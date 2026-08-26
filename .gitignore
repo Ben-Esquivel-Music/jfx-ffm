@@ -79,3 +79,8 @@ hs_err_pid*
 # Ignore Windows system files
 Desktop.ini
 Thumbs.db
+
+# AI
+.claude/**
+.agents/**
+.codex/**
