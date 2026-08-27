@@ -11,7 +11,7 @@ This codebase is a fork of the OpenJFX mainline development branch (version 28-e
 # Long Term Project Goals
 
 - Port native code to Rust
-- Serve as a prototype for OpenJFX project to use as a blueprint for making similar improvements.
+- Serve as a prototype for OpenJFX project to use as a blueprint for making similar improvements
 
 # Non Goals
 
