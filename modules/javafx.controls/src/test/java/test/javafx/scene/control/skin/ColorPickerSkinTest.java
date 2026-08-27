@@ -38,6 +38,7 @@ import javafx.scene.input.MouseEvent;
 import javafx.scene.layout.GridPane;
 import javafx.scene.layout.VBox;
 import javafx.stage.Stage;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import com.sun.javafx.scene.SceneHelper;
@@ -61,6 +62,15 @@ public class ColorPickerSkinTest {
         stage = new Stage();
         stage.setScene(scene);
         stage.show();
+        tk.firePulse();
+    }
+
+    @AfterEach
+    public void cleanup() {
+        // Hide the popup and stage so that they are removed from the global
+        // window list and do not leak into other tests in the same JVM.
+        colorPicker.hide();
+        stage.hide();
         tk.firePulse();
     }
 

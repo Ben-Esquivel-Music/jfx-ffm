@@ -35,6 +35,7 @@ import javafx.collections.ListChangeListener;
 import test.javafx.collections.MockListObserver;
 import javafx.collections.ObservableList;
 
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
@@ -75,6 +76,13 @@ public class ListListenerHelperTest {
         helper = null;
         list = FXCollections.emptyObservableList();
         change = new NonIterableChange.SimpleRemovedChange<>(0, 1, new Object(), list);
+    }
+
+    @AfterEach
+    public void tearDown() {
+        // Some tests install a custom uncaught exception handler on this thread;
+        // reset it so it cannot swallow exceptions in tests run later in the same JVM.
+        Thread.currentThread().setUncaughtExceptionHandler(null);
     }
 
     private void resetAllListeners() {

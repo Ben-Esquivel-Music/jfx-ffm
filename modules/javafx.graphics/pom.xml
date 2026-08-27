@@ -163,6 +163,7 @@
                                     <arg value="-pkg"/>
                                     <arg value="com/sun/scenario/effect"/>
                                     <arg value="-d3d"/>
+                                    <arg value="-es2"/>
                                     <arg value="-all"/>
                                     <arg value="GenAllDecoraShaders"/>
                                 </java>
@@ -199,6 +200,7 @@
                                     <arg value="-pkg"/>
                                     <arg value="com/sun/prism"/>
                                     <arg value="-d3d"/>
+                                    <arg value="-es2"/>
                                     <arg value="-name"/>
                                     <srcfile/>
                                     <fileset dir="${project.basedir}/src/main/jsl-prism" includes="**/*.jsl"/>
@@ -297,27 +299,9 @@
             <plugin>
                 <groupId>org.apache.maven.plugins</groupId>
                 <artifactId>maven-jar-plugin</artifactId>
-                <configuration>
-                    <!-- Mirrors the Gradle buildModuleClasses excludes for Windows -->
-                    <excludes>
-                        <exclude>version.rc</exclude>
-                        <exclude>com/sun/glass/ui/swt/**</exclude>
-                        <exclude>com/sun/javafx/tools/ant/**</exclude>
-                        <exclude>com/javafx/main/**</exclude>
-                        <exclude>com/sun/javafx/webkit/drt/**</exclude>
-                        <exclude>com/sun/prism/es2/**</exclude>
-                        <exclude>com/sun/scenario/effect/impl/es2/**</exclude>
-                        <exclude>com/sun/prism/es2/MacGL*</exclude>
-                        <exclude>com/sun/glass/events/mac/**</exclude>
-                        <exclude>com/sun/glass/ui/mac/**</exclude>
-                        <exclude>com/sun/prism/mtl/**</exclude>
-                        <exclude>com/sun/scenario/effect/impl/hw/mtl/**</exclude>
-                        <exclude>com/sun/glass/ui/gtk/**</exclude>
-                        <exclude>com/sun/glass/ui/monocle/**</exclude>
-                        <exclude>com/sun/glass/ui/ios/**</exclude>
-                        <exclude>com/sun/glass/ui/android/**</exclude>
-                    </excludes>
-                </configuration>
+                <!-- Platform-specific jar excludes (mirroring the Gradle
+                     buildModuleClasses excludes) live in the jar-excludes-win /
+                     jar-excludes-linux profiles below. -->
                 <executions>
                     <execution>
                         <id>test-jar</id>
@@ -359,6 +343,85 @@
     </build>
 
     <profiles>
+        <!-- Platform-specific module jar contents, mirroring the Gradle
+             buildModuleClasses excludes for each platform. -->
+        <profile>
+            <id>jar-excludes-win</id>
+            <activation>
+                <os>
+                    <family>windows</family>
+                </os>
+            </activation>
+            <build>
+                <plugins>
+                    <plugin>
+                        <groupId>org.apache.maven.plugins</groupId>
+                        <artifactId>maven-jar-plugin</artifactId>
+                        <configuration>
+                            <excludes>
+                                <exclude>version.rc</exclude>
+                                <exclude>com/sun/glass/ui/swt/**</exclude>
+                                <exclude>com/sun/javafx/tools/ant/**</exclude>
+                                <exclude>com/javafx/main/**</exclude>
+                                <exclude>com/sun/javafx/webkit/drt/**</exclude>
+                                <exclude>com/sun/prism/es2/**</exclude>
+                                <exclude>com/sun/scenario/effect/impl/es2/**</exclude>
+                                <exclude>com/sun/prism/es2/MacGL*</exclude>
+                                <exclude>com/sun/glass/events/mac/**</exclude>
+                                <exclude>com/sun/glass/ui/mac/**</exclude>
+                                <exclude>com/sun/prism/mtl/**</exclude>
+                                <exclude>com/sun/scenario/effect/impl/hw/mtl/**</exclude>
+                                <exclude>com/sun/glass/ui/gtk/**</exclude>
+                                <exclude>com/sun/glass/ui/monocle/**</exclude>
+                                <exclude>com/sun/glass/ui/ios/**</exclude>
+                                <exclude>com/sun/glass/ui/android/**</exclude>
+                            </excludes>
+                        </configuration>
+                    </plugin>
+                </plugins>
+            </build>
+        </profile>
+        <profile>
+            <id>jar-excludes-linux</id>
+            <activation>
+                <os>
+                    <name>linux</name>
+                </os>
+            </activation>
+            <build>
+                <plugins>
+                    <plugin>
+                        <groupId>org.apache.maven.plugins</groupId>
+                        <artifactId>maven-jar-plugin</artifactId>
+                        <configuration>
+                            <excludes>
+                                <exclude>version.rc</exclude>
+                                <exclude>com/sun/glass/ui/swt/**</exclude>
+                                <exclude>com/sun/javafx/tools/ant/**</exclude>
+                                <exclude>com/javafx/main/**</exclude>
+                                <exclude>com/sun/javafx/webkit/drt/**</exclude>
+                                <exclude>**/*.hlsl</exclude>
+                                <exclude>com/sun/glass/ui/win/**</exclude>
+                                <exclude>com/sun/prism/d3d/**</exclude>
+                                <exclude>com/sun/prism/es2/WinGL*</exclude>
+                                <exclude>com/sun/scenario/effect/impl/hw/d3d/**</exclude>
+                                <exclude>com/sun/prism/es2/MacGL*</exclude>
+                                <exclude>com/sun/glass/events/mac/**</exclude>
+                                <exclude>com/sun/glass/ui/mac/**</exclude>
+                                <exclude>com/sun/prism/mtl/**</exclude>
+                                <exclude>com/sun/scenario/effect/impl/hw/mtl/**</exclude>
+                                <exclude>com/sun/prism/es2/EGL*</exclude>
+                                <exclude>com/sun/glass/ui/monocle/**</exclude>
+                                <exclude>com/sun/prism/es2/Monocle*</exclude>
+                                <exclude>com/sun/glass/ui/ios/**</exclude>
+                                <exclude>com/sun/prism/es2/IOS*</exclude>
+                                <exclude>com/sun/glass/ui/android/**</exclude>
+                            </excludes>
+                        </configuration>
+                    </plugin>
+                </plugins>
+            </build>
+        </profile>
         <!-- Native Windows libraries via CMake + Visual Studio. Skip with -DskipNative=true -->
         <profile>
             <id>native-win</id>
@@ -417,6 +480,66 @@
                                         <argument>${project.build.directory}/native/cmake</argument>
                                         <argument>--config</argument>
                                         <argument>${CONF}</argument>
+                                        <argument>--parallel</argument>
+                                    </arguments>
+                                </configuration>
+                            </execution>
+                        </executions>
+                    </plugin>
+                </plugins>
+            </build>
+        </profile>
+        <!-- Native Linux libraries via CMake + make/gcc. Skip with -DskipNative=true -->
+        <profile>
+            <id>native-linux</id>
+            <activation>
+                <os>
+                    <name>linux</name>
+                </os>
+                <property>
+                    <name>skipNative</name>
+                    <value>!true</value>
+                </property>
+            </activation>
+            <build>
+                <plugins>
+                    <plugin>
+                        <groupId>org.codehaus.mojo</groupId>
+                        <artifactId>exec-maven-plugin</artifactId>
+                        <executions>
+                            <execution>
+                                <id>cmake-configure</id>
+                                <phase>process-classes</phase>
+                                <goals>
+                                    <goal>exec</goal>
+                                </goals>
+                                <configuration>
+                                    <executable>cmake</executable>
+                                    <arguments>
+                                        <argument>-S</argument>
+                                        <argument>${project.basedir}/native</argument>
+                                        <argument>-B</argument>
+                                        <argument>${project.build.directory}/native/cmake</argument>
+                                        <argument>-DCMAKE_BUILD_TYPE=${CONF}</argument>
+                                        <argument>-DJDK_HOME=${java.home}</argument>
+                                        <argument>-DGENSRC_DIR=${jfx.graphics.gensrc}</argument>
+                                        <argument>-DHEADERS_DIR=${jfx.graphics.gensrc}/headers/javafx.graphics</argument>
+                                        <argument>-DBIN_DIR=${project.build.directory}/native/bin</argument>
+                                        <argument>-DINCLUDE_ES2=${INCLUDE_ES2}</argument>
+                                    </arguments>
+                                </configuration>
+                            </execution>
+                            <execution>
+                                <id>cmake-build</id>
+                                <phase>process-classes</phase>
+                                <goals>
+                                    <goal>exec</goal>
+                                </goals>
+                                <configuration>
+                                    <executable>cmake</executable>
+                                    <arguments>
+                                        <argument>--build</argument>
+                                        <argument>${project.build.directory}/native/cmake</argument>
                                         <argument>--parallel</argument>
                                     </arguments>
                                 </configuration>

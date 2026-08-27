@@ -34,6 +34,7 @@ import javafx.collections.FXCollections;
 import test.javafx.collections.MockSetObserver;
 import javafx.collections.ObservableSet;
 import javafx.collections.SetChangeListener;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
@@ -71,6 +72,13 @@ public class SetListenerHelperTest {
         helper = null;
         set = FXCollections.observableSet();
         change = new SetExpressionHelper.SimpleChange<>(set).setRemoved(new Object());
+    }
+
+    @AfterEach
+    public void tearDown() {
+        // Some tests install a custom uncaught exception handler on this thread;
+        // reset it so it cannot swallow exceptions in tests run later in the same JVM.
+        Thread.currentThread().setUncaughtExceptionHandler(null);
     }
 
     private void resetAllListeners() {

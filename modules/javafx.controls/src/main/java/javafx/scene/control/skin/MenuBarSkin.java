@@ -546,6 +546,12 @@ public class MenuBarSkin extends SkinBase<MenuBar> {
             while (c.next()) {
                 for (Window stage : c.getRemoved()) {
                     stage.focusedProperty().removeListener(focusedStageListener);
+                    if (stage == currentMenuBarStage) {
+                        // Reset the system menu so that a closed stage (and the
+                        // scene graph it references) cannot be retained by the
+                        // static currentMenuBarStage reference.
+                        setSystemMenu(null);
+                    }
                 }
                 for (Window stage : c.getAddedSubList()) {
                     stage.focusedProperty().addListener(focusedStageListener);

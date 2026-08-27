@@ -30,9 +30,9 @@
 # We download a specific version of the boot JDK and use the Maven and native
 # toolchains (MSVC, CMake) that are preinstalled on each runner.
 #
-# The native javafx.graphics libraries are currently only built by the Maven
-# build on Windows (via CMake); unit tests are therefore only run on Windows.
-# The Linux and macOS jobs verify that the Java sources compile.
+# The native javafx.graphics libraries are currently built by the Maven build
+# on Windows and Linux (via CMake); unit tests are therefore run on those
+# platforms. The macOS jobs verify that the Java sources compile.
 #
 # NOTE: much of the build logic is duplicated for each platform. Keep this in
 # mind when making changes.
@@ -71,6 +71,13 @@ jobs:
         with:
           path: jfx
 
+      - name: Install build dependencies
+        run: |
+          set -x
+          sudo apt-get update
+          sudo apt-get -y install libgl1-mesa-dev libx11-dev libxxf86vm-dev libxt-dev \
+            pkg-config libgtk-3-dev libxtst-dev libfreetype-dev libpango1.0-dev
+
       - name: Download boot JDK
         run: |
           set -x
@@ -89,14 +96,14 @@ jobs:
           java -version
           mvn -version
 
-      - name: Build JavaFX artifacts
+      - name: Build JavaFX artifacts and run headless tests
         working-directory: jfx
         run: |
           set -x
           export PATH="$JAVA_HOME/bin:$PATH"
-          # Native libraries are not yet built by the Maven build on Linux,
-          # so tests (which need them at run time) are skipped.
-          mvn -B -ntp install -DskipTests
+          # Full build: Java modules, native libraries (CMake + gcc) and the
+          # unit test suite. Web and system tests are skipped by default.
+          mvn -B -ntp install
 
   linux_aarch64_build:
     name: Linux aarch64
@@ -113,6 +120,13 @@ jobs:
         with:
           path: jfx
 
+      - name: Install build dependencies
+        run: |
+          set -x
+          sudo apt-get update
+          sudo apt-get -y install libgl1-mesa-dev libx11-dev libxxf86vm-dev libxt-dev \
+            pkg-config libgtk-3-dev libxtst-dev libfreetype-dev libpango1.0-dev
+
       - name: Download boot JDK
         run: |
           set -x
@@ -131,14 +145,14 @@ jobs:
           java -version
           mvn -version
 
-      - name: Build JavaFX artifacts
+      - name: Build JavaFX artifacts and run headless tests
         working-directory: jfx
         run: |
           set -x
           export PATH="$JAVA_HOME/bin:$PATH"
-          # Native libraries are not yet built by the Maven build on Linux,
-          # so tests (which need them at run time) are skipped.
-          mvn -B -ntp install -DskipTests
+          # Full build: Java modules, native libraries (CMake + gcc) and the
+          # unit test suite. Web and system tests are skipped by default.
+          mvn -B -ntp install
 
   macos_x64_build:
     name: macOS x64

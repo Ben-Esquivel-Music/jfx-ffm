@@ -39,6 +39,7 @@ import javafx.scene.control.skin.MenuBarSkin;
 import javafx.scene.control.skin.MenuBarSkinShim;
 import javafx.scene.input.KeyCode;
 import javafx.stage.Stage;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -85,6 +86,15 @@ public class MenuBarSkinTest {
 
         // Stage has to be focused in order for system menus to work
         WindowHelper.setFocused(stage, true);
+    }
+
+    @AfterEach
+    public void cleanup() {
+        // Dispose the skin so that the static system menu state in
+        // MenuBarSkin (currentMenuBarStage, systemMenuMap, the toolkit's
+        // system menu) does not leak this test's stage and menus into
+        // other tests running in the same JVM.
+        menubar.setSkin(null);
     }
 
     @Test public void maxHeightTracksPreferred() {

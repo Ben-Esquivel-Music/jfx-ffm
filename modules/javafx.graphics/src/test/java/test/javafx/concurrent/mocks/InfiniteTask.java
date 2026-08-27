@@ -28,13 +28,26 @@ package test.javafx.concurrent.mocks;
 import test.javafx.concurrent.AbstractTask;
 
 /**
- *
+ * A task that runs until it is cancelled. As recommended by the
+ * {@link javafx.concurrent.Task} documentation for cancellable tasks, the
+ * call method checks {@code isCancelled()} and returns cleanly when the
+ * task has been cancelled, rather than letting the interrupt raised by
+ * {@code cancel(true)} propagate as an exception. Propagating it would
+ * race the FAILED transition (from the task thread) against the CANCELLED
+ * transition (from the cancelling thread), because the test harness runs
+ * both threads as if they were the FX application thread.
  */
 public class InfiniteTask extends AbstractTask {
 
     @Override protected String call() throws Exception {
-        while (true) {
-            Thread.sleep(1); // Cancel will eventually end up here?
+        while (!isCancelled()) {
+            try {
+                Thread.sleep(1);
+            } catch (InterruptedException e) {
+                // Interrupted by cancel(true); the loop condition
+                // re-checks isCancelled() and exits cleanly.
+            }
         }
+        return null;
     }
 }
