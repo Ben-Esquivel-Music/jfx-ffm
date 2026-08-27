@@ -24,16 +24,18 @@
 #
 
 #
-# This GitHub actions YAML file runs a build and test on each of the three primary platforms:
-# Linux, macOS (both x64 and aarch64), Windows. The jobs are run using the default (latest) OS platform for each OS.
-# We download a specific version the boot JDK and gradle. We use the default versions
-# of all other build tools (e.g., compilers and ant) that are available on each platform.
+# This GitHub actions YAML file runs a Maven build on each of the three primary
+# platforms: Linux, macOS (both x64 and aarch64), Windows. The jobs are run
+# using the default (latest) OS platform for each OS.
+# We download a specific version of the boot JDK and use the Maven and native
+# toolchains (MSVC, CMake) that are preinstalled on each runner.
 #
-# The build step is run in the default mode without building the native media or webkit libraries.
-# The test is run with web tests excluded. As a follow-up enhancement, we might consider optionally
-# building the media and webkit libraries.
+# The native javafx.graphics libraries are currently only built by the Maven
+# build on Windows (via CMake); unit tests are therefore only run on Windows.
+# The Linux and macOS jobs verify that the Java sources compile.
 #
-# NOTE: much of the build logic is duplicated for each platform. Keep this in mind when making changes.
+# NOTE: much of the build logic is duplicated for each platform. Keep this in
+# mind when making changes.
 #
 
 name: JavaFX pre-submit tests
@@ -54,31 +56,14 @@ permissions:
   contents: read
 
 jobs:
-  validation:
-    name: "Gradle Wrapper Validation"
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
-      - uses: gradle/actions/wrapper-validation@3f131e8634966bd73d06cc69884922b02e6faf92 # v6.2.0
-
-
   linux_x64_build:
     name: Linux x64
-    needs: validation
     runs-on: "ubuntu-24.04"
 
     env:
-      # FIXME: read this information from a property file
-      # BOOT_JDK_VERSION: "${{ fromJson(needs.prerequisites.outputs.dependencies).BOOT_JDK_VERSION }}"
-      # BOOT_JDK_FILENAME: "${{ fromJson(needs.prerequisites.outputs.dependencies).LINUX_X64_BOOT_JDK_FILENAME }}"
-      # BOOT_JDK_URL: "${{ fromJson(needs.prerequisites.outputs.dependencies).LINUX_X64_BOOT_JDK_URL }}"
-      # BOOT_JDK_SHA256: "${{ fromJson(needs.prerequisites.outputs.dependencies).LINUX_X64_BOOT_JDK_SHA256 }}"
       BOOT_JDK_VERSION: "26.0.2"
       BOOT_JDK_FILENAME: "jdk-26.0.2_linux-x64_bin.tar.gz"
       BOOT_JDK_URL: "https://download.oracle.com/java/26/archive/jdk-26.0.2_linux-x64_bin.tar.gz"
-      # ANT_DIR: "apache-ant-1.10.5"
-      # ANT_FILENAME: "apache-ant-1.10.5.tar.gz"
-      # ANT_URL: "https://archive.apache.org/dist/ant/binaries/apache-ant-1.10.5-bin.tar.gz"
 
     steps:
       - name: Checkout the source
@@ -86,84 +71,41 @@ jobs:
         with:
           path: jfx
 
-      - name: Install dependencies
-        run: |
-          set -x
-          sudo apt-get update
-          sudo apt-get install ant libgl1-mesa-dev libx11-dev libxxf86vm-dev libxt-dev pkg-config libgtk2.0-dev libgtk-3-dev libxtst-dev gcc-14 g++-14
-          sudo update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-14 100 --slave /usr/bin/g++ g++ /usr/bin/g++-14
-          mkdir -p "${HOME}/build-tools"
-          # wget -O "${HOME}/build-tools/${ANT_FILENAME}" "${ANT_URL}"
-          # tar -zxf "${HOME}/build-tools/${ANT_FILENAME}" -C "${HOME}/build-tools"
-
-# FIXME: enable cache for boot JDK
-#      - name: Restore boot JDK from cache
-#        id: bootjdk
-#        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-#        with:
-#          path: ~/bootjdk/${{ env.BOOT_JDK_VERSION }}
-#          key: bootjdk-${{ runner.os }}-${{ env.BOOT_JDK_VERSION }}-${{ env.BOOT_JDK_SHA256 }}-v1
-
       - name: Download boot JDK
         run: |
           set -x
           mkdir -p "${HOME}/bootjdk"
           wget -O "${HOME}/bootjdk/${BOOT_JDK_FILENAME}" "${BOOT_JDK_URL}"
-          # FIXME: sha256sum
           tar -xf "${HOME}/bootjdk/${BOOT_JDK_FILENAME}" -C "${HOME}/bootjdk"
-          # FIXME: enable cache for boot JDK
 
       - name: Setup environment
         run: |
           set -x
           export JAVA_HOME="${HOME}/bootjdk/jdk-${BOOT_JDK_VERSION}"
           echo "JAVA_HOME=${JAVA_HOME}" >> "${GITHUB_ENV}"
-          # export ANT_HOME="${HOME}/build-tools/${ANT_DIR}"
-          # echo "ANT_HOME=${ANT_HOME}" >> "${GITHUB_ENV}"
-          # export PATH="$JAVA_HOME/bin:$ANT_HOME/bin:$PATH"
           export PATH="$JAVA_HOME/bin:$PATH"
           env | sort
           which java
           java -version
-          which ant
-          ant -version
-          gcc -v
+          mvn -version
 
       - name: Build JavaFX artifacts
         working-directory: jfx
         run: |
           set -x
-          # export PATH="$JAVA_HOME/bin:$ANT_HOME/bin:$PATH"
           export PATH="$JAVA_HOME/bin:$PATH"
-          bash gradlew -version
-          bash gradlew --info all
-
-      - name: Run JavaFX headless tests
-        working-directory: jfx
-        run: |
-          set -x
-          # export PATH="$JAVA_HOME/bin:$ANT_HOME/bin:$PATH"
-          export PATH="$JAVA_HOME/bin:$PATH"
-          bash gradlew --info --continue -PTEST_ONLY=true test -x :web:test
-
+          # Native libraries are not yet built by the Maven build on Linux,
+          # so tests (which need them at run time) are skipped.
+          mvn -B -ntp install -DskipTests
 
   linux_aarch64_build:
     name: Linux aarch64
-    needs: validation
     runs-on: "ubuntu-24.04-arm"
 
     env:
-      # FIXME: read this information from a property file
-      # BOOT_JDK_VERSION: "${{ fromJson(needs.prerequisites.outputs.dependencies).BOOT_JDK_VERSION }}"
-      # BOOT_JDK_FILENAME: "${{ fromJson(needs.prerequisites.outputs.dependencies).LINUX_AARCH64_BOOT_JDK_FILENAME }}"
-      # BOOT_JDK_URL: "${{ fromJson(needs.prerequisites.outputs.dependencies).LINUX_AARCH64_BOOT_JDK_URL }}"
-      # BOOT_JDK_SHA256: "${{ fromJson(needs.prerequisites.outputs.dependencies).LINUX_AARCH64_BOOT_JDK_SHA256 }}"
       BOOT_JDK_VERSION: "26.0.2"
       BOOT_JDK_FILENAME: "jdk-26.0.2_linux-aarch64_bin.tar.gz"
       BOOT_JDK_URL: "https://download.oracle.com/java/26/archive/jdk-26.0.2_linux-aarch64_bin.tar.gz"
-      # ANT_DIR: "apache-ant-1.10.5"
-      # ANT_FILENAME: "apache-ant-1.10.5.tar.gz"
-      # ANT_URL: "https://archive.apache.org/dist/ant/binaries/apache-ant-1.10.5-bin.tar.gz"
 
     steps:
       - name: Checkout the source
@@ -171,84 +113,41 @@ jobs:
         with:
           path: jfx
 
-      - name: Install dependencies
-        run: |
-          set -x
-          sudo apt-get update
-          sudo apt-get install ant libgl1-mesa-dev libx11-dev libxxf86vm-dev libxt-dev pkg-config libgtk2.0-dev libgtk-3-dev libxtst-dev gcc-14 g++-14
-          sudo update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-14 100 --slave /usr/bin/g++ g++ /usr/bin/g++-14
-          mkdir -p "${HOME}/build-tools"
-          # wget -O "${HOME}/build-tools/${ANT_FILENAME}" "${ANT_URL}"
-          # tar -zxf "${HOME}/build-tools/${ANT_FILENAME}" -C "${HOME}/build-tools"
-
-# FIXME: enable cache for boot JDK
-#      - name: Restore boot JDK from cache
-#        id: bootjdk
-#        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-#        with:
-#          path: ~/bootjdk/${{ env.BOOT_JDK_VERSION }}
-#          key: bootjdk-${{ runner.os }}-${{ env.BOOT_JDK_VERSION }}-${{ env.BOOT_JDK_SHA256 }}-v1
-
       - name: Download boot JDK
         run: |
           set -x
           mkdir -p "${HOME}/bootjdk"
           wget -O "${HOME}/bootjdk/${BOOT_JDK_FILENAME}" "${BOOT_JDK_URL}"
-          # FIXME: sha256sum
           tar -xf "${HOME}/bootjdk/${BOOT_JDK_FILENAME}" -C "${HOME}/bootjdk"
-          # FIXME: enable cache for boot JDK
 
       - name: Setup environment
         run: |
           set -x
           export JAVA_HOME="${HOME}/bootjdk/jdk-${BOOT_JDK_VERSION}"
           echo "JAVA_HOME=${JAVA_HOME}" >> "${GITHUB_ENV}"
-          # export ANT_HOME="${HOME}/build-tools/${ANT_DIR}"
-          # echo "ANT_HOME=${ANT_HOME}" >> "${GITHUB_ENV}"
-          # export PATH="$JAVA_HOME/bin:$ANT_HOME/bin:$PATH"
           export PATH="$JAVA_HOME/bin:$PATH"
           env | sort
           which java
           java -version
-          which ant
-          ant -version
-          gcc -v
+          mvn -version
 
       - name: Build JavaFX artifacts
         working-directory: jfx
         run: |
           set -x
-          # export PATH="$JAVA_HOME/bin:$ANT_HOME/bin:$PATH"
           export PATH="$JAVA_HOME/bin:$PATH"
-          bash gradlew -version
-          bash gradlew --info all
-
-      - name: Run JavaFX headless tests
-        working-directory: jfx
-        run: |
-          set -x
-          # export PATH="$JAVA_HOME/bin:$ANT_HOME/bin:$PATH"
-          export PATH="$JAVA_HOME/bin:$PATH"
-          bash gradlew --info --continue -PTEST_ONLY=true test -x :web:test
+          # Native libraries are not yet built by the Maven build on Linux,
+          # so tests (which need them at run time) are skipped.
+          mvn -B -ntp install -DskipTests
 
   macos_x64_build:
     name: macOS x64
-    needs: validation
     runs-on: "macos-15-intel"
 
     env:
-      # FIXME: read this information from a property file
-      # BOOT_JDK_VERSION: "${{ fromJson(needs.prerequisites.outputs.dependencies).BOOT_JDK_VERSION }}"
-      # BOOT_JDK_FILENAME: "${{ fromJson(needs.prerequisites.outputs.dependencies).LINUX_X64_BOOT_JDK_FILENAME }}"
-      # BOOT_JDK_URL: "${{ fromJson(needs.prerequisites.outputs.dependencies).LINUX_X64_BOOT_JDK_URL }}"
-      # BOOT_JDK_SHA256: "${{ fromJson(needs.prerequisites.outputs.dependencies).LINUX_X64_BOOT_JDK_SHA256 }}"
       BOOT_JDK_VERSION: "26.0.2"
       BOOT_JDK_FILENAME: "jdk-26.0.2_macos-x64_bin.tar.gz"
       BOOT_JDK_URL: "https://download.oracle.com/java/26/archive/jdk-26.0.2_macos-x64_bin.tar.gz"
-      # Disabled due to timeout downloading ant; use ant installed on system
-      #ANT_DIR: "apache-ant-1.10.5"
-      #ANT_FILENAME: "apache-ant-1.10.5.tar.gz"
-      #ANT_URL: "https://archive.apache.org/dist/ant/binaries/apache-ant-1.10.5-bin.tar.gz"
 
     steps:
       - name: Checkout the source
@@ -256,86 +155,41 @@ jobs:
         with:
           path: jfx
 
-      - name: Install dependencies
-        run: |
-          set -x
-          echo "NOT NEEDED: brew install make"
-          echo "NOT NEEDED: wget ... ant"
-          #mkdir -p "${HOME}/build-tools"
-          #wget -O "${HOME}/build-tools/${ANT_FILENAME}" "${ANT_URL}"
-          #tar -zxf "${HOME}/build-tools/${ANT_FILENAME}" -C "${HOME}/build-tools"
-
-# FIXME: enable cache for boot JDK
-#      - name: Restore boot JDK from cache
-#        id: bootjdk
-#        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-#        with:
-#          path: ~/bootjdk/${{ env.BOOT_JDK_VERSION }}
-#          key: bootjdk-${{ runner.os }}-${{ env.BOOT_JDK_VERSION }}-${{ env.BOOT_JDK_SHA256 }}-v1
-
       - name: Download boot JDK
         run: |
           set -x
           mkdir -p "${HOME}/bootjdk"
-          wget -O "${HOME}/bootjdk/${BOOT_JDK_FILENAME}" "${BOOT_JDK_URL}"
-          # FIXME: sha256sum
+          curl -L -o "${HOME}/bootjdk/${BOOT_JDK_FILENAME}" "${BOOT_JDK_URL}"
           tar -xf "${HOME}/bootjdk/${BOOT_JDK_FILENAME}" -C "${HOME}/bootjdk"
-          # FIXME: enable cache for boot JDK
 
       - name: Setup environment
         run: |
           set -x
           export JAVA_HOME="${HOME}/bootjdk/jdk-${BOOT_JDK_VERSION}.jdk/Contents/Home"
           echo "JAVA_HOME=${JAVA_HOME}" >> "${GITHUB_ENV}"
-          #export ANT_HOME="${HOME}/build-tools/${ANT_DIR}"
-          #echo "ANT_HOME=${ANT_HOME}" >> "${GITHUB_ENV}"
-          #export PATH="$JAVA_HOME/bin:$ANT_HOME/bin:$PATH"
           export PATH="$JAVA_HOME/bin:$PATH"
           env | sort
           which java
           java -version
-          which ant
-          ant -version
-          # Production builds use Xcode 15.4, but 16.0 is the lowest that the GHA macOS 15 runner supports
-          sudo xcode-select --switch /Applications/Xcode_16.0.app/Contents/Developer
-          xcodebuild -version
+          mvn -version
 
       - name: Build JavaFX artifacts
         working-directory: jfx
         run: |
           set -x
-          #export PATH="$JAVA_HOME/bin:$ANT_HOME/bin:$PATH"
           export PATH="$JAVA_HOME/bin:$PATH"
-          bash gradlew -version
-          bash gradlew --info all
-
-      - name: Run JavaFX headless tests
-        working-directory: jfx
-        run: |
-          set -x
-          #export PATH="$JAVA_HOME/bin:$ANT_HOME/bin:$PATH"
-          export PATH="$JAVA_HOME/bin:$PATH"
-          bash gradlew --info --continue -PTEST_ONLY=true test -x :web:test
-
+          # Native libraries are not yet built by the Maven build on macOS,
+          # so tests (which need them at run time) are skipped.
+          mvn -B -ntp install -DskipTests
 
   macos_aarch64_build:
     name: macOS aarch64
-    needs: validation
-    runs-on: "macos-14"
+    runs-on: "macos-15"
 
     env:
-      # FIXME: read this information from a property file
-      # BOOT_JDK_VERSION: "${{ fromJson(needs.prerequisites.outputs.dependencies).BOOT_JDK_VERSION }}"
-      # BOOT_JDK_FILENAME: "${{ fromJson(needs.prerequisites.outputs.dependencies).LINUX_X64_BOOT_JDK_FILENAME }}"
-      # BOOT_JDK_URL: "${{ fromJson(needs.prerequisites.outputs.dependencies).LINUX_X64_BOOT_JDK_URL }}"
-      # BOOT_JDK_SHA256: "${{ fromJson(needs.prerequisites.outputs.dependencies).LINUX_X64_BOOT_JDK_SHA256 }}"
       BOOT_JDK_VERSION: "26.0.2"
       BOOT_JDK_FILENAME: "jdk-26.0.2_macos-aarch64_bin.tar.gz"
       BOOT_JDK_URL: "https://download.oracle.com/java/26/archive/jdk-26.0.2_macos-aarch64_bin.tar.gz"
-      # Disabled due to timeout downloading ant; use ant installed on system
-      #ANT_DIR: "apache-ant-1.10.5"
-      #ANT_FILENAME: "apache-ant-1.10.5.tar.gz"
-      #ANT_URL: "https://archive.apache.org/dist/ant/binaries/apache-ant-1.10.5-bin.tar.gz"
 
     steps:
       - name: Checkout the source
@@ -343,168 +197,74 @@ jobs:
         with:
           path: jfx
 
-      - name: Install dependencies
-        run: |
-          set -x
-          echo "NOT NEEDED: brew install make"
-          echo "NOT NEEDED: wget ... ant"
-          #mkdir -p "${HOME}/build-tools"
-          #wget -O "${HOME}/build-tools/${ANT_FILENAME}" "${ANT_URL}"
-          #tar -zxf "${HOME}/build-tools/${ANT_FILENAME}" -C "${HOME}/build-tools"
-
-# FIXME: enable cache for boot JDK
-#      - name: Restore boot JDK from cache
-#        id: bootjdk
-#        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-#        with:
-#          path: ~/bootjdk/${{ env.BOOT_JDK_VERSION }}
-#          key: bootjdk-${{ runner.os }}-${{ env.BOOT_JDK_VERSION }}-${{ env.BOOT_JDK_SHA256 }}-v1
-
       - name: Download boot JDK
         run: |
           set -x
           mkdir -p "${HOME}/bootjdk"
-          wget -O "${HOME}/bootjdk/${BOOT_JDK_FILENAME}" "${BOOT_JDK_URL}"
-          # FIXME: sha256sum
+          curl -L -o "${HOME}/bootjdk/${BOOT_JDK_FILENAME}" "${BOOT_JDK_URL}"
           tar -xf "${HOME}/bootjdk/${BOOT_JDK_FILENAME}" -C "${HOME}/bootjdk"
-          # FIXME: enable cache for boot JDK
 
       - name: Setup environment
         run: |
           set -x
           export JAVA_HOME="${HOME}/bootjdk/jdk-${BOOT_JDK_VERSION}.jdk/Contents/Home"
           echo "JAVA_HOME=${JAVA_HOME}" >> "${GITHUB_ENV}"
-          #export ANT_HOME="${HOME}/build-tools/${ANT_DIR}"
-          #echo "ANT_HOME=${ANT_HOME}" >> "${GITHUB_ENV}"
-          #export PATH="$JAVA_HOME/bin:$ANT_HOME/bin:$PATH"
           export PATH="$JAVA_HOME/bin:$PATH"
           env | sort
           which java
           java -version
-          which ant
-          ant -version
-          sudo xcode-select --switch /Applications/Xcode_15.4.app/Contents/Developer
-          xcodebuild -version
+          mvn -version
 
       - name: Build JavaFX artifacts
         working-directory: jfx
         run: |
           set -x
-          #export PATH="$JAVA_HOME/bin:$ANT_HOME/bin:$PATH"
           export PATH="$JAVA_HOME/bin:$PATH"
-          bash gradlew -version
-          bash gradlew --info all
-
-      - name: Run JavaFX headless tests
-        working-directory: jfx
-        run: |
-          set -x
-          #export PATH="$JAVA_HOME/bin:$ANT_HOME/bin:$PATH"
-          export PATH="$JAVA_HOME/bin:$PATH"
-          bash gradlew --info --continue -PTEST_ONLY=true test -x :web:test
-
+          # Native libraries are not yet built by the Maven build on macOS,
+          # so tests (which need them at run time) are skipped.
+          mvn -B -ntp install -DskipTests
 
   windows_x64_build:
     name: Windows x64
-    needs: validation
     runs-on: "windows-2022"
 
     env:
-      # FIXME: read this information from a property file
-      # BOOT_JDK_VERSION: "${{ fromJson(needs.prerequisites.outputs.dependencies).BOOT_JDK_VERSION }}"
-      # BOOT_JDK_FILENAME: "${{ fromJson(needs.prerequisites.outputs.dependencies).LINUX_X64_BOOT_JDK_FILENAME }}"
-      # BOOT_JDK_URL: "${{ fromJson(needs.prerequisites.outputs.dependencies).LINUX_X64_BOOT_JDK_URL }}"
-      # BOOT_JDK_SHA256: "${{ fromJson(needs.prerequisites.outputs.dependencies).LINUX_X64_BOOT_JDK_SHA256 }}"
       BOOT_JDK_VERSION: "26.0.2"
       BOOT_JDK_FILENAME: "jdk-26.0.2_windows-x64_bin.zip"
       BOOT_JDK_URL: "https://download.oracle.com/java/26/archive/jdk-26.0.2_windows-x64_bin.zip"
-      ANT_DIR: "apache-ant-1.10.5"
-      ANT_FILENAME: "apache-ant-1.10.5.tar.gz"
-      ANT_URL: "https://archive.apache.org/dist/ant/binaries/apache-ant-1.10.5-bin.tar.gz"
 
     steps:
       - name: Checkout the source
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           path: jfx
-
-# FIXME: enable cache for boot JDK
-#      - name: Restore boot JDK from cache
-#        id: bootjdk
-#        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-#        with:
-#          path: ~/bootjdk/${{ env.BOOT_JDK_VERSION }}
-#          key: bootjdk-${{ runner.os }}-${{ env.BOOT_JDK_VERSION }}-${{ env.BOOT_JDK_SHA256 }}-v1
 
       - name: Download boot JDK
         run: |
           mkdir -p "$HOME\bootjdk"
           & curl -L "$env:BOOT_JDK_URL" -o "$HOME/bootjdk/$env:BOOT_JDK_FILENAME"
-          # FIXME: sha256sum
           tar -xf "$HOME/bootjdk/$env:BOOT_JDK_FILENAME" -C "$HOME/bootjdk"
-          # FIXME: enable cache for boot JDK
-
-      - name: Restore cygwin packages from cache
-        id: cygwin
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        with:
-          path: ~/cygwin/packages
-          key: cygwin-packages-${{ runner.os }}-v1
-
-      - name: Install cygwin
-        run: |
-          New-Item -Force -ItemType directory -Path "$HOME\cygwin"
-          & curl -L "https://www.cygwin.com/setup-x86_64.exe" -o "$HOME/cygwin/setup-x86_64.exe"
-          Start-Process -FilePath "$HOME\cygwin\setup-x86_64.exe" -ArgumentList "--quiet-mode --packages make,zip,unzip --root $HOME\cygwin\cygwin64 --local-package-dir $HOME\cygwin\packages --site http://mirrors.kernel.org/sourceware/cygwin --no-desktop --no-shortcuts --no-startmenu --no-admin" -Wait -NoNewWindow
-
-      - name: Install dependencies
-        run: |
-          mkdir -p "$HOME\build-tools"
-          & curl -L "$env:ANT_URL" -o "$HOME/build-tools/$env:ANT_FILENAME"
-          tar -zxf "$HOME/build-tools/$env:ANT_FILENAME" -C "$HOME/build-tools"
 
       - name: Setup environment
         run: |
-          echo "dir ...\VC\Tools\MSVC"
-          dir "C:\Program Files\Microsoft Visual Studio\2022\Enterprise\VC\Tools\MSVC"
-          # echo "dir ...\VC\Tools\MSVC"
-          # dir "C:\Program Files\Microsoft Visual Studio\2022\Enterprise\VC\Tools\MSVC"
-
-          $env:Path = "$HOME\cygwin\cygwin64\bin;$HOME\cygwin\cygwin64\bin;$env:Path" ;
           $env:JAVA_HOME = "$HOME\bootjdk\jdk-$env:BOOT_JDK_VERSION" ;
           echo "JAVA_HOME=$env:JAVA_HOME"
-          $env:ANT_HOME = "${HOME}\build-tools\$env:ANT_DIR"
-          echo "ANT_HOME=$env:ANT_HOME"
-          $env:Path = "$env:JAVA_HOME\bin;$env:ANT_HOME\bin;$env:Path" ;
+          $env:Path = "$env:JAVA_HOME\bin;$env:Path" ;
           echo "Path=$env:Path"
-          which java
           java -version
-          which ant
-          ant -version
+          mvn -version
+          cmake --version
 
-          # Save JAVA_HOME, ANT_HOME, and Path (renamed to THE_PATH) in env variables
+          # Save JAVA_HOME and Path (renamed to THE_PATH) in env variables
           echo "JAVA_HOME=$env:JAVA_HOME" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
-          echo "ANT_HOME=$env:ANT_HOME" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
           echo "THE_PATH=$env:Path" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
 
-      - name: Build JavaFX artifacts
+      - name: Build JavaFX artifacts and run headless tests
         working-directory: jfx
         run: |
           echo "JAVA_HOME=$env:JAVA_HOME"
-          echo "ANT_HOME=$env:ANT_HOME"
           $env:Path = "$env:THE_PATH" ;
           echo "Path=$env:Path"
-          which java
-          java -version
-          .\gradlew.bat -version
-          # Skip "chmod" task for GHA builds. See JDK-8354337 for details.
-          .\gradlew.bat --info -PCHMOD_ARTIFACTS=false all
-
-      - name: Run JavaFX headless tests
-        working-directory: jfx
-        run: |
-          echo "JAVA_HOME=$env:JAVA_HOME"
-          echo "ANT_HOME=$env:ANT_HOME"
-          $env:Path = "$env:THE_PATH" ;
-          echo "Path=$env:Path"
-          .\gradlew.bat --info --continue -PTEST_ONLY=true test -x :web:test
+          # Full build: Java modules, native libraries (CMake + MSVC) and the
+          # unit test suite. Web and system tests are skipped by default.
+          mvn -B -ntp install

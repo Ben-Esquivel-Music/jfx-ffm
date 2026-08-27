@@ -38,7 +38,7 @@ version=0
 domain=openjdk.org
 
 [checks "whitespace"]
-files=.*\.java$|.*\.c$|.*\.h$|.*\.cpp$|.*\.hpp$|.*\.cc$|.*\.jsl$|.*\.fxml$|.*\.css$|.*\.m$|.*\.mm$|.*\.frag$|.*\.vert$|.*\.hlsl$|.*\.metal$|.*\.gradle$|.*\.groovy$|.*\.g4$|.*\.stg$
+files=.*\.java$|.*\.c$|.*\.h$|.*\.cpp$|.*\.hpp$|.*\.cc$|.*\.jsl$|.*\.fxml$|.*\.css$|.*\.m$|.*\.mm$|.*\.frag$|.*\.vert$|.*\.hlsl$|.*\.metal$|.*\.g4$|.*\.stg$
 
 [checks "reviewers"]
 reviewers=1

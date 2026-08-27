@@ -1,0 +1,403 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+ Copyright (c) 2026, Oracle and/or its affiliates. All rights reserved.
+ DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
+
+ This code is free software; you can redistribute it and/or modify it
+ under the terms of the GNU General Public License version 2 only, as
+ published by the Free Software Foundation.  Oracle designates this
+ particular file as subject to the "Classpath" exception as provided
+ by Oracle in the LICENSE file that accompanied this code.
+
+ This code is distributed in the hope that it will be useful, but WITHOUT
+ ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
+ FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License
+ version 2 for more details (a copy is included in the LICENSE file that
+ accompanied this code).
+
+ You should have received a copy of the GNU General Public License version
+ 2 along with this work; if not, write to the Free Software Foundation,
+ Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301 USA.
+
+ Please contact Oracle, 500 Oracle Parkway, Redwood Shores, CA 94065 USA
+ or visit www.oracle.com if you need additional information or have any
+ questions.
+-->
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+    xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+    xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+    <parent>
+        <groupId>org.openjfx</groupId>
+        <artifactId>javafx</artifactId>
+        <version>28-ea</version>
+        <relativePath>../../pom.xml</relativePath>
+    </parent>
+    <artifactId>javafx-system-tests</artifactId>
+    <name>javafx-system-tests</name>
+    <description>JavaFX system tests (run with -DFULL_TEST=true; robot tests additionally need -DUSE_ROBOT=true)</description>
+
+    <properties>
+        <!-- System tests exercise the real toolkit and need a display; they are
+             compiled always but only run with -DFULL_TEST=true (as in Gradle). -->
+        <jfx.systemtests.skip>true</jfx.systemtests.skip>
+        <!-- Test-run module path: shim dirs where a module has shims, otherwise the
+             module's main classes (same set Gradle put in test.run.args) -->
+        <jfx.st.modulepath>${jfx.shims.base}${path.separator}${jfx.shims.graphics}${path.separator}${jfx.shims.controls}${path.separator}${jfx.root}/modules/jfx.incubator.input/target/classes${path.separator}${jfx.shims.incubator.richtext}${path.separator}${jfx.root}/modules/javafx.media/target/classes${path.separator}${jfx.root}/modules/jdk.jsobject/target/classes${path.separator}${jfx.shims.web}${path.separator}${jfx.shims.swing}${path.separator}${jfx.shims.fxml}</jfx.st.modulepath>
+        <jfx.st.addmodules>javafx.base,javafx.graphics,javafx.controls,jfx.incubator.input,jfx.incubator.richtext,javafx.media,jdk.jsobject,javafx.web,javafx.swing,javafx.fxml</jfx.st.addmodules>
+        <!-- Test exclusions, lifted by the USE_ROBOT / UNSTABLE_TEST / AWT_TEST profiles -->
+        <jfx.st.exclude.robot>test/robot/**</jfx.st.exclude.robot>
+        <jfx.st.exclude.monocle>test/robot/com/sun/glass/ui/monocle/**</jfx.st.exclude.monocle>
+        <jfx.st.exclude.awt1>**/javafx/embed/swing/*.*</jfx.st.exclude.awt1>
+        <jfx.st.exclude.awt2>**/com/sun/javafx/application/Swing*.*</jfx.st.exclude.awt2>
+        <maven.install.skip>true</maven.install.skip>
+        <maven.deploy.skip>true</maven.deploy.skip>
+    </properties>
+
+    <dependencies>
+        <dependency>
+            <groupId>org.openjfx</groupId>
+            <artifactId>javafx-base</artifactId>
+            <version>${project.version}</version>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.openjfx</groupId>
+            <artifactId>javafx-graphics</artifactId>
+            <version>${project.version}</version>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.openjfx</groupId>
+            <artifactId>javafx-controls</artifactId>
+            <version>${project.version}</version>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.openjfx</groupId>
+            <artifactId>jfx-incubator-input</artifactId>
+            <version>${project.version}</version>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.openjfx</groupId>
+            <artifactId>jfx-incubator-richtext</artifactId>
+            <version>${project.version}</version>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.openjfx</groupId>
+            <artifactId>javafx-media</artifactId>
+            <version>${project.version}</version>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.openjfx</groupId>
+            <artifactId>jdk-jsobject</artifactId>
+            <version>${project.version}</version>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.openjfx</groupId>
+            <artifactId>javafx-web</artifactId>
+            <version>${project.version}</version>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.openjfx</groupId>
+            <artifactId>javafx-swing</artifactId>
+            <version>${project.version}</version>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.openjfx</groupId>
+            <artifactId>javafx-fxml</artifactId>
+            <version>${project.version}</version>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.openjfx</groupId>
+            <artifactId>javafx-base</artifactId>
+            <version>${project.version}</version>
+            <classifier>tests</classifier>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.openjfx</groupId>
+            <artifactId>javafx-graphics</artifactId>
+            <version>${project.version}</version>
+            <classifier>tests</classifier>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.openjfx</groupId>
+            <artifactId>javafx-controls</artifactId>
+            <version>${project.version}</version>
+            <classifier>tests</classifier>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.openjfx</groupId>
+            <artifactId>javafx-web</artifactId>
+            <version>${project.version}</version>
+            <classifier>tests</classifier>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.openjfx</groupId>
+            <artifactId>javafx-swing</artifactId>
+            <version>${project.version}</version>
+            <classifier>tests</classifier>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.junit.jupiter</groupId>
+            <artifactId>junit-jupiter</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.junit.platform</groupId>
+            <artifactId>junit-platform-launcher</artifactId>
+            <scope>test</scope>
+        </dependency>
+    </dependencies>
+
+    <build>
+        <plugins>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-compiler-plugin</artifactId>
+                <configuration>
+                    <!-- The tests use internal java.desktop packages, which the
+                         "release NN" option disallows; -source/-target are used
+                         instead (mirrors skipJavaCompilerOptionRelease in Gradle) -->
+                    <release combine.self="override"/>
+                    <source>${jfx.jdk.target.version}</source>
+                    <target>${jfx.jdk.target.version}</target>
+                </configuration>
+                <executions>
+                    <execution>
+                        <id>default-testCompile</id>
+                        <configuration>
+                            <compilerArgs combine.children="append">
+                                <arg>--add-exports</arg>
+                                <arg>java.desktop/sun.awt.datatransfer=ALL-UNNAMED</arg>
+                            </compilerArgs>
+                        </configuration>
+                    </execution>
+                </executions>
+            </plugin>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-antrun-plugin</artifactId>
+                <executions>
+                    <execution>
+                        <!-- st.run.args is read by test.util.Util to launch worker JVMs
+                             with the same module configuration as the test JVM -->
+                        <id>write-st-run-args</id>
+                        <phase>process-test-classes</phase>
+                        <goals>
+                            <goal>run</goal>
+                        </goals>
+                        <configuration>
+                            <target>
+                                <pathconvert property="jfx.st.testclasspath" refid="maven.test.classpath"/>
+                                <echo file="${project.build.directory}/st.run.args">-Djava.library.path="${jfx.root}/modules/javafx.graphics/target/native/bin"
+--upgrade-module-path="${jfx.st.modulepath}"
+--add-modules=${jfx.st.addmodules}
+--enable-native-access=javafx.graphics,javafx.media,javafx.web
+-cp "${jfx.st.testclasspath}"
+</echo>
+                            </target>
+                        </configuration>
+                    </execution>
+                </executions>
+            </plugin>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-surefire-plugin</artifactId>
+                <configuration>
+                    <skipTests>${jfx.systemtests.skip}</skipTests>
+                    <forkCount>1</forkCount>
+                    <reuseForks>false</reuseForks>
+                    <excludes>
+                        <exclude>${jfx.st.exclude.robot}</exclude>
+                        <exclude>${jfx.st.exclude.monocle}</exclude>
+                        <exclude>${jfx.st.exclude.awt1}</exclude>
+                        <exclude>${jfx.st.exclude.awt2}</exclude>
+                    </excludes>
+                    <argLine>
+                        -Xmx1000m
+                        --upgrade-module-path "${jfx.st.modulepath}"
+                        --add-modules ${jfx.st.addmodules}
+                        @${project.basedir}/src/test/addExports
+                        @${jfx.root}/buildtools/addExports
+                        --enable-native-access=javafx.graphics,javafx.media,javafx.web
+                        -Djava.library.path=${jfx.root}/modules/javafx.graphics/target/native/bin
+                        ${jfx.headless.args}
+                    </argLine>
+                    <systemPropertyVariables>
+                        <worker.debug>false</worker.debug>
+                        <worker.patchmodule.file>${project.build.directory}/st.run.args</worker.patchmodule.file>
+                        <worker.module.path>${jfx.st.modulepath}</worker.module.path>
+                        <worker.java.cmd>${java.home}/bin/java</worker.java.cmd>
+                        <launchertest.testapp1.jar>build/testapp1/testapp1.jar</launchertest.testapp1.jar>
+                        <launchertest.testapp2.module.path>${project.basedir}/build/modules/testapp2</launchertest.testapp2.module.path>
+                        <launchertest.testapp3.module.path>${project.basedir}/build/modules/testapp3</launchertest.testapp3.module.path>
+                        <launchertest.testapp4.module.path>${project.basedir}/build/modules/testapp4</launchertest.testapp4.module.path>
+                        <launchertest.testapp5.module.path>${project.basedir}/build/modules/testapp5</launchertest.testapp5.module.path>
+                        <launchertest.testapp6.module.path>${project.basedir}/build/modules/testapp6</launchertest.testapp6.module.path>
+                        <launchertest.testapp7.module.path>${project.basedir}/build/modules/testapp7</launchertest.testapp7.module.path>
+                        <launchertest.testscriptapp1.module.path>${project.basedir}/build/modules/testscriptapp1</launchertest.testscriptapp1.module.path>
+                        <launchertest.testscriptapp2.module.path>${project.basedir}/build/modules/testscriptapp2</launchertest.testscriptapp2.module.path>
+                        <unstable.test>${UNSTABLE_TEST}</unstable.test>
+                        <test.screenshot>${TEST_SCREENSHOT}</test.screenshot>
+                        <junit.jupiter.execution.timeout.test.method.default>${junit.test.timeout}s</junit.jupiter.execution.timeout.test.method.default>
+                        <junit.jupiter.execution.timeout.lifecycle.method.default>${junit.lifecycle.timeout}s</junit.jupiter.execution.timeout.lifecycle.method.default>
+                        <javafx.enablePreview>true</javafx.enablePreview>
+                        <javafx.suppressPreviewWarning>true</javafx.suppressPreviewWarning>
+                    </systemPropertyVariables>
+                </configuration>
+            </plugin>
+        </plugins>
+    </build>
+
+    <profiles>
+        <profile>
+            <!-- Enables the system tests and builds the launcher-test apps -->
+            <id>full-test</id>
+            <activation>
+                <property>
+                    <name>FULL_TEST</name>
+                    <value>true</value>
+                </property>
+            </activation>
+            <properties>
+                <jfx.systemtests.skip>false</jfx.systemtests.skip>
+            </properties>
+            <build>
+                <plugins>
+                    <plugin>
+                        <groupId>org.apache.maven.plugins</groupId>
+                        <artifactId>maven-antrun-plugin</artifactId>
+                        <executions>
+                            <execution>
+                                <id>build-testapps</id>
+                                <phase>process-test-classes</phase>
+                                <goals>
+                                    <goal>run</goal>
+                                </goals>
+                                <configuration>
+                                    <target>
+                                        <!-- Non-modular launcher test app: two jars -->
+                                        <mkdir dir="${project.build.directory}/testapps/testapp1"/>
+                                        <javac destdir="${project.build.directory}/testapps/testapp1"
+                                               includeantruntime="false" encoding="UTF-8" debug="true"
+                                               source="${jfx.jdk.target.version}" target="${jfx.jdk.target.version}"
+                                               fork="true" sourcepath="">
+                                            <src path="${project.basedir}/src/testapp1/java"/>
+                                            <classpath refid="maven.test.classpath"/>
+                                            <compilerarg value="-Xlint:-options"/>
+                                            <compilerarg value="--upgrade-module-path"/>
+                                            <compilerarg value="${jfx.st.modulepath}"/>
+                                            <compilerarg value="--add-modules=${jfx.st.addmodules}"/>
+                                        </javac>
+                                        <mkdir dir="${project.basedir}/build/testapp1"/>
+                                        <jar destfile="${project.basedir}/build/testapp1/testapp1.jar">
+                                            <fileset dir="${project.build.directory}/testapps/testapp1"
+                                                     includes="testapp/**,com/javafx/main/**"/>
+                                            <manifest>
+                                                <attribute name="Main-Class" value="com.javafx.main.Main"/>
+                                                <attribute name="JavaFX-Version" value="2.2"/>
+                                                <attribute name="JavaFX-Application-Class" value="testapp.HelloWorld"/>
+                                                <attribute name="JavaFX-Class-Path" value="jar2.jar"/>
+                                            </manifest>
+                                        </jar>
+                                        <jar destfile="${project.basedir}/build/testapp1/jar2.jar">
+                                            <fileset dir="${project.build.directory}/testapps/testapp1"
+                                                     includes="pkg2/**"/>
+                                        </jar>
+
+                                        <!-- Modular launcher/script test apps -->
+                                        <macrodef name="buildmodapp">
+                                            <attribute name="app"/>
+                                            <sequential>
+                                                <mkdir dir="${project.build.directory}/testapps/@{app}"/>
+                                                <javac destdir="${project.build.directory}/testapps/@{app}"
+                                                       includeantruntime="false" encoding="UTF-8" debug="true"
+                                                       source="${jfx.jdk.target.version}" target="${jfx.jdk.target.version}"
+                                                       fork="true" sourcepath=""
+                                                       modulesourcepath="${project.basedir}/src/@{app}/java">
+                                                    <compilerarg value="-implicit:none"/>
+                                                    <compilerarg value="-Xlint:-options"/>
+                                                    <compilerarg value="--upgrade-module-path"/>
+                                                    <compilerarg value="${jfx.st.modulepath}"/>
+                                                    <compilerarg value="--add-modules=${jfx.st.addmodules}"/>
+                                                </javac>
+                                                <mkdir dir="${project.basedir}/build/modules/@{app}"/>
+                                                <copy todir="${project.basedir}/build/modules/@{app}">
+                                                    <fileset dir="${project.build.directory}/testapps/@{app}"/>
+                                                </copy>
+                                                <copy todir="${project.basedir}/build/modules/@{app}" failonerror="false" quiet="true">
+                                                    <fileset dir="${project.basedir}/src/@{app}/resources" erroronmissingdir="false"/>
+                                                </copy>
+                                            </sequential>
+                                        </macrodef>
+                                        <buildmodapp app="testapp2"/>
+                                        <buildmodapp app="testapp3"/>
+                                        <buildmodapp app="testapp4"/>
+                                        <buildmodapp app="testapp5"/>
+                                        <buildmodapp app="testapp6"/>
+                                        <buildmodapp app="testapp7"/>
+                                        <buildmodapp app="testscriptapp1"/>
+                                        <buildmodapp app="testscriptapp2"/>
+                                    </target>
+                                </configuration>
+                            </execution>
+                        </executions>
+                    </plugin>
+                </plugins>
+            </build>
+        </profile>
+        <profile>
+            <!-- Enables robot-based visual tests -->
+            <id>use-robot</id>
+            <activation>
+                <property>
+                    <name>USE_ROBOT</name>
+                    <value>true</value>
+                </property>
+            </activation>
+            <properties>
+                <jfx.st.exclude.robot>__none__/**</jfx.st.exclude.robot>
+            </properties>
+        </profile>
+        <profile>
+            <!-- Enables unstable (monocle) robot tests -->
+            <id>unstable-test</id>
+            <activation>
+                <property>
+                    <name>UNSTABLE_TEST</name>
+                    <value>true</value>
+                </property>
+            </activation>
+            <properties>
+                <jfx.st.exclude.monocle>__none__/**</jfx.st.exclude.monocle>
+            </properties>
+        </profile>
+        <profile>
+            <!-- Enables AWT/Swing interop tests -->
+            <id>awt-test</id>
+            <activation>
+                <property>
+                    <name>AWT_TEST</name>
+                    <value>true</value>
+                </property>
+            </activation>
+            <properties>
+                <jfx.st.exclude.awt1>__none1__/**</jfx.st.exclude.awt1>
+                <jfx.st.exclude.awt2>__none2__/**</jfx.st.exclude.awt2>
+            </properties>
+        </profile>
+    </profiles>
+</project>

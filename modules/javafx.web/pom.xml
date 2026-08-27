@@ -1,0 +1,270 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+ Copyright (c) 2026, Oracle and/or its affiliates. All rights reserved.
+ DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
+
+ This code is free software; you can redistribute it and/or modify it
+ under the terms of the GNU General Public License version 2 only, as
+ published by the Free Software Foundation.  Oracle designates this
+ particular file as subject to the "Classpath" exception as provided
+ by Oracle in the LICENSE file that accompanied this code.
+
+ This code is distributed in the hope that it will be useful, but WITHOUT
+ ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
+ FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License
+ version 2 for more details (a copy is included in the LICENSE file that
+ accompanied this code).
+
+ You should have received a copy of the GNU General Public License version
+ 2 along with this work; if not, write to the Free Software Foundation,
+ Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301 USA.
+
+ Please contact Oracle, 500 Oracle Parkway, Redwood Shores, CA 94065 USA
+ or visit www.oracle.com if you need additional information or have any
+ questions.
+-->
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+    xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+    xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+    <parent>
+        <groupId>org.openjfx</groupId>
+        <artifactId>javafx</artifactId>
+        <version>28-ea</version>
+        <relativePath>../../pom.xml</relativePath>
+    </parent>
+    <artifactId>javafx-web</artifactId>
+    <name>javafx-web</name>
+    <description>JavaFX web module (javafx.web)</description>
+
+    <!-- The WebKit native library (jfxwebkit) is only built with COMPILE_WEBKIT=true
+         in the Gradle build (perl + cmake + ninja + clang toolchain) and is not
+         ported to Maven; a prebuilt jfxwebkit library from an OpenJFX SDK can be
+         used at runtime instead. Web tests need that native library, so they are
+         compiled but skipped unless -Djfx.web.skipTests=false is passed and the
+         library is available on java.library.path. -->
+
+    <properties>
+        <jfx.web.skipTests>true</jfx.web.skipTests>
+        <!-- The "release NN" option cannot be combined with upgrade-module-path
+             (needed to override the deprecated-for-removal system jdk.jsobject with
+             this repository's copy), so -source/-target are used instead and the
+             resulting implicit "options" lint warning is disabled. -->
+        <jfx.lint>-Xlint:removal,missing-explicit-ctor,-module,-options</jfx.lint>
+        <jfx.web.modulepath.extra>${jfx.root}/modules/javafx.media/target/classes${path.separator}${jfx.root}/modules/jdk.jsobject/target/classes</jfx.web.modulepath.extra>
+    </properties>
+
+    <dependencies>
+        <dependency>
+            <groupId>org.openjfx</groupId>
+            <artifactId>javafx-base</artifactId>
+            <version>${project.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>org.openjfx</groupId>
+            <artifactId>javafx-graphics</artifactId>
+            <version>${project.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>org.openjfx</groupId>
+            <artifactId>javafx-controls</artifactId>
+            <version>${project.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>org.openjfx</groupId>
+            <artifactId>javafx-media</artifactId>
+            <version>${project.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>org.openjfx</groupId>
+            <artifactId>jdk-jsobject</artifactId>
+            <version>${project.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>org.openjfx</groupId>
+            <artifactId>javafx-base</artifactId>
+            <version>${project.version}</version>
+            <classifier>tests</classifier>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.junit.jupiter</groupId>
+            <artifactId>junit-jupiter</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.junit.platform</groupId>
+            <artifactId>junit-platform-launcher</artifactId>
+            <scope>test</scope>
+        </dependency>
+    </dependencies>
+
+    <build>
+        <testResources>
+            <testResource>
+                <directory>${jfx.shims.base}</directory>
+                <excludes>
+                    <exclude>module-info.class</exclude>
+                </excludes>
+            </testResource>
+            <testResource>
+                <directory>${jfx.shims.web}</directory>
+                <excludes>
+                    <exclude>module-info.class</exclude>
+                </excludes>
+            </testResource>
+            <testResource>
+                <directory>src/test/resources</directory>
+            </testResource>
+        </testResources>
+        <plugins>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-antrun-plugin</artifactId>
+                <executions>
+                    <execution>
+                        <!-- The pre-generated DOM binding wrappers live in the native
+                             source tree and are compiled as part of the module -->
+                        <id>copy-dom-wrappers</id>
+                        <phase>generate-sources</phase>
+                        <goals>
+                            <goal>run</goal>
+                        </goals>
+                        <configuration>
+                            <target>
+                                <copy todir="${project.build.directory}/gensrc/java">
+                                    <fileset dir="${project.basedir}/src/main/native/Source/WebCore/bindings/java/dom3/java"/>
+                                </copy>
+                            </target>
+                        </configuration>
+                    </execution>
+                    <execution>
+                        <id>compile-shims</id>
+                        <phase>process-test-sources</phase>
+                        <goals>
+                            <goal>run</goal>
+                        </goals>
+                        <configuration>
+                            <target>
+                                <mkdir dir="${jfx.shims.web}"/>
+                                <javac destdir="${jfx.shims.web}" includeantruntime="false"
+                                       encoding="UTF-8" debug="true" fork="true" sourcepath=""
+                                       source="${jfx.jdk.target.version}" target="${jfx.jdk.target.version}"
+                                       memorymaximumsize="2048m">
+                                    <src path="${project.basedir}/src/main/java"/>
+                                    <src path="${project.build.directory}/gensrc/java"/>
+                                    <src path="${project.basedir}/src/shims/java"/>
+                                    <compilerarg value="-implicit:none"/>
+                                    <compilerarg value="-Xlint:-options"/>
+                                    <compilerarg value="--module-path"/>
+                                    <compilerarg value="${jfx.shims.base}${path.separator}${jfx.shims.graphics}${path.separator}${jfx.shims.controls}${path.separator}${jfx.root}/modules/javafx.media/target/classes"/>
+                                    <compilerarg value="--upgrade-module-path"/>
+                                    <compilerarg value="${jfx.root}/modules/jdk.jsobject/target/classes"/>
+                                    <compilerarg value="--module-version"/>
+                                    <compilerarg value="${jfx.release.version.short}"/>
+                                    <compilerarg value="${jfx.test.lint}"/>
+                                </javac>
+                                <copy todir="${jfx.shims.web}">
+                                    <fileset dir="${project.build.outputDirectory}" excludes="**/*.class"/>
+                                </copy>
+                            </target>
+                        </configuration>
+                    </execution>
+                    <execution>
+                        <!-- Jar of archive-*.* test resources used by WebEngine load tests -->
+                        <id>test-web-archive-jar</id>
+                        <phase>process-test-resources</phase>
+                        <goals>
+                            <goal>run</goal>
+                        </goals>
+                        <configuration>
+                            <target>
+                                <mkdir dir="${project.build.directory}/testing/resources"/>
+                                <jar destfile="${project.build.directory}/testing/resources/webArchiveJar.jar">
+                                    <fileset dir="${project.basedir}/src/test/resources/test/html"
+                                             includes="archive-*.*"/>
+                                </jar>
+                            </target>
+                        </configuration>
+                    </execution>
+                </executions>
+            </plugin>
+            <plugin>
+                <groupId>org.codehaus.mojo</groupId>
+                <artifactId>build-helper-maven-plugin</artifactId>
+                <executions>
+                    <execution>
+                        <id>add-gensrc</id>
+                        <phase>generate-sources</phase>
+                        <goals>
+                            <goal>add-source</goal>
+                        </goals>
+                        <configuration>
+                            <sources>
+                                <source>${project.build.directory}/gensrc/java</source>
+                            </sources>
+                        </configuration>
+                    </execution>
+                </executions>
+            </plugin>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-compiler-plugin</artifactId>
+                <configuration>
+                    <release combine.self="override"/>
+                    <source>${jfx.jdk.target.version}</source>
+                    <target>${jfx.jdk.target.version}</target>
+                    <compilerArgs combine.children="append">
+                        <arg>--module-version</arg>
+                        <arg>${jfx.release.version.short}</arg>
+                        <!-- Resolve requires jdk.jsobject against this repository's copy
+                             rather than the deprecated-for-removal JDK system module -->
+                        <arg>--upgrade-module-path</arg>
+                        <arg>${jfx.root}/modules/jdk.jsobject/target/classes</arg>
+                    </compilerArgs>
+                </configuration>
+            </plugin>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-jar-plugin</artifactId>
+                <executions>
+                    <execution>
+                        <id>test-jar</id>
+                        <goals>
+                            <goal>test-jar</goal>
+                        </goals>
+                        <configuration>
+                            <skipIfEmpty>true</skipIfEmpty>
+                        </configuration>
+                    </execution>
+                </executions>
+            </plugin>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-surefire-plugin</artifactId>
+                <configuration>
+                    <skipTests>${jfx.web.skipTests}</skipTests>
+                    <argLine>
+                        --upgrade-module-path "${jfx.shims.base}${path.separator}${jfx.shims.graphics}${path.separator}${jfx.shims.controls}${path.separator}${jfx.web.modulepath.extra}${path.separator}${jfx.shims.web}"
+                        --add-modules javafx.base,javafx.graphics,javafx.controls,javafx.media,jdk.jsobject,javafx.web
+                        @${project.basedir}/src/test/addExports
+                        @${jfx.root}/buildtools/addExports
+                        --enable-native-access=javafx.graphics,javafx.media,javafx.web
+                        -Djava.library.path=${jfx.root}/modules/javafx.graphics/target/native/bin
+                        -DWEB_ARCHIVE_JAR_TEST_DIR=${project.build.directory}/testing/resources
+                    </argLine>
+                    <systemPropertyVariables>
+                        <glass.platform>Headless</glass.platform>
+                        <prism.order>sw</prism.order>
+                        <unstable.test>${UNSTABLE_TEST}</unstable.test>
+                        <test.screenshot>${TEST_SCREENSHOT}</test.screenshot>
+                        <junit.jupiter.execution.timeout.test.method.default>${junit.test.timeout}s</junit.jupiter.execution.timeout.test.method.default>
+                        <junit.jupiter.execution.timeout.lifecycle.method.default>${junit.lifecycle.timeout}s</junit.jupiter.execution.timeout.lifecycle.method.default>
+                        <javafx.enablePreview>true</javafx.enablePreview>
+                        <javafx.suppressPreviewWarning>true</javafx.suppressPreviewWarning>
+                    </systemPropertyVariables>
+                </configuration>
+            </plugin>
+        </plugins>
+    </build>
+</project>

@@ -185,7 +185,7 @@ public class Util {
         final boolean isJar = testAppName.endsWith(".jar");
 
         /*
-         * note: the "worker" properties are tied into build.gradle
+         * note: the "worker" properties are tied into tests/system/pom.xml
          */
         final String workerJavaCmd = System.getProperty("worker.java.cmd");
         final String workerPatchModuleFile = System.getProperty("worker.patchmodule.file");

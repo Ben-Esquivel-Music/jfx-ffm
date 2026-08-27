@@ -1,0 +1,341 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+ Copyright (c) 2026, Oracle and/or its affiliates. All rights reserved.
+ DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
+
+ This code is free software; you can redistribute it and/or modify it
+ under the terms of the GNU General Public License version 2 only, as
+ published by the Free Software Foundation.  Oracle designates this
+ particular file as subject to the "Classpath" exception as provided
+ by Oracle in the LICENSE file that accompanied this code.
+
+ This code is distributed in the hope that it will be useful, but WITHOUT
+ ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
+ FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License
+ version 2 for more details (a copy is included in the LICENSE file that
+ accompanied this code).
+
+ You should have received a copy of the GNU General Public License version
+ 2 along with this work; if not, write to the Free Software Foundation,
+ Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301 USA.
+
+ Please contact Oracle, 500 Oracle Parkway, Redwood Shores, CA 94065 USA
+ or visit www.oracle.com if you need additional information or have any
+ questions.
+-->
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+    xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+    xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+    <groupId>org.openjfx</groupId>
+    <artifactId>javafx</artifactId>
+    <version>28-ea</version>
+    <packaging>pom</packaging>
+    <name>openjfx</name>
+    <description>OpenJFX JavaFX</description>
+
+    <modules>
+        <module>buildtools/jslc</module>
+        <module>modules/javafx.base</module>
+        <module>modules/javafx.graphics</module>
+        <module>modules/javafx.controls</module>
+        <module>modules/jfx.incubator.input</module>
+        <module>modules/jfx.incubator.richtext</module>
+        <module>modules/javafx.fxml</module>
+        <module>modules/javafx.swing</module>
+        <module>modules/javafx.swt</module>
+        <module>modules/jdk.jsobject</module>
+        <module>modules/javafx.media</module>
+        <module>modules/javafx.web</module>
+        <module>tests/system</module>
+        <module>sdk</module>
+    </modules>
+
+    <properties>
+        <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
+        <project.reporting.outputEncoding>UTF-8</project.reporting.outputEncoding>
+
+        <!-- Values from build.properties -->
+        <jfx.release.major.version>28</jfx.release.major.version>
+        <jfx.release.minor.version>0</jfx.release.minor.version>
+        <jfx.release.security.version>0</jfx.release.security.version>
+        <jfx.release.patch.version>0</jfx.release.patch.version>
+        <jfx.release.version>28</jfx.release.version>
+        <jfx.jdk.target.version>25</jfx.jdk.target.version>
+
+        <!-- Local (non-CI) builds are "-internal", matching the Gradle defaults -->
+        <maven.build.timestamp.format>yyyy-MM-dd-HHmmss</maven.build.timestamp.format>
+        <jfx.build.timestamp>${maven.build.timestamp}</jfx.build.timestamp>
+        <jfx.hudson.job.name>not_hudson</jfx.hudson.job.name>
+        <jfx.hudson.build.number>0000</jfx.hudson.build.number>
+        <jfx.promoted.build.number>0</jfx.promoted.build.number>
+        <jfx.release.suffix>-internal</jfx.release.suffix>
+        <jfx.release.version.short>${jfx.release.version}${jfx.release.suffix}</jfx.release.version.short>
+        <jfx.release.version.long>${jfx.release.version.short}+${jfx.promoted.build.number}-${jfx.build.timestamp}</jfx.release.version.long>
+
+        <!-- Product identification (open build defaults) -->
+        <jfx.product.name>OpenJFX</jfx.product.name>
+        <jfx.company.name>N/A</jfx.company.name>
+        <jfx.platform.name>Platform</jfx.platform.name>
+
+        <!-- Lint settings (Gradle: LINT / TEST_LINT / JAVAC_WERROR / TEST_JAVAC_WERROR) -->
+        <!-- -module lint: each module compiles alone against reactor jars, so qualified
+             exports to not-yet-built sibling modules would otherwise warn (Gradle compiled
+             all modules in one module-source-path invocation and kept this lint enabled). -->
+        <jfx.lint>-Xlint:removal,missing-explicit-ctor,-module</jfx.lint>
+        <jfx.test.lint>-Xlint:-options,removal</jfx.test.lint>
+        <jfx.werror>-Werror</jfx.werror>
+
+        <!-- Dependency versions from build.properties -->
+        <junit.jupiter.version>5.12.2</junit.jupiter.version>
+        <junit.platform.version>1.12.2</junit.platform.version>
+        <opentest4j.version>1.3.0</opentest4j.version>
+        <apiguardian.version>1.1.2</apiguardian.version>
+        <antlr4.version>4.7.2</antlr4.version>
+        <swt.version>3.124.200</swt.version>
+        <lucene.version>7.7.3</lucene.version>
+
+        <!-- Test timeouts (seconds) -->
+        <junit.test.timeout>120</junit.test.timeout>
+        <junit.lifecycle.timeout>20</junit.lifecycle.timeout>
+
+        <!-- Test control flags (Gradle: FULL_TEST, USE_ROBOT, HEADLESS_TEST, UNSTABLE_TEST, TEST_SCREENSHOT, AWT_TEST) -->
+        <FULL_TEST>false</FULL_TEST>
+        <USE_ROBOT>false</USE_ROBOT>
+        <HEADLESS_TEST>false</HEADLESS_TEST>
+        <UNSTABLE_TEST>false</UNSTABLE_TEST>
+        <TEST_SCREENSHOT>false</TEST_SCREENSHOT>
+        <AWT_TEST>true</AWT_TEST>
+
+        <!-- Native build controls -->
+        <CONF>Release</CONF>
+        <skipNative>false</skipNative>
+        <INCLUDE_ES2>false</INCLUDE_ES2>
+
+        <!-- Extra JVM args appended to every surefire run; overridden by the headless profile -->
+        <jfx.headless.args/>
+
+        <!-- Shim/module staging directories shared across modules -->
+        <jfx.root>${maven.multiModuleProjectDirectory}</jfx.root>
+        <jfx.shims.base>${jfx.root}/modules/javafx.base/target/shims/javafx.base</jfx.shims.base>
+        <jfx.shims.graphics>${jfx.root}/modules/javafx.graphics/target/shims/javafx.graphics</jfx.shims.graphics>
+        <jfx.shims.controls>${jfx.root}/modules/javafx.controls/target/shims/javafx.controls</jfx.shims.controls>
+        <jfx.shims.incubator.input>${jfx.root}/modules/jfx.incubator.input/target/shims/jfx.incubator.input</jfx.shims.incubator.input>
+        <jfx.shims.incubator.richtext>${jfx.root}/modules/jfx.incubator.richtext/target/shims/jfx.incubator.richtext</jfx.shims.incubator.richtext>
+        <jfx.shims.swing>${jfx.root}/modules/javafx.swing/target/shims/javafx.swing</jfx.shims.swing>
+        <jfx.shims.fxml>${jfx.root}/modules/javafx.fxml/target/shims/javafx.fxml</jfx.shims.fxml>
+        <jfx.shims.web>${jfx.root}/modules/javafx.web/target/shims/javafx.web</jfx.shims.web>
+        <jfx.classes.media>${jfx.root}/modules/javafx.media/target/classes</jfx.classes.media>
+        <jfx.classes.jsobject>${jfx.root}/modules/jdk.jsobject/target/classes</jfx.classes.jsobject>
+    </properties>
+
+    <dependencyManagement>
+        <dependencies>
+            <dependency>
+                <groupId>org.junit.jupiter</groupId>
+                <artifactId>junit-jupiter</artifactId>
+                <version>${junit.jupiter.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>org.junit.jupiter</groupId>
+                <artifactId>junit-jupiter-api</artifactId>
+                <version>${junit.jupiter.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>org.junit.jupiter</groupId>
+                <artifactId>junit-jupiter-params</artifactId>
+                <version>${junit.jupiter.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>org.junit.jupiter</groupId>
+                <artifactId>junit-jupiter-engine</artifactId>
+                <version>${junit.jupiter.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>org.junit.platform</groupId>
+                <artifactId>junit-platform-commons</artifactId>
+                <version>${junit.platform.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>org.junit.platform</groupId>
+                <artifactId>junit-platform-engine</artifactId>
+                <version>${junit.platform.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>org.junit.platform</groupId>
+                <artifactId>junit-platform-launcher</artifactId>
+                <version>${junit.platform.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>org.opentest4j</groupId>
+                <artifactId>opentest4j</artifactId>
+                <version>${opentest4j.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>org.apiguardian</groupId>
+                <artifactId>apiguardian-api</artifactId>
+                <version>${apiguardian.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>org.antlr</groupId>
+                <artifactId>antlr4</artifactId>
+                <version>${antlr4.version}</version>
+            </dependency>
+        </dependencies>
+    </dependencyManagement>
+
+    <build>
+        <pluginManagement>
+            <plugins>
+                <plugin>
+                    <groupId>org.apache.maven.plugins</groupId>
+                    <artifactId>maven-compiler-plugin</artifactId>
+                    <version>3.14.0</version>
+                    <configuration>
+                        <release>${jfx.jdk.target.version}</release>
+                        <encoding>UTF-8</encoding>
+                        <debug>true</debug>
+                        <debuglevel>source,lines</debuglevel>
+                        <showWarnings>true</showWarnings>
+                        <fork>true</fork>
+                        <compilerArgs>
+                            <arg>-Xmaxerrs</arg>
+                            <arg>1000</arg>
+                            <arg>-Xmaxwarns</arg>
+                            <arg>1000</arg>
+                            <arg>${jfx.lint}</arg>
+                            <arg>${jfx.werror}</arg>
+                        </compilerArgs>
+                    </configuration>
+                    <executions>
+                        <execution>
+                            <id>default-testCompile</id>
+                            <configuration>
+                                <useModulePath>false</useModulePath>
+                                <compilerArgs>
+                                    <arg>-Xmaxerrs</arg>
+                                    <arg>1000</arg>
+                                    <arg>-Xmaxwarns</arg>
+                                    <arg>1000</arg>
+                                    <arg>${jfx.test.lint}</arg>
+                                    <arg>${jfx.werror}</arg>
+                                </compilerArgs>
+                            </configuration>
+                        </execution>
+                    </executions>
+                </plugin>
+                <plugin>
+                    <groupId>org.apache.maven.plugins</groupId>
+                    <artifactId>maven-surefire-plugin</artifactId>
+                    <version>3.5.4</version>
+                    <configuration>
+                        <useModulePath>false</useModulePath>
+                        <enableAssertions>true</enableAssertions>
+                        <trimStackTrace>false</trimStackTrace>
+                        <redirectTestOutputToFile>true</redirectTestOutputToFile>
+                    </configuration>
+                </plugin>
+                <plugin>
+                    <groupId>org.apache.maven.plugins</groupId>
+                    <artifactId>maven-resources-plugin</artifactId>
+                    <version>3.3.1</version>
+                    <configuration>
+                        <propertiesEncoding>UTF-8</propertiesEncoding>
+                    </configuration>
+                </plugin>
+                <plugin>
+                    <groupId>org.apache.maven.plugins</groupId>
+                    <artifactId>maven-jar-plugin</artifactId>
+                    <version>3.4.2</version>
+                </plugin>
+                <plugin>
+                    <groupId>org.apache.maven.plugins</groupId>
+                    <artifactId>maven-antrun-plugin</artifactId>
+                    <version>3.1.0</version>
+                </plugin>
+                <plugin>
+                    <groupId>org.codehaus.mojo</groupId>
+                    <artifactId>exec-maven-plugin</artifactId>
+                    <version>3.5.1</version>
+                </plugin>
+                <plugin>
+                    <groupId>org.codehaus.mojo</groupId>
+                    <artifactId>build-helper-maven-plugin</artifactId>
+                    <version>3.6.1</version>
+                </plugin>
+                <plugin>
+                    <groupId>org.apache.maven.plugins</groupId>
+                    <artifactId>maven-dependency-plugin</artifactId>
+                    <version>3.8.1</version>
+                </plugin>
+                <plugin>
+                    <groupId>org.antlr</groupId>
+                    <artifactId>antlr4-maven-plugin</artifactId>
+                    <version>${antlr4.version}</version>
+                </plugin>
+                <plugin>
+                    <groupId>org.apache.maven.plugins</groupId>
+                    <artifactId>maven-javadoc-plugin</artifactId>
+                    <version>3.11.2</version>
+                </plugin>
+                <plugin>
+                    <groupId>org.apache.maven.plugins</groupId>
+                    <artifactId>maven-deploy-plugin</artifactId>
+                    <version>3.1.4</version>
+                </plugin>
+            </plugins>
+        </pluginManagement>
+    </build>
+
+    <profiles>
+        <profile>
+            <id>linux</id>
+            <activation>
+                <os>
+                    <name>linux</name>
+                </os>
+            </activation>
+            <properties>
+                <javafx.platform>linux</javafx.platform>
+                <jfx.swt.artifact>org.eclipse.swt.gtk.linux.x86_64</jfx.swt.artifact>
+            </properties>
+        </profile>
+        <profile>
+            <id>macosx</id>
+            <activation>
+                <os>
+                    <name>mac os x</name>
+                </os>
+            </activation>
+            <properties>
+                <javafx.platform>mac</javafx.platform>
+                <jfx.swt.artifact>org.eclipse.swt.cocoa.macosx.x86_64</jfx.swt.artifact>
+            </properties>
+        </profile>
+        <profile>
+            <id>windows</id>
+            <activation>
+                <os>
+                    <family>windows</family>
+                </os>
+            </activation>
+            <properties>
+                <javafx.platform>win</javafx.platform>
+                <jfx.swt.artifact>org.eclipse.swt.win32.win32.x86_64</jfx.swt.artifact>
+            </properties>
+        </profile>
+        <profile>
+            <!-- Gradle: -PHEADLESS_TEST=true -->
+            <id>headless</id>
+            <activation>
+                <property>
+                    <name>HEADLESS_TEST</name>
+                    <value>true</value>
+                </property>
+            </activation>
+            <properties>
+                <jfx.headless.args>-Dglass.platform=Headless -Dprism.order=sw -Dcom.sun.javafx.gestures.zoom=true -Dcom.sun.javafx.gestures.rotate=true -Dcom.sun.javafx.gestures.scroll=true</jfx.headless.args>
+            </properties>
+        </profile>
+    </profiles>
+</project>

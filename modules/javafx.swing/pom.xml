@@ -1,0 +1,136 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+ Copyright (c) 2026, Oracle and/or its affiliates. All rights reserved.
+ DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
+
+ This code is free software; you can redistribute it and/or modify it
+ under the terms of the GNU General Public License version 2 only, as
+ published by the Free Software Foundation.  Oracle designates this
+ particular file as subject to the "Classpath" exception as provided
+ by Oracle in the LICENSE file that accompanied this code.
+
+ This code is distributed in the hope that it will be useful, but WITHOUT
+ ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
+ FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License
+ version 2 for more details (a copy is included in the LICENSE file that
+ accompanied this code).
+
+ You should have received a copy of the GNU General Public License version
+ 2 along with this work; if not, write to the Free Software Foundation,
+ Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301 USA.
+
+ Please contact Oracle, 500 Oracle Parkway, Redwood Shores, CA 94065 USA
+ or visit www.oracle.com if you need additional information or have any
+ questions.
+-->
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+    xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+    xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+    <parent>
+        <groupId>org.openjfx</groupId>
+        <artifactId>javafx</artifactId>
+        <version>28-ea</version>
+        <relativePath>../../pom.xml</relativePath>
+    </parent>
+    <artifactId>javafx-swing</artifactId>
+    <name>javafx-swing</name>
+    <description>JavaFX swing interop module (javafx.swing)</description>
+
+    <properties>
+        <!-- javafx.swing requires jdk.unsupported.desktop, which the "release NN"
+             option excludes; the implicitly-enabled "options" lint warning that results
+             from -source/-target is disabled (mirrors the Gradle build) -->
+        <jfx.lint>-Xlint:removal,missing-explicit-ctor,-module,-options</jfx.lint>
+    </properties>
+
+    <dependencies>
+        <dependency>
+            <groupId>org.openjfx</groupId>
+            <artifactId>javafx-base</artifactId>
+            <version>${project.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>org.openjfx</groupId>
+            <artifactId>javafx-graphics</artifactId>
+            <version>${project.version}</version>
+        </dependency>
+    </dependencies>
+
+    <build>
+        <!-- The shim classes are exposed to downstream test modules (tests/system)
+             through the tests classifier jar, mirroring the Gradle shims source set -->
+        <testResources>
+            <testResource>
+                <directory>${jfx.shims.swing}</directory>
+                <excludes>
+                    <exclude>module-info.class</exclude>
+                </excludes>
+            </testResource>
+        </testResources>
+        <plugins>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-compiler-plugin</artifactId>
+                <configuration>
+                    <release combine.self="override"/>
+                    <source>${jfx.jdk.target.version}</source>
+                    <target>${jfx.jdk.target.version}</target>
+                    <compilerArgs combine.children="append">
+                        <arg>--module-version</arg>
+                        <arg>${jfx.release.version.short}</arg>
+                    </compilerArgs>
+                </configuration>
+            </plugin>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-jar-plugin</artifactId>
+                <executions>
+                    <execution>
+                        <id>test-jar</id>
+                        <goals>
+                            <goal>test-jar</goal>
+                        </goals>
+                        <configuration>
+                            <skipIfEmpty>true</skipIfEmpty>
+                        </configuration>
+                    </execution>
+                </executions>
+            </plugin>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-antrun-plugin</artifactId>
+                <executions>
+                    <execution>
+                        <id>compile-shims</id>
+                        <phase>process-test-sources</phase>
+                        <goals>
+                            <goal>run</goal>
+                        </goals>
+                        <configuration>
+                            <target>
+                                <mkdir dir="${jfx.shims.swing}"/>
+                                <javac destdir="${jfx.shims.swing}" includeantruntime="false"
+                                       encoding="UTF-8" debug="true" fork="true" sourcepath=""
+                                       source="${jfx.jdk.target.version}" target="${jfx.jdk.target.version}"
+                                       memorymaximumsize="2048m">
+                                    <src path="${project.basedir}/src/main/java"/>
+                                    <src path="${project.basedir}/src/shims/java"/>
+                                    <compilerarg value="-implicit:none"/>
+                                    <compilerarg value="--module-path"/>
+                                    <compilerarg value="${jfx.shims.base}${path.separator}${jfx.shims.graphics}"/>
+                                    <compilerarg value="--module-version"/>
+                                    <compilerarg value="${jfx.release.version.short}"/>
+                                    <compilerarg value="${jfx.test.lint}"/>
+                                </javac>
+                                <copy todir="${jfx.shims.swing}" failonerror="false">
+                                    <fileset dir="${project.build.outputDirectory}" excludes="**/*.class"/>
+                                </copy>
+                            </target>
+                        </configuration>
+                    </execution>
+                </executions>
+            </plugin>
+        </plugins>
+    </build>
+</project>
