@@ -6,13 +6,9 @@ These can be supplied in a number of ways. See sections below.
 
 ## Compiled from source
 
-Specify these Gradle properties to enable building of WebKit and Media libraries from source:
-
-    -PCOMPILE_WEBKIT=true -PCOMPILE_MEDIA=true
-
-Note that these require additional build tooling and take some time to build.
-
-If you are not actively working on these sources, you may want to cache the output by copying it to one of the folders mentioned below.
+The Maven build in this fork does not yet compile the WebKit and Media native
+libraries from source (the former Gradle COMPILE_WEBKIT / COMPILE_MEDIA
+switches). Use one of the options below to supply prebuilt libraries.
 
 
 ## Cached libraries
@@ -31,21 +27,19 @@ You can manually place WebKit and Media shared libraries in these folders:
 
 ## Officially released libraries
 
-Gradle has a task to automate downloading officially released libraries from MavenCentral.
-
-You can enable the task by specifying this Gradle property:
-
-    -PSTUB_RUNTIME_OPENJFX="15-ea+4"
+You can download officially released libraries from
+[MavenCentral](https://search.maven.org/search?q=g:org.openjfx%20AND%20a:javafx)
+(artifacts `javafx-web` and `javafx-media` with your platform classifier) and
+extract the shared libraries into the cache folders above.
 
 Note that these libraries may not be compatible with the source tree you are working with. Always use the [latest version](https://search.maven.org/search?q=g:org.openjfx%20AND%20a:javafx); this may improve your chances of compatibility.
 
 
 ## Skip Web tests
 
-You can also skip the web module tests.
+The web module tests are skipped by default in the Maven build (they require
+the native `jfxwebkit` library). To run them, pass:
 
-Specify these options to Gradle
+    -Djfx.web.skipTests=false
 
-    -x :web:test
-
-Note that this is fine for local work. But a full test *is* required before submitting a PR, see [CONTRIBUTING.md](https://github.com/openjdk/jfx/blob/master/CONTRIBUTING.md).
+Note that skipping is fine for local work. But a full test *is* required before submitting a PR, see [CONTRIBUTING.md](https://github.com/openjdk/jfx/blob/master/CONTRIBUTING.md).

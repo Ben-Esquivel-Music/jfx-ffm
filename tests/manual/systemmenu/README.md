@@ -1,9 +1,9 @@
 # Compiling and Running
 
-To compile and run the tests, run the following command (You do need to run the gradle build first):
+To compile and run the tests, run the following command (You do need to run the Maven build first, e.g. `mvn install -DskipTests`):
 
 ```
-java @../../../build/run.args MacOSSystemMenuMultiWindowTest.java
+java --module-path ../../../sdk/target/sdk/lib --add-modules javafx.controls MacOSSystemMenuMultiWindowTest.java
 ```
 
 The tests are used to verify that the system menu bar works as expected.

@@ -1,0 +1,214 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+ Copyright (c) 2026, Oracle and/or its affiliates. All rights reserved.
+ DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
+
+ This code is free software; you can redistribute it and/or modify it
+ under the terms of the GNU General Public License version 2 only, as
+ published by the Free Software Foundation.  Oracle designates this
+ particular file as subject to the "Classpath" exception as provided
+ by Oracle in the LICENSE file that accompanied this code.
+
+ This code is distributed in the hope that it will be useful, but WITHOUT
+ ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
+ FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License
+ version 2 for more details (a copy is included in the LICENSE file that
+ accompanied this code).
+
+ You should have received a copy of the GNU General Public License version
+ 2 along with this work; if not, write to the Free Software Foundation,
+ Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301 USA.
+
+ Please contact Oracle, 500 Oracle Parkway, Redwood Shores, CA 94065 USA
+ or visit www.oracle.com if you need additional information or have any
+ questions.
+-->
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+    xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+    xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+    <parent>
+        <groupId>org.openjfx</groupId>
+        <artifactId>javafx</artifactId>
+        <version>28-ea</version>
+        <relativePath>../pom.xml</relativePath>
+    </parent>
+    <artifactId>javafx-sdk</artifactId>
+    <name>javafx-sdk</name>
+    <packaging>pom</packaging>
+    <description>Assembles a runnable JavaFX SDK layout under target/sdk (lib jars + native libraries)</description>
+
+    <properties>
+        <jfx.sdk.dir>${project.build.directory}/sdk</jfx.sdk.dir>
+        <maven.install.skip>true</maven.install.skip>
+        <maven.deploy.skip>true</maven.deploy.skip>
+    </properties>
+
+    <dependencies>
+        <dependency>
+            <groupId>org.openjfx</groupId>
+            <artifactId>javafx-base</artifactId>
+            <version>${project.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>org.openjfx</groupId>
+            <artifactId>javafx-graphics</artifactId>
+            <version>${project.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>org.openjfx</groupId>
+            <artifactId>javafx-controls</artifactId>
+            <version>${project.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>org.openjfx</groupId>
+            <artifactId>jfx-incubator-input</artifactId>
+            <version>${project.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>org.openjfx</groupId>
+            <artifactId>jfx-incubator-richtext</artifactId>
+            <version>${project.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>org.openjfx</groupId>
+            <artifactId>javafx-fxml</artifactId>
+            <version>${project.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>org.openjfx</groupId>
+            <artifactId>javafx-swing</artifactId>
+            <version>${project.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>org.openjfx</groupId>
+            <artifactId>javafx-media</artifactId>
+            <version>${project.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>org.openjfx</groupId>
+            <artifactId>jdk-jsobject</artifactId>
+            <version>${project.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>org.openjfx</groupId>
+            <artifactId>javafx-web</artifactId>
+            <version>${project.version}</version>
+        </dependency>
+    </dependencies>
+
+    <build>
+        <plugins>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-dependency-plugin</artifactId>
+                <executions>
+                    <execution>
+                        <id>sdk-lib-jars</id>
+                        <phase>package</phase>
+                        <goals>
+                            <goal>copy</goal>
+                        </goals>
+                        <configuration>
+                            <outputDirectory>${jfx.sdk.dir}/lib</outputDirectory>
+                            <artifactItems>
+                                <artifactItem>
+                                    <groupId>org.openjfx</groupId>
+                                    <artifactId>javafx-base</artifactId>
+                                    <version>${project.version}</version>
+                                    <destFileName>javafx.base.jar</destFileName>
+                                </artifactItem>
+                                <artifactItem>
+                                    <groupId>org.openjfx</groupId>
+                                    <artifactId>javafx-graphics</artifactId>
+                                    <version>${project.version}</version>
+                                    <destFileName>javafx.graphics.jar</destFileName>
+                                </artifactItem>
+                                <artifactItem>
+                                    <groupId>org.openjfx</groupId>
+                                    <artifactId>javafx-controls</artifactId>
+                                    <version>${project.version}</version>
+                                    <destFileName>javafx.controls.jar</destFileName>
+                                </artifactItem>
+                                <artifactItem>
+                                    <groupId>org.openjfx</groupId>
+                                    <artifactId>jfx-incubator-input</artifactId>
+                                    <version>${project.version}</version>
+                                    <destFileName>jfx.incubator.input.jar</destFileName>
+                                </artifactItem>
+                                <artifactItem>
+                                    <groupId>org.openjfx</groupId>
+                                    <artifactId>jfx-incubator-richtext</artifactId>
+                                    <version>${project.version}</version>
+                                    <destFileName>jfx.incubator.richtext.jar</destFileName>
+                                </artifactItem>
+                                <artifactItem>
+                                    <groupId>org.openjfx</groupId>
+                                    <artifactId>javafx-fxml</artifactId>
+                                    <version>${project.version}</version>
+                                    <destFileName>javafx.fxml.jar</destFileName>
+                                </artifactItem>
+                                <artifactItem>
+                                    <groupId>org.openjfx</groupId>
+                                    <artifactId>javafx-swing</artifactId>
+                                    <version>${project.version}</version>
+                                    <destFileName>javafx.swing.jar</destFileName>
+                                </artifactItem>
+                                <artifactItem>
+                                    <groupId>org.openjfx</groupId>
+                                    <artifactId>javafx-media</artifactId>
+                                    <version>${project.version}</version>
+                                    <destFileName>javafx.media.jar</destFileName>
+                                </artifactItem>
+                                <artifactItem>
+                                    <groupId>org.openjfx</groupId>
+                                    <artifactId>jdk-jsobject</artifactId>
+                                    <version>${project.version}</version>
+                                    <destFileName>jdk.jsobject.jar</destFileName>
+                                </artifactItem>
+                                <artifactItem>
+                                    <groupId>org.openjfx</groupId>
+                                    <artifactId>javafx-web</artifactId>
+                                    <version>${project.version}</version>
+                                    <destFileName>javafx.web.jar</destFileName>
+                                </artifactItem>
+                                <artifactItem>
+                                    <groupId>org.openjfx</groupId>
+                                    <artifactId>javafx-swt</artifactId>
+                                    <version>${project.version}</version>
+                                    <destFileName>javafx-swt.jar</destFileName>
+                                </artifactItem>
+                            </artifactItems>
+                        </configuration>
+                    </execution>
+                </executions>
+            </plugin>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-antrun-plugin</artifactId>
+                <executions>
+                    <execution>
+                        <id>sdk-native-and-properties</id>
+                        <phase>package</phase>
+                        <goals>
+                            <goal>run</goal>
+                        </goals>
+                        <configuration>
+                            <target>
+                                <mkdir dir="${jfx.sdk.dir}/bin"/>
+                                <copy todir="${jfx.sdk.dir}/bin" failonerror="false" quiet="true">
+                                    <fileset dir="${jfx.root}/modules/javafx.graphics/target/native/bin"
+                                             includes="*.dll,*.so,*.dylib" erroronmissingdir="false"/>
+                                </copy>
+                                <echo file="${jfx.sdk.dir}/lib/javafx.properties">javafx.version=${jfx.release.version.short}
+javafx.runtime.version=${jfx.release.version.long}
+javafx.runtime.build=${jfx.promoted.build.number}
+</echo>
+                            </target>
+                        </configuration>
+                    </execution>
+                </executions>
+            </plugin>
+        </plugins>
+    </build>
+</project>

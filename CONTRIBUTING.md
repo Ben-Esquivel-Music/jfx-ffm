@@ -241,21 +241,21 @@ installed on your system
 with the environment variable `JAVA_HOME` referencing the path to Java home for
 your JDK installation. By default, tests use the same runtime as `JAVA_HOME`.
 
-It is possible to develop in any major Java IDE (Eclipse, IntelliJ, NetBeans). IDEs can automatically configure projects based on Gradle setup.
+It is possible to develop in any major Java IDE (Eclipse, IntelliJ, NetBeans). IDEs can automatically configure projects based on the Maven setup.
 
-OpenJFX uses Gradle for its build. Before submitting your changes, run the test suite to make sure that nothing is broken, with:
+This fork of OpenJFX uses Apache Maven (3.9+) for its build; developers must have Maven installed locally (no wrapper is committed). Before submitting your changes, run the test suite to make sure that nothing is broken, with:
 
 ```sh
-bash ./gradlew all test
+mvn install
 ```
 
 If you are changing anything that might possibly affect rendering, you should run a full test with robot enabled:
 
 ```sh
-bash ./gradlew -PFULL_TEST=true -PUSE_ROBOT=true all test
+mvn install -DFULL_TEST=true -DUSE_ROBOT=true
 ```
 
-If you don't build WebKit (using the `-PCOMPILE_WEBKIT=true` option), you are likely to get test failures when running the web tests. See the [Web Testing](WEBKIT-MEDIA-STUBS.md) page for information on how to address this.
+If you don't build WebKit, you are likely to get test failures when running the web tests (the Maven build does not yet compile the native WebKit and Media libraries; web tests are therefore skipped unless `-Djfx.web.skipTests=false` is given). See the [Web Testing](WEBKIT-MEDIA-STUBS.md) page for information on how to address this.
 
 Even more documentation on OpenJFX projects and its build system can be found on the
 [OpenJFX Wiki](https://wiki.openjdk.org/display/OpenJFX/).

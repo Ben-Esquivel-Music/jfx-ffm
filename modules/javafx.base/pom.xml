@@ -1,0 +1,215 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+ Copyright (c) 2026, Oracle and/or its affiliates. All rights reserved.
+ DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
+
+ This code is free software; you can redistribute it and/or modify it
+ under the terms of the GNU General Public License version 2 only, as
+ published by the Free Software Foundation.  Oracle designates this
+ particular file as subject to the "Classpath" exception as provided
+ by Oracle in the LICENSE file that accompanied this code.
+
+ This code is distributed in the hope that it will be useful, but WITHOUT
+ ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
+ FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License
+ version 2 for more details (a copy is included in the LICENSE file that
+ accompanied this code).
+
+ You should have received a copy of the GNU General Public License version
+ 2 along with this work; if not, write to the Free Software Foundation,
+ Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301 USA.
+
+ Please contact Oracle, 500 Oracle Parkway, Redwood Shores, CA 94065 USA
+ or visit www.oracle.com if you need additional information or have any
+ questions.
+-->
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+    xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+    xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+    <parent>
+        <groupId>org.openjfx</groupId>
+        <artifactId>javafx</artifactId>
+        <version>28-ea</version>
+        <relativePath>../../pom.xml</relativePath>
+    </parent>
+    <artifactId>javafx-base</artifactId>
+    <name>javafx-base</name>
+    <description>JavaFX base module (javafx.base)</description>
+
+    <properties>
+        <!-- Tokens substituted into VersionInfo.java, mirroring Gradle processVersionInfo -->
+        <BUILD_TIMESTAMP>${jfx.build.timestamp}</BUILD_TIMESTAMP>
+        <HUDSON_JOB_NAME>${jfx.hudson.job.name}</HUDSON_JOB_NAME>
+        <HUDSON_BUILD_NUMBER>${jfx.hudson.build.number}</HUDSON_BUILD_NUMBER>
+        <RELEASE_SUFFIX>${jfx.release.suffix}</RELEASE_SUFFIX>
+        <RELEASE_VERSION_SHORT>${jfx.release.version.short}</RELEASE_VERSION_SHORT>
+        <RELEASE_VERSION_LONG>${jfx.release.version.long}</RELEASE_VERSION_LONG>
+    </properties>
+
+    <dependencies>
+        <dependency>
+            <groupId>org.junit.jupiter</groupId>
+            <artifactId>junit-jupiter</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.junit.platform</groupId>
+            <artifactId>junit-platform-launcher</artifactId>
+            <scope>test</scope>
+        </dependency>
+    </dependencies>
+
+    <build>
+        <!-- Shim classes are placed on the test classpath (Gradle compiled tests against
+             the shims dir). At runtime the javafx.base module from the upgrade module
+             path owns these packages, so the classpath copies are ignored. -->
+        <testResources>
+            <testResource>
+                <directory>${jfx.shims.base}</directory>
+                <excludes>
+                    <exclude>module-info.class</exclude>
+                </excludes>
+            </testResource>
+        </testResources>
+        <plugins>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-resources-plugin</artifactId>
+                <executions>
+                    <execution>
+                        <id>process-version-info</id>
+                        <phase>generate-sources</phase>
+                        <goals>
+                            <goal>copy-resources</goal>
+                        </goals>
+                        <configuration>
+                            <outputDirectory>${project.build.directory}/gensrc/java/com/sun/javafx/runtime</outputDirectory>
+                            <overwrite>true</overwrite>
+                            <useDefaultDelimiters>false</useDefaultDelimiters>
+                            <delimiters>
+                                <delimiter>@</delimiter>
+                            </delimiters>
+                            <resources>
+                                <resource>
+                                    <directory>src/main/version-info</directory>
+                                    <filtering>true</filtering>
+                                </resource>
+                            </resources>
+                        </configuration>
+                    </execution>
+                </executions>
+            </plugin>
+            <plugin>
+                <groupId>org.codehaus.mojo</groupId>
+                <artifactId>build-helper-maven-plugin</artifactId>
+                <executions>
+                    <execution>
+                        <id>add-gensrc</id>
+                        <phase>generate-sources</phase>
+                        <goals>
+                            <goal>add-source</goal>
+                        </goals>
+                        <configuration>
+                            <sources>
+                                <source>${project.build.directory}/gensrc/java</source>
+                            </sources>
+                        </configuration>
+                    </execution>
+                </executions>
+            </plugin>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-compiler-plugin</artifactId>
+                <configuration>
+                    <compilerArgs combine.children="append">
+                        <arg>--module-version</arg>
+                        <arg>${jfx.release.version.short}</arg>
+                    </compilerArgs>
+                </configuration>
+            </plugin>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-antrun-plugin</artifactId>
+                <executions>
+                    <execution>
+                        <id>compile-shims</id>
+                        <phase>process-test-sources</phase>
+                        <goals>
+                            <goal>run</goal>
+                        </goals>
+                        <configuration>
+                            <target>
+                                <mkdir dir="${jfx.shims.base}"/>
+                                <javac destdir="${jfx.shims.base}" includeantruntime="false"
+                                       encoding="UTF-8" debug="true" release="${jfx.jdk.target.version}"
+                                       fork="true">
+                                    <src path="${project.basedir}/src/main/java"/>
+                                    <src path="${project.build.directory}/gensrc/java"/>
+                                    <src path="${project.basedir}/src/shims/java"/>
+                                    <compilerarg value="-implicit:none"/>
+                                    <compilerarg value="--module-version"/>
+                                    <compilerarg value="${jfx.release.version.short}"/>
+                                    <compilerarg value="${jfx.test.lint}"/>
+                                </javac>
+                            </target>
+                        </configuration>
+                    </execution>
+                    <execution>
+                        <id>write-javafx-properties</id>
+                        <phase>process-test-resources</phase>
+                        <goals>
+                            <goal>run</goal>
+                        </goals>
+                        <configuration>
+                            <target>
+                                <!-- VersionInfoTest reads build/module-lib/javafx.properties
+                                     relative to the module working directory -->
+                                <mkdir dir="${project.basedir}/build/module-lib"/>
+                                <echo file="${project.basedir}/build/module-lib/javafx.properties">javafx.version=${jfx.release.version.short}
+javafx.runtime.version=${jfx.release.version.long}
+javafx.runtime.build=${jfx.promoted.build.number}
+</echo>
+                            </target>
+                        </configuration>
+                    </execution>
+                </executions>
+            </plugin>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-jar-plugin</artifactId>
+                <executions>
+                    <execution>
+                        <id>test-jar</id>
+                        <goals>
+                            <goal>test-jar</goal>
+                        </goals>
+                        <configuration>
+                            <skipIfEmpty>true</skipIfEmpty>
+                        </configuration>
+                    </execution>
+                </executions>
+            </plugin>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-surefire-plugin</artifactId>
+                <configuration>
+                    <argLine>
+                        --upgrade-module-path "${jfx.shims.base}"
+                        --add-modules javafx.base
+                        @${project.basedir}/src/test/addExports
+                        ${jfx.headless.args}
+                    </argLine>
+                    <systemPropertyVariables>
+                        <unstable.test>${UNSTABLE_TEST}</unstable.test>
+                        <test.screenshot>${TEST_SCREENSHOT}</test.screenshot>
+                        <junit.jupiter.execution.timeout.test.method.default>${junit.test.timeout}s</junit.jupiter.execution.timeout.test.method.default>
+                        <junit.jupiter.execution.timeout.lifecycle.method.default>${junit.lifecycle.timeout}s</junit.jupiter.execution.timeout.lifecycle.method.default>
+                        <javafx.enablePreview>true</javafx.enablePreview>
+                        <javafx.suppressPreviewWarning>true</javafx.suppressPreviewWarning>
+                    </systemPropertyVariables>
+                </configuration>
+            </plugin>
+        </plugins>
+    </build>
+</project>

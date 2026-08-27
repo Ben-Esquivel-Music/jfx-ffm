@@ -1,12 +1,11 @@
 # Ignore the following directories and files
-.gradle/
 .hg/
 Debug/
 Release/
 bin/
 build/
 dist/
-gradle.properties
+target/
 testbin/
 **/Ensemble8/lib/
 **/Ensemble8/src/generated/resources/ensemble/search/index/write.lock

@@ -1,0 +1,193 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+ Copyright (c) 2026, Oracle and/or its affiliates. All rights reserved.
+ DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
+
+ This code is free software; you can redistribute it and/or modify it
+ under the terms of the GNU General Public License version 2 only, as
+ published by the Free Software Foundation.  Oracle designates this
+ particular file as subject to the "Classpath" exception as provided
+ by Oracle in the LICENSE file that accompanied this code.
+
+ This code is distributed in the hope that it will be useful, but WITHOUT
+ ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
+ FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License
+ version 2 for more details (a copy is included in the LICENSE file that
+ accompanied this code).
+
+ You should have received a copy of the GNU General Public License version
+ 2 along with this work; if not, write to the Free Software Foundation,
+ Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301 USA.
+
+ Please contact Oracle, 500 Oracle Parkway, Redwood Shores, CA 94065 USA
+ or visit www.oracle.com if you need additional information or have any
+ questions.
+-->
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+    xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+    xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+    <parent>
+        <groupId>org.openjfx</groupId>
+        <artifactId>javafx</artifactId>
+        <version>28-ea</version>
+        <relativePath>../../pom.xml</relativePath>
+    </parent>
+    <artifactId>javafx-fxml</artifactId>
+    <name>javafx-fxml</name>
+    <description>JavaFX FXML module (javafx.fxml)</description>
+
+    <dependencies>
+        <dependency>
+            <groupId>org.openjfx</groupId>
+            <artifactId>javafx-base</artifactId>
+            <version>${project.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>org.openjfx</groupId>
+            <artifactId>javafx-graphics</artifactId>
+            <version>${project.version}</version>
+        </dependency>
+        <!-- Tests load FXML documents that instantiate controls -->
+        <dependency>
+            <groupId>org.openjfx</groupId>
+            <artifactId>javafx-controls</artifactId>
+            <version>${project.version}</version>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.openjfx</groupId>
+            <artifactId>javafx-base</artifactId>
+            <version>${project.version}</version>
+            <classifier>tests</classifier>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.openjfx</groupId>
+            <artifactId>javafx-graphics</artifactId>
+            <version>${project.version}</version>
+            <classifier>tests</classifier>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.junit.jupiter</groupId>
+            <artifactId>junit-jupiter</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.junit.platform</groupId>
+            <artifactId>junit-platform-launcher</artifactId>
+            <scope>test</scope>
+        </dependency>
+    </dependencies>
+
+    <build>
+        <testResources>
+            <testResource>
+                <directory>${jfx.shims.base}</directory>
+                <excludes>
+                    <exclude>module-info.class</exclude>
+                </excludes>
+            </testResource>
+            <testResource>
+                <directory>${jfx.shims.graphics}</directory>
+                <excludes>
+                    <exclude>module-info.class</exclude>
+                </excludes>
+            </testResource>
+            <testResource>
+                <directory>${jfx.shims.fxml}</directory>
+                <excludes>
+                    <exclude>module-info.class</exclude>
+                </excludes>
+            </testResource>
+            <testResource>
+                <directory>src/test/resources</directory>
+            </testResource>
+        </testResources>
+        <plugins>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-compiler-plugin</artifactId>
+                <configuration>
+                    <compilerArgs combine.children="append">
+                        <arg>--module-version</arg>
+                        <arg>${jfx.release.version.short}</arg>
+                    </compilerArgs>
+                </configuration>
+            </plugin>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-antrun-plugin</artifactId>
+                <executions>
+                    <execution>
+                        <id>compile-shims</id>
+                        <phase>process-test-sources</phase>
+                        <goals>
+                            <goal>run</goal>
+                        </goals>
+                        <configuration>
+                            <target>
+                                <mkdir dir="${jfx.shims.fxml}"/>
+                                <javac destdir="${jfx.shims.fxml}" includeantruntime="false"
+                                       encoding="UTF-8" debug="true" release="${jfx.jdk.target.version}"
+                                       fork="true" sourcepath="" memorymaximumsize="2048m">
+                                    <src path="${project.basedir}/src/main/java"/>
+                                    <src path="${project.basedir}/src/shims/java"/>
+                                    <compilerarg value="-implicit:none"/>
+                                    <compilerarg value="--module-path"/>
+                                    <compilerarg value="${jfx.shims.base}${path.separator}${jfx.shims.graphics}"/>
+                                    <compilerarg value="--module-version"/>
+                                    <compilerarg value="${jfx.release.version.short}"/>
+                                    <compilerarg value="${jfx.test.lint}"/>
+                                </javac>
+                                <copy todir="${jfx.shims.fxml}">
+                                    <fileset dir="${project.build.outputDirectory}" excludes="**/*.class"/>
+                                </copy>
+                            </target>
+                        </configuration>
+                    </execution>
+                </executions>
+            </plugin>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-jar-plugin</artifactId>
+                <executions>
+                    <execution>
+                        <id>test-jar</id>
+                        <goals>
+                            <goal>test-jar</goal>
+                        </goals>
+                        <configuration>
+                            <skipIfEmpty>true</skipIfEmpty>
+                        </configuration>
+                    </execution>
+                </executions>
+            </plugin>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-surefire-plugin</artifactId>
+                <configuration>
+                    <argLine>
+                        --upgrade-module-path "${jfx.shims.base}${path.separator}${jfx.shims.graphics}${path.separator}${jfx.shims.controls}${path.separator}${jfx.shims.fxml}"
+                        --add-modules javafx.base,javafx.graphics,javafx.controls,javafx.fxml
+                        @${project.basedir}/src/test/addExports
+                        @${jfx.root}/buildtools/addExports
+                        --enable-native-access=javafx.graphics
+                        -Djava.library.path=${jfx.root}/modules/javafx.graphics/target/native/bin
+                        ${jfx.headless.args}
+                    </argLine>
+                    <systemPropertyVariables>
+                        <javafx.toolkit>test.com.sun.javafx.pgstub.StubToolkit</javafx.toolkit>
+                        <unstable.test>${UNSTABLE_TEST}</unstable.test>
+                        <test.screenshot>${TEST_SCREENSHOT}</test.screenshot>
+                        <junit.jupiter.execution.timeout.test.method.default>${junit.test.timeout}s</junit.jupiter.execution.timeout.test.method.default>
+                        <junit.jupiter.execution.timeout.lifecycle.method.default>${junit.lifecycle.timeout}s</junit.jupiter.execution.timeout.lifecycle.method.default>
+                        <javafx.enablePreview>true</javafx.enablePreview>
+                        <javafx.suppressPreviewWarning>true</javafx.suppressPreviewWarning>
+                    </systemPropertyVariables>
+                </configuration>
+            </plugin>
+        </plugins>
+    </build>
+</project>

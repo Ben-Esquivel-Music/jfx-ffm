@@ -1,0 +1,129 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+ Copyright (c) 2026, Oracle and/or its affiliates. All rights reserved.
+ DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
+
+ This code is free software; you can redistribute it and/or modify it
+ under the terms of the GNU General Public License version 2 only, as
+ published by the Free Software Foundation.  Oracle designates this
+ particular file as subject to the "Classpath" exception as provided
+ by Oracle in the LICENSE file that accompanied this code.
+
+ This code is distributed in the hope that it will be useful, but WITHOUT
+ ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
+ FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License
+ version 2 for more details (a copy is included in the LICENSE file that
+ accompanied this code).
+
+ You should have received a copy of the GNU General Public License version
+ 2 along with this work; if not, write to the Free Software Foundation,
+ Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301 USA.
+
+ Please contact Oracle, 500 Oracle Parkway, Redwood Shores, CA 94065 USA
+ or visit www.oracle.com if you need additional information or have any
+ questions.
+-->
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+    xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+    xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+    <parent>
+        <groupId>org.openjfx</groupId>
+        <artifactId>javafx</artifactId>
+        <version>28-ea</version>
+        <relativePath>../../pom.xml</relativePath>
+    </parent>
+    <artifactId>javafx-swt</artifactId>
+    <name>javafx-swt</name>
+    <description>JavaFX SWT interop (automatic module javafx.swt)</description>
+
+    <properties>
+        <!-- FXCanvas compiles as an automatic module: base and graphics classes go on
+             the module path (not the classpath) with targeted add-exports options,
+             exactly as the Gradle build did. The provided-scope deps below only order
+             the reactor; default-compile is replaced by the antrun javac. -->
+        <maven.main.skip>true</maven.main.skip>
+        <!-- SWT interop tests need a display and are only run with FULL_TEST=true
+             in the Gradle build; they are not wired up in the Maven build. -->
+        <maven.test.skip>true</maven.test.skip>
+    </properties>
+
+    <dependencies>
+        <dependency>
+            <groupId>org.eclipse.platform</groupId>
+            <artifactId>${jfx.swt.artifact}</artifactId>
+            <version>${swt.version}</version>
+            <scope>provided</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.openjfx</groupId>
+            <artifactId>javafx-base</artifactId>
+            <version>${project.version}</version>
+            <scope>provided</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.openjfx</groupId>
+            <artifactId>javafx-graphics</artifactId>
+            <version>${project.version}</version>
+            <scope>provided</scope>
+        </dependency>
+    </dependencies>
+
+    <build>
+        <plugins>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-dependency-plugin</artifactId>
+                <executions>
+                    <execution>
+                        <id>copy-swt-jar</id>
+                        <phase>initialize</phase>
+                        <goals>
+                            <goal>copy-dependencies</goal>
+                        </goals>
+                        <configuration>
+                            <includeArtifactIds>${jfx.swt.artifact}</includeArtifactIds>
+                            <outputDirectory>${project.build.directory}/swt-libs</outputDirectory>
+                        </configuration>
+                    </execution>
+                </executions>
+            </plugin>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-antrun-plugin</artifactId>
+                <executions>
+                    <execution>
+                        <id>compile-swt</id>
+                        <phase>compile</phase>
+                        <goals>
+                            <goal>run</goal>
+                        </goals>
+                        <configuration>
+                            <target>
+                                <mkdir dir="${project.build.outputDirectory}"/>
+                                <javac destdir="${project.build.outputDirectory}" includeantruntime="false"
+                                       encoding="UTF-8" debug="true" release="${jfx.jdk.target.version}"
+                                       fork="true" sourcepath="">
+                                    <src path="${project.basedir}/src/main/java"/>
+                                    <classpath>
+                                        <fileset dir="${project.build.directory}/swt-libs" includes="*.jar"/>
+                                    </classpath>
+                                    <compilerarg value="--module-path"/>
+                                    <compilerarg value="${jfx.root}/modules/javafx.base/target/classes${path.separator}${jfx.root}/modules/javafx.graphics/target/classes"/>
+                                    <compilerarg value="--add-modules=javafx.base,javafx.graphics"/>
+                                    <compilerarg value="--add-exports=javafx.graphics/com.sun.glass.ui=ALL-UNNAMED"/>
+                                    <compilerarg value="--add-exports=javafx.graphics/com.sun.javafx.cursor=ALL-UNNAMED"/>
+                                    <compilerarg value="--add-exports=javafx.graphics/com.sun.javafx.embed=ALL-UNNAMED"/>
+                                    <compilerarg value="--add-exports=javafx.graphics/com.sun.javafx.stage=ALL-UNNAMED"/>
+                                    <compilerarg value="--add-exports=javafx.graphics/com.sun.javafx.tk=ALL-UNNAMED"/>
+                                    <compilerarg value="${jfx.lint}"/>
+                                    <compilerarg value="${jfx.werror}"/>
+                                </javac>
+                            </target>
+                        </configuration>
+                    </execution>
+                </executions>
+            </plugin>
+        </plugins>
+    </build>
+</project>

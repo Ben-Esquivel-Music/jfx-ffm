@@ -1,23 +1,29 @@
 <component name="ProjectRunConfigurationManager">
-  <configuration default="false" name="Run Robot Tests" type="GradleRunConfiguration" factoryName="Gradle">
-    <ExternalSystemSettings>
-      <option name="executionName" />
-      <option name="externalProjectPath" value="$PROJECT_DIR$" />
-      <option name="externalSystemIdString" value="GRADLE" />
-      <option name="scriptParameters" value="-PFULL_TEST=true -PUSE_ROBOT=true" />
-      <option name="taskDescriptions">
-        <list />
+  <configuration default="false" name="Run Robot Tests" type="MavenRunConfiguration" factoryName="Maven">
+    <MavenSettings>
+      <option name="myGeneralSettings" />
+      <option name="myRunnerSettings" />
+      <option name="myRunnerParameters">
+        <MavenRunnerParameters>
+          <option name="profiles">
+            <set />
+          </option>
+          <option name="goals">
+            <list>
+              <option value="install" />
+              <option value="-DFULL_TEST=true" />
+              <option value="-DUSE_ROBOT=true" />
+            </list>
+          </option>
+          <option name="pomFileName" value="pom.xml" />
+          <option name="profilesMap">
+            <map />
+          </option>
+          <option name="resolveToWorkspace" value="false" />
+          <option name="workingDirPath" value="$PROJECT_DIR$" />
+        </MavenRunnerParameters>
       </option>
-      <option name="taskNames">
-        <list>
-          <option value=":systemTests:test" />
-        </list>
-      </option>
-      <option name="vmOptions" />
-    </ExternalSystemSettings>
-    <ExternalSystemDebugServerProcess>true</ExternalSystemDebugServerProcess>
-    <ExternalSystemReattachDebugProcess>true</ExternalSystemReattachDebugProcess>
-    <DebugAllEnabled>false</DebugAllEnabled>
+    </MavenSettings>
     <method v="2" />
   </configuration>
 </component>

@@ -1,0 +1,430 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+ Copyright (c) 2026, Oracle and/or its affiliates. All rights reserved.
+ DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
+
+ This code is free software; you can redistribute it and/or modify it
+ under the terms of the GNU General Public License version 2 only, as
+ published by the Free Software Foundation.  Oracle designates this
+ particular file as subject to the "Classpath" exception as provided
+ by Oracle in the LICENSE file that accompanied this code.
+
+ This code is distributed in the hope that it will be useful, but WITHOUT
+ ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
+ FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License
+ version 2 for more details (a copy is included in the LICENSE file that
+ accompanied this code).
+
+ You should have received a copy of the GNU General Public License version
+ 2 along with this work; if not, write to the Free Software Foundation,
+ Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301 USA.
+
+ Please contact Oracle, 500 Oracle Parkway, Redwood Shores, CA 94065 USA
+ or visit www.oracle.com if you need additional information or have any
+ questions.
+-->
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+    xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+    xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+    <parent>
+        <groupId>org.openjfx</groupId>
+        <artifactId>javafx</artifactId>
+        <version>28-ea</version>
+        <relativePath>../../pom.xml</relativePath>
+    </parent>
+    <artifactId>javafx-graphics</artifactId>
+    <name>javafx-graphics</name>
+    <description>JavaFX graphics module (javafx.graphics)</description>
+
+    <properties>
+        <jfx.graphics.modulepath>${project.build.outputDirectory}${path.separator}${jfx.root}/modules/javafx.base/target/classes</jfx.graphics.modulepath>
+        <jfx.graphics.gensrc>${project.build.directory}/gensrc</jfx.graphics.gensrc>
+    </properties>
+
+    <dependencies>
+        <dependency>
+            <groupId>org.openjfx</groupId>
+            <artifactId>javafx-base</artifactId>
+            <version>${project.version}</version>
+        </dependency>
+        <!-- Build-time only: JSL shader compiler and its ANTLR runtime -->
+        <dependency>
+            <groupId>org.openjfx</groupId>
+            <artifactId>javafx-jslc</artifactId>
+            <version>${project.version}</version>
+            <scope>provided</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.openjfx</groupId>
+            <artifactId>javafx-base</artifactId>
+            <version>${project.version}</version>
+            <type>test-jar</type>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.junit.jupiter</groupId>
+            <artifactId>junit-jupiter</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.junit.platform</groupId>
+            <artifactId>junit-platform-launcher</artifactId>
+            <scope>test</scope>
+        </dependency>
+    </dependencies>
+
+    <build>
+        <!-- Shim classes on the test classpath; at runtime the shim modules from the
+             upgrade module path own these packages (classpath copies are ignored). -->
+        <testResources>
+            <testResource>
+                <directory>${jfx.shims.base}</directory>
+                <excludes>
+                    <exclude>module-info.class</exclude>
+                </excludes>
+            </testResource>
+            <testResource>
+                <directory>${jfx.shims.graphics}</directory>
+                <excludes>
+                    <exclude>module-info.class</exclude>
+                </excludes>
+            </testResource>
+            <testResource>
+                <directory>src/test/resources</directory>
+            </testResource>
+        </testResources>
+        <plugins>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-compiler-plugin</artifactId>
+                <configuration>
+                    <compilerArgs combine.children="append">
+                        <arg>--module-version</arg>
+                        <arg>${jfx.release.version.short}</arg>
+                    </compilerArgs>
+                </configuration>
+            </plugin>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-antrun-plugin</artifactId>
+                <executions>
+                    <execution>
+                        <!-- Generate and compile the Decora/Prism JSL shaders. This mirrors the
+                             Gradle addJSL/compileFullJava pipeline:
+                             1. compile the JSL shader compilers against pass-one classes
+                             2. run GenAllDecoraShaders / CompileJSL to emit .java/.hlsl/.frag/.cc
+                             3. recompile the whole module (main + generated) as a second pass,
+                                emitting the JNI headers used by the native build -->
+                        <id>jsl-codegen</id>
+                        <phase>compile</phase>
+                        <goals>
+                            <goal>run</goal>
+                        </goals>
+                        <configuration>
+                            <target>
+                                <mkdir dir="${project.build.directory}/jsl-compilers/decora"/>
+                                <mkdir dir="${project.build.directory}/jsl-compilers/prism"/>
+                                <mkdir dir="${jfx.graphics.gensrc}/jsl-decora"/>
+                                <mkdir dir="${jfx.graphics.gensrc}/jsl-prism"/>
+                                <mkdir dir="${jfx.graphics.gensrc}/headers"/>
+
+                                <javac destdir="${project.build.directory}/jsl-compilers/decora"
+                                       includeantruntime="false" encoding="UTF-8" debug="true"
+                                       release="${jfx.jdk.target.version}" fork="true">
+                                    <src path="${project.basedir}/src/main/jsl-decora"/>
+                                    <classpath refid="maven.compile.classpath"/>
+                                    <compilerarg value="-implicit:none"/>
+                                    <compilerarg value="--module-path"/>
+                                    <compilerarg value="${jfx.graphics.modulepath}"/>
+                                    <compilerarg value="--add-modules=javafx.graphics"/>
+                                    <compilerarg value="--add-exports=javafx.graphics/com.sun.scenario.effect=ALL-UNNAMED"/>
+                                    <compilerarg value="--add-exports=javafx.graphics/com.sun.scenario.effect.light=ALL-UNNAMED"/>
+                                    <compilerarg value="--add-exports=javafx.graphics/com.sun.scenario.effect.impl.state=ALL-UNNAMED"/>
+                                </javac>
+
+                                <java classname="GenAllDecoraShaders" fork="true" failonerror="true"
+                                      dir="${project.basedir}">
+                                    <classpath>
+                                        <path refid="maven.compile.classpath"/>
+                                        <pathelement location="${project.basedir}/src/jslc/resources"/>
+                                        <pathelement location="${project.build.directory}/jsl-compilers/decora"/>
+                                    </classpath>
+                                    <jvmarg value="--module-path=${jfx.graphics.modulepath}"/>
+                                    <jvmarg value="--add-modules=javafx.graphics"/>
+                                    <jvmarg value="--add-exports=javafx.graphics/com.sun.scenario.effect=ALL-UNNAMED"/>
+                                    <jvmarg value="--add-exports=javafx.graphics/com.sun.scenario.effect.light=ALL-UNNAMED"/>
+                                    <jvmarg value="--add-exports=javafx.graphics/com.sun.scenario.effect.impl.state=ALL-UNNAMED"/>
+                                    <arg value="-i"/>
+                                    <arg value="${project.basedir}/src/main/jsl-decora"/>
+                                    <arg value="-o"/>
+                                    <arg value="${jfx.graphics.gensrc}/jsl-decora"/>
+                                    <arg value="-t"/>
+                                    <arg value="-pkg"/>
+                                    <arg value="com/sun/scenario/effect"/>
+                                    <arg value="-d3d"/>
+                                    <arg value="-all"/>
+                                    <arg value="GenAllDecoraShaders"/>
+                                </java>
+
+                                <javac destdir="${project.build.directory}/jsl-compilers/prism"
+                                       includeantruntime="false" encoding="UTF-8" debug="true"
+                                       release="${jfx.jdk.target.version}" fork="true">
+                                    <src path="${project.basedir}/src/main/jsl-prism"/>
+                                    <classpath refid="maven.compile.classpath"/>
+                                    <compilerarg value="-implicit:none"/>
+                                    <compilerarg value="--module-path"/>
+                                    <compilerarg value="${jfx.graphics.modulepath}"/>
+                                    <compilerarg value="--add-modules=javafx.graphics"/>
+                                </javac>
+
+                                <pathconvert property="jfx.jslc.prism.classpath">
+                                    <path>
+                                        <path refid="maven.compile.classpath"/>
+                                        <pathelement location="${project.basedir}/src/jslc/resources"/>
+                                        <pathelement location="${project.build.directory}/jsl-compilers/prism"/>
+                                        <pathelement location="${project.basedir}/src/main/jsl-prism"/>
+                                    </path>
+                                </pathconvert>
+                                <apply executable="${java.home}/bin/java" failonerror="true"
+                                       dir="${project.basedir}" parallel="false">
+                                    <arg value="-cp"/>
+                                    <arg value="${jfx.jslc.prism.classpath}"/>
+                                    <arg value="CompileJSL"/>
+                                    <arg value="-i"/>
+                                    <arg value="${project.basedir}/src/main/jsl-prism"/>
+                                    <arg value="-o"/>
+                                    <arg value="${jfx.graphics.gensrc}/jsl-prism"/>
+                                    <arg value="-t"/>
+                                    <arg value="-pkg"/>
+                                    <arg value="com/sun/prism"/>
+                                    <arg value="-d3d"/>
+                                    <arg value="-name"/>
+                                    <srcfile/>
+                                    <fileset dir="${project.basedir}/src/main/jsl-prism" includes="**/*.jsl"/>
+                                </apply>
+
+                                <!-- Second pass: compile main + generated sources as the module,
+                                     generating JNI headers for the native build -->
+                                <mkdir dir="${project.build.directory}/mods"/>
+                                <javac destdir="${project.build.directory}/mods"
+                                       includeantruntime="false" encoding="UTF-8" debug="true"
+                                       release="${jfx.jdk.target.version}" fork="true"
+                                       sourcepath="" memorymaximumsize="2048m">
+                                    <src path="${project.basedir}/src/main/java"/>
+                                    <src path="${jfx.graphics.gensrc}/jsl-decora"/>
+                                    <src path="${jfx.graphics.gensrc}/jsl-prism"/>
+                                    <compilerarg value="-h"/>
+                                    <compilerarg value="${jfx.graphics.gensrc}/headers"/>
+                                    <compilerarg value="-implicit:none"/>
+                                    <compilerarg value="--module-version"/>
+                                    <compilerarg value="${jfx.release.version.short}"/>
+                                    <compilerarg value="--module-source-path"/>
+                                    <compilerarg value="javafx.graphics=${project.basedir}/src/main/java${path.separator}${jfx.graphics.gensrc}/jsl-decora${path.separator}${jfx.graphics.gensrc}/jsl-prism"/>
+                                    <compilerarg value="--module-path"/>
+                                    <compilerarg value="${jfx.root}/modules/javafx.base/target/classes"/>
+                                    <compilerarg value="${jfx.lint}"/>
+                                    <compilerarg value="${jfx.werror}"/>
+                                    <compilerarg value="-Xmaxerrs"/>
+                                    <compilerarg value="1000"/>
+                                    <compilerarg value="-Xmaxwarns"/>
+                                    <compilerarg value="1000"/>
+                                </javac>
+                                <copy todir="${project.build.outputDirectory}">
+                                    <fileset dir="${project.build.directory}/mods/javafx.graphics"/>
+                                </copy>
+                            </target>
+                        </configuration>
+                    </execution>
+                    <execution>
+                        <!-- Shader resources (fxc .obj, GLSL .frag) into the module classes -->
+                        <id>copy-shaders</id>
+                        <phase>generate-test-sources</phase>
+                        <goals>
+                            <goal>run</goal>
+                        </goals>
+                        <configuration>
+                            <target>
+                                <mkdir dir="${project.build.directory}/native/shader-obj"/>
+                                <copy todir="${project.build.outputDirectory}">
+                                    <fileset dir="${project.build.directory}/native/shader-obj" includes="**/*.obj"/>
+                                </copy>
+                                <copy todir="${project.build.outputDirectory}">
+                                    <fileset dir="${jfx.graphics.gensrc}/jsl-decora" includes="**/*.frag"/>
+                                    <fileset dir="${jfx.graphics.gensrc}/jsl-prism" includes="**/*.frag"/>
+                                </copy>
+                            </target>
+                        </configuration>
+                    </execution>
+                    <execution>
+                        <id>compile-shims</id>
+                        <phase>process-test-sources</phase>
+                        <goals>
+                            <goal>run</goal>
+                        </goals>
+                        <configuration>
+                            <target>
+                                <mkdir dir="${project.build.directory}/shims"/>
+                                <javac destdir="${project.build.directory}/shims"
+                                       includeantruntime="false" encoding="UTF-8" debug="true"
+                                       release="${jfx.jdk.target.version}" fork="true"
+                                       sourcepath="" memorymaximumsize="2048m">
+                                    <src path="${project.basedir}/src/main/java"/>
+                                    <src path="${project.basedir}/src/shims/java"/>
+                                    <src path="${jfx.graphics.gensrc}/jsl-decora"/>
+                                    <src path="${jfx.graphics.gensrc}/jsl-prism"/>
+                                    <compilerarg value="-implicit:none"/>
+                                    <compilerarg value="--module-version"/>
+                                    <compilerarg value="${jfx.release.version.short}"/>
+                                    <compilerarg value="--module-source-path"/>
+                                    <compilerarg value="javafx.graphics=${project.basedir}/src/main/java${path.separator}${project.basedir}/src/shims/java${path.separator}${jfx.graphics.gensrc}/jsl-decora${path.separator}${jfx.graphics.gensrc}/jsl-prism"/>
+                                    <compilerarg value="--module-path"/>
+                                    <compilerarg value="${jfx.shims.base}"/>
+                                    <compilerarg value="${jfx.test.lint}"/>
+                                </javac>
+                                <!-- module resources + compiled shaders for test runtime -->
+                                <copy todir="${jfx.shims.graphics}">
+                                    <fileset dir="${project.build.outputDirectory}" excludes="**/*.class"/>
+                                </copy>
+                                <copy todir="${jfx.shims.graphics}">
+                                    <fileset dir="${project.build.directory}/native/shader-obj" includes="**/*.obj"/>
+                                </copy>
+                            </target>
+                        </configuration>
+                    </execution>
+                </executions>
+            </plugin>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-jar-plugin</artifactId>
+                <configuration>
+                    <!-- Mirrors the Gradle buildModuleClasses excludes for Windows -->
+                    <excludes>
+                        <exclude>version.rc</exclude>
+                        <exclude>com/sun/glass/ui/swt/**</exclude>
+                        <exclude>com/sun/javafx/tools/ant/**</exclude>
+                        <exclude>com/javafx/main/**</exclude>
+                        <exclude>com/sun/javafx/webkit/drt/**</exclude>
+                        <exclude>com/sun/prism/es2/**</exclude>
+                        <exclude>com/sun/scenario/effect/impl/es2/**</exclude>
+                        <exclude>com/sun/prism/es2/MacGL*</exclude>
+                        <exclude>com/sun/glass/events/mac/**</exclude>
+                        <exclude>com/sun/glass/ui/mac/**</exclude>
+                        <exclude>com/sun/prism/mtl/**</exclude>
+                        <exclude>com/sun/scenario/effect/impl/hw/mtl/**</exclude>
+                        <exclude>com/sun/glass/ui/gtk/**</exclude>
+                        <exclude>com/sun/glass/ui/monocle/**</exclude>
+                        <exclude>com/sun/glass/ui/ios/**</exclude>
+                        <exclude>com/sun/glass/ui/android/**</exclude>
+                    </excludes>
+                </configuration>
+                <executions>
+                    <execution>
+                        <id>test-jar</id>
+                        <goals>
+                            <goal>test-jar</goal>
+                        </goals>
+                        <configuration>
+                            <skipIfEmpty>true</skipIfEmpty>
+                        </configuration>
+                    </execution>
+                </executions>
+            </plugin>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-surefire-plugin</artifactId>
+                <configuration>
+                    <argLine>
+                        --upgrade-module-path "${jfx.shims.base}${path.separator}${jfx.shims.graphics}"
+                        --add-modules javafx.base,javafx.graphics
+                        @${project.basedir}/src/test/addExports
+                        @${jfx.root}/buildtools/addExports
+                        --enable-native-access=javafx.graphics
+                        -Djava.library.path=${project.build.directory}/native/bin
+                        ${jfx.headless.args}
+                    </argLine>
+                    <systemPropertyVariables>
+                        <javafx.toolkit>test.com.sun.javafx.pgstub.StubToolkit</javafx.toolkit>
+                        <CSS_META_DATA_TEST_DIR>${jfx.shims.graphics}/javafx</CSS_META_DATA_TEST_DIR>
+                        <unstable.test>${UNSTABLE_TEST}</unstable.test>
+                        <test.screenshot>${TEST_SCREENSHOT}</test.screenshot>
+                        <junit.jupiter.execution.timeout.test.method.default>${junit.test.timeout}s</junit.jupiter.execution.timeout.test.method.default>
+                        <junit.jupiter.execution.timeout.lifecycle.method.default>${junit.lifecycle.timeout}s</junit.jupiter.execution.timeout.lifecycle.method.default>
+                        <javafx.enablePreview>true</javafx.enablePreview>
+                        <javafx.suppressPreviewWarning>true</javafx.suppressPreviewWarning>
+                    </systemPropertyVariables>
+                </configuration>
+            </plugin>
+        </plugins>
+    </build>
+
+    <profiles>
+        <!-- Native Windows libraries via CMake + Visual Studio. Skip with -DskipNative=true -->
+        <profile>
+            <id>native-win</id>
+            <activation>
+                <os>
+                    <family>windows</family>
+                </os>
+                <property>
+                    <name>skipNative</name>
+                    <value>!true</value>
+                </property>
+            </activation>
+            <build>
+                <plugins>
+                    <plugin>
+                        <groupId>org.codehaus.mojo</groupId>
+                        <artifactId>exec-maven-plugin</artifactId>
+                        <executions>
+                            <execution>
+                                <id>cmake-configure</id>
+                                <phase>process-classes</phase>
+                                <goals>
+                                    <goal>exec</goal>
+                                </goals>
+                                <configuration>
+                                    <executable>cmake</executable>
+                                    <arguments>
+                                        <argument>-S</argument>
+                                        <argument>${project.basedir}/native</argument>
+                                        <argument>-B</argument>
+                                        <argument>${project.build.directory}/native/cmake</argument>
+                                        <argument>-A</argument>
+                                        <argument>x64</argument>
+                                        <argument>-DJDK_HOME=${java.home}</argument>
+                                        <argument>-DGENSRC_DIR=${jfx.graphics.gensrc}</argument>
+                                        <argument>-DHEADERS_DIR=${jfx.graphics.gensrc}/headers/javafx.graphics</argument>
+                                        <argument>-DBIN_DIR=${project.build.directory}/native/bin</argument>
+                                        <argument>-DSHADER_OBJ_DIR=${project.build.directory}/native/shader-obj</argument>
+                                        <argument>-DINCLUDE_ES2=${INCLUDE_ES2}</argument>
+                                        <argument>-DJFX_VER=${jfx.release.version}</argument>
+                                        <argument>-DJFX_FVER=${jfx.release.major.version},${jfx.release.minor.version},${jfx.release.security.version},${jfx.release.patch.version}</argument>
+                                        <argument>-DJFX_BUILD_ID=${jfx.release.version.long}</argument>
+                                    </arguments>
+                                </configuration>
+                            </execution>
+                            <execution>
+                                <id>cmake-build</id>
+                                <phase>process-classes</phase>
+                                <goals>
+                                    <goal>exec</goal>
+                                </goals>
+                                <configuration>
+                                    <executable>cmake</executable>
+                                    <arguments>
+                                        <argument>--build</argument>
+                                        <argument>${project.build.directory}/native/cmake</argument>
+                                        <argument>--config</argument>
+                                        <argument>${CONF}</argument>
+                                        <argument>--parallel</argument>
+                                    </arguments>
+                                </configuration>
+                            </execution>
+                        </executions>
+                    </plugin>
+                </plugins>
+            </build>
+        </profile>
+    </profiles>
+</project>
