@@ -28,11 +28,10 @@
 # platforms: Linux, macOS (both x64 and aarch64), Windows. The jobs are run
 # using the default (latest) OS platform for each OS.
 # We download a specific version of the boot JDK and use the Maven and native
-# toolchains (MSVC, CMake) that are preinstalled on each runner.
+# toolchains (MSVC, CMake, Xcode) that are preinstalled on each runner.
 #
-# The native javafx.graphics libraries are currently built by the Maven build
-# on Windows and Linux (via CMake); unit tests are therefore run on those
-# platforms. The macOS jobs verify that the Java sources compile.
+# The native javafx.graphics libraries are built by the Maven build on all
+# three platforms (via CMake); the unit test suite therefore runs everywhere.
 #
 # NOTE: much of the build logic is duplicated for each platform. Keep this in
 # mind when making changes.
@@ -187,14 +186,15 @@ jobs:
           java -version
           mvn -version
 
-      - name: Build JavaFX artifacts
+      - name: Build JavaFX artifacts and run headless tests
         working-directory: jfx
         run: |
           set -x
           export PATH="$JAVA_HOME/bin:$PATH"
-          # Native libraries are not yet built by the Maven build on macOS,
-          # so tests (which need them at run time) are skipped.
-          mvn -B -ntp install -DskipTests
+          # Full build: Java modules, native libraries (CMake + clang, Metal
+          # shaders) and the unit test suite. Web and system tests are skipped
+          # by default.
+          mvn -B -ntp install
 
   macos_aarch64_build:
     name: macOS aarch64
@@ -229,14 +229,15 @@ jobs:
           java -version
           mvn -version
 
-      - name: Build JavaFX artifacts
+      - name: Build JavaFX artifacts and run headless tests
         working-directory: jfx
         run: |
           set -x
           export PATH="$JAVA_HOME/bin:$PATH"
-          # Native libraries are not yet built by the Maven build on macOS,
-          # so tests (which need them at run time) are skipped.
-          mvn -B -ntp install -DskipTests
+          # Full build: Java modules, native libraries (CMake + clang, Metal
+          # shaders) and the unit test suite. Web and system tests are skipped
+          # by default.
+          mvn -B -ntp install
 
   windows_x64_build:
     name: Windows x64
