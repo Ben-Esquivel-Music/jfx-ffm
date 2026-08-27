@@ -45,6 +45,7 @@ import javafx.beans.property.StringProperty;
 import javafx.beans.value.ChangeListener;
 import javafx.beans.value.ObservableValue;
 import javafx.beans.value.ObservableValueStub;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import com.sun.javafx.binding.ExpressionHelper;
@@ -77,6 +78,13 @@ public class ExpressionHelperTest {
         changeListener = new ChangeListenerMock[] {
                 new ChangeListenerMock<>(UNDEFINED), new ChangeListenerMock<>(UNDEFINED), new ChangeListenerMock<>(UNDEFINED), new ChangeListenerMock<>(UNDEFINED)
         };
+    }
+
+    @AfterEach
+    public void tearDown() {
+        // Some tests install a custom uncaught exception handler on this thread;
+        // reset it so it cannot swallow exceptions in tests run later in the same JVM.
+        Thread.currentThread().setUncaughtExceptionHandler(null);
     }
 
     @Test

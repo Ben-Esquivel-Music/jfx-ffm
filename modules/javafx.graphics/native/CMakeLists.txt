@@ -21,296 +21,42 @@
 # or visit www.oracle.com if you need additional information or have any
 # questions.
 
-# Native build for the javafx.graphics Windows libraries. This replicates the
+# Native build for the javafx.graphics platform libraries. This replicates the
 # compiler/linker flags previously defined by the retired Gradle native build.
 # Invoked from modules/javafx.graphics/pom.xml via the exec-maven-plugin.
+# Platform-specific targets live in win.cmake and linux.cmake.
 
 cmake_minimum_required(VERSION 3.20)
 
 cmake_policy(SET CMP0091 NEW) # MSVC runtime library via CMAKE_MSVC_RUNTIME_LIBRARY
 set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>DLL")
 
-project(javafxGraphicsNatives LANGUAGES C CXX RC)
-
-if(NOT WIN32)
-    message(FATAL_ERROR "This CMake build currently supports Windows only. "
-        "Linux/macOS native builds have not been ported from Gradle yet.")
-endif()
+project(javafxGraphicsNatives LANGUAGES C CXX)
 
 # ---------------------------------------------------------------------------
-# Inputs from Maven
+# Inputs from Maven (shared across platforms)
 # ---------------------------------------------------------------------------
 set(JDK_HOME "$ENV{JAVA_HOME}" CACHE PATH "JDK used for JNI headers")
 set(GENSRC_DIR "" CACHE PATH "modules/javafx.graphics/target/gensrc")
 set(HEADERS_DIR "" CACHE PATH "Directory containing javac -h generated JNI headers")
-set(BIN_DIR "" CACHE PATH "Output directory for the built DLLs")
-set(SHADER_OBJ_DIR "" CACHE PATH "Output directory for fxc-compiled .obj shader resources")
-option(INCLUDE_ES2 "Build the prism_es2 (OpenGL) library" OFF)
+set(BIN_DIR "" CACHE PATH "Output directory for the built native libraries")
+if(WIN32)
+    option(INCLUDE_ES2 "Build the prism_es2 (OpenGL) library" OFF)
+else()
+    option(INCLUDE_ES2 "Build the prism_es2 (OpenGL) library" ON)
+endif()
 
-set(JFX_VER "28" CACHE STRING "JavaFX release version")
-set(JFX_FVER "28,0,0,0" CACHE STRING "JavaFX file version quad")
-set(JFX_BUILD_ID "28-internal" CACHE STRING "JavaFX build identifier")
-set(JFX_COMPANY "N/A" CACHE STRING "Company name embedded in version resources")
-set(JFX_PRODUCT "OpenJFX" CACHE STRING "Product name embedded in version resources")
-
-if(NOT GENSRC_DIR OR NOT HEADERS_DIR OR NOT BIN_DIR OR NOT SHADER_OBJ_DIR)
-    message(FATAL_ERROR "GENSRC_DIR, HEADERS_DIR, BIN_DIR and SHADER_OBJ_DIR must be provided")
+if(NOT GENSRC_DIR OR NOT HEADERS_DIR OR NOT BIN_DIR)
+    message(FATAL_ERROR "GENSRC_DIR, HEADERS_DIR and BIN_DIR must be provided")
 endif()
 
 set(GRAPHICS_SRC "${CMAKE_CURRENT_SOURCE_DIR}/../src/main")
-string(TIMESTAMP JFX_COPYRIGHT_YEAR "%Y")
 
-# ---------------------------------------------------------------------------
-# Locate fxc.exe in the Windows SDK (rc.exe is located by CMake itself)
-# ---------------------------------------------------------------------------
-get_filename_component(WINSDK_ROOT
-    "[HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Windows Kits\\Installed Roots;KitsRoot10]"
-    ABSOLUTE)
-if(NOT WINSDK_ROOT OR WINSDK_ROOT MATCHES "registry")
-    set(WINSDK_ROOT "C:/Program Files (x86)/Windows Kits/10")
+if(WIN32)
+    include("${CMAKE_CURRENT_SOURCE_DIR}/win.cmake")
+elseif(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    include("${CMAKE_CURRENT_SOURCE_DIR}/linux.cmake")
+else()
+    message(FATAL_ERROR "This CMake build currently supports Windows and Linux only. "
+        "The macOS native build has not been ported from Gradle yet.")
 endif()
-file(GLOB WINSDK_BIN_DIRS "${WINSDK_ROOT}/bin/10.*/x64")
-list(SORT WINSDK_BIN_DIRS)
-list(REVERSE WINSDK_BIN_DIRS)
-find_program(FXC_EXECUTABLE fxc HINTS ${WINSDK_BIN_DIRS} "${WINSDK_ROOT}/bin/x64")
-if(NOT FXC_EXECUTABLE)
-    message(FATAL_ERROR "Cannot find fxc.exe in the Windows SDK (looked under ${WINSDK_ROOT}/bin)")
-endif()
-
-# ---------------------------------------------------------------------------
-# Global flags: exact parity with the retired Gradle Windows toolchain config,
-# replacing CMake defaults
-# ---------------------------------------------------------------------------
-foreach(lang C CXX)
-    set(CMAKE_${lang}_FLAGS "")
-    set(CMAKE_${lang}_FLAGS_RELEASE "")
-    set(CMAKE_${lang}_FLAGS_DEBUG "")
-endforeach()
-set(CMAKE_SHARED_LINKER_FLAGS "/nologo /manifest /opt:REF /incremental:no /dynamicbase /nxcompat")
-set(CMAKE_SHARED_LINKER_FLAGS_RELEASE "")
-set(CMAKE_SHARED_LINKER_FLAGS_DEBUG "/debug")
-
-# Common cc flags (the /MD | /MDd runtime flag comes from CMAKE_MSVC_RUNTIME_LIBRARY)
-set(JFX_COMMON_COMPILE_OPTIONS
-    /nologo /W3 /EHsc
-    /D_DISABLE_CONSTEXPR_MUTEX_CONSTRUCTOR
-    /DINLINE=__inline
-    /DWIN32 /DIAL /D_LITTLE_ENDIAN /DWIN32_LEAN_AND_MEAN
-    "$<$<CONFIG:Release>:/O2;/DNDEBUG>"
-    "$<$<CONFIG:Debug>:/Od;/Zi;/DDEBUG;/FS>")
-
-set(JFX_RC_COMMON_DEFINITIONS
-    "JFX_COMPANY=${JFX_COMPANY}"
-    "JFX_COMPONENT=${JFX_PRODUCT} Platform binary"
-    "JFX_NAME=${JFX_PRODUCT} Platform ${JFX_VER}"
-    "JFX_VER=${JFX_VER}"
-    "JFX_BUILD_ID=${JFX_BUILD_ID}"
-    "JFX_COPYRIGHT=Copyright © ${JFX_COPYRIGHT_YEAR}"
-    "JFX_FVER=${JFX_FVER}"
-    "JFX_FTYPE=0x2L")
-
-# ---------------------------------------------------------------------------
-# add_jfx_library(<name>
-#     OUTPUT_NAME <dll base name>
-#     SOURCE_DIRS <dirs...>          # globbed non-recursively, like Gradle listFiles()
-#     EXTRA_SOURCES <files...>
-#     COMPILE_OPTIONS <opts...>
-#     NO_UNICODE                     # drop /DUNICODE /D_UNICODE (javafx_font)
-#     LINK_LIBS <libs...>
-#     LINK_OPTIONS <opts...>
-#     RC_SOURCE <file>               # defaults to version.rc
-#     RC_INCLUDE_DIRS <dirs...>
-# )
-# ---------------------------------------------------------------------------
-function(add_jfx_library name)
-    cmake_parse_arguments(JFX "NO_UNICODE" "OUTPUT_NAME;RC_SOURCE"
-        "SOURCE_DIRS;EXTRA_SOURCES;COMPILE_OPTIONS;LINK_LIBS;LINK_OPTIONS;RC_INCLUDE_DIRS" ${ARGN})
-
-    set(sources)
-    foreach(dir ${JFX_SOURCE_DIRS})
-        file(GLOB dir_sources "${dir}/*.c" "${dir}/*.cc" "${dir}/*.cpp")
-        list(APPEND sources ${dir_sources})
-    endforeach()
-    list(APPEND sources ${JFX_EXTRA_SOURCES})
-
-    # Each target compiles its own copy of the version resource with its own defines
-    if(NOT JFX_RC_SOURCE)
-        set(JFX_RC_SOURCE "${GRAPHICS_SRC}/resources/version.rc")
-    endif()
-    get_filename_component(rc_name "${JFX_RC_SOURCE}" NAME)
-    set(rc_copy "${CMAKE_CURRENT_BINARY_DIR}/rc/${name}/${rc_name}")
-    configure_file("${JFX_RC_SOURCE}" "${rc_copy}" COPYONLY)
-    get_filename_component(rc_src_dir "${JFX_RC_SOURCE}" DIRECTORY)
-    set_source_files_properties("${rc_copy}" PROPERTIES
-        COMPILE_DEFINITIONS "JFX_FNAME=${JFX_OUTPUT_NAME}.dll;JFX_INTERNAL_NAME=${name};${JFX_RC_COMMON_DEFINITIONS}"
-        INCLUDE_DIRECTORIES "${rc_src_dir};${JFX_RC_INCLUDE_DIRS}")
-    list(APPEND sources "${rc_copy}")
-
-    add_library(${name} SHARED ${sources})
-    set_target_properties(${name} PROPERTIES
-        OUTPUT_NAME "${JFX_OUTPUT_NAME}"
-        PREFIX ""
-        RUNTIME_OUTPUT_DIRECTORY "${BIN_DIR}"
-        RUNTIME_OUTPUT_DIRECTORY_RELEASE "${BIN_DIR}"
-        RUNTIME_OUTPUT_DIRECTORY_DEBUG "${BIN_DIR}"
-        PDB_OUTPUT_DIRECTORY "${BIN_DIR}"
-        PDB_OUTPUT_DIRECTORY_RELEASE "${BIN_DIR}"
-        PDB_OUTPUT_DIRECTORY_DEBUG "${BIN_DIR}")
-
-    target_compile_options(${name} PRIVATE ${JFX_COMMON_COMPILE_OPTIONS})
-    if(NOT JFX_NO_UNICODE)
-        target_compile_options(${name} PRIVATE /DUNICODE /D_UNICODE)
-    endif()
-    target_compile_options(${name} PRIVATE ${JFX_COMPILE_OPTIONS})
-
-    target_include_directories(${name} PRIVATE
-        "${JDK_HOME}/include" "${JDK_HOME}/include/win32"
-        "${HEADERS_DIR}"
-        ${JFX_SOURCE_DIRS})
-
-    target_link_libraries(${name} PRIVATE ${JFX_LINK_LIBS})
-    target_link_options(${name} PRIVATE
-        "/map:$<TARGET_FILE_DIR:${name}>/${JFX_OUTPUT_NAME}.map"
-        ${JFX_LINK_OPTIONS})
-endfunction()
-
-# ---------------------------------------------------------------------------
-# glass.dll
-# ---------------------------------------------------------------------------
-add_jfx_library(glass
-    OUTPUT_NAME glass
-    SOURCE_DIRS "${GRAPHICS_SRC}/native-glass/win"
-    RC_SOURCE "${GRAPHICS_SRC}/native-glass/win/GlassResources.rc"
-    RC_INCLUDE_DIRS "${GRAPHICS_SRC}/resources"
-    LINK_LIBS delayimp.lib gdi32.lib urlmon.lib Comdlg32.lib winmm.lib imm32.lib
-        shell32.lib Uiautomationcore.lib dwmapi.lib shlwapi.lib version.lib
-    LINK_OPTIONS /DELAYLOAD:user32.dll /DELAYLOAD:urlmon.dll /DELAYLOAD:winmm.dll
-        /DELAYLOAD:shell32.dll /DELAYLOAD:Uiautomationcore.dll /DELAYLOAD:dwmapi.dll
-        /DELAYLOAD:shlwapi.dll /DELAYLOAD:version.dll)
-
-# ---------------------------------------------------------------------------
-# prism_common.dll
-# ---------------------------------------------------------------------------
-add_jfx_library(prism
-    OUTPUT_NAME prism_common
-    SOURCE_DIRS "${GRAPHICS_SRC}/native-prism")
-
-# ---------------------------------------------------------------------------
-# prism_sw.dll
-# ---------------------------------------------------------------------------
-add_jfx_library(prismSW
-    OUTPUT_NAME prism_sw
-    SOURCE_DIRS "${GRAPHICS_SRC}/native-prism-sw")
-
-# ---------------------------------------------------------------------------
-# prism_d3d.dll (needs fxc-generated shader headers)
-# ---------------------------------------------------------------------------
-set(D3D_HEADER_DIR "${CMAKE_CURRENT_BINARY_DIR}/headers/PrismD3D")
-set(D3D_SRC "${GRAPHICS_SRC}/native-prism-d3d")
-set(PS_3D_SRC "${D3D_SRC}/hlsl/Mtl1PS.hlsl")
-set(VS_3D_SRC "${D3D_SRC}/hlsl/Mtl1VS.hlsl")
-set(PASSTHROUGH_VS_SRC "${D3D_SRC}/PassThroughVS.hlsl")
-set(D3D_GENERATED_HEADERS)
-
-function(add_fxc_header out_file profile src)
-    # Remaining arguments are fxc /D or /E options
-    add_custom_command(OUTPUT "${out_file}"
-        COMMAND "${FXC_EXECUTABLE}" /nologo /T ${profile} /Fh "${out_file}" ${ARGN} "${src}"
-        DEPENDS "${src}"
-        VERBATIM)
-    set(D3D_GENERATED_HEADERS ${D3D_GENERATED_HEADERS} "${out_file}" PARENT_SCOPE)
-endfunction()
-
-add_fxc_header("${D3D_HEADER_DIR}/PassThroughVS.h" vs_3_0 "${PASSTHROUGH_VS_SRC}" /E passThrough)
-add_fxc_header("${D3D_HEADER_DIR}/hlsl/Mtl1PS.h" ps_3_0 "${PS_3D_SRC}" /DSpec=0 /DSType=0)
-add_fxc_header("${D3D_HEADER_DIR}/hlsl/Mtl1PS_i.h" ps_3_0 "${PS_3D_SRC}" /DSpec=0 /DSType=0 /DIllumMap=1)
-# Pixel shader permutations: s = specular only, b = specular + bump map (/DBump=1);
-# 1..3 = /DSpec level; n/t/c/m = /DSType 0..3; trailing i = /DIllumMap=1
-foreach(bump_prefix s b)
-    if(bump_prefix STREQUAL "b")
-        set(bump_args /DBump=1)
-    else()
-        set(bump_args)
-    endif()
-    foreach(spec RANGE 1 3)
-        set(stype_index 0)
-        foreach(stype_letter n t c m)
-            add_fxc_header("${D3D_HEADER_DIR}/hlsl/Mtl1PS_${bump_prefix}${spec}${stype_letter}.h"
-                ps_3_0 "${PS_3D_SRC}" /DSpec=${spec} /DSType=${stype_index} ${bump_args})
-            add_fxc_header("${D3D_HEADER_DIR}/hlsl/Mtl1PS_${bump_prefix}${spec}${stype_letter}i.h"
-                ps_3_0 "${PS_3D_SRC}" /DSpec=${spec} /DSType=${stype_index} ${bump_args} /DIllumMap=1)
-            math(EXPR stype_index "${stype_index} + 1")
-        endforeach()
-    endforeach()
-endforeach()
-add_fxc_header("${D3D_HEADER_DIR}/hlsl/Mtl1VS_Obj.h" vs_3_0 "${VS_3D_SRC}" /DVertexType=VsInput)
-
-add_custom_target(generateD3DHeaders DEPENDS ${D3D_GENERATED_HEADERS})
-
-add_jfx_library(prismD3D
-    OUTPUT_NAME prism_d3d
-    SOURCE_DIRS "${D3D_SRC}" "${D3D_SRC}/hlsl"
-    COMPILE_OPTIONS "/I${D3D_HEADER_DIR}"
-    LINK_LIBS user32.lib)
-add_dependencies(prismD3D generateD3DHeaders)
-
-# ---------------------------------------------------------------------------
-# prism_es2.dll (optional, mirrors IS_INCLUDE_ES2)
-# ---------------------------------------------------------------------------
-if(INCLUDE_ES2)
-    add_jfx_library(prismES2
-        OUTPUT_NAME prism_es2
-        SOURCE_DIRS "${GRAPHICS_SRC}/native-prism-es2"
-            "${GRAPHICS_SRC}/native-prism-es2/GL"
-            "${GRAPHICS_SRC}/native-prism-es2/windows"
-        COMPILE_OPTIONS /Ob1 /GF /Gy /GS
-        LINK_LIBS opengl32.lib gdi32.lib user32.lib kernel32.lib
-        LINK_OPTIONS /SUBSYSTEM:WINDOWS)
-endif()
-
-# ---------------------------------------------------------------------------
-# javafx_font.dll (no /DUNICODE /D_UNICODE)
-# ---------------------------------------------------------------------------
-add_jfx_library(font
-    OUTPUT_NAME javafx_font
-    SOURCE_DIRS "${GRAPHICS_SRC}/native-font"
-    NO_UNICODE
-    COMPILE_OPTIONS /DJFXFONT_PLUS /D_WIN32_WINNT=0x0601
-    LINK_LIBS advapi32.lib gdi32.lib user32.lib dwrite.lib d2d1.lib
-        windowscodecs.lib ole32.lib)
-
-# ---------------------------------------------------------------------------
-# javafx_iio.dll
-# ---------------------------------------------------------------------------
-add_jfx_library(iio
-    OUTPUT_NAME javafx_iio
-    SOURCE_DIRS "${GRAPHICS_SRC}/native-iio" "${GRAPHICS_SRC}/native-iio/libjpeg")
-
-# ---------------------------------------------------------------------------
-# decora_sse.dll (generated JSL .cc files + native-decora)
-# ---------------------------------------------------------------------------
-add_jfx_library(decora
-    OUTPUT_NAME decora_sse
-    SOURCE_DIRS "${GENSRC_DIR}/jsl-decora" "${GRAPHICS_SRC}/native-decora"
-    COMPILE_OPTIONS /fp:fast)
-
-# ---------------------------------------------------------------------------
-# Pixel shader .obj resources bundled into javafx-graphics.jar
-# ---------------------------------------------------------------------------
-set(SHADER_OBJS)
-foreach(entry "jsl-decora=com/sun/scenario/effect/impl/hw" "jsl-prism=com/sun/prism")
-    string(REPLACE "=" ";" parts "${entry}")
-    list(GET parts 0 gendir)
-    list(GET parts 1 pkg)
-    file(GLOB hlsl_files "${GENSRC_DIR}/${gendir}/${pkg}/d3d/hlsl/*.hlsl")
-    foreach(hlsl ${hlsl_files})
-        get_filename_component(base "${hlsl}" NAME_WE)
-        set(obj "${SHADER_OBJ_DIR}/${pkg}/d3d/hlsl/${base}.obj")
-        add_custom_command(OUTPUT "${obj}"
-            COMMAND "${FXC_EXECUTABLE}" /nologo /T ps_3_0 /Fo "${obj}" "${hlsl}"
-            DEPENDS "${hlsl}"
-            VERBATIM)
-        list(APPEND SHADER_OBJS "${obj}")
-    endforeach()
-endforeach()
-add_custom_target(shaders ALL DEPENDS ${SHADER_OBJS})

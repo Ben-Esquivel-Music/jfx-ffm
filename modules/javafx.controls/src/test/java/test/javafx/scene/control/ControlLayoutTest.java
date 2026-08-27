@@ -46,6 +46,7 @@ class ControlLayoutTest {
     private static final double EPSILON = 0.00000000001;
 
     private ControlStub control;
+    private Stage stage;
 
     @BeforeEach
     void setup() {
@@ -54,6 +55,10 @@ class ControlLayoutTest {
 
     @AfterEach
     void cleanup() {
+        if (stage != null) {
+            stage.hide();
+            stage = null;
+        }
         control = null;
     }
 
@@ -70,7 +75,7 @@ class ControlLayoutTest {
     void testLayoutChildrenContract(double scale) {
         DoubleProperty renderScaleProperty = new SimpleDoubleProperty(scale);
 
-        Stage stage = new Stage();
+        stage = new Stage();
         stage.renderScaleXProperty().bind(renderScaleProperty);
         stage.renderScaleYProperty().bind(renderScaleProperty);
 

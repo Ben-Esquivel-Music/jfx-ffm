@@ -29,6 +29,9 @@ import static org.junit.jupiter.api.Assertions.fail;
 import java.io.PrintStream;
 import java.util.HashMap;
 import java.util.Map;
+import java.util.logging.ConsoleHandler;
+import java.util.logging.Handler;
+import java.util.logging.Logger;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import org.junit.jupiter.api.Test;
@@ -56,6 +59,7 @@ public class OutputRedirect {
             stderr = System.err;
             stderrCapture = AccumulatingPrintStream.create();
             System.setErr(stderrCapture);
+            rebindConsoleLogging();
         }
     }
 
@@ -66,6 +70,25 @@ public class OutputRedirect {
             System.setErr(stderr);
             stderr = null;
             stderrCapture = null;
+            rebindConsoleLogging();
+        }
+    }
+
+    /// `java.util.logging`'s `ConsoleHandler` captures `System.err` once, when the handler is
+    /// constructed (which typically happens at the first log record published anywhere in the JVM).
+    /// From then on, log output goes to whichever stream was installed at that moment, so tests
+    /// checking for the presence (or absence) of logged warnings in the redirected stderr would
+    /// pass or fail depending on test execution order.  Replacing the root logger's
+    /// `ConsoleHandler` with a fresh instance after each stream swap keeps console log output
+    /// bound to the current `System.err`.
+    private static void rebindConsoleLogging() {
+        Logger root = Logger.getLogger("");
+        for (Handler h : root.getHandlers()) {
+            if (h instanceof ConsoleHandler) {
+                h.flush();
+                root.removeHandler(h);
+                root.addHandler(new ConsoleHandler());
+            }
         }
     }
 

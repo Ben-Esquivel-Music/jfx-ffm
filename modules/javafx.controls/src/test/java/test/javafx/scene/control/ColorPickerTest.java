@@ -72,6 +72,7 @@ public class ColorPickerTest {
 
     @AfterEach
     public void after() {
+        colorPicker.hide();
         stage.hide();
     }
 

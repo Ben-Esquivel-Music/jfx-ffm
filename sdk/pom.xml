@@ -195,8 +195,8 @@
                         </goals>
                         <configuration>
                             <target>
-                                <mkdir dir="${jfx.sdk.dir}/bin"/>
-                                <copy todir="${jfx.sdk.dir}/bin" failonerror="false" quiet="true">
+                                <mkdir dir="${jfx.sdk.dir}/${jfx.sdk.native.dir}"/>
+                                <copy todir="${jfx.sdk.dir}/${jfx.sdk.native.dir}" failonerror="false" quiet="true">
                                     <fileset dir="${jfx.root}/modules/javafx.graphics/target/native/bin"
                                              includes="*.dll,*.so,*.dylib" erroronmissingdir="false"/>
                                 </copy>

@@ -34,6 +34,7 @@ import test.javafx.beans.InvalidationListenerMock;
 import javafx.beans.Observable;
 import javafx.collections.*;
 
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
@@ -71,6 +72,13 @@ public class MapListenerHelperTest {
         helper = null;
         map = FXCollections.observableHashMap();
         change = new MapExpressionHelper.SimpleChange<>(map).setRemoved(new Object(), new Object());
+    }
+
+    @AfterEach
+    public void tearDown() {
+        // Some tests install a custom uncaught exception handler on this thread;
+        // reset it so it cannot swallow exceptions in tests run later in the same JVM.
+        Thread.currentThread().setUncaughtExceptionHandler(null);
     }
 
     private void resetAllListeners() {
