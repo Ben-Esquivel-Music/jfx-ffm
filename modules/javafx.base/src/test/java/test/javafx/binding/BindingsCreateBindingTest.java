@@ -122,6 +122,7 @@ public class BindingsCreateBindingTest<T> {
         ErrorLoggingUtility.checkWarning(Exception.class);
         assertTrue(binding2.getDependencies().isEmpty());
         binding2.dispose();
+        OutputRedirect.checkAndRestoreStderr(Exception.class);
     }
 
     @ParameterizedTest
