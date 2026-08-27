@@ -128,6 +128,10 @@
                                 <mkdir dir="${jfx.graphics.gensrc}/jsl-decora"/>
                                 <mkdir dir="${jfx.graphics.gensrc}/jsl-prism"/>
                                 <mkdir dir="${jfx.graphics.gensrc}/headers"/>
+                                <!-- The JSLC MSL backend writes the Metal uniform-struct headers
+                                     here but does not create the directory itself (Gradle created
+                                     it in the generateShaders task) -->
+                                <mkdir dir="${jfx.graphics.gensrc}/mtl-headers"/>
 
                                 <javac destdir="${project.build.directory}/jsl-compilers/decora"
                                        includeantruntime="false" encoding="UTF-8" debug="true"
@@ -164,6 +168,7 @@
                                     <arg value="com/sun/scenario/effect"/>
                                     <arg value="-d3d"/>
                                     <arg value="-es2"/>
+                                    <arg value="-mtl"/>
                                     <arg value="-all"/>
                                     <arg value="GenAllDecoraShaders"/>
                                 </java>
@@ -201,6 +206,7 @@
                                     <arg value="com/sun/prism"/>
                                     <arg value="-d3d"/>
                                     <arg value="-es2"/>
+                                    <arg value="-mtl"/>
                                     <arg value="-name"/>
                                     <srcfile/>
                                     <fileset dir="${project.basedir}/src/main/jsl-prism" includes="**/*.jsl"/>
@@ -239,7 +245,8 @@
                         </configuration>
                     </execution>
                     <execution>
-                        <!-- Shader resources (fxc .obj, GLSL .frag) into the module classes -->
+                        <!-- Shader resources (fxc .obj, GLSL .frag, Metal .metallib) into the
+                             module classes -->
                         <id>copy-shaders</id>
                         <phase>generate-test-sources</phase>
                         <goals>
@@ -249,7 +256,7 @@
                             <target>
                                 <mkdir dir="${project.build.directory}/native/shader-obj"/>
                                 <copy todir="${project.build.outputDirectory}">
-                                    <fileset dir="${project.build.directory}/native/shader-obj" includes="**/*.obj"/>
+                                    <fileset dir="${project.build.directory}/native/shader-obj" includes="**/*.obj,**/*.metallib"/>
                                 </copy>
                                 <copy todir="${project.build.outputDirectory}">
                                     <fileset dir="${jfx.graphics.gensrc}/jsl-decora" includes="**/*.frag"/>
@@ -289,7 +296,7 @@
                                     <fileset dir="${project.build.outputDirectory}" excludes="**/*.class"/>
                                 </copy>
                                 <copy todir="${jfx.shims.graphics}">
-                                    <fileset dir="${project.build.directory}/native/shader-obj" includes="**/*.obj"/>
+                                    <fileset dir="${project.build.directory}/native/shader-obj" includes="**/*.obj,**/*.metallib"/>
                                 </copy>
                             </target>
                         </configuration>
@@ -422,6 +429,43 @@
                 </plugins>
             </build>
         </profile>
+        <profile>
+            <id>jar-excludes-mac</id>
+            <activation>
+                <os>
+                    <name>mac os x</name>
+                </os>
+            </activation>
+            <build>
+                <plugins>
+                    <plugin>
+                        <groupId>org.apache.maven.plugins</groupId>
+                        <artifactId>maven-jar-plugin</artifactId>
+                        <configuration>
+                            <excludes>
+                                <exclude>version.rc</exclude>
+                                <exclude>com/sun/glass/ui/swt/**</exclude>
+                                <exclude>com/sun/javafx/tools/ant/**</exclude>
+                                <exclude>com/javafx/main/**</exclude>
+                                <exclude>com/sun/javafx/webkit/drt/**</exclude>
+                                <exclude>**/*.hlsl</exclude>
+                                <exclude>com/sun/glass/ui/win/**</exclude>
+                                <exclude>com/sun/prism/d3d/**</exclude>
+                                <exclude>com/sun/prism/es2/WinGL*</exclude>
+                                <exclude>com/sun/scenario/effect/impl/hw/d3d/**</exclude>
+                                <exclude>com/sun/glass/ui/gtk/**</exclude>
+                                <exclude>com/sun/prism/es2/EGL*</exclude>
+                                <exclude>com/sun/glass/ui/monocle/**</exclude>
+                                <exclude>com/sun/prism/es2/Monocle*</exclude>
+                                <exclude>com/sun/glass/ui/ios/**</exclude>
+                                <exclude>com/sun/prism/es2/IOS*</exclude>
+                                <exclude>com/sun/glass/ui/android/**</exclude>
+                            </excludes>
+                        </configuration>
+                    </plugin>
+                </plugins>
+            </build>
+        </profile>
         <!-- Native Windows libraries via CMake + Visual Studio. Skip with -DskipNative=true -->
         <profile>
             <id>native-win</id>
@@ -526,6 +570,69 @@
                                         <argument>-DHEADERS_DIR=${jfx.graphics.gensrc}/headers/javafx.graphics</argument>
                                         <argument>-DBIN_DIR=${project.build.directory}/native/bin</argument>
                                         <argument>-DINCLUDE_ES2=${INCLUDE_ES2}</argument>
+                                    </arguments>
+                                </configuration>
+                            </execution>
+                            <execution>
+                                <id>cmake-build</id>
+                                <phase>process-classes</phase>
+                                <goals>
+                                    <goal>exec</goal>
+                                </goals>
+                                <configuration>
+                                    <executable>cmake</executable>
+                                    <arguments>
+                                        <argument>--build</argument>
+                                        <argument>${project.build.directory}/native/cmake</argument>
+                                        <argument>--parallel</argument>
+                                    </arguments>
+                                </configuration>
+                            </execution>
+                        </executions>
+                    </plugin>
+                </plugins>
+            </build>
+        </profile>
+        <!-- Native macOS libraries and Metal shader library via CMake + clang and the
+             xcrun metal/metallib tools. Skip with -DskipNative=true -->
+        <profile>
+            <id>native-mac</id>
+            <activation>
+                <os>
+                    <name>mac os x</name>
+                </os>
+                <property>
+                    <name>skipNative</name>
+                    <value>!true</value>
+                </property>
+            </activation>
+            <build>
+                <plugins>
+                    <plugin>
+                        <groupId>org.codehaus.mojo</groupId>
+                        <artifactId>exec-maven-plugin</artifactId>
+                        <executions>
+                            <execution>
+                                <id>cmake-configure</id>
+                                <phase>process-classes</phase>
+                                <goals>
+                                    <goal>exec</goal>
+                                </goals>
+                                <configuration>
+                                    <executable>cmake</executable>
+                                    <arguments>
+                                        <argument>-S</argument>
+                                        <argument>${project.basedir}/native</argument>
+                                        <argument>-B</argument>
+                                        <argument>${project.build.directory}/native/cmake</argument>
+                                        <argument>-DCMAKE_BUILD_TYPE=${CONF}</argument>
+                                        <argument>-DJDK_HOME=${java.home}</argument>
+                                        <argument>-DGENSRC_DIR=${jfx.graphics.gensrc}</argument>
+                                        <argument>-DHEADERS_DIR=${jfx.graphics.gensrc}/headers/javafx.graphics</argument>
+                                        <argument>-DBIN_DIR=${project.build.directory}/native/bin</argument>
+                                        <argument>-DSHADER_OBJ_DIR=${project.build.directory}/native/shader-obj</argument>
+                                        <argument>-DINCLUDE_ES2=${INCLUDE_ES2}</argument>
+                                        <argument>-DMSL_VERSION=${jfx.msl.version}</argument>
                                     </arguments>
                                 </configuration>
                             </execution>

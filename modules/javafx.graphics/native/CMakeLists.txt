@@ -24,12 +24,16 @@
 # Native build for the javafx.graphics platform libraries. This replicates the
 # compiler/linker flags previously defined by the retired Gradle native build.
 # Invoked from modules/javafx.graphics/pom.xml via the exec-maven-plugin.
-# Platform-specific targets live in win.cmake and linux.cmake.
+# Platform-specific targets live in win.cmake, linux.cmake and mac.cmake.
 
 cmake_minimum_required(VERSION 3.20)
 
 cmake_policy(SET CMP0091 NEW) # MSVC runtime library via CMAKE_MSVC_RUNTIME_LIBRARY
 set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>DLL")
+
+# Minimum macOS version (Gradle: MACOSX_MIN_VERSION); ignored on other
+# platforms. Must be set before project().
+set(CMAKE_OSX_DEPLOYMENT_TARGET "11.0" CACHE STRING "Minimum macOS deployment version")
 
 project(javafxGraphicsNatives LANGUAGES C CXX)
 
@@ -54,9 +58,10 @@ set(GRAPHICS_SRC "${CMAKE_CURRENT_SOURCE_DIR}/../src/main")
 
 if(WIN32)
     include("${CMAKE_CURRENT_SOURCE_DIR}/win.cmake")
+elseif(APPLE)
+    include("${CMAKE_CURRENT_SOURCE_DIR}/mac.cmake")
 elseif(CMAKE_SYSTEM_NAME STREQUAL "Linux")
     include("${CMAKE_CURRENT_SOURCE_DIR}/linux.cmake")
 else()
-    message(FATAL_ERROR "This CMake build currently supports Windows and Linux only. "
-        "The macOS native build has not been ported from Gradle yet.")
+    message(FATAL_ERROR "This CMake build currently supports Windows, macOS and Linux only.")
 endif()

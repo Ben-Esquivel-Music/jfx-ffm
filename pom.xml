@@ -94,6 +94,9 @@
         <antlr4.version>4.7.2</antlr4.version>
         <swt.version>3.124.200</swt.version>
         <lucene.version>7.7.3</lucene.version>
+        <!-- Metal Shading Language version (build.properties: msl.version);
+             2.4 is required for supporting macOS 12 -->
+        <jfx.msl.version>macos-metal2.4</jfx.msl.version>
 
         <!-- Test timeouts (seconds) -->
         <junit.test.timeout>120</junit.test.timeout>
