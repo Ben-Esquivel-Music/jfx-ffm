@@ -251,6 +251,8 @@ function(add_msl_shader group src)
     # Remaining arguments are extra metal compiler options
     get_filename_component(base "${src}" NAME_WE)
     set(air "${MSL_AIR_DIR}/${group}/${base}.air")
+    # The Makefiles generator does not create custom-command output directories
+    file(MAKE_DIRECTORY "${MSL_AIR_DIR}/${group}")
     add_custom_command(OUTPUT "${air}"
         COMMAND "${METAL_COMPILER}" ${ARGN} -std=${MSL_VERSION} -c "${src}" -o "${air}"
         DEPENDS "${src}"
@@ -274,6 +276,7 @@ foreach(metal ${native_metal_files})
 endforeach()
 
 set(MSL_LIB "${SHADER_OBJ_DIR}/com/sun/prism/mtl/msl/jfxshaders.metallib")
+file(MAKE_DIRECTORY "${SHADER_OBJ_DIR}/com/sun/prism/mtl/msl")
 add_custom_command(OUTPUT "${MSL_LIB}"
     COMMAND "${METAL_LINKER}" ${MSL_AIR_FILES} -o "${MSL_LIB}"
     DEPENDS ${MSL_AIR_FILES}
