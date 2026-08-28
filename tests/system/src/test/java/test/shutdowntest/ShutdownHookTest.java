@@ -58,6 +58,9 @@ public class ShutdownHookTest {
         // Initilaize the socket
         final ServerSocket service = new ServerSocket(0);
         final int port = service.getLocalPort();
+        // Fail instead of blocking forever if the app never connects or dies
+        // early: @Timeout interrupts don't unblock socket accept/read.
+        service.setSoTimeout(30000);
 
         // Launch the test app
         final ArrayList<String> cmd
@@ -75,6 +78,7 @@ public class ShutdownHookTest {
 
         // Accept a connection from the test app
         final Socket socket = service.accept();
+        socket.setSoTimeout(30000);
         final InputStream in = socket.getInputStream();
 
         // Read the "handshake" token

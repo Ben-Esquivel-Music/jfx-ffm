@@ -1,0 +1,2 @@
+--add-modules=jfx.incubator.input
+--upgrade-module-path="C:\SourceCode\jfx-ffm/modules/jfx.incubator.input/target/classes"

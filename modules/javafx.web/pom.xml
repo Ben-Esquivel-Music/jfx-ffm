@@ -250,7 +250,7 @@
                         @${project.basedir}/src/test/addExports
                         @${jfx.root}/buildtools/addExports
                         --enable-native-access=javafx.graphics,javafx.media,javafx.web
-                        -Djava.library.path=${jfx.root}/modules/javafx.graphics/target/native/bin
+                        "-Djava.library.path=${jfx.native.librarypath}"
                         -DWEB_ARCHIVE_JAR_TEST_DIR=${project.build.directory}/testing/resources
                     </argLine>
                     <systemPropertyVariables>

@@ -130,6 +130,11 @@
         <jfx.shims.web>${jfx.root}/modules/javafx.web/target/shims/javafx.web</jfx.shims.web>
         <jfx.classes.media>${jfx.root}/modules/javafx.media/target/classes</jfx.classes.media>
         <jfx.classes.jsobject>${jfx.root}/modules/jdk.jsobject/target/classes</jfx.classes.jsobject>
+
+        <!-- Native library path for test JVMs: the graphics natives this build compiles,
+             plus the cache directories for prebuilt WebKit/Media libraries that this build
+             does NOT compile (see WEBKIT-MEDIA-STUBS.md; bin = Windows dlls, lib = unix) -->
+        <jfx.native.librarypath>${jfx.root}/modules/javafx.graphics/target/native/bin${path.separator}${jfx.root}/../caches/sdk/bin${path.separator}${jfx.root}/../caches/sdk/lib</jfx.native.librarypath>
     </properties>
 
     <dependencyManagement>

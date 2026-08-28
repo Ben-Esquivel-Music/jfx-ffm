@@ -13,7 +13,9 @@ switches). Use one of the options below to supply prebuilt libraries.
 
 ## Cached libraries
 
-You can manually place WebKit and Media shared libraries in these folders:
+You can manually place WebKit and Media shared libraries in these folders
+(`$projectDir` is the repository root, so `caches` sits *next to* the
+repository, outside it — safe from `mvn clean`):
 
 * Unix libraries (*.so or *.dylib files)
 ````
@@ -24,6 +26,11 @@ You can manually place WebKit and Media shared libraries in these folders:
 ````
     $projectDir/../caches/sdk/bin
 ````
+
+The Maven build puts both cache folders on `java.library.path` for the
+`javafx.web` unit tests and the `tests/system` test and worker JVMs (property
+`jfx.native.librarypath` in the root pom), so libraries placed there are picked
+up automatically on the next test run.
 
 ## Officially released libraries
 
