@@ -56,77 +56,84 @@ public class ShutdownHookTest {
     @Test
     public void testShutdownHook() throws Exception {
         // Initilaize the socket
-        final ServerSocket service = new ServerSocket(0);
-        final int port = service.getLocalPort();
-        // Fail instead of blocking forever if the app never connects or dies early:
-        // @Timeout interrupts don't unblock socket accept/read. Each socket wait is
-        // bounded at 10s, so the combined worst case (accept + two reads = 30s) stays
-        // below the 45s class @Timeout, the backstop for interruptible waits (waitFor).
-        service.setSoTimeout(10000);
+        try (ServerSocket service = new ServerSocket(0)) {
+            final int port = service.getLocalPort();
+            // Fail instead of blocking forever if the app never connects or dies early:
+            // @Timeout interrupts don't unblock socket accept/read. Each socket wait is
+            // bounded at 10s, so the combined worst case (accept + two reads = 30s) stays
+            // below the 45s class @Timeout, the backstop for interruptible waits (waitFor).
+            service.setSoTimeout(10000);
 
-        // Launch the test app
-        final ArrayList<String> cmd
-                = test.util.Util.createApplicationLaunchCommand(
-                        testAppName,
-                        null
-                );
-        // and add our argument
-        cmd.add(String.valueOf(port));
-        ProcessBuilder builder;
-        builder = new ProcessBuilder(cmd);
-        builder.redirectError(ProcessBuilder.Redirect.INHERIT);
-        builder.redirectOutput(ProcessBuilder.Redirect.INHERIT);
-        Process process = builder.start();
+            // Launch the test app
+            final ArrayList<String> cmd
+                    = test.util.Util.createApplicationLaunchCommand(
+                            testAppName,
+                            null
+                    );
+            // and add our argument
+            cmd.add(String.valueOf(port));
+            ProcessBuilder builder;
+            builder = new ProcessBuilder(cmd);
+            builder.redirectError(ProcessBuilder.Redirect.INHERIT);
+            builder.redirectOutput(ProcessBuilder.Redirect.INHERIT);
+            Process process = builder.start();
 
-        // Accept a connection from the test app
-        final Socket socket = service.accept();
-        socket.setSoTimeout(10000);
-        final InputStream in = socket.getInputStream();
+            // Accept a connection from the test app
+            try (Socket socket = service.accept();
+                 InputStream in = socket.getInputStream()) {
+                socket.setSoTimeout(10000);
 
-        // Read the "handshake" token
-        int handshake = in.read();
-        assertEquals(SOCKET_HANDSHAKE, handshake, "Socket handshake failed,");
+                // Read the "handshake" token
+                int handshake = in.read();
+                assertEquals(SOCKET_HANDSHAKE, handshake, "Socket handshake failed,");
 
-        // Read the status code from the shutdown hook
-        int status = in.read();
-        switch (status) {
-            case STATUS_OK:
-                break;
-            case STATUS_ILLEGAL_STATE:
-                fail(testAppName
-                    + ": IllegalStateException from Platform.runLater");
-                break;
-            case STATUS_RUNNABLE_EXECUTED:
-                fail(testAppName
-                    + ": Unexpected execution of Platform.runLater Runnable from ShutdownHook");
-                break;
-            case STATUS_UNEXPECTED_EXCEPTION:
-                fail(testAppName + ": Unexpected exception");
-                break;
-            default:
-                fail(testAppName + ": Unexpected status: " + status);
-        }
+                // Read the status code from the shutdown hook
+                int status = in.read();
+                switch (status) {
+                    case STATUS_OK:
+                        break;
+                    case STATUS_ILLEGAL_STATE:
+                        fail(testAppName
+                            + ": IllegalStateException from Platform.runLater");
+                        break;
+                    case STATUS_RUNNABLE_EXECUTED:
+                        fail(testAppName
+                            + ": Unexpected execution of Platform.runLater Runnable from ShutdownHook");
+                        break;
+                    case STATUS_UNEXPECTED_EXCEPTION:
+                        fail(testAppName + ": Unexpected exception");
+                        break;
+                    default:
+                        fail(testAppName + ": Unexpected status: " + status);
+                }
 
-        // Make sure that the process exited as expected
-        int retVal = process.waitFor();
-        switch (retVal) {
-            case ERROR_NONE:
-                break;
+                // Make sure that the process exited as expected
+                int retVal = process.waitFor();
+                switch (retVal) {
+                    case ERROR_NONE:
+                        break;
 
-            case ERROR_SOCKET:
-                fail(testAppName + ": Error connecting to socket");
-                break;
+                    case ERROR_SOCKET:
+                        fail(testAppName + ": Error connecting to socket");
+                        break;
 
-            case 0:
-                fail(testAppName + ": Unexpected exit 0");
-                break;
+                    case 0:
+                        fail(testAppName + ": Unexpected exit 0");
+                        break;
 
-            case 1:
-                fail(testAppName + ": Unable to launch java application");
-                break;
+                    case 1:
+                        fail(testAppName + ": Unable to launch java application");
+                        break;
 
-            default:
-                fail(testAppName + ": Unexpected error exit: " + retVal);
+                    default:
+                        fail(testAppName + ": Unexpected error exit: " + retVal);
+                }
+            } finally {
+                // A no-op once waitFor has seen the app exit; on every other path
+                // (socket timeout, assertion failure, interrupt) forcibly terminate
+                // the app so it cannot outlive this test.
+                process.destroyForcibly();
+            }
         }
     }
 
