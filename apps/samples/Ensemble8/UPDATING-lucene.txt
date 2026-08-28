@@ -1,5 +1,12 @@
 To update to a new version of Lucene:
 
+NOTE: The Lucene jars are not downloaded automatically; nothing populates
+apps/samples/Ensemble8/lib. Download lucene-core, lucene-grouping and
+lucene-queryparser for the version in build.properties (lucene.version,
+currently 7.7.3) into that directory by hand, named lucene-core-<version>.jar,
+lucene-grouping-<version>.jar and lucene-queryparser-<version>.jar as
+referenced by nbproject/project.properties.
+
 1. Change the version number in the following files:
 
     apps/samples/.classpath

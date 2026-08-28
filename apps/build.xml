@@ -1,9 +1,15 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <project default="appsJar" basedir=".">
 
-    <!-- 
-       Note: this build.xml will be pulled into the
-       Gradle namespace, so lets use long names...
+    <!--
+       Note: this Ant build is dormant. It is not wired into the Maven build,
+       and nothing in the Maven reactor invokes it. Running it by hand also
+       needs the argument files the outer build used to pass in
+       (-Dcompile.patch=@... / -Drun.patch=@..., formerly build/compile.args
+       and build/run.args), which nothing generates any more, so they have to
+       be supplied manually.
+       The long target names below are a leftover from when these targets
+       shared a namespace with the outer build.
     -->
 
     <target name="appsJar">

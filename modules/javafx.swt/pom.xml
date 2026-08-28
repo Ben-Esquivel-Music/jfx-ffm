@@ -43,9 +43,14 @@
              exactly as the Gradle build did. The provided-scope deps below only order
              the reactor; default-compile is replaced by the antrun javac. -->
         <maven.main.skip>true</maven.main.skip>
-        <!-- SWT interop tests need a display and are only run with FULL_TEST=true
-             in the Gradle build; they are not wired up in the Maven build. -->
-        <maven.test.skip>true</maven.test.skip>
+        <!-- Gradle parity: the SWT interop tests were always compiled and only their
+             execution was gated on FULL_TEST. Using maven.test.skip here also skipped
+             test compilation and left no way to opt in, so the tests were unreachable;
+             skipTests is lifted by the full-test profile below (-DFULL_TEST=true). -->
+        <jfx.swt.tests.skip>true</jfx.swt.tests.skip>
+        <!-- Extra JVM arguments for the Gradle swt test task, supplied by the
+             swt-macosx profile below -->
+        <jfx.swt.test.args/>
     </properties>
 
     <dependencies>
@@ -67,6 +72,16 @@
             <version>${project.version}</version>
             <scope>provided</scope>
         </dependency>
+        <dependency>
+            <groupId>org.junit.jupiter</groupId>
+            <artifactId>junit-jupiter</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.junit.platform</groupId>
+            <artifactId>junit-platform-launcher</artifactId>
+            <scope>test</scope>
+        </dependency>
     </dependencies>
 
     <build>
@@ -79,10 +94,22 @@
                         <id>copy-swt-jar</id>
                         <phase>initialize</phase>
                         <goals>
-                            <goal>copy-dependencies</goal>
+                            <goal>copy</goal>
                         </goals>
                         <configuration>
-                            <includeArtifactIds>${jfx.swt.artifact}</includeArtifactIds>
+                            <!-- Gradle parity: the SWT jar was copied under the fixed,
+                                 platform-neutral name swt-debug.jar "for the sake of the
+                                 IDEs", because the real artifact name is per-platform and
+                                 an Eclipse .classpath lib entry cannot use a wildcard. -->
+                            <artifactItems>
+                                <artifactItem>
+                                    <groupId>org.eclipse.platform</groupId>
+                                    <artifactId>${jfx.swt.artifact}</artifactId>
+                                    <version>${swt.version}</version>
+                                    <type>jar</type>
+                                    <destFileName>swt-debug.jar</destFileName>
+                                </artifactItem>
+                            </artifactItems>
                             <outputDirectory>${project.build.directory}/swt-libs</outputDirectory>
                         </configuration>
                     </execution>
@@ -106,7 +133,7 @@
                                        fork="true" sourcepath="">
                                     <src path="${project.basedir}/src/main/java"/>
                                     <classpath>
-                                        <fileset dir="${project.build.directory}/swt-libs" includes="*.jar"/>
+                                        <fileset dir="${project.build.directory}/swt-libs" includes="swt-debug.jar"/>
                                     </classpath>
                                     <compilerarg value="--module-path"/>
                                     <compilerarg value="${jfx.root}/modules/javafx.base/target/classes${path.separator}${jfx.root}/modules/javafx.graphics/target/classes"/>
@@ -124,6 +151,88 @@
                     </execution>
                 </executions>
             </plugin>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-surefire-plugin</artifactId>
+                <configuration>
+                    <skipTests>${jfx.swt.tests.skip}</skipTests>
+                    <!-- javafx.swt is an automatic module: FXCanvas (target/classes),
+                         the SWT jar and the tests all stay on the classpath, while
+                         javafx.base and javafx.graphics come from the shim dirs on the
+                         upgrade module path, as in the other module poms. The internal
+                         packages FXCanvas uses must be exported to the unnamed module;
+                         the Gradle build got them from the shim module-info. -->
+                    <argLine>
+                        --upgrade-module-path "${jfx.shims.base}${path.separator}${jfx.shims.graphics}"
+                        --add-modules javafx.base,javafx.graphics
+                        --add-exports=javafx.graphics/com.sun.glass.ui=ALL-UNNAMED
+                        --add-exports=javafx.graphics/com.sun.javafx.cursor=ALL-UNNAMED
+                        --add-exports=javafx.graphics/com.sun.javafx.embed=ALL-UNNAMED
+                        --add-exports=javafx.graphics/com.sun.javafx.stage=ALL-UNNAMED
+                        --add-exports=javafx.graphics/com.sun.javafx.tk=ALL-UNNAMED
+                        @${jfx.root}/buildtools/addExports
+                        --enable-native-access=javafx.graphics
+                        -Djava.library.path=${jfx.root}/modules/javafx.graphics/target/native/bin
+                        ${jfx.swt.test.args}
+                    </argLine>
+                    <systemPropertyVariables>
+                        <junit.jupiter.execution.timeout.test.method.default>${junit.test.timeout}s</junit.jupiter.execution.timeout.test.method.default>
+                        <junit.jupiter.execution.timeout.lifecycle.method.default>${junit.lifecycle.timeout}s</junit.jupiter.execution.timeout.lifecycle.method.default>
+                    </systemPropertyVariables>
+                </configuration>
+            </plugin>
         </plugins>
     </build>
+
+    <profiles>
+        <profile>
+            <!-- Gradle parity: test.enabled = IS_FULL_TEST -->
+            <id>full-test</id>
+            <activation>
+                <property>
+                    <name>FULL_TEST</name>
+                    <value>true</value>
+                </property>
+            </activation>
+            <properties>
+                <jfx.swt.tests.skip>false</jfx.swt.tests.skip>
+            </properties>
+        </profile>
+        <profile>
+            <!-- Gradle parity: environment "GDK_BACKEND", "x11" on Linux. Declared
+                 here rather than in the unconditional surefire configuration so that
+                 GDK_BACKEND is never handed to the forked JVM on the other platforms. -->
+            <id>swt-linux</id>
+            <activation>
+                <os>
+                    <name>linux</name>
+                </os>
+            </activation>
+            <build>
+                <plugins>
+                    <plugin>
+                        <groupId>org.apache.maven.plugins</groupId>
+                        <artifactId>maven-surefire-plugin</artifactId>
+                        <configuration>
+                            <environmentVariables>
+                                <GDK_BACKEND>x11</GDK_BACKEND>
+                            </environmentVariables>
+                        </configuration>
+                    </plugin>
+                </plugins>
+            </build>
+        </profile>
+        <profile>
+            <!-- Gradle parity: jvmArgs "-XstartOnFirstThread" on macOS -->
+            <id>swt-macosx</id>
+            <activation>
+                <os>
+                    <name>mac os x</name>
+                </os>
+            </activation>
+            <properties>
+                <jfx.swt.test.args>-XstartOnFirstThread</jfx.swt.test.args>
+            </properties>
+        </profile>
+    </profiles>
 </project>
