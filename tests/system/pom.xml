@@ -212,9 +212,18 @@
                         </goals>
                         <configuration>
                             <target>
-                                <pathconvert property="jfx.st.testclasspath" refid="maven.test.classpath"/>
-                                <echo file="${project.build.directory}/st.run.args">-Djava.library.path="${jfx.root}/modules/javafx.graphics/target/native/bin"
---upgrade-module-path="${jfx.st.modulepath}"
+                                <!-- Force forward slashes: the file is read as a java @argfile,
+                                     where backslash inside quoted strings is an escape character
+                                     and silently corrupts Windows paths -->
+                                <pathconvert property="jfx.st.testclasspath" refid="maven.test.classpath" dirsep="/"/>
+                                <pathconvert property="jfx.st.librarypath.argfile" dirsep="/">
+                                    <path path="${jfx.native.librarypath}"/>
+                                </pathconvert>
+                                <pathconvert property="jfx.st.modulepath.argfile" dirsep="/">
+                                    <path path="${jfx.st.modulepath}"/>
+                                </pathconvert>
+                                <echo file="${project.build.directory}/st.run.args">-Djava.library.path="${jfx.st.librarypath.argfile}"
+--upgrade-module-path="${jfx.st.modulepath.argfile}"
 --add-modules=${jfx.st.addmodules}
 --enable-native-access=javafx.graphics,javafx.media,javafx.web
 -cp "${jfx.st.testclasspath}"
@@ -239,6 +248,11 @@
                 <configuration>
                     <skipTests>${jfx.systemtests.skip}</skipTests>
                     <forkCount>1</forkCount>
+                    <!-- reuseForks=false makes surefire fork per test class, which requires it
+                         to run JUnit discovery inside the Maven JVM itself. Loading test classes
+                         there needs the same JDK-internal exports as the test JVM (ClipboardTest
+                         extends sun.awt.datatransfer.SunClipboard), supplied via .mvn/jvm.config
+                         at the repo root - the argfiles below only reach the forked test JVMs. -->
                     <reuseForks>false</reuseForks>
                     <excludes>
                         <exclude>${jfx.st.exclude.robot}</exclude>
@@ -253,7 +267,7 @@
                         @${project.basedir}/src/test/addExports
                         @${jfx.root}/buildtools/addExports
                         --enable-native-access=javafx.graphics,javafx.media,javafx.web
-                        -Djava.library.path=${jfx.root}/modules/javafx.graphics/target/native/bin
+                        "-Djava.library.path=${jfx.native.librarypath}"
                         ${jfx.headless.args}
                     </argLine>
                     <systemPropertyVariables>
