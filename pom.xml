@@ -62,6 +62,11 @@
         <jfx.release.patch.version>0</jfx.release.patch.version>
         <jfx.release.version>28</jfx.release.version>
         <jfx.jdk.target.version>25</jfx.jdk.target.version>
+        <!-- Gradle parity: the verifyJava task failed the build when the JDK running
+             the build was older than jfx.build.jdk.version.min (build.properties) -->
+        <jfx.build.jdk.version.min>25</jfx.build.jdk.version.min>
+        <!-- Minimum Apache Maven version, as documented in README.md -->
+        <jfx.maven.version.min>3.9</jfx.maven.version.min>
 
         <!-- Local (non-CI) builds are "-internal", matching the Gradle defaults -->
         <maven.build.timestamp.format>yyyy-MM-dd-HHmmss</maven.build.timestamp.format>
@@ -86,6 +91,11 @@
         <jfx.test.lint>-Xlint:-options,removal</jfx.test.lint>
         <jfx.werror>-Werror</jfx.werror>
 
+        <!-- Gradle parity: IS_DEBUG_JAVA (CONF=Debug or CONF=DebugNative) compiled with
+             "source,lines,vars"; every other configuration used "source,lines".
+             Overridden by the CONF-debug profiles below. -->
+        <jfx.debuglevel>source,lines</jfx.debuglevel>
+
         <!-- Dependency versions from build.properties -->
         <junit.jupiter.version>5.12.2</junit.jupiter.version>
         <junit.platform.version>1.12.2</junit.platform.version>
@@ -97,6 +107,33 @@
         <!-- Metal Shading Language version (build.properties: msl.version);
              2.4 is required for supporting macOS 12 -->
         <jfx.msl.version>macos-metal2.4</jfx.msl.version>
+
+        <!-- Javadoc settings, mirrored from build.properties (jdk.docs.version and
+             javadoc.title / javadoc.header / javadoc.bottom / javadoc.top, with the
+             @TOKEN@ placeholders resolved the way the Gradle javadoc task resolved
+             them). Only read by the opt-in "javadoc" profile below (mvn -Pjavadoc). -->
+        <jfx.jdk.docs.version>26</jfx.jdk.docs.version>
+        <!-- Gradle: JDK_DOCS, the URL handed to javadoc's -link option. Gradle's
+             separate JDK_DOCS_LINK (the offline linkoffline location, empty by
+             default) is deliberately not modelled here. -->
+        <jfx.jdk.docs.url>https://docs.oracle.com/en/java/javase/${jfx.jdk.docs.version}/docs/api/</jfx.jdk.docs.url>
+        <!-- Gradle: DOC_LINT (default "all") and DOC_WERROR (default true). Relax with
+             -Djfx.javadoc.doclint=none and/or -Djfx.javadoc.werror=false -->
+        <jfx.javadoc.doclint>all</jfx.javadoc.doclint>
+        <jfx.javadoc.werror>true</jfx.javadoc.werror>
+        <!-- Gradle: draftMsg, which was empty for an FCS build (MILESTONE_FCS=true).
+             The Maven build does not model MILESTONE_FCS; pass -Djfx.javadoc.draft=
+             and -Djfx.javadoc.top= to blank the draft markers. -->
+        <jfx.javadoc.draft><![CDATA[<br><b>DRAFT ${jfx.release.version.long}</b>]]></jfx.javadoc.draft>
+        <jfx.javadoc.title>JavaFX ${jfx.release.major.version}</jfx.javadoc.title>
+        <jfx.javadoc.header><![CDATA[<div><strong>JavaFX ${jfx.release.major.version}${jfx.javadoc.draft}</strong></div>]]></jfx.javadoc.header>
+        <jfx.javadoc.bottom><![CDATA[<small><a href="http://bugreport.java.com/bugreport/">Report a bug or suggest an enhancement</a><br> Copyright &copy; 2008, 2026, Oracle and/or its affiliates. All rights reserved.${jfx.javadoc.draft}<!-- Version ${jfx.release.version.long} --></small>]]></jfx.javadoc.bottom>
+        <jfx.javadoc.top><![CDATA[<div style="padding: 6px; text-align: center; font-size: 80%;">This specification is not final and is subject to change. Use is subject to license terms.</div>]]></jfx.javadoc.top>
+        <!-- Gradle: (9..jfxReleaseMajorVersion).join(","); extend for each new release -->
+        <jfx.javadoc.since>9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25,26,27,28</jfx.javadoc.since>
+        <!-- Gradle wrote the docs to build/javadoc. maven-javadoc-plugin always appends
+             "apidocs" to its outputDirectory, so they land here instead. -->
+        <jfx.javadoc.output.dir>${project.build.directory}/apidocs</jfx.javadoc.output.dir>
 
         <!-- Test timeouts (seconds) -->
         <junit.test.timeout>120</junit.test.timeout>
@@ -198,7 +235,7 @@
                         <release>${jfx.jdk.target.version}</release>
                         <encoding>UTF-8</encoding>
                         <debug>true</debug>
-                        <debuglevel>source,lines</debuglevel>
+                        <debuglevel>${jfx.debuglevel}</debuglevel>
                         <showWarnings>true</showWarnings>
                         <fork>true</fork>
                         <compilerArgs>
@@ -232,6 +269,20 @@
                     <artifactId>maven-surefire-plugin</artifactId>
                     <version>3.5.4</version>
                     <configuration>
+                        <!-- Gradle parity: the test tasks used scanForTestClasses with
+                             include("**/*.*"), so every compiled class was scanned for
+                             test annotations. Surefire's default patterns (Test*, *Test,
+                             *Tests, *TestCase) silently skip test classes whose names do
+                             not match; classes without tests are still ignored. -->
+                        <!-- Scoped to the "test" package rather than **/*.java: each module's
+                             pom stages its shim classes into target/test-classes via
+                             <testResources>, so a bare **/*.java would also scan the module's
+                             main classes (up to ~2700 per module), which Gradle never did.
+                             Every test source root in the reactor has exactly one top-level
+                             package, "test". -->
+                        <includes>
+                            <include>test/**/*.java</include>
+                        </includes>
                         <useModulePath>false</useModulePath>
                         <enableAssertions>true</enableAssertions>
                         <trimStackTrace>false</trimStackTrace>
@@ -286,8 +337,51 @@
                     <artifactId>maven-deploy-plugin</artifactId>
                     <version>3.1.4</version>
                 </plugin>
+                <plugin>
+                    <groupId>org.apache.maven.plugins</groupId>
+                    <artifactId>maven-enforcer-plugin</artifactId>
+                    <version>3.5.0</version>
+                    <configuration>
+                        <rules>
+                            <requireJavaVersion>
+                                <version>[${jfx.build.jdk.version.min},)</version>
+                                <message>JavaFX must be built with JDK ${jfx.build.jdk.version.min} or later (build.properties: jfx.build.jdk.version.min).</message>
+                            </requireJavaVersion>
+                            <requireMavenVersion>
+                                <version>[${jfx.maven.version.min},)</version>
+                                <message>JavaFX must be built with Apache Maven ${jfx.maven.version.min} or later.</message>
+                            </requireMavenVersion>
+                        </rules>
+                    </configuration>
+                </plugin>
             </plugins>
         </pluginManagement>
+
+        <plugins>
+            <!-- Gradle parity: the verifyJava task, which failed the build when the JDK
+                 was older than the minimum recorded in build.properties. The Maven floor
+                 matches the version documented in README.md. Declared as not inherited so
+                 that it runs once for the whole reactor, as verifyJava did.
+                 Gradle also compared the JDK build number against
+                 jfx.build.jdk.buildnum.min (25+36). requireJavaVersion cannot see the
+                 build number, so only the feature version is checked here; every GA build
+                 of JDK 25 is 25+36 or later, so only JDK 25 early access builds slip
+                 through the Maven check. -->
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-enforcer-plugin</artifactId>
+                <inherited>false</inherited>
+                <executions>
+                    <execution>
+                        <id>verify-build-tools</id>
+                        <phase>validate</phase>
+                        <goals>
+                            <goal>enforce</goal>
+                        </goals>
+                    </execution>
+                </executions>
+            </plugin>
+        </plugins>
     </build>
 
     <profiles>
@@ -307,6 +401,21 @@
             </properties>
         </profile>
         <profile>
+            <!-- Gradle parity: SWT_FILE_NAME selected the aarch64 SWT jar on ARM hosts.
+                 This profile is declared after the "linux" profile above so that its
+                 jfx.swt.artifact wins when both are active. -->
+            <id>linux-aarch64</id>
+            <activation>
+                <os>
+                    <name>linux</name>
+                    <arch>aarch64</arch>
+                </os>
+            </activation>
+            <properties>
+                <jfx.swt.artifact>org.eclipse.swt.gtk.linux.aarch64</jfx.swt.artifact>
+            </properties>
+        </profile>
+        <profile>
             <id>macosx</id>
             <activation>
                 <os>
@@ -318,6 +427,21 @@
                 <jfx.swt.artifact>org.eclipse.swt.cocoa.macosx.x86_64</jfx.swt.artifact>
                 <INCLUDE_ES2>true</INCLUDE_ES2>
                 <jfx.sdk.native.dir>lib</jfx.sdk.native.dir>
+            </properties>
+        </profile>
+        <profile>
+            <!-- Gradle parity: SWT_FILE_NAME selected the aarch64 SWT jar on Apple
+                 Silicon. Declared after the "macosx" profile above so that its
+                 jfx.swt.artifact wins when both are active. -->
+            <id>macosx-aarch64</id>
+            <activation>
+                <os>
+                    <name>mac os x</name>
+                    <arch>aarch64</arch>
+                </os>
+            </activation>
+            <properties>
+                <jfx.swt.artifact>org.eclipse.swt.cocoa.macosx.aarch64</jfx.swt.artifact>
             </properties>
         </profile>
         <profile>
@@ -345,6 +469,256 @@
             <properties>
                 <jfx.headless.args>-Dglass.platform=Headless -Dprism.order=sw -Dcom.sun.javafx.gestures.zoom=true -Dcom.sun.javafx.gestures.rotate=true -Dcom.sun.javafx.gestures.scroll=true</jfx.headless.args>
             </properties>
+        </profile>
+        <profile>
+            <!-- Gradle parity: IS_DEBUG_JAVA, i.e. -DCONF=Debug. The Maven default for
+                 CONF stays Release (the Gradle default was Debug). -->
+            <id>conf-debug</id>
+            <activation>
+                <property>
+                    <name>CONF</name>
+                    <value>Debug</value>
+                </property>
+            </activation>
+            <properties>
+                <jfx.debuglevel>source,lines,vars</jfx.debuglevel>
+            </properties>
+        </profile>
+        <profile>
+            <!-- Gradle parity: IS_DEBUG_JAVA was also true for CONF=DebugNative -->
+            <id>conf-debug-native</id>
+            <activation>
+                <property>
+                    <name>CONF</name>
+                    <value>DebugNative</value>
+                </property>
+            </activation>
+            <properties>
+                <jfx.debuglevel>source,lines,vars</jfx.debuglevel>
+            </properties>
+        </profile>
+        <profile>
+            <!-- Gradle parity: the "javadoc" task (createOverviewFile + javadoc + the
+                 doLast that copied each module's src/main/docs into the output).
+                 Opt in with -Pjavadoc; a plain build never runs any of this:
+
+                     mvn -Pjavadoc package
+
+                 maven-javadoc-plugin's aggregate goal is an aggregator mojo that forks
+                 a compile lifecycle for every project in the session, so the generated
+                 sources of javafx.base and javafx.web are on the source path even
+                 though this pom is the first thing the reactor builds. The docs are
+                 written to ${jfx.javadoc.output.dir}. -->
+            <id>javadoc</id>
+            <properties>
+                <!-- Filter tokens for the two resource copies below. overview.html uses
+                     @JAVADOC_VERSION@ and the module docs use @FXVERSION@, so the
+                     property names have to match those tokens exactly. -->
+                <JAVADOC_VERSION>${jfx.release.major.version}</JAVADOC_VERSION>
+                <FXVERSION>${jfx.release.version}</FXVERSION>
+            </properties>
+            <build>
+                <plugins>
+                    <plugin>
+                        <groupId>org.apache.maven.plugins</groupId>
+                        <artifactId>maven-javadoc-plugin</artifactId>
+                        <inherited>false</inherited>
+                        <executions>
+                            <execution>
+                                <id>aggregate-javadoc</id>
+                                <phase>package</phase>
+                                <goals>
+                                    <goal>aggregate</goal>
+                                </goals>
+                            </execution>
+                        </executions>
+                        <!-- Kept outside the executions so that a direct
+                             "mvn -Pjavadoc javadoc:aggregate" is configured too. -->
+                        <configuration>
+                            <!-- The plugin appends "apidocs" to this directory -->
+                            <outputDirectory>${project.build.directory}</outputDirectory>
+                            <!-- Gradle parity: projectsToDocument. javafx.swt was
+                                 commented out there, and jslc, the system tests and the
+                                 sdk aggregator are not API modules. Everything that is
+                                 left has a module-info.java, which the aggregate goal
+                                 requires: it refuses to mix named and unnamed modules. -->
+                            <skippedModules>javafx-jslc,javafx-swt,javafx-system-tests,javafx-sdk</skippedModules>
+                            <!-- Gradle parity: the javadoc task's exclude(...) list -->
+                            <sourceFileExcludes>
+                                <sourceFileExclude>com/**/*</sourceFileExclude>
+                                <sourceFileExclude>Compile*</sourceFileExclude>
+                                <sourceFileExclude>javafx/builder/**/*</sourceFileExclude>
+                                <sourceFileExclude>javafx/scene/accessibility/**/*</sourceFileExclude>
+                            </sourceFileExcludes>
+                            <!-- The filtered copy produced by the overview execution below -->
+                            <overview>${project.build.directory}/overview.html</overview>
+                            <windowtitle>${jfx.javadoc.title}</windowtitle>
+                            <header>${jfx.javadoc.header}</header>
+                            <bottom>${jfx.javadoc.bottom}</bottom>
+                            <top>${jfx.javadoc.top}</top>
+                            <locale>en</locale>
+                            <use>true</use>
+                            <doclint>${jfx.javadoc.doclint}</doclint>
+                            <!-- Gradle passed -Werror to javadoc; the plugin reaches the
+                                 same outcome by failing on any javadoc warning. -->
+                            <failOnWarnings>${jfx.javadoc.werror}</failOnWarnings>
+                            <!-- Gradle emitted exactly one -link, to JDK_DOCS. Let the
+                                 plugin add neither its own JDK link nor per module
+                                 offline links. -->
+                            <detectJavaApiLink>false</detectJavaApiLink>
+                            <detectOfflineLinks>false</detectOfflineLinks>
+                            <links>
+                                <link>${jfx.jdk.docs.url}</link>
+                            </links>
+                            <!-- Gradle parity: the options.tags(...) calls, in order -->
+                            <tags>
+                                <tag><name>apiNote</name><placement>a</placement><head>API Note:</head></tag>
+                                <tag><name>implSpec</name><placement>a</placement><head>Implementation Requirements:</head></tag>
+                                <tag><name>implNote</name><placement>a</placement><head>Implementation Note:</head></tag>
+                                <tag><name>interpolationType</name><placement>a</placement><head>Interpolation Type:</head></tag>
+                                <tag><name>mediaFeature</name><placement>a</placement><head>Media Feature:</head></tag>
+                                <tag><name>param</name></tag>
+                                <tag><name>return</name></tag>
+                                <tag><name>throws</name></tag>
+                                <tag><name>moduleGraph</name><placement>X</placement></tag>
+                                <tag><name>since</name></tag>
+                                <tag><name>version</name></tag>
+                                <tag><name>serialData</name></tag>
+                                <tag><name>factory</name></tag>
+                                <tag><name>see</name></tag>
+                            </tags>
+                            <!-- Passed through verbatim into javadoc's options file,
+                                 which is whitespace tokenised, so an entry may carry its
+                                 own value. Gradle parity: the addStringOption and
+                                 addBooleanOption calls of the javadoc task. -->
+                            <additionalOptions>
+                                <additionalOption>-html5</additionalOption>
+                                <additionalOption>-javafx</additionalOption>
+                                <additionalOption>-Xmaxwarns 1000</additionalOption>
+                                <additionalOption>-Xmaxerrs 1000</additionalOption>
+                                <additionalOption>--since ${jfx.javadoc.since}</additionalOption>
+                                <additionalOption>--since-label "New API since JavaFX 9"</additionalOption>
+                                <additionalOption>--override-methods=summary</additionalOption>
+                            </additionalOptions>
+                        </configuration>
+                    </plugin>
+                    <plugin>
+                        <groupId>org.apache.maven.plugins</groupId>
+                        <artifactId>maven-resources-plugin</artifactId>
+                        <inherited>false</inherited>
+                        <configuration>
+                            <overwrite>true</overwrite>
+                            <useDefaultDelimiters>false</useDefaultDelimiters>
+                            <delimiters>
+                                <delimiter>@</delimiter>
+                            </delimiters>
+                        </configuration>
+                        <executions>
+                            <!-- Gradle parity: createOverviewFile, which substituted
+                                 @JAVADOC_VERSION@ in the root overview.html. Bound to
+                                 generate-resources so that it is also produced by the
+                                 compile lifecycle that the aggregate goal forks. -->
+                            <execution>
+                                <id>javadoc-overview</id>
+                                <phase>generate-resources</phase>
+                                <goals>
+                                    <goal>copy-resources</goal>
+                                </goals>
+                                <configuration>
+                                    <outputDirectory>${project.build.directory}</outputDirectory>
+                                    <resources>
+                                        <resource>
+                                            <directory>${project.basedir}</directory>
+                                            <includes>
+                                                <include>overview.html</include>
+                                            </includes>
+                                            <filtering>true</filtering>
+                                        </resource>
+                                    </resources>
+                                </configuration>
+                            </execution>
+                            <!-- Gradle parity: the javadoc task's doLast, which copied
+                                 each documented module's src/main/docs into
+                                 build/javadoc/[moduleName], substituting @FXVERSION@ in
+                                 the html files only. Declared after maven-javadoc-plugin
+                                 so that it runs after the docs are generated. Add a pair
+                                 of entries whenever a module gains a src/main/docs. -->
+                            <execution>
+                                <id>javadoc-module-docs</id>
+                                <phase>package</phase>
+                                <goals>
+                                    <goal>copy-resources</goal>
+                                </goals>
+                                <configuration>
+                                    <outputDirectory>${jfx.javadoc.output.dir}</outputDirectory>
+                                    <resources>
+                                        <resource>
+                                            <directory>${project.basedir}/modules/javafx.controls/src/main/docs</directory>
+                                            <targetPath>javafx.controls</targetPath>
+                                            <filtering>true</filtering>
+                                            <includes><include>**/*.html</include></includes>
+                                        </resource>
+                                        <resource>
+                                            <directory>${project.basedir}/modules/javafx.controls/src/main/docs</directory>
+                                            <targetPath>javafx.controls</targetPath>
+                                            <filtering>false</filtering>
+                                            <excludes><exclude>**/*.html</exclude></excludes>
+                                        </resource>
+                                        <resource>
+                                            <directory>${project.basedir}/modules/javafx.fxml/src/main/docs</directory>
+                                            <targetPath>javafx.fxml</targetPath>
+                                            <filtering>true</filtering>
+                                            <includes><include>**/*.html</include></includes>
+                                        </resource>
+                                        <resource>
+                                            <directory>${project.basedir}/modules/javafx.fxml/src/main/docs</directory>
+                                            <targetPath>javafx.fxml</targetPath>
+                                            <filtering>false</filtering>
+                                            <excludes><exclude>**/*.html</exclude></excludes>
+                                        </resource>
+                                        <resource>
+                                            <directory>${project.basedir}/modules/javafx.graphics/src/main/docs</directory>
+                                            <targetPath>javafx.graphics</targetPath>
+                                            <filtering>true</filtering>
+                                            <includes><include>**/*.html</include></includes>
+                                        </resource>
+                                        <resource>
+                                            <directory>${project.basedir}/modules/javafx.graphics/src/main/docs</directory>
+                                            <targetPath>javafx.graphics</targetPath>
+                                            <filtering>false</filtering>
+                                            <excludes><exclude>**/*.html</exclude></excludes>
+                                        </resource>
+                                        <resource>
+                                            <directory>${project.basedir}/modules/javafx.media/src/main/docs</directory>
+                                            <targetPath>javafx.media</targetPath>
+                                            <filtering>true</filtering>
+                                            <includes><include>**/*.html</include></includes>
+                                        </resource>
+                                        <resource>
+                                            <directory>${project.basedir}/modules/javafx.media/src/main/docs</directory>
+                                            <targetPath>javafx.media</targetPath>
+                                            <filtering>false</filtering>
+                                            <excludes><exclude>**/*.html</exclude></excludes>
+                                        </resource>
+                                        <resource>
+                                            <directory>${project.basedir}/modules/jfx.incubator.richtext/src/main/docs</directory>
+                                            <targetPath>jfx.incubator.richtext</targetPath>
+                                            <filtering>true</filtering>
+                                            <includes><include>**/*.html</include></includes>
+                                        </resource>
+                                        <resource>
+                                            <directory>${project.basedir}/modules/jfx.incubator.richtext/src/main/docs</directory>
+                                            <targetPath>jfx.incubator.richtext</targetPath>
+                                            <filtering>false</filtering>
+                                            <excludes><exclude>**/*.html</exclude></excludes>
+                                        </resource>
+                                    </resources>
+                                </configuration>
+                            </execution>
+                        </executions>
+                    </plugin>
+                </plugins>
+            </build>
         </profile>
     </profiles>
 </project>

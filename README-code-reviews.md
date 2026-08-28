@@ -43,7 +43,7 @@ An experienced Committer can eventually become a Reviewer by providing good qual
 
 ### 2. Code review policies
 
-All code reviews must be done via a pull request submitted against this GitHub repo, [openjdk/jfx](https://github.com/openjdk/jfx). A JBS bug ID must exist before the pull request will be reviewed. See [CONTRIBUTING.md](CONTRIBUTING.md) for information on how to submit a pull request.
+All code reviews must be done via a pull request submitted against this GitHub repo, [openjdk/jfx](https://github.com/openjdk/jfx). A JBS bug ID must exist before the pull request will be reviewed. See [CONTRIBUTING.md](https://github.com/openjdk/jfx/blob/master/CONTRIBUTING.md) for information on how to submit a pull request.
 
 All fixes must be reviewed by at least one reviewer with the "Reviewer" role (aka a "R"eviewer). We have a different code review threshold for different types of changes. If there is disagreement as to whether a fix is low-impact or high-impact, then it is considered high-impact. In other words we will always err on the side of quality by "rounding up" to the next higher category. The contributor can say whether they think something is low-impact or high-impact, but it is up to a Reviewer to confirm this. A Reviewer either adds a comment indicating that they think a single review is sufficient, or else issues the Skara `/reviewers 2` command requesting a second reviewer (a Reviewer can request more than 2 reviewers in some cases where a fix might be especially risky or cut across multiple functional areas).
 

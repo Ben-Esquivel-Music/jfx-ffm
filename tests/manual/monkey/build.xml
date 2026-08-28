@@ -8,7 +8,7 @@ This build requires javafx.home property, pointing to JavaFX SDK directory, e.g.
 	<!-- project config -->
 	<property name="TARGET" value="MonkeyTester" />
 	<property name="MAIN_CLASS" value="com.oracle.tools.fx.monkey.MonkeyTesterApp"/>
-	<property name="javafx.home" value="../../../build/sdk" />
+	<property name="javafx.home" value="../../../sdk/target/sdk" />
 	
 	<!-- libraries -->
 	<path id="libs">

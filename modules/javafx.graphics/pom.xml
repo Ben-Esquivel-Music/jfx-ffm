@@ -40,6 +40,12 @@
     <properties>
         <jfx.graphics.modulepath>${project.build.outputDirectory}${path.separator}${jfx.root}/modules/javafx.base/target/classes</jfx.graphics.modulepath>
         <jfx.graphics.gensrc>${project.build.directory}/gensrc</jfx.graphics.gensrc>
+        <!-- Gradle parity: the JSLC hardware backends are platform specific.
+             Gradle emitted -d3d on Windows, -mtl on macOS, and -es2 on Linux
+             or whenever INCLUDE_ES2 was set. Linux therefore always gets -es2,
+             which is what this default provides; it also covers any other OS.
+             The jsl-backends-* profiles below override it for Windows and macOS. -->
+        <jfx.jsl.backends>-es2</jfx.jsl.backends>
     </properties>
 
     <dependencies>
@@ -166,9 +172,7 @@
                                     <arg value="-t"/>
                                     <arg value="-pkg"/>
                                     <arg value="com/sun/scenario/effect"/>
-                                    <arg value="-d3d"/>
-                                    <arg value="-es2"/>
-                                    <arg value="-mtl"/>
+                                    <arg line="${jfx.jsl.backends}"/>
                                     <arg value="-all"/>
                                     <arg value="GenAllDecoraShaders"/>
                                 </java>
@@ -204,9 +208,7 @@
                                     <arg value="-t"/>
                                     <arg value="-pkg"/>
                                     <arg value="com/sun/prism"/>
-                                    <arg value="-d3d"/>
-                                    <arg value="-es2"/>
-                                    <arg value="-mtl"/>
+                                    <arg line="${jfx.jsl.backends}"/>
                                     <arg value="-name"/>
                                     <srcfile/>
                                     <fileset dir="${project.basedir}/src/main/jsl-prism" includes="**/*.jsl"/>
@@ -290,6 +292,21 @@
                                     <compilerarg value="--module-path"/>
                                     <compilerarg value="${jfx.shims.base}"/>
                                     <compilerarg value="${jfx.test.lint}"/>
+                                    <!-- Gradle parity: the shims were compiled with
+                                         TEST_JAVAC_WERROR, which defaulted to true.
+                                         The module lint has to be switched off first,
+                                         exactly as jfx.lint does for the main compile.
+                                         This javac sees only the javafx.base shim on
+                                         its module path, so every qualified export in
+                                         module-info.java to javafx.controls, media,
+                                         swing or web reports "module not found" and
+                                         those 65 warnings would fail the build. -->
+                                    <compilerarg value="-Xlint:-module"/>
+                                    <compilerarg value="${jfx.werror}"/>
+                                    <compilerarg value="-Xmaxerrs"/>
+                                    <compilerarg value="1000"/>
+                                    <compilerarg value="-Xmaxwarns"/>
+                                    <compilerarg value="1000"/>
                                 </javac>
                                 <!-- module resources + compiled shaders for test runtime -->
                                 <copy todir="${jfx.shims.graphics}">
@@ -307,8 +324,11 @@
                 <groupId>org.apache.maven.plugins</groupId>
                 <artifactId>maven-jar-plugin</artifactId>
                 <!-- Platform-specific jar excludes (mirroring the Gradle
-                     buildModuleClasses excludes) live in the jar-excludes-win /
-                     jar-excludes-linux profiles below. -->
+                     buildModuleClasses excludes) live in the jar-excludes-win,
+                     jar-excludes-linux and jar-excludes-mac profiles below.
+                     The conditional jar-excludes-*-noes2 and jar-excludes-nonull3d
+                     profiles append further patterns to those lists and therefore
+                     have to stay declared after the profile they extend. -->
                 <executions>
                     <execution>
                         <id>test-jar</id>
@@ -371,17 +391,52 @@
                                 <exclude>com/sun/javafx/tools/ant/**</exclude>
                                 <exclude>com/javafx/main/**</exclude>
                                 <exclude>com/sun/javafx/webkit/drt/**</exclude>
-                                <exclude>com/sun/prism/es2/**</exclude>
-                                <exclude>com/sun/scenario/effect/impl/es2/**</exclude>
                                 <exclude>com/sun/prism/es2/MacGL*</exclude>
                                 <exclude>com/sun/glass/events/mac/**</exclude>
                                 <exclude>com/sun/glass/ui/mac/**</exclude>
                                 <exclude>com/sun/prism/mtl/**</exclude>
                                 <exclude>com/sun/scenario/effect/impl/hw/mtl/**</exclude>
                                 <exclude>com/sun/glass/ui/gtk/**</exclude>
+                                <exclude>com/sun/prism/es2/EGL*</exclude>
+                                <exclude>com/sun/prism/es2/X11GL*</exclude>
                                 <exclude>com/sun/glass/ui/monocle/**</exclude>
+                                <exclude>com/sun/prism/es2/Monocle*</exclude>
                                 <exclude>com/sun/glass/ui/ios/**</exclude>
+                                <exclude>com/sun/prism/es2/IOS*</exclude>
                                 <exclude>com/sun/glass/ui/android/**</exclude>
+                            </excludes>
+                        </configuration>
+                    </plugin>
+                </plugins>
+            </build>
+        </profile>
+        <!-- Gradle parity: the ES2 pipeline classes are only dropped when
+             INCLUDE_ES2 is off (the default on Windows); with -DINCLUDE_ES2=true
+             the native-win profile builds prism_es2.dll and the classes must
+             stay in the jar. This profile must be declared after
+             jar-excludes-win: it is injected later, so combine.children="append"
+             adds these two patterns to that profile's <excludes> instead of
+             replacing them. -->
+        <profile>
+            <id>jar-excludes-win-noes2</id>
+            <activation>
+                <os>
+                    <family>windows</family>
+                </os>
+                <property>
+                    <name>INCLUDE_ES2</name>
+                    <value>!true</value>
+                </property>
+            </activation>
+            <build>
+                <plugins>
+                    <plugin>
+                        <groupId>org.apache.maven.plugins</groupId>
+                        <artifactId>maven-jar-plugin</artifactId>
+                        <configuration>
+                            <excludes combine.children="append">
+                                <exclude>com/sun/prism/es2/**</exclude>
+                                <exclude>com/sun/scenario/effect/impl/es2/**</exclude>
                             </excludes>
                         </configuration>
                     </plugin>
@@ -429,6 +484,40 @@
                 </plugins>
             </build>
         </profile>
+        <!-- Gradle parity: INCLUDE_ES2 defaults to true on Linux, so the ES2
+             pipeline classes are only dropped when it is explicitly turned off,
+             which is what the old build did with "if (!IS_INCLUDE_ES2) exclude".
+             Profile activation never sees POM properties, only ones set on the
+             command line, so this matches the literal value "false" instead of
+             the !true form used by the Windows profile above, where the default
+             is off. Declared after jar-excludes-linux so that the append
+             combiner adds these patterns to that exclude list. -->
+        <profile>
+            <id>jar-excludes-linux-noes2</id>
+            <activation>
+                <os>
+                    <name>linux</name>
+                </os>
+                <property>
+                    <name>INCLUDE_ES2</name>
+                    <value>false</value>
+                </property>
+            </activation>
+            <build>
+                <plugins>
+                    <plugin>
+                        <groupId>org.apache.maven.plugins</groupId>
+                        <artifactId>maven-jar-plugin</artifactId>
+                        <configuration>
+                            <excludes combine.children="append">
+                                <exclude>com/sun/prism/es2/**</exclude>
+                                <exclude>com/sun/scenario/effect/impl/es2/**</exclude>
+                            </excludes>
+                        </configuration>
+                    </plugin>
+                </plugins>
+            </build>
+        </profile>
         <profile>
             <id>jar-excludes-mac</id>
             <activation>
@@ -455,6 +544,7 @@
                                 <exclude>com/sun/scenario/effect/impl/hw/d3d/**</exclude>
                                 <exclude>com/sun/glass/ui/gtk/**</exclude>
                                 <exclude>com/sun/prism/es2/EGL*</exclude>
+                                <exclude>com/sun/prism/es2/X11GL*</exclude>
                                 <exclude>com/sun/glass/ui/monocle/**</exclude>
                                 <exclude>com/sun/prism/es2/Monocle*</exclude>
                                 <exclude>com/sun/glass/ui/ios/**</exclude>
@@ -465,6 +555,142 @@
                     </plugin>
                 </plugins>
             </build>
+        </profile>
+        <!-- Same reasoning as jar-excludes-linux-noes2: INCLUDE_ES2 defaults to
+             true on macOS, so the ES2 pipeline classes are only dropped when it
+             is explicitly set to false. Declared after jar-excludes-mac so that
+             the append combiner adds to that exclude list. -->
+        <profile>
+            <id>jar-excludes-mac-noes2</id>
+            <activation>
+                <os>
+                    <name>mac os x</name>
+                </os>
+                <property>
+                    <name>INCLUDE_ES2</name>
+                    <value>false</value>
+                </property>
+            </activation>
+            <build>
+                <plugins>
+                    <plugin>
+                        <groupId>org.apache.maven.plugins</groupId>
+                        <artifactId>maven-jar-plugin</artifactId>
+                        <configuration>
+                            <excludes combine.children="append">
+                                <exclude>com/sun/prism/es2/**</exclude>
+                                <exclude>com/sun/scenario/effect/impl/es2/**</exclude>
+                            </excludes>
+                        </configuration>
+                    </plugin>
+                </plugins>
+            </build>
+        </profile>
+        <!-- Gradle parity: the Null3D pipeline is a perf debugging aid that only
+             ships when INCLUDE_NULL3D is true; the old build defaulted that
+             property to false and gated the exclude on it. Null3D is pure Java
+             with no native library, is not named in module-info.java and is not
+             referenced from any source outside com/sun/prism/null3d, so leaving
+             it out of the jar is safe. One profile covers every platform and is
+             declared last so that the append combiner adds to whichever
+             jar-excludes profile matched the host OS. -->
+        <profile>
+            <id>jar-excludes-nonull3d</id>
+            <activation>
+                <property>
+                    <name>INCLUDE_NULL3D</name>
+                    <value>!true</value>
+                </property>
+            </activation>
+            <build>
+                <plugins>
+                    <plugin>
+                        <groupId>org.apache.maven.plugins</groupId>
+                        <artifactId>maven-jar-plugin</artifactId>
+                        <configuration>
+                            <excludes combine.children="append">
+                                <exclude>com/sun/prism/null3d/**</exclude>
+                            </excludes>
+                        </configuration>
+                    </plugin>
+                </plugins>
+            </build>
+        </profile>
+        <!-- JSLC hardware shader backends, mirroring the Gradle addJSL/generateShaders
+             argument list: -d3d on Windows, -mtl on macOS, -es2 on Linux or when
+             INCLUDE_ES2 is set. The default (-es2) is declared in <properties> and
+             is what Linux always uses, because Gradle emitted -es2 for IS_LINUX
+             regardless of INCLUDE_ES2. The profiles below are mutually exclusive
+             per OS and their activation values are matched literally, so use
+             exactly -DINCLUDE_ES2=true or -DINCLUDE_ES2=false. The values are
+             deliberately asymmetric because INCLUDE_ES2 is off by default on
+             Windows and on by default on macOS, and profile activation only ever
+             sees properties set on the command line, never the POM property that
+             the root pom sets per platform. -->
+        <profile>
+            <id>jsl-backends-win</id>
+            <activation>
+                <os>
+                    <family>windows</family>
+                </os>
+                <property>
+                    <name>INCLUDE_ES2</name>
+                    <value>!true</value>
+                </property>
+            </activation>
+            <properties>
+                <jfx.jsl.backends>-d3d</jfx.jsl.backends>
+            </properties>
+        </profile>
+        <!-- Mutually exclusive with jsl-backends-win: with -DINCLUDE_ES2=true the
+             native-win profile builds prism_es2.dll, so the GLSL shaders are needed. -->
+        <profile>
+            <id>jsl-backends-win-es2</id>
+            <activation>
+                <os>
+                    <family>windows</family>
+                </os>
+                <property>
+                    <name>INCLUDE_ES2</name>
+                    <value>true</value>
+                </property>
+            </activation>
+            <properties>
+                <jfx.jsl.backends>-d3d -es2</jfx.jsl.backends>
+            </properties>
+        </profile>
+        <profile>
+            <id>jsl-backends-mac</id>
+            <activation>
+                <os>
+                    <name>mac os x</name>
+                </os>
+                <property>
+                    <name>INCLUDE_ES2</name>
+                    <value>!false</value>
+                </property>
+            </activation>
+            <properties>
+                <jfx.jsl.backends>-mtl -es2</jfx.jsl.backends>
+            </properties>
+        </profile>
+        <!-- Mutually exclusive with jsl-backends-mac: with -DINCLUDE_ES2=false the
+             native-mac profile skips libprism_es2.dylib and jar-excludes-mac-noes2
+             drops the ES2 classes, so the GLSL shaders are not needed either. -->
+        <profile>
+            <id>jsl-backends-mac-noes2</id>
+            <activation>
+                <os>
+                    <name>mac os x</name>
+                </os>
+                <property>
+                    <name>INCLUDE_ES2</name>
+                    <value>false</value>
+                </property>
+            </activation>
+            <properties>
+                <jfx.jsl.backends>-mtl</jfx.jsl.backends>
+            </properties>
         </profile>
         <!-- Native Windows libraries via CMake + Visual Studio. Skip with -DskipNative=true -->
         <profile>

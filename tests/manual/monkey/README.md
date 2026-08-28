@@ -21,6 +21,9 @@ using absolute path:
 ant -Djavafx.home=<JAVAFX>
 ```
 
+Building this repository with `mvn install` produces a suitable SDK in
+`sdk/target/sdk` at the repository root.
+
 
 ## Run
 

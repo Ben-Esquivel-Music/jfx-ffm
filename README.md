@@ -19,8 +19,10 @@ This codebase is a fork of the OpenJFX mainline development branch (version 28-e
 
 # Building
 
-The project builds with Apache Maven (3.9+) and a JDK matching
-`jfx.jdk.target.version` in [build.properties](build.properties):
+The project builds with Apache Maven (3.9+) and a JDK at least as new as
+`jfx.build.jdk.version.min` (25) in [build.properties](build.properties) (CI
+builds with JDK 26.0.2; the separate `jfx.jdk.target.version` is the runtime
+target passed to `javac --release`, not the build JDK):
 
     mvn install
 
@@ -38,7 +40,10 @@ the headless unit test suite. Useful flags:
 
 The media and WebKit native libraries are not compiled from source; see
 [WEBKIT-MEDIA-STUBS.md](WEBKIT-MEDIA-STUBS.md) for how to supply prebuilt
-libraries. The assembled SDK lands in `sdk/target/sdk/`.
+libraries. The assembled SDK lands in `sdk/target/sdk/`; it holds the module
+jars and `javafx.properties` under `lib/` plus the javafx.graphics native
+libraries. Legal notices, `src.zip`, jmods, javadoc and distribution archives
+are not produced.
 
 # Contribute
 
