@@ -24,19 +24,30 @@ Import and run the project.
 
 ### Using Command Line
 
-Execute `ant` command in this directory. 
+Execute the `ant` command in this directory, pointing `javafx.home` at a
+JavaFX SDK using an absolute path:
+```
+ant -Djavafx.home=<JAVAFX>
+```
+
+Building this repository with `mvn install` produces a suitable SDK in
+`sdk/target/sdk` at the repository root, which is also the default when
+building in place.
 
 
 
 ## Running Demos
 
-Use the following commands to run demos build in the previous section:
+Use the following commands to run the demos built in the previous section. Ant
+does not retain properties between invocations, so pass the same
+`-Djavafx.home=<JAVAFX>` used to build; omitting it silently falls back to the
+in-tree default:
 
-Code Area Demo: `ant run-codearea-demo`
+Code Area Demo: `ant -Djavafx.home=<JAVAFX> run-codearea-demo`
 
-Notebook Demo: `ant run-notebook-demo`
+Notebook Demo: `ant -Djavafx.home=<JAVAFX> run-notebook-demo`
 
-Rich Editor Demo: `ant run-richeditor-demo`
+Rich Editor Demo: `ant -Djavafx.home=<JAVAFX> run-richeditor-demo`
 
-RichTextArea Tester: `ant run-richtextarea-demo`
+RichTextArea Tester: `ant -Djavafx.home=<JAVAFX> run-richtextarea-demo`
 

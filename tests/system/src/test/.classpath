@@ -57,15 +57,11 @@
     </classpathentry>
 	<classpathentry kind="src" output="bin" path="java">
 	    <attributes>
-            <attribute name="gradle_scope" value="test"/>
-            <attribute name="gradle_used_by_scope" value="test"/>
             <attribute name="test" value="true"/>
         </attributes>
 	</classpathentry>
 	<classpathentry kind="src" output="bin" path="resources">
         <attributes>
-            <attribute name="gradle_scope" value="test"/>
-            <attribute name="gradle_used_by_scope" value="test"/>
             <attribute name="test" value="true"/>
         </attributes>
     </classpathentry>

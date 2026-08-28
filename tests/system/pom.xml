@@ -45,11 +45,22 @@
              module's main classes (same set Gradle put in test.run.args) -->
         <jfx.st.modulepath>${jfx.shims.base}${path.separator}${jfx.shims.graphics}${path.separator}${jfx.shims.controls}${path.separator}${jfx.root}/modules/jfx.incubator.input/target/classes${path.separator}${jfx.shims.incubator.richtext}${path.separator}${jfx.root}/modules/javafx.media/target/classes${path.separator}${jfx.root}/modules/jdk.jsobject/target/classes${path.separator}${jfx.shims.web}${path.separator}${jfx.shims.swing}${path.separator}${jfx.shims.fxml}</jfx.st.modulepath>
         <jfx.st.addmodules>javafx.base,javafx.graphics,javafx.controls,jfx.incubator.input,jfx.incubator.richtext,javafx.media,jdk.jsobject,javafx.web,javafx.swing,javafx.fxml</jfx.st.addmodules>
-        <!-- Test exclusions, lifted by the USE_ROBOT / UNSTABLE_TEST / AWT_TEST profiles -->
+        <!-- Test exclusions, lifted by the USE_ROBOT / UNSTABLE_TEST profiles -->
         <jfx.st.exclude.robot>test/robot/**</jfx.st.exclude.robot>
         <jfx.st.exclude.monocle>test/robot/com/sun/glass/ui/monocle/**</jfx.st.exclude.monocle>
-        <jfx.st.exclude.awt1>**/javafx/embed/swing/*.*</jfx.st.exclude.awt1>
-        <jfx.st.exclude.awt2>**/com/sun/javafx/application/Swing*.*</jfx.st.exclude.awt2>
+        <!-- Gradle parity: AWT_TEST defaulted to true, so the AWT/Swing interop
+             tests ran by default; they are excluded by the no-awt-test profile
+             (-DAWT_TEST=false). The exclusion cannot be the default here: profile
+             <activation><property> reads system/user properties only, never POM
+             properties, so a profile keyed on AWT_TEST=true would never activate. -->
+        <jfx.st.exclude.awt1>__none1__/**</jfx.st.exclude.awt1>
+        <jfx.st.exclude.awt2>__none2__/**</jfx.st.exclude.awt2>
+        <!-- Gradle parity: -PWORKER_DEBUG toggled the diagnostic output that
+             test.util.Util prints when it launches a worker JVM -->
+        <WORKER_DEBUG>false</WORKER_DEBUG>
+        <!-- Gradle parity: -PClipShapeTest.numTests passthrough; 100 is also the
+             default baked into ClipShapeTest itself -->
+        <ClipShapeTest.numTests>100</ClipShapeTest.numTests>
         <maven.install.skip>true</maven.install.skip>
         <maven.deploy.skip>true</maven.deploy.skip>
     </properties>
@@ -217,6 +228,15 @@
 --enable-native-access=javafx.graphics,javafx.media,javafx.web
 -cp "${jfx.st.testclasspath}"
 </echo>
+                                <!-- Gradle parity: cygpath() converted every path written into an
+                                     argfile to forward slashes. The JDK @argfile parser treats a
+                                     backslash as an escape character, so an unconverted Windows
+                                     path is silently mangled (C:\SourceCode -> C:SourceCode).
+                                     Every line above is path-bearing except the add-modules and
+                                     enable-native-access lines, which contain no backslashes, so
+                                     a whole-file conversion is both safe and complete. -->
+                                <replaceregexp file="${project.build.directory}/st.run.args"
+                                               match="\\" replace="/" flags="g"/>
                             </target>
                         </configuration>
                     </execution>
@@ -251,7 +271,7 @@
                         ${jfx.headless.args}
                     </argLine>
                     <systemPropertyVariables>
-                        <worker.debug>false</worker.debug>
+                        <worker.debug>${WORKER_DEBUG}</worker.debug>
                         <worker.patchmodule.file>${project.build.directory}/st.run.args</worker.patchmodule.file>
                         <worker.module.path>${jfx.st.modulepath}</worker.module.path>
                         <worker.java.cmd>${java.home}/bin/java</worker.java.cmd>
@@ -266,6 +286,7 @@
                         <launchertest.testscriptapp2.module.path>${project.basedir}/build/modules/testscriptapp2</launchertest.testscriptapp2.module.path>
                         <unstable.test>${UNSTABLE_TEST}</unstable.test>
                         <test.screenshot>${TEST_SCREENSHOT}</test.screenshot>
+                        <ClipShapeTest.numTests>${ClipShapeTest.numTests}</ClipShapeTest.numTests>
                         <junit.jupiter.execution.timeout.test.method.default>${junit.test.timeout}s</junit.jupiter.execution.timeout.test.method.default>
                         <junit.jupiter.execution.timeout.lifecycle.method.default>${junit.lifecycle.timeout}s</junit.jupiter.execution.timeout.lifecycle.method.default>
                         <javafx.enablePreview>true</javafx.enablePreview>
@@ -400,17 +421,18 @@
             </properties>
         </profile>
         <profile>
-            <!-- Enables AWT/Swing interop tests -->
-            <id>awt-test</id>
+            <!-- Disables the AWT/Swing interop tests, which run by default
+                 (Gradle: -PAWT_TEST=false) -->
+            <id>no-awt-test</id>
             <activation>
                 <property>
                     <name>AWT_TEST</name>
-                    <value>true</value>
+                    <value>false</value>
                 </property>
             </activation>
             <properties>
-                <jfx.st.exclude.awt1>__none1__/**</jfx.st.exclude.awt1>
-                <jfx.st.exclude.awt2>__none2__/**</jfx.st.exclude.awt2>
+                <jfx.st.exclude.awt1>**/javafx/embed/swing/*.*</jfx.st.exclude.awt1>
+                <jfx.st.exclude.awt2>**/com/sun/javafx/application/Swing*.*</jfx.st.exclude.awt2>
             </properties>
         </profile>
     </profiles>

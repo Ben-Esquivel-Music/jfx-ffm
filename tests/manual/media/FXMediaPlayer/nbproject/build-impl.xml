@@ -874,7 +874,7 @@ is divided into following sections:
                         <path path="@{classpath}"/>
                     </classpath>
                     <modulepath>
-                        <pathelement path="../../../../build/sdk/lib:@{modulepath}"/>
+                        <pathelement path="../../../../sdk/target/sdk/lib:@{modulepath}"/>
                         <pathelement location="${module.build.classes.dir}"/>
                     </modulepath>
                     <upgrademodulepath>
