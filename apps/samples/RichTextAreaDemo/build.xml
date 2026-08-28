@@ -9,7 +9,7 @@ unless built as a part of openjfx repository where the default value is sufficie
 	<!-- project config -->
 	<property name="TARGET" value="RichEditorDemo" />
 	<property name="MAIN_CLASS" value="com.oracle.demo.richtext.editor.RichEditorDemoApp"/>
-	<property name="javafx.home" value="../../../build/sdk" />
+	<property name="javafx.home" value="../../../sdk/target/sdk" />
 	
 	<target name="clean">
 		<delete includeEmptyDirs="true" dir="build" failonerror="false" />

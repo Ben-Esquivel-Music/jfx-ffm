@@ -167,6 +167,18 @@
                                     <compilerarg value="--module-version"/>
                                     <compilerarg value="${jfx.release.version.short}"/>
                                     <compilerarg value="${jfx.test.lint}"/>
+                                    <!-- Gradle parity: the shims were compiled with TEST_JAVAC_WERROR,
+                                         which defaulted to true. The module lint has to be switched
+                                         off first, exactly as jfx.lint does for the main compile:
+                                         this javac sees only part of the module graph, so every
+                                         qualified export in module-info.java to a module that is not
+                                         on its module path reports "module not found". -->
+                                    <compilerarg value="-Xlint:-module"/>
+                                    <compilerarg value="${jfx.werror}"/>
+                                    <compilerarg value="-Xmaxerrs"/>
+                                    <compilerarg value="1000"/>
+                                    <compilerarg value="-Xmaxwarns"/>
+                                    <compilerarg value="1000"/>
                                 </javac>
                                 <copy todir="${jfx.shims.incubator.richtext}">
                                     <fileset dir="${project.build.outputDirectory}" excludes="**/*.class"/>

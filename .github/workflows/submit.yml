@@ -102,7 +102,10 @@ jobs:
           export PATH="$JAVA_HOME/bin:$PATH"
           # Full build: Java modules, native libraries (CMake + gcc) and the
           # unit test suite. Web and system tests are skipped by default.
-          mvn -B -ntp install
+          # -fae (fail-at-end) approximates the "gradlew --continue" that the old CI
+          # passed to its separate test run: after a failure Maven still builds and
+          # tests every module that does not depend on the failed one.
+          mvn -B -ntp -fae install
 
   linux_aarch64_build:
     name: Linux aarch64
@@ -151,7 +154,10 @@ jobs:
           export PATH="$JAVA_HOME/bin:$PATH"
           # Full build: Java modules, native libraries (CMake + gcc) and the
           # unit test suite. Web and system tests are skipped by default.
-          mvn -B -ntp install
+          # -fae (fail-at-end) approximates the "gradlew --continue" that the old CI
+          # passed to its separate test run: after a failure Maven still builds and
+          # tests every module that does not depend on the failed one.
+          mvn -B -ntp -fae install
 
   macos_x64_build:
     name: macOS x64
@@ -194,7 +200,10 @@ jobs:
           # Full build: Java modules, native libraries (CMake + clang, Metal
           # shaders) and the unit test suite. Web and system tests are skipped
           # by default.
-          mvn -B -ntp install
+          # -fae (fail-at-end) approximates the "gradlew --continue" that the old CI
+          # passed to its separate test run: after a failure Maven still builds and
+          # tests every module that does not depend on the failed one.
+          mvn -B -ntp -fae install
 
   macos_aarch64_build:
     name: macOS aarch64
@@ -237,7 +246,10 @@ jobs:
           # Full build: Java modules, native libraries (CMake + clang, Metal
           # shaders) and the unit test suite. Web and system tests are skipped
           # by default.
-          mvn -B -ntp install
+          # -fae (fail-at-end) approximates the "gradlew --continue" that the old CI
+          # passed to its separate test run: after a failure Maven still builds and
+          # tests every module that does not depend on the failed one.
+          mvn -B -ntp -fae install
 
   windows_x64_build:
     name: Windows x64
@@ -282,4 +294,7 @@ jobs:
           echo "Path=$env:Path"
           # Full build: Java modules, native libraries (CMake + MSVC) and the
           # unit test suite. Web and system tests are skipped by default.
-          mvn -B -ntp install
+          # -fae (fail-at-end) approximates the "gradlew --continue" that the old CI
+          # passed to its separate test run: after a failure Maven still builds and
+          # tests every module that does not depend on the failed one.
+          mvn -B -ntp -fae install

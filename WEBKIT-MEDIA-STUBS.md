@@ -11,21 +11,25 @@ libraries from source (the former Gradle COMPILE_WEBKIT / COMPILE_MEDIA
 switches). Use one of the options below to supply prebuilt libraries.
 
 
-## Cached libraries
+## Prebuilt libraries
 
-You can manually place WebKit and Media shared libraries in these folders
-(`$projectDir` is the repository root, so `caches` sits *next to* the
-repository, outside it — safe from `mvn clean`):
+You can manually place the WebKit and Media shared libraries (`*.dll`, `*.so`
+or `*.dylib`) in the directory the build already uses as `java.library.path`:
 
-* Unix libraries (*.so or *.dylib files)
 ````
-    $projectDir/../caches/sdk/lib
+    modules/javafx.graphics/target/native/bin
 ````
 
-* Windows libraries (*.dll files)
-````
-    $projectDir/../caches/sdk/bin
-````
+This is the same directory the javafx.graphics native build writes to, and the
+one passed as `-Djava.library.path` by both the web module tests
+(`modules/javafx.web/pom.xml`) and the system tests (`tests/system/pom.xml`).
+The SDK assembly also copies every shared library found there into
+`sdk/target/sdk`, so libraries dropped in before `mvn install` end up in the
+assembled SDK as well.
+
+The web module loads `jfxwebkit`; the media module loads `jfxmedia` together
+with its platform dependencies (`glib-lite`, `gstreamer-lite`, `fxplugins`,
+and `jfxmedia_avf` on macOS).
 
 The Maven build puts both cache folders on `java.library.path` for the
 `javafx.web` unit tests and the `tests/system` test and worker JVMs (property
@@ -37,7 +41,7 @@ up automatically on the next test run.
 You can download officially released libraries from
 [MavenCentral](https://search.maven.org/search?q=g:org.openjfx%20AND%20a:javafx)
 (artifacts `javafx-web` and `javafx-media` with your platform classifier) and
-extract the shared libraries into the cache folders above.
+extract the shared libraries into the folder above.
 
 Note that these libraries may not be compatible with the source tree you are working with. Always use the [latest version](https://search.maven.org/search?q=g:org.openjfx%20AND%20a:javafx); this may improve your chances of compatibility.
 

@@ -73,4 +73,76 @@
             </plugin>
         </plugins>
     </build>
+
+    <profiles>
+        <!-- Platform-specific module jar contents, mirroring the Gradle
+             buildModuleClasses excludes for each platform: the iOS platform
+             classes are never shipped on a desktop build, and the OS X platform
+             classes only on macOS. -->
+        <profile>
+            <id>jar-excludes-win</id>
+            <activation>
+                <os>
+                    <family>windows</family>
+                </os>
+            </activation>
+            <build>
+                <plugins>
+                    <plugin>
+                        <groupId>org.apache.maven.plugins</groupId>
+                        <artifactId>maven-jar-plugin</artifactId>
+                        <configuration>
+                            <excludes>
+                                <exclude>com/sun/media/jfxmediaimpl/platform/osx/**</exclude>
+                                <exclude>com/sun/media/jfxmediaimpl/platform/ios/**</exclude>
+                            </excludes>
+                        </configuration>
+                    </plugin>
+                </plugins>
+            </build>
+        </profile>
+        <profile>
+            <id>jar-excludes-linux</id>
+            <activation>
+                <os>
+                    <name>linux</name>
+                </os>
+            </activation>
+            <build>
+                <plugins>
+                    <plugin>
+                        <groupId>org.apache.maven.plugins</groupId>
+                        <artifactId>maven-jar-plugin</artifactId>
+                        <configuration>
+                            <excludes>
+                                <exclude>com/sun/media/jfxmediaimpl/platform/osx/**</exclude>
+                                <exclude>com/sun/media/jfxmediaimpl/platform/ios/**</exclude>
+                            </excludes>
+                        </configuration>
+                    </plugin>
+                </plugins>
+            </build>
+        </profile>
+        <profile>
+            <id>jar-excludes-mac</id>
+            <activation>
+                <os>
+                    <name>mac os x</name>
+                </os>
+            </activation>
+            <build>
+                <plugins>
+                    <plugin>
+                        <groupId>org.apache.maven.plugins</groupId>
+                        <artifactId>maven-jar-plugin</artifactId>
+                        <configuration>
+                            <excludes>
+                                <exclude>com/sun/media/jfxmediaimpl/platform/ios/**</exclude>
+                            </excludes>
+                        </configuration>
+                    </plugin>
+                </plugins>
+            </build>
+        </profile>
+    </profiles>
 </project>
