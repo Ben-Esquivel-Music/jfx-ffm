@@ -38,14 +38,16 @@ building in place.
 
 ## Running Demos
 
-Use the following commands to run demos build in the previous section, passing
-the same `-Djavafx.home=<JAVAFX>` used to build:
+Use the following commands to run the demos built in the previous section. Ant
+does not retain properties between invocations, so pass the same
+`-Djavafx.home=<JAVAFX>` used to build; omitting it silently falls back to the
+in-tree default:
 
-Code Area Demo: `ant run-codearea-demo`
+Code Area Demo: `ant -Djavafx.home=<JAVAFX> run-codearea-demo`
 
-Notebook Demo: `ant run-notebook-demo`
+Notebook Demo: `ant -Djavafx.home=<JAVAFX> run-notebook-demo`
 
-Rich Editor Demo: `ant run-richeditor-demo`
+Rich Editor Demo: `ant -Djavafx.home=<JAVAFX> run-richeditor-demo`
 
-RichTextArea Tester: `ant run-richtextarea-demo`
+RichTextArea Tester: `ant -Djavafx.home=<JAVAFX> run-richtextarea-demo`
 

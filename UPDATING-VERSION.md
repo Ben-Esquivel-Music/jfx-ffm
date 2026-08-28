@@ -29,6 +29,11 @@ files must be kept in sync.
 the `<version>` in the `<parent>` block of every module `pom.xml`) to the new
 release version, for example from `$N-ea` to `$N+1-ea`.
 
+* In `pom.xml`, append the new feature version to the `jfx.javadoc.since`
+property. It is passed to the javadoc tool as `--since`, so leaving it behind
+omits the new release from the generated API documentation's "since"
+navigation.
+
 * In
 `modules/javafx.base/src/test/java/test/com/sun/javafx/runtime/VersionInfoTest.java`,
 modify the `FEATURE` variable to increment the feature version number
