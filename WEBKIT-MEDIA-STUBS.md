@@ -31,10 +31,11 @@ The web module loads `jfxwebkit`; the media module loads `jfxmedia` together
 with its platform dependencies (`glib-lite`, `gstreamer-lite`, `fxplugins`,
 and `jfxmedia_avf` on macOS).
 
-The Maven build puts both cache folders on `java.library.path` for the
-`javafx.web` unit tests and the `tests/system` test and worker JVMs (property
-`jfx.native.librarypath` in the root pom), so libraries placed there are picked
-up automatically on the next test run.
+The Maven build also puts `../caches/sdk/bin` and `../caches/sdk/lib`
+(relative to the repository root) on `java.library.path` for the `javafx.web`
+unit tests and the `tests/system` test and worker JVMs (property
+`jfx.native.librarypath` in the root pom), so cached libraries are picked up
+automatically on the next test run.
 
 ## Officially released libraries
 
