@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2014, 2024, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2014, 2026, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -45,7 +45,7 @@ import org.junit.jupiter.api.Timeout;
 /**
  * Unit test for calling Platform runLater from a ShutdownHook.
  */
-@Timeout(value=15000, unit=TimeUnit.MILLISECONDS)
+@Timeout(value=45000, unit=TimeUnit.MILLISECONDS)
 public class ShutdownHookTest {
 
     private static final String className = ShutdownHookTest.class.getName();
@@ -58,9 +58,11 @@ public class ShutdownHookTest {
         // Initilaize the socket
         final ServerSocket service = new ServerSocket(0);
         final int port = service.getLocalPort();
-        // Fail instead of blocking forever if the app never connects or dies
-        // early: @Timeout interrupts don't unblock socket accept/read.
-        service.setSoTimeout(30000);
+        // Fail instead of blocking forever if the app never connects or dies early:
+        // @Timeout interrupts don't unblock socket accept/read. Each socket wait is
+        // bounded at 10s, so the combined worst case (accept + two reads = 30s) stays
+        // below the 45s class @Timeout, the backstop for interruptible waits (waitFor).
+        service.setSoTimeout(10000);
 
         // Launch the test app
         final ArrayList<String> cmd
@@ -78,7 +80,7 @@ public class ShutdownHookTest {
 
         // Accept a connection from the test app
         final Socket socket = service.accept();
-        socket.setSoTimeout(30000);
+        socket.setSoTimeout(10000);
         final InputStream in = socket.getInputStream();
 
         // Read the "handshake" token
