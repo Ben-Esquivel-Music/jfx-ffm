@@ -25,6 +25,7 @@
 
 package test.com.sun.webkit.ffm;
 
+import com.sun.webkit.WebKitNativeShim;
 import com.sun.webkit.WkjStubShim;
 import com.sun.webkit.dom.DomFacadeShim;
 import org.junit.jupiter.api.BeforeAll;
@@ -52,6 +53,8 @@ public class WebKitDomFacadeTest {
     @BeforeAll
     static void loadLibrary() {
         assumeTrue(WkjStubShim.load(), WkjStubShim.loadFailure());
+        // Initialize WebKitNative before @BeforeEach clears wkj_init from the call recorder.
+        assertEquals(0, WebKitNativeShim.productionHostInitResult());
     }
 
     @BeforeEach
