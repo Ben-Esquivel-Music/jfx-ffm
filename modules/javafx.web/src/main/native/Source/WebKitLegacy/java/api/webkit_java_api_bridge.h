@@ -27,7 +27,7 @@
  * webkit_java_api_bridge.h - the LiveConnect (netscape.javascript.JSObject) third of the
  * jfxwebkit C ABI.
  *
- * Scope, exactly: Source/WebCore/bridge/jni/**. That directory is the JavaScript <-> Java
+ * Scope, exactly: the Source/WebCore/bridge/jni directory. It is the JavaScript <-> Java
  * bridge: it turns a JS value into a Java object and back, it exposes an arbitrary Java
  * object to script as a JS object, and it carries the nine JNI entry points behind
  * com.sun.webkit.dom.JSObject. Its directory name is now a misnomer - there is no JNI in

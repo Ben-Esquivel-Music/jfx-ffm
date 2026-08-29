@@ -68,7 +68,8 @@ my @checks = (
         name    => 'C/C++ naming a JNI type',
         roots   => ["$module/src/main/native/Source", "$module/src/main/native/Tools"],
         match   => qr/\.(?:cpp|c|h|hpp|mm|m)$/,
-        pattern => qr/\b(?:JNIEnv|JavaVM|jobject|jclass|jstring|jmethodID|jfieldID|jthrowable|jweak)\b/,
+        pattern => qr/\b(?:JNIEnv|JavaVM|jobject|jclass|jstring|jmethodID|jfieldID|jthrowable|jweak|
+            jboolean|jbyte|jchar|jshort|jint|jlong|jfloat|jdouble|jsize)\b/x,
     },
     {
         name    => 'C/C++ exporting a JNI entry point',

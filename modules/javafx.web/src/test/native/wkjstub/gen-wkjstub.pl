@@ -106,13 +106,26 @@ my %skip = map { $_ => 1 } @skip;
 # pulled in BY the core header, because their structs are members of WKJHost and must be
 # complete mid-header. _page.h and _bridge.h include the core instead, because their
 # tables are installed separately and are not WKJHost members. Following includes alone
-# therefore finds the first group and misses the second, so the siblings are globbed too.
+# therefore finds the first group and misses the second, so the siblings are enumerated too.
 my @headerIncludes;
+
+# Git for Windows Perl accepts a backslash path for open(), but glob() treats
+# those backslashes as escapes. CMake supplies an absolute native-Windows path,
+# so the old glob silently missed the reverse-including _page and _bridge
+# siblings. Normalize once and enumerate the directory without glob semantics.
+$header =~ tr{\\}{/};
 my @headerQueue = ($header);
 {
     my $dir = $header;
     $dir =~ s{[^/\\]+$}{};
-    push @headerQueue, sort grep { !m{\Q$dom_include\E$} } glob("${dir}webkit_java_api*.h");
+    my $scanDir = length($dir) ? $dir : '.';
+    opendir(my $dh, $scanDir)
+        or die "gen-wkjstub: cannot read header directory $scanDir: $!\n";
+    my @siblings = sort grep {
+        /^webkit_java_api.*\.h$/ && $_ ne $dom_include
+    } readdir($dh);
+    closedir($dh) or die "gen-wkjstub: cannot close header directory $scanDir: $!\n";
+    push @headerQueue, map { "$dir$_" } @siblings;
 }
 my %headerSeen;
 my $src = '';
@@ -266,6 +279,20 @@ sub split_declarator {
     return ($decl, "wkjstub_p$index", undef);
 }
 
+# Parses one function parameter. Fixed-size array parameters decay to pointers for
+# ABI classification, but their original declarator must be retained for the generated
+# definition. GCC's -Warray-parameter diagnoses a pointer definition following an array
+# declaration even though the two types are otherwise compatible in C.
+sub parameter_from_declarator {
+    my ($decl, $index, $function) = @_;
+    my ($type, $name, $extent) = split_declarator($decl, $index);
+    die "gen-wkjstub: cannot parse parameter " . ($index + 1) . " of $function: '$decl'\n"
+        unless defined $type && $type =~ /\S/;
+    my $definition = defined $extent ? "$type $name\[$extent\]" : "$type $name";
+    $type .= "*" if defined $extent;
+    return { type => $type, name => $name, kind => kind_of($type), definition => $definition };
+}
+
 # ------------------------------------------------------ exported declarations
 
 my @functions;
@@ -277,18 +304,7 @@ while ($src =~ /\bWKJ_EXPORT\s+(.*?)\b([A-Za-z_][A-Za-z0-9_]*)\s*\(([^;]*?)\)\s*
     my @args;
     my $i = 0;
     for my $d (@decls) {
-        my ($type, $pname, $pextent) = split_declarator($d, $i);
-        # An array-style parameter (const float x[4]) decays to a pointer in C. Dropping
-        # the extent silently turned "const float* in_xywh" into "const float in_xywh",
-        # i.e. a stub whose signature disagreed with the header it was generated from --
-        # exactly the mismatch this library exists to catch.
-        $type .= "*" if defined $pextent;
-        # Name the function in the diagnostic. Reading several headers turned a silent
-        # "uninitialized value" warning into the only clue about which declaration the
-        # parser could not handle, which is not enough to act on.
-        die "gen-wkjstub: cannot parse parameter " . ($i + 1) . " of $name: '$d'\n"
-            unless defined $type && $type =~ /\S/;
-        push @args, { type => $type, name => $pname, kind => kind_of($type) };
+        push @args, parameter_from_declarator($d, $i, $name);
         $i++;
     }
     die "gen-wkjstub: $name has " . scalar(@args) . " parameters; raise WKJSTUB_MAX_ARGS\n"
@@ -356,13 +372,7 @@ if (defined $spec) {
         my @args;
         my $i = 0;
         for my $d (@decls) {
-            my ($type, $pname, $pextent) = split_declarator($d, $i);
-        # An array-style parameter (const float x[4]) decays to a pointer in C. Dropping
-        # the extent silently turned "const float* in_xywh" into "const float in_xywh",
-        # i.e. a stub whose signature disagreed with the header it was generated from --
-        # exactly the mismatch this library exists to catch.
-        $type .= "*" if defined $pextent;
-            push @args, { type => $type, name => $pname, kind => kind_of($type) };
+            push @args, parameter_from_declarator($d, $i, $name);
             $i++;
         }
         die "gen-wkjstub: $name has " . scalar(@args) . " parameters; raise WKJSTUB_MAX_ARGS\n"
@@ -416,13 +426,7 @@ sub struct_members {
             my @args;
             my $i = 0;
             for my $d (@decls) {
-                my ($type, $pname, $pextent) = split_declarator($d, $i);
-        # An array-style parameter (const float x[4]) decays to a pointer in C. Dropping
-        # the extent silently turned "const float* in_xywh" into "const float in_xywh",
-        # i.e. a stub whose signature disagreed with the header it was generated from --
-        # exactly the mismatch this library exists to catch.
-        $type .= "*" if defined $pextent;
-                push @args, { type => $type, name => $pname, kind => kind_of($type) };
+                push @args, parameter_from_declarator($d, $i, "$name.$fname");
                 $i++;
             }
             push @members, { name => $fname, kind => 'p', callback => 1,
@@ -610,7 +614,7 @@ for my $f (@functions) {
     }
 
     my $sig = $f->{ret_kind} . join('', map { $_->{kind} } @args);
-    my $decl_args = $n ? join(', ', map { "$_->{type} $_->{name}" } @args) : 'void';
+    my $decl_args = $n ? join(', ', map { $_->{definition} } @args) : 'void';
 
     emit("/* $sig");
     emit("; " . join('; ', @note)) if @note;

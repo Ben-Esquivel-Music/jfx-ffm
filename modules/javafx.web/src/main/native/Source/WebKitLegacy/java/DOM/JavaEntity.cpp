@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2013, 2019, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2013, 2026, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -34,19 +34,25 @@ extern "C" {
 WKJ_EXPORT int32_t wkj_dom_Entity_getPublicId(int64_t arg0, uint16_t* result_buf, int32_t result_cap, int32_t* result_length)
 {
     WKJCallScope wkjScope;
-    return nullptr;
+    if (result_length)
+        *result_length = 0;
+    return WKJ_STR_NULL;
 }
 
 WKJ_EXPORT int32_t wkj_dom_Entity_getSystemId(int64_t arg0, uint16_t* result_buf, int32_t result_cap, int32_t* result_length)
 {
     WKJCallScope wkjScope;
-    return nullptr;
+    if (result_length)
+        *result_length = 0;
+    return WKJ_STR_NULL;
 }
 
 WKJ_EXPORT int32_t wkj_dom_Entity_getNotationName(int64_t arg0, uint16_t* result_buf, int32_t result_cap, int32_t* result_length)
 {
     WKJCallScope wkjScope;
-    return nullptr;
+    if (result_length)
+        *result_length = 0;
+    return WKJ_STR_NULL;
 }
 
 }

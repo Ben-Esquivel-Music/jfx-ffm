@@ -211,15 +211,36 @@ for my $file (@files) {
     #    the result is copied into result_buf before the call returns and nothing
     #    outlives it. See FFM-ABI-CONTRACT.md section 13.
     $out =~ s{JavaReturn<(?:WTF::)?String>\(env,}{WKJReturnString(result_buf, result_cap, result_length,}g;
-    # 2. Peer-returning helper for every other type.
+    # 2. A null JNI string return becomes the null-string status. Seventeen legacy
+    #    stub getters return nullptr directly rather than using JavaReturn<String>.
+    #    Match only a rewritten string ABI function so pointer-returning stubs keep
+    #    their original meaning. Normalize the first generated form too, making the
+    #    repair safe to reapply to an already-transformed tree. result_length is
+    #    nullable by contract, just as it is in WKJReturnString.
+    my $nullStringGuards = ($out =~ s!
+        ^([ ]{4})\*result_length\s*=\s*0;\n
+        [ ]{4}return\s+WKJ_STR_NULL;
+    !${1}if (result_length)\n        *result_length = 0;\n    return WKJ_STR_NULL;!gmx);
+    my $nullStringReturns = ($out =~ s!
+        (WKJ_EXPORT\s+int32_t\s+wkj_dom_\w+\s*
+         \([^)]*\bint32_t\s*\*\s*result_length\s*\)\s*
+         \{[^{}]*?)
+        return\s+nullptr;
+    !$1if (result_length)\n        *result_length = 0;\n    return WKJ_STR_NULL;!gsx);
+    $stats{nullStringReturns} += $nullStringGuards + $nullStringReturns;
+    if ($out =~ /return WKJ_STR_NULL;/) {
+        $out =~ s{Copyright \(c\) (\d{4})(?:, \d{4})?, Oracle}{Copyright (c) $1, 2026, Oracle};
+    }
+
+    # 3. Peer-returning helper for every other type.
     $out =~ s{JavaReturn<([^>]+)>\(env,\s*}{WKJReturnPeer<$1>(}g;
-    # 3. jstring -> WTF::String conversion; every argument is a plain parameter name.
+    # 4. jstring -> WTF::String conversion; every argument is a plain parameter name.
     $out =~ s{\bString\(env,\s*(\w+)\)}{WKJString($1, ${1}_length)}g;
-    # 4-6. Exception raisers lose their env argument.
+    # 5-7. Exception raisers lose their env argument.
     $out =~ s{\braiseOnDOMError\(env,\s*}{raiseOnDOMError(}g;
     $out =~ s{\braiseTypeErrorException\(env\)}{raiseTypeErrorException()}g;
     $out =~ s{\braiseNotSupportedErrorException\(env\)}{raiseNotSupportedErrorException()}g;
-    # 7. The single direct call from one binding to another
+    # 8. The single direct call from one binding to another
     #    (NamedNodeMapImpl_setNamedItemNSImpl -> setNamedItemImpl). The JNI call
     #    passes (env, clazz, peer, node); BOTH leading arguments have to go, not
     #    just env, or the result is a call to an undeclared `clazz` with the wrong
@@ -231,7 +252,7 @@ for my $file (@files) {
     $out =~ s{\b(Java_com_sun_webkit_dom_(\w+?)Impl_(\w+?)(?:Impl)?)\(\s*env\s*,\s*}{
         "wkj_dom_$2_$3("
     }ge;
-    # 8. JNI-era spellings that survive in bodies: the peer cast macros and the
+    # 9. JNI-era spellings that survive in bodies: the peer cast macros and the
     #    jboolean constants. Renamed rather than kept so no jni.h name remains.
     $out =~ s{\bjlong_to_Nodeptr\b}{wkj_to_Nodeptr}g;
     $out =~ s{\bjlong_to_ptr\b}{wkj_to_ptr}g;
@@ -258,8 +279,19 @@ for my $file (@files) {
     }
     (my $codeOnly = $out) =~ s{/\*.*?\*/}{}gs;
 
+    if ($codeOnly =~ m{
+        WKJ_EXPORT\s+int32_t\s+wkj_dom_\w+\s*
+        \([^)]*\bint32_t\s*\*\s*result_length\s*\)\s*
+        \{[^{}]*?return\s+nullptr;
+    }sx) {
+        push @fileProblems, "null pointer returned from a string-status function";
+    }
+    if ($codeOnly =~ /^    \*result_length\s*=\s*0;\n    return\s+WKJ_STR_NULL;/m) {
+        push @fileProblems, "unguarded result_length write in a null-string return";
+    }
+
     # The JNI parameter names must be gone from the code, not merely from the
-    # signatures. `clazz` in particular is the one that bit: substitution 7 used to
+    # signatures. `clazz` in particular is the one that bit: substitution 8 used to
     # eat only `(env,` and leave `clazz` behind as a call argument, producing a call
     # to an undeclared identifier with the wrong arity. Nothing in this repository
     # compiles the WebKit tree, so a check here is the only thing standing between
@@ -284,6 +316,7 @@ for my $file (@files) {
         raiseOnDOMError raiseTypeErrorException raiseNotSupportedErrorException
         WKJDOMUtils WKJHandle
         WKJCallScope WKJClearPendingException WKJSetPendingException
+        WKJ_STR_NULL
     );
     while ($codeOnly =~ /\b(WKJ[A-Za-z_]*|wkj_[a-z_]*)\b/g) {
         my $h = $1;
@@ -412,6 +445,7 @@ printf STDERR "files seen        : %d\n", $stats{files}       // 0;
 printf STDERR "files transformed : %d\n", $stats{transformed} // 0;
 printf STDERR "files skipped     : %d\n", $stats{skipped}     // 0;
 printf STDERR "functions mapped  : %d\n", $stats{functions}   // 0;
+printf STDERR "null strings fixed: %d\n", $stats{nullStringReturns} // 0;
 printf STDERR "mode              : %s\n", ($apply ? 'APPLY' : 'dry run');
 
 if (@problems) {

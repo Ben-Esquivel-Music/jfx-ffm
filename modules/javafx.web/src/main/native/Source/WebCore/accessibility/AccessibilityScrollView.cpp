@@ -156,7 +156,7 @@ PlatformWidget AccessibilityScrollView::platformWidget() const
 {
     if (RefPtr scrollView = currentScrollView())
         return scrollView->platformWidget();
-    return nullptr;
+    return { };
 }
 
 bool AccessibilityScrollView::canSetFocusAttribute() const

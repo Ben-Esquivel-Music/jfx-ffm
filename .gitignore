@@ -80,3 +80,4 @@ Thumbs.db
 .claude/**
 .agents/**
 .codex/**
+.codex-runtime/**

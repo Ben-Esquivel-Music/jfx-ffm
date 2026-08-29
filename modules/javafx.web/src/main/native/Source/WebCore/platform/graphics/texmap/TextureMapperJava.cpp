@@ -24,6 +24,8 @@
  */
 
 #include "config.h"
+
+#include <stdint.h>
 #include <wkj_constants.h>
 #include "TextureMapperJava.h"
 
@@ -70,7 +72,7 @@ void TextureMapperJava::drawTexture(const BitmapTextureJava& texture, const Floa
     context->save();
     context->setAlpha(opacity);
     context->platformContext()->rq().freeSpace(68)
-        << (jint)com_sun_webkit_graphics_GraphicsDecoder_SET_PERSPECTIVE_TRANSFORM
+        << (int32_t)com_sun_webkit_graphics_GraphicsDecoder_SET_PERSPECTIVE_TRANSFORM
         << (float)transform.m11() << (float)transform.m12() << (float)transform.m13() << (float)transform.m14()
         << (float)transform.m21() << (float)transform.m22() << (float)transform.m23() << (float)transform.m24()
         << (float)transform.m31() << (float)transform.m32() << (float)transform.m33() << (float)transform.m34()
@@ -87,7 +89,7 @@ void TextureMapperJava::drawSolidColor(const FloatRect& rect, const Transformati
 
     context->save();
     context->platformContext()->rq().freeSpace(68)
-        << (jint)com_sun_webkit_graphics_GraphicsDecoder_SET_PERSPECTIVE_TRANSFORM
+        << (int32_t)com_sun_webkit_graphics_GraphicsDecoder_SET_PERSPECTIVE_TRANSFORM
         << (float)transform.m11() << (float)transform.m12() << (float)transform.m13() << (float)transform.m14()
         << (float)transform.m21() << (float)transform.m22() << (float)transform.m23() << (float)transform.m24()
         << (float)transform.m31() << (float)transform.m32() << (float)transform.m33() << (float)transform.m34()

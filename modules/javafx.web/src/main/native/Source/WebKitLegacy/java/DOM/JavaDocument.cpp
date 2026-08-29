@@ -343,13 +343,17 @@ WKJ_EXPORT int32_t wkj_dom_Document_getCharacterSet(int64_t peer, uint16_t* resu
 WKJ_EXPORT int32_t wkj_dom_Document_getPreferredStylesheetSet(int64_t arg0, uint16_t* result_buf, int32_t result_cap, int32_t* result_length)
 {
     WKJCallScope wkjScope;
-    return nullptr;
+    if (result_length)
+        *result_length = 0;
+    return WKJ_STR_NULL;
 }
 
 WKJ_EXPORT int32_t wkj_dom_Document_getSelectedStylesheetSet(int64_t arg0, uint16_t* result_buf, int32_t result_cap, int32_t* result_length)
 {
     WKJCallScope wkjScope;
-    return nullptr;
+    if (result_length)
+        *result_length = 0;
+    return WKJ_STR_NULL;
 }
 
 WKJ_EXPORT void wkj_dom_Document_setSelectedStylesheetSet(int64_t arg0, const uint16_t* arg1, int32_t arg1_length)

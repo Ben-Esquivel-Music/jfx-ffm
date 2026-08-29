@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2013, 2023, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2013, 2026, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -48,7 +48,9 @@ WKJ_EXPORT int32_t wkj_dom_HTMLHeadElement_getProfile(int64_t peer, uint16_t* re
 {
     WKJCallScope wkjScope;
     WebCore::JSMainThreadNullState state;
-    return nullptr;
+    if (result_length)
+        *result_length = 0;
+    return WKJ_STR_NULL;
 }
 
 WKJ_EXPORT void wkj_dom_HTMLHeadElement_setProfile(int64_t peer, const uint16_t* value, int32_t value_length)

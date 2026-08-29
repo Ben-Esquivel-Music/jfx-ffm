@@ -180,27 +180,29 @@ void WebPage::setCallbacks(const WKJPageCallbacks* callbacks, wkj_ref webPage)
     if (!page)
         return;
 
+    wkj_ref pageRef = m_javaPage.get();
+
     static_cast<ChromeClientJava&>(page->chrome().client()).setJavaPage(
-        webPage, callbacks ? callbacks->chrome : nullptr, this);
+        pageRef, callbacks ? callbacks->chrome : nullptr, this);
 
     static_cast<EditorClientJava&>(page->editorClient()).setJavaPage(
-        webPage, callbacks ? callbacks->editor : nullptr);
+        pageRef, callbacks ? callbacks->editor : nullptr);
 
     static_cast<DragClientJava&>(page->dragController().client()).setJavaPage(
-        webPage, callbacks ? callbacks->drag : nullptr, page);
+        pageRef, callbacks ? callbacks->drag : nullptr, page);
 
     if (auto* inspectorClient = static_cast<InspectorClientJava*>(
             page->inspectorController().inspectorBackendClient())) {
-        inspectorClient->setJavaPage(webPage, callbacks ? callbacks->inspector : nullptr);
+        inspectorClient->setJavaPage(pageRef, callbacks ? callbacks->inspector : nullptr);
     }
 
     static_cast<ProgressTrackerClientJava&>(page->progress().client()).setJavaPage(
-        webPage, callbacks ? callbacks->progress : nullptr);
+        pageRef, callbacks ? callbacks->progress : nullptr);
 
-    if (auto* localFrame = dynamicDowncast<LocalFrame>(&page->mainFrame())) {
-        static_cast<FrameLoaderClientJava&>(localFrame->loader().client()).setJavaPage(
-            webPage, callbacks ? callbacks->frame_loader : nullptr, page);
-    }
+    page->forEachLocalFrame([&](LocalFrame& localFrame) {
+        static_cast<FrameLoaderClientJava&>(localFrame.loader().client()).setJavaPage(
+            pageRef, callbacks ? callbacks->frame_loader : nullptr, page);
+    });
 }
 
 WKJHandle WebPage::jobjectFromPage(Page* page)

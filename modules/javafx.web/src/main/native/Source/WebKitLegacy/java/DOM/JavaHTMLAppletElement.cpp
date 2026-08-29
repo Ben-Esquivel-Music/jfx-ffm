@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2013, 2021, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2013, 2026, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -42,7 +42,9 @@ extern "C" {
 WKJ_EXPORT int32_t wkj_dom_HTMLAppletElement_getAlign(int64_t peer, uint16_t* result_buf, int32_t result_cap, int32_t* result_length)
 {
     WKJCallScope wkjScope;
-    return nullptr;
+    if (result_length)
+        *result_length = 0;
+    return WKJ_STR_NULL;
 }
 
 WKJ_EXPORT void wkj_dom_HTMLAppletElement_setAlign(int64_t peer, const uint16_t* value, int32_t value_length)
@@ -53,7 +55,9 @@ WKJ_EXPORT void wkj_dom_HTMLAppletElement_setAlign(int64_t peer, const uint16_t*
 WKJ_EXPORT int32_t wkj_dom_HTMLAppletElement_getAlt(int64_t peer, uint16_t* result_buf, int32_t result_cap, int32_t* result_length)
 {
     WKJCallScope wkjScope;
-    return nullptr;
+    if (result_length)
+        *result_length = 0;
+    return WKJ_STR_NULL;
 }
 
 WKJ_EXPORT void wkj_dom_HTMLAppletElement_setAlt(int64_t peer, const uint16_t* value, int32_t value_length)
@@ -64,7 +68,9 @@ WKJ_EXPORT void wkj_dom_HTMLAppletElement_setAlt(int64_t peer, const uint16_t* v
 WKJ_EXPORT int32_t wkj_dom_HTMLAppletElement_getArchive(int64_t peer, uint16_t* result_buf, int32_t result_cap, int32_t* result_length)
 {
     WKJCallScope wkjScope;
-    return nullptr;
+    if (result_length)
+        *result_length = 0;
+    return WKJ_STR_NULL;
 }
 
 WKJ_EXPORT void wkj_dom_HTMLAppletElement_setArchive(int64_t peer, const uint16_t* value, int32_t value_length)
@@ -75,7 +81,9 @@ WKJ_EXPORT void wkj_dom_HTMLAppletElement_setArchive(int64_t peer, const uint16_
 WKJ_EXPORT int32_t wkj_dom_HTMLAppletElement_getCode(int64_t peer, uint16_t* result_buf, int32_t result_cap, int32_t* result_length)
 {
     WKJCallScope wkjScope;
-    return nullptr;
+    if (result_length)
+        *result_length = 0;
+    return WKJ_STR_NULL;
 }
 
 WKJ_EXPORT void wkj_dom_HTMLAppletElement_setCode(int64_t peer, const uint16_t* value, int32_t value_length)
@@ -86,7 +94,9 @@ WKJ_EXPORT void wkj_dom_HTMLAppletElement_setCode(int64_t peer, const uint16_t* 
 WKJ_EXPORT int32_t wkj_dom_HTMLAppletElement_getCodeBase(int64_t peer, uint16_t* result_buf, int32_t result_cap, int32_t* result_length)
 {
     WKJCallScope wkjScope;
-    return nullptr;
+    if (result_length)
+        *result_length = 0;
+    return WKJ_STR_NULL;
 }
 
 WKJ_EXPORT void wkj_dom_HTMLAppletElement_setCodeBase(int64_t peer, const uint16_t* value, int32_t value_length)
@@ -97,7 +107,9 @@ WKJ_EXPORT void wkj_dom_HTMLAppletElement_setCodeBase(int64_t peer, const uint16
 WKJ_EXPORT int32_t wkj_dom_HTMLAppletElement_getHeight(int64_t peer, uint16_t* result_buf, int32_t result_cap, int32_t* result_length)
 {
     WKJCallScope wkjScope;
-    return nullptr;
+    if (result_length)
+        *result_length = 0;
+    return WKJ_STR_NULL;
 }
 
 WKJ_EXPORT void wkj_dom_HTMLAppletElement_setHeight(int64_t peer, const uint16_t* value, int32_t value_length)
@@ -119,7 +131,9 @@ WKJ_EXPORT void wkj_dom_HTMLAppletElement_setHspace(int64_t peer, int32_t value)
 WKJ_EXPORT int32_t wkj_dom_HTMLAppletElement_getName(int64_t peer, uint16_t* result_buf, int32_t result_cap, int32_t* result_length)
 {
     WKJCallScope wkjScope;
-    return nullptr;
+    if (result_length)
+        *result_length = 0;
+    return WKJ_STR_NULL;
 }
 
 WKJ_EXPORT void wkj_dom_HTMLAppletElement_setName(int64_t peer, const uint16_t* value, int32_t value_length)
@@ -130,7 +144,9 @@ WKJ_EXPORT void wkj_dom_HTMLAppletElement_setName(int64_t peer, const uint16_t* 
 WKJ_EXPORT int32_t wkj_dom_HTMLAppletElement_getObject(int64_t peer, uint16_t* result_buf, int32_t result_cap, int32_t* result_length)
 {
     WKJCallScope wkjScope;
-    return nullptr;
+    if (result_length)
+        *result_length = 0;
+    return WKJ_STR_NULL;
 }
 
 WKJ_EXPORT void wkj_dom_HTMLAppletElement_setObject(int64_t peer, const uint16_t* value, int32_t value_length)
@@ -152,7 +168,9 @@ WKJ_EXPORT void wkj_dom_HTMLAppletElement_setVspace(int64_t peer, int32_t value)
 WKJ_EXPORT int32_t wkj_dom_HTMLAppletElement_getWidth(int64_t peer, uint16_t* result_buf, int32_t result_cap, int32_t* result_length)
 {
     WKJCallScope wkjScope;
-    return nullptr;
+    if (result_length)
+        *result_length = 0;
+    return WKJ_STR_NULL;
 }
 
 WKJ_EXPORT void wkj_dom_HTMLAppletElement_setWidth(int64_t peer, const uint16_t* value, int32_t value_length)

@@ -33,6 +33,7 @@
 #   WKJ_API_HEADER  core ABI header; defaults to the real one when it exists,
 #                   otherwise to the seed header in this directory
 #   WKJ_DOM_SPEC    DOM ABI spec; defaults to buildtools/ffm-web/dom-abi.tsv
+#   PERL_EXECUTABLE Perl interpreter; normally discovered automatically
 
 cmake_minimum_required(VERSION 3.20)
 project(wkjstub C)
@@ -44,6 +45,29 @@ if(NOT DEFINED BIN_DIR)
     message(FATAL_ERROR "wkjstub: BIN_DIR is required")
 endif()
 
+# Treat an explicitly empty override as unset so FindPerl can perform its normal
+# PATH and platform searches.
+if(DEFINED PERL_EXECUTABLE AND PERL_EXECUTABLE STREQUAL "")
+    unset(PERL_EXECUTABLE CACHE)
+endif()
+
+find_package(Perl QUIET)
+if(WIN32 AND NOT PERL_FOUND)
+    # Git for Windows ships the Perl needed by its own tools, but usr/bin is not
+    # normally on PATH. Derive that directory from the discovered Git executable
+    # so custom and portable Git installations work as well as Program Files.
+    find_package(Git QUIET)
+    if(GIT_EXECUTABLE)
+        get_filename_component(WKJ_GIT_BIN_DIR "${GIT_EXECUTABLE}" DIRECTORY)
+        get_filename_component(WKJ_GIT_ROOT "${WKJ_GIT_BIN_DIR}" DIRECTORY)
+        set(WKJ_GIT_PERL "${WKJ_GIT_ROOT}/usr/bin/perl.exe")
+        if(EXISTS "${WKJ_GIT_PERL}")
+            set(PERL_EXECUTABLE "${WKJ_GIT_PERL}" CACHE FILEPATH
+                "Perl interpreter used to generate wkjstub sources" FORCE)
+            message(STATUS "wkjstub: using Git for Windows Perl: ${PERL_EXECUTABLE}")
+        endif()
+    endif()
+endif()
 find_package(Perl REQUIRED)
 
 set(WKJ_GEN_DIR "${CMAKE_CURRENT_BINARY_DIR}/generated")

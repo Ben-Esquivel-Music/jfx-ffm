@@ -49,8 +49,8 @@ public:
     ~FrameLoaderClientJava();
 
     /*
-     * Installs the page this client reports to. wkj_page_set_callbacks calls it on the
-     * main frame's client; createFrame() passes the same three values on to every
+     * Installs the page this client reports to. wkj_page_set_callbacks calls it on every
+     * existing local frame; createFrame() passes the same three values on to every new
      * subframe client it makes, which is what the captured Java reference used to do.
      *
      * `pageRef` is borrowed - the WebPage owns the retained id and outlives the frame -

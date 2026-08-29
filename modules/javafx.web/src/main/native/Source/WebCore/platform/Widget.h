@@ -93,7 +93,7 @@ enum class WidgetNotification : uint8_t { WillPaintFlattened, DidPaintFlattened 
 //
 class Widget : public RefCounted<Widget>, public CanMakeSingleThreadWeakPtr<Widget> {
 public:
-    WEBCORE_EXPORT explicit Widget(PlatformWidget = nullptr);
+    WEBCORE_EXPORT explicit Widget(PlatformWidget = { });
     WEBCORE_EXPORT virtual ~Widget();
 
     WEBCORE_EXPORT PlatformWidget platformWidget() const;
@@ -271,4 +271,3 @@ inline void Widget::setPlatformWidget(PlatformWidget widget)
 SPECIALIZE_TYPE_TRAITS_BEGIN(WebCore::ToValueTypeName) \
     static bool isType(const WebCore::Widget& widget) { return widget.predicate; } \
 SPECIALIZE_TYPE_TRAITS_END()
-

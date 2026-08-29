@@ -39,7 +39,7 @@
 
 #if PLATFORM(JAVA)
 #include <webkit_java_api.h>
-typedef jint CGGlyph;
+typedef int32_t CGGlyph;
 #else
 typedef unsigned short CGGlyph;
 #endif

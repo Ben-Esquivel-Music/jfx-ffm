@@ -194,6 +194,16 @@ static void copy_name(char* dest, const uint16_t* name, int32_t length)
     dest[length] = 0;
 }
 
+static void copy_ascii_name(char* dest, const char* name)
+{
+    size_t length = strlen(name);
+    if (length > WKJSTUB_NAME_MAX - 1) {
+        length = WKJSTUB_NAME_MAX - 1;
+    }
+    memcpy(dest, name, length);
+    dest[length] = 0;
+}
+
 /* --------------------------------------------------------------- recording */
 
 typedef struct WKJStubRecord {
@@ -329,8 +339,7 @@ static WKJStubProgrammed* find_programmed(const char* name, int create)
         return NULL;
     }
     memset(&g_programmed[free_slot], 0, sizeof(WKJStubProgrammed));
-    strncpy(g_programmed[free_slot].name, name, WKJSTUB_NAME_MAX - 1);
-    g_programmed[free_slot].name[WKJSTUB_NAME_MAX - 1] = 0;
+    copy_ascii_name(g_programmed[free_slot].name, name);
     g_programmed[free_slot].in_use = 1;
     return &g_programmed[free_slot];
 }
@@ -356,8 +365,7 @@ void wkjstub_record(const char* name, const WKJStubArg* args, int32_t argc)
     WKJSTUB_LOCK();
     r = &g_ring[(size_t) (g_total % WKJSTUB_RING_CAPACITY)];
     free_args(r);
-    strncpy(r->name, name, WKJSTUB_NAME_MAX - 1);
-    r->name[WKJSTUB_NAME_MAX - 1] = 0;
+    copy_ascii_name(r->name, name);
     r->argc = argc;
     for (i = 0; i < argc; i++) {
         /* Takes ownership of any blob capture() allocated for this argument. */
@@ -650,8 +658,7 @@ WKJSTUB_EXPORT const uint16_t* wkjstub_call_name(int32_t index, int32_t* out_len
         WKJSTUB_UNLOCK();
         return query_string(NULL, out_length);
     }
-    strncpy(name, r->name, WKJSTUB_NAME_MAX - 1);
-    name[WKJSTUB_NAME_MAX - 1] = 0;
+    copy_ascii_name(name, r->name);
     WKJSTUB_UNLOCK();
     return query_string(name, out_length);
 }
@@ -928,8 +935,7 @@ WKJSTUB_EXPORT void wkjstub_arm_exception(const uint16_t* name, int32_t name_len
     for (i = 0; i < WKJSTUB_ARMED_MAX; i++) {
         if (g_armed[i].in_use == 0) {
             memset(&g_armed[i], 0, sizeof(WKJStubArmed));
-            strncpy(g_armed[i].name, key, WKJSTUB_NAME_MAX - 1);
-            g_armed[i].name[WKJSTUB_NAME_MAX - 1] = 0;
+            copy_ascii_name(g_armed[i].name, key);
             g_armed[i].in_use = 1;
             g_armed[i].type = type;
             g_armed[i].code = code;
