@@ -146,6 +146,8 @@
         <UNSTABLE_TEST>false</UNSTABLE_TEST>
         <TEST_SCREENSHOT>false</TEST_SCREENSHOT>
         <AWT_TEST>true</AWT_TEST>
+        <!-- WebKit natives are supplied separately; tests that need jfxwebkit opt in. -->
+        <jfx.web.skipTests>true</jfx.web.skipTests>
 
         <!-- Native build controls -->
         <CONF>Release</CONF>

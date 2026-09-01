@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2011, 2019, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2011, 2026, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -27,6 +27,11 @@
 
 #include "PlatformJavaClasses.h"
 #include "MainThreadSharedTimer.h"
+#include "WKJDOMUtils.h"
+
+#include <webkit_java_api.h>
+
+#include <wtf/java/WKJRuntime.h>
 
 #include <wtf/Assertions.h>
 #include <wtf/MainThread.h>
@@ -42,26 +47,33 @@ void MainThreadSharedTimer::setFireInterval(Seconds timeout)
     if (fireTime < MINIMAL_INTERVAL) {
         fireTime = MINIMAL_INTERVAL;
     }
-    WC_GETJAVAENV_CHKRET(env);
 
-    static jmethodID mid = env->GetStaticMethodID(getTimerClass(env),
-                                                  "fwkSetFireTime", "(D)V");
-    ASSERT(mid);
+    /*
+     * WC_GETJAVAENV_CHKRET returned early here when the environment was gone, which during
+     * teardown it was. The host table stays installed for the life of the process, so the
+     * explicit gate is the substitution; the null-slot test below only covers a table that
+     * was never installed. See THE SHUTDOWN GATE in wtf/java/WKJRuntime.h.
+     */
+    WKJ_RETURN_IF_SHUTTING_DOWN();
 
-    env->CallStaticVoidMethod(getTimerClass(env), mid, fireTime);
-    WTF::CheckAndClearException(env);
+    const WKJHostTheme* cb = wkjTheme();
+    if (!cb || !cb->timer_set_fire_time)
+        return;
+
+    cb->timer_set_fire_time(fireTime);
+    wkjCheckAndClearException();
 }
 
 void MainThreadSharedTimer::stop()
 {
-    WC_GETJAVAENV_CHKRET(env);
+    WKJ_RETURN_IF_SHUTTING_DOWN();
 
-    static jmethodID mid = env->GetStaticMethodID(getTimerClass(env),
-                                                  "fwkStopTimer", "()V");
-    ASSERT(mid);
+    const WKJHostTheme* cb = wkjTheme();
+    if (!cb || !cb->timer_stop)
+        return;
 
-    env->CallStaticVoidMethod(getTimerClass(env), mid);
-    WTF::CheckAndClearException(env);
+    cb->timer_stop();
+    wkjCheckAndClearException();
 }
 
 // JDK-8146958
@@ -73,9 +85,9 @@ void MainThreadSharedTimer::invalidate()
 
 extern "C" {
 
-JNIEXPORT void JNICALL Java_com_sun_webkit_Timer_twkFireTimerEvent
-    (JNIEnv*, jclass)
+WKJ_EXPORT void wkj_timer_fire(void)
 {
+    WebCore::WKJCallScope wkjScope;
     WebCore::MainThreadSharedTimer::singleton().fired();
 }
 

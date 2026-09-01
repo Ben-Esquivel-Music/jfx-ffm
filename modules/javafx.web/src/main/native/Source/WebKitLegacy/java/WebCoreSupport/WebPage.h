@@ -26,7 +26,6 @@
 #pragma once
 
 #include <wtf/OptionSet.h>
-#include <wtf/java/JavaRef.h>
 #include <WebCore/GraphicsLayerClient.h>
 #include <WebCore/IntRect.h>
 #include <WebCore/PrintContext.h>
@@ -36,10 +35,12 @@
 #include "MediaPlayerPrivateJava.h"
 #include "TextureMapperJavaAdapter.h"
 
-#include <jni.h> // todo tav remove when building w/ pch
+#include <webkit_java_api_page.h>
+#include <wtf/java/WKJHandle.h>
 
 namespace WebCore {
 
+class DragClientJava;
 class Frame;
 class GraphicsContext;
 class GraphicsLayer;
@@ -54,7 +55,7 @@ class WebPage
     : GraphicsLayerClient
 {
 public:
-    WebPage(RefPtr<Page> page);
+    WebPage(RefPtr<Page> page, DragClientJava& dragClient);
     ~WebPage();
 
     inline Page* page()
@@ -62,31 +63,41 @@ public:
         return m_page.get();
     }
 
-    static inline WebPage* webPageFromJLong(jlong p)
+    /* The `long pPage` the Java WebPage holds, as the WebPage it names. */
+    static inline WebPage* webPageFromPeer(int64_t p)
     {
-        return static_cast<WebPage*>(jlong_to_ptr(p));
+        return static_cast<WebPage*>(wkj_to_ptr(p));
     }
 
-    static WebPage* webPageFromJObject(const JLObject& obj);
-
-    static inline Page* pageFromJLong(jlong p)
+    static inline Page* pageFromPeer(int64_t p)
     {
-        WebPage* webPage = webPageFromJLong(p);
+        WebPage* webPage = webPageFromPeer(p);
         return webPage ? webPage->page() : NULL;
     }
 
-    static inline Page* pageFromJObject(const JLObject& obj)
-    {
-        WebPage* webPage = webPageFromJObject(obj);
-        return webPage ? webPage->page() : NULL;
-    }
+    /*
+     * A NEW id for the Java WebPage of `page`, owned by the caller - which is what the
+     * local reference this used to return was. It comes from PageSupplementJava, which is
+     * also where ScrollbarThemeJava, the URLLoader and the socket stream handle read it.
+     */
+    static WKJHandle jobjectFromPage(Page* page);
 
-    static JLObject jobjectFromPage(Page* page);
+    /*
+     * The callback tables and the registry id of the Java WebPage, installed once by
+     * wkj_page_create. The id is retained here and released when the page is destroyed or
+     * the tables are detached, which is the one retention that replaces the eight JNI
+     * global references the clients used to hold on the same object.
+     */
+    void setCallbacks(const WKJPageCallbacks* callbacks, wkj_ref webPage);
+
+    const WKJPageCallbacks* callbacks() const { return m_callbacks; }
+    wkj_ref javaPage() const { return m_javaPage.get(); }
 
     void setSize(const IntSize&);
     void prePaint();
-    void paint(jobject, jint, jint, jint, jint);
-    void postPaint(jobject, jint, jint, jint, jint);
+    /* `renderQueue` is a com.sun.webkit.graphics.WCRenderQueue registry id. */
+    void paint(wkj_ref renderQueue, int32_t, int32_t, int32_t, int32_t);
+    void postPaint(wkj_ref renderQueue, int32_t, int32_t, int32_t, int32_t);
     bool processKeyEvent(const PlatformKeyboardEvent& event);
 
     void scroll(const IntSize& scrollDelta, const IntRect& rectToScroll,
@@ -130,6 +141,9 @@ private:
     Node* focusedWebCoreNode();
 
     RefPtr<Page> m_page;
+    DragClientJava& m_dragClient;
+    const WKJPageCallbacks* m_callbacks { nullptr };
+    WKJHandle m_javaPage;
     RefPtr<PrintContext> m_printContext;
     RefPtr<RQRef> m_jRenderTheme;
 

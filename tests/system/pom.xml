@@ -45,9 +45,12 @@
              module's main classes (same set Gradle put in test.run.args) -->
         <jfx.st.modulepath>${jfx.shims.base}${path.separator}${jfx.shims.graphics}${path.separator}${jfx.shims.controls}${path.separator}${jfx.root}/modules/jfx.incubator.input/target/classes${path.separator}${jfx.shims.incubator.richtext}${path.separator}${jfx.root}/modules/javafx.media/target/classes${path.separator}${jfx.root}/modules/jdk.jsobject/target/classes${path.separator}${jfx.shims.web}${path.separator}${jfx.shims.swing}${path.separator}${jfx.shims.fxml}</jfx.st.modulepath>
         <jfx.st.addmodules>javafx.base,javafx.graphics,javafx.controls,jfx.incubator.input,jfx.incubator.richtext,javafx.media,jdk.jsobject,javafx.web,javafx.swing,javafx.fxml</jfx.st.addmodules>
-        <!-- Test exclusions, lifted by the USE_ROBOT / UNSTABLE_TEST profiles -->
+        <!-- Test exclusions, lifted by the opt-in profiles below -->
         <jfx.st.exclude.robot>test/robot/**</jfx.st.exclude.robot>
         <jfx.st.exclude.monocle>test/robot/com/sun/glass/ui/monocle/**</jfx.st.exclude.monocle>
+        <!-- The Maven build does not compile WebKit. Keep the WebKit-dependent robot
+             tests aligned with the javafx.web module's explicit test opt-in. -->
+        <jfx.st.exclude.robot.web>test/robot/javafx/web/**</jfx.st.exclude.robot.web>
         <!-- Gradle parity: AWT_TEST defaulted to true, so the AWT/Swing interop
              tests ran by default; they are excluded by the no-awt-test profile
              (-DAWT_TEST=false). The exclusion cannot be the default here: profile
@@ -191,6 +194,11 @@
                         <id>default-testCompile</id>
                         <configuration>
                             <compilerArgs combine.children="append">
+                                <!-- Resolve netscape.javascript.JSObject against this
+                                     repository's jdk.jsobject instead of the JDK 25 system
+                                     module, where the type is deprecated for removal. -->
+                                <arg>--upgrade-module-path</arg>
+                                <arg>${jfx.root}/modules/jdk.jsobject/target/classes</arg>
                                 <arg>--add-exports</arg>
                                 <arg>java.desktop/sun.awt.datatransfer=ALL-UNNAMED</arg>
                             </compilerArgs>
@@ -257,6 +265,7 @@
                     <excludes>
                         <exclude>${jfx.st.exclude.robot}</exclude>
                         <exclude>${jfx.st.exclude.monocle}</exclude>
+                        <exclude>${jfx.st.exclude.robot.web}</exclude>
                         <exclude>${jfx.st.exclude.awt1}</exclude>
                         <exclude>${jfx.st.exclude.awt2}</exclude>
                     </excludes>
@@ -418,6 +427,19 @@
             </activation>
             <properties>
                 <jfx.st.exclude.monocle>__none__/**</jfx.st.exclude.monocle>
+            </properties>
+        </profile>
+        <profile>
+            <!-- Enables robot tests that need an ABI-compatible prebuilt jfxwebkit -->
+            <id>web-test</id>
+            <activation>
+                <property>
+                    <name>jfx.web.skipTests</name>
+                    <value>false</value>
+                </property>
+            </activation>
+            <properties>
+                <jfx.st.exclude.robot.web>__none3__/**</jfx.st.exclude.robot.web>
             </properties>
         </profile>
         <profile>

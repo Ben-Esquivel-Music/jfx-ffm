@@ -1,0 +1,692 @@
+#
+# Copyright (c) 2026, Oracle and/or its affiliates. All rights reserved.
+# DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
+#
+# This code is free software; you can redistribute it and/or modify it
+# under the terms of the GNU General Public License version 2 only, as
+# published by the Free Software Foundation.  Oracle designates this
+# particular file as subject to the "Classpath" exception as provided
+# by Oracle in the LICENSE file that accompanied this code.
+#
+# This code is distributed in the hope that it will be useful, but WITHOUT
+# ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
+# FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License
+# version 2 for more details (a copy is included in the LICENSE file that
+# accompanied this code).
+#
+# You should have received a copy of the GNU General Public License version
+# 2 along with this work; if not, write to the Free Software Foundation,
+# Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301 USA.
+#
+# Please contact Oracle, 500 Oracle Parkway, Redwood Shores, CA 94065 USA
+# or visit www.oracle.com if you need additional information or have any
+# questions.
+#
+
+#
+# Builds the WebKit native library (jfxwebkit) for every platform this fork
+# supports and publishes the results to the repository's Releases page.
+#
+# The Maven build does NOT compile WebKit (see WEBKIT-MEDIA-STUBS.md), so this
+# workflow drives the WebKit CMake/Ninja tree directly through
+# Tools/Scripts/build-webkit, mirroring what the retired Gradle
+# COMPILE_WEBKIT=true task used to do.
+#
+# This is a very long build (hours per platform), so the workflow is manual
+# only. ccache is enabled automatically by Source/cmake/WebKitCCache.cmake when
+# ccache is on PATH, and the cache is persisted between runs.
+#
+
+name: Build jfxwebkit
+
+on:
+  # Manual trigger only. This build is far too expensive to run automatically.
+  workflow_dispatch:
+    inputs:
+      platforms:
+        description: "Platform(s) to build"
+        type: choice
+        default: "all"
+        options:
+          - all
+          - linux-x64
+          - linux-aarch64
+          - macos-x64
+          - macos-aarch64
+          - windows-x64
+      configuration:
+        description: "WebKit build configuration"
+        type: choice
+        default: "Release"
+        options:
+          - Release
+          - Debug
+      release_tag:
+        description: "Release tag (default: jfxwebkit-<jfx version>-b<run number>)"
+        type: string
+        default: ""
+      release_type:
+        description: "How to publish the GitHub release"
+        type: choice
+        default: "draft"
+        options:
+          - draft
+          - prerelease
+          - release
+      build_dumprendertree:
+        description: "Also build DumpRenderTreeJava (ENABLE_TOOLS=1)"
+        type: boolean
+        default: false
+      parallel_jobs:
+        description: "Compiler jobs (-j). Empty means one per CPU."
+        type: string
+        default: ""
+
+permissions:
+  contents: read
+
+concurrency:
+  group: build-webkit-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  # Browser version reported in the WebView user agent. Not held in
+  # build.properties; mirrors WEBVIEW_VERSION in the upstream OpenJFX build.
+  WEBVIEW_BROWSER_VERSION: "18.4"
+  # Minimum macOS version, kept in sync with CMAKE_OSX_DEPLOYMENT_TARGET in
+  # modules/javafx.graphics/native/CMakeLists.txt.
+  MACOSX_DEPLOYMENT_TARGET: "11.0"
+  PYTHONDONTWRITEBYTECODE: "1"
+
+jobs:
+  prepare:
+    name: Prepare
+    runs-on: ubuntu-24.04
+    outputs:
+      matrix: ${{ steps.matrix.outputs.matrix }}
+      jfx_version: ${{ steps.props.outputs.jfx_version }}
+      icu_file_version: ${{ steps.props.outputs.icu_file_version }}
+      icu_release_version: ${{ steps.props.outputs.icu_release_version }}
+      release_tag: ${{ steps.props.outputs.release_tag }}
+
+    steps:
+      - name: Checkout the source
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+
+      - name: Read build.properties
+        id: props
+        run: |
+          set -eu
+          prop() {
+            key="$(printf '%s' "$1" | sed 's/\./\\./g')"
+            grep -E "^${key}=" build.properties | tail -n 1 | cut -d= -f2- | tr -d '\r'
+          }
+
+          jfx_version="$(prop jfx.release.major.version)"
+          icu_version="$(prop icu.version)"
+          test -n "$jfx_version"
+          test -n "$icu_version"
+
+          # ICU release assets are named icu4c-77_1-data-bin-l.zip inside the
+          # release-77-1 tag.
+          icu_file_version="$(printf '%s' "$icu_version" | tr '.' '_')"
+          icu_release_version="$(printf '%s' "$icu_version" | tr '.' '-')"
+
+          release_tag='${{ inputs.release_tag }}'
+          if [ -z "$release_tag" ]; then
+            release_tag="jfxwebkit-${jfx_version}-b${GITHUB_RUN_NUMBER}"
+          fi
+
+          {
+            echo "jfx_version=${jfx_version}"
+            echo "icu_file_version=${icu_file_version}"
+            echo "icu_release_version=${icu_release_version}"
+            echo "release_tag=${release_tag}"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Compute the build matrix
+        id: matrix
+        run: |
+          set -eu
+          selection='${{ inputs.platforms }}'
+          entries=""
+
+          add() { entries="${entries:+${entries},}$1"; }
+          want() { [ "$selection" = "all" ] || [ "$selection" = "$1" ]; }
+
+          if want linux-x64; then
+            add '{"platform":"linux-x64","runner":"ubuntu-24.04","os":"linux","libdir":"lib","libfile":"libjfxwebkit.so","drtfile":"libDumpRenderTreeJava.so"}'
+          fi
+          if want linux-aarch64; then
+            add '{"platform":"linux-aarch64","runner":"ubuntu-24.04-arm","os":"linux","libdir":"lib","libfile":"libjfxwebkit.so","drtfile":"libDumpRenderTreeJava.so"}'
+          fi
+          if want macos-x64; then
+            add '{"platform":"macos-x64","runner":"macos-15-intel","os":"macos","libdir":"lib","libfile":"libjfxwebkit.dylib","drtfile":"libDumpRenderTreeJava.dylib"}'
+          fi
+          if want macos-aarch64; then
+            add '{"platform":"macos-aarch64","runner":"macos-15","os":"macos","libdir":"lib","libfile":"libjfxwebkit.dylib","drtfile":"libDumpRenderTreeJava.dylib"}'
+          fi
+          if want windows-x64; then
+            add '{"platform":"windows-x64","runner":"windows-2022","os":"windows","libdir":"bin","libfile":"jfxwebkit.dll","drtfile":"DumpRenderTreeJava.dll"}'
+          fi
+
+          test -n "$entries"
+          echo "matrix={\"include\":[${entries}]}" >> "$GITHUB_OUTPUT"
+
+  build:
+    name: ${{ matrix.platform }}
+    needs: prepare
+    runs-on: ${{ matrix.runner }}
+    # WebKit is a multi-hour build on the standard runners; take the maximum.
+    timeout-minutes: 350
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.prepare.outputs.matrix) }}
+    defaults:
+      run:
+        shell: bash
+
+    env:
+      CONFIGURATION: ${{ inputs.configuration }}
+      JFX_VERSION: ${{ needs.prepare.outputs.jfx_version }}
+      ICU_FILE_VERSION: ${{ needs.prepare.outputs.icu_file_version }}
+      ICU_RELEASE_VERSION: ${{ needs.prepare.outputs.icu_release_version }}
+      ENABLE_TOOLS: ${{ inputs.build_dumprendertree && '1' || '0' }}
+      ARCHIVE_NAME: jfxwebkit-${{ needs.prepare.outputs.jfx_version }}-${{ matrix.platform }}
+
+    steps:
+      - name: Checkout the source
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+
+      - name: Set up the build environment
+        id: env
+        run: |
+          set -eux
+          # CMake, and the junction logic in Source/cmake/WebKitFS.cmake, want
+          # forward slashes on every platform.
+          workspace="$(printf '%s' "$GITHUB_WORKSPACE" | tr '\\' '/')"
+          echo "WEBKIT_OUTPUTDIR=${workspace}/webkit-build" >> "$GITHUB_ENV"
+          echo "WEBKIT_SRCDIR=${workspace}/modules/javafx.web/src/main/native" >> "$GITHUB_ENV"
+          echo "CCACHE_DIR=${workspace}/.ccache" >> "$GITHUB_ENV"
+
+          if [ -n "${{ inputs.parallel_jobs }}" ]; then
+            jobs='${{ inputs.parallel_jobs }}'
+          elif command -v nproc > /dev/null 2>&1; then
+            jobs="$(nproc)"
+          elif command -v sysctl > /dev/null 2>&1; then
+            jobs="$(sysctl -n hw.ncpu)"
+          else
+            jobs=4
+          fi
+          echo "BUILD_JOBS=${jobs}" >> "$GITHUB_ENV"
+
+          case "$CONFIGURATION" in
+            Debug) echo "CONFIGURATION_FLAG=--debug" >> "$GITHUB_ENV" ;;
+            *)     echo "CONFIGURATION_FLAG=--release" >> "$GITHUB_ENV" ;;
+          esac
+
+      - name: Install build dependencies (Linux)
+        if: matrix.os == 'linux'
+        run: |
+          set -eux
+          sudo apt-get update
+          sudo apt-get -y install build-essential cmake ninja-build gperf ruby \
+            python3 perl ccache
+
+      - name: Install build dependencies (macOS)
+        if: matrix.os == 'macos'
+        run: |
+          set -eux
+          # brew install fails when a formula is already present in the image,
+          # so only install what is actually missing.
+          for pkg in ninja gperf ccache; do
+            brew list --formula "$pkg" > /dev/null 2>&1 || brew install "$pkg"
+          done
+
+      - name: Install build dependencies (Windows)
+        if: matrix.os == 'windows'
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          choco install -y --no-progress gperf ninja ccache
+          # Chocolatey shims live in a directory that is already on PATH.
+          "C:\ProgramData\chocolatey\bin" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+
+      - name: Set up the MSVC and clang-cl toolchain (Windows)
+        if: matrix.os == 'windows'
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+
+          $vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
+          $vsPath = & $vswhere -latest -products * `
+              -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 `
+              -property installationPath
+          if (-not $vsPath) { throw "No Visual Studio installation with the C++ toolset was found" }
+
+          # Export the vcvars64 environment so that rc.exe, link.exe, dumpbin.exe
+          # and the Windows SDK are available to every later step.
+          cmd /c "call `"$vsPath\VC\Auxiliary\Build\vcvars64.bat`" > nul && set" |
+            ForEach-Object {
+              if ($_ -match '^([A-Za-z_][A-Za-z0-9_()]*)=(.*)$') {
+                $name = $Matches[1]
+                $value = $Matches[2]
+                if ($name -notmatch '^(GITHUB_|RUNNER_|ACTIONS_)') {
+                  "$name=$value" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+                }
+              }
+            }
+
+          # WebKit has dropped MSVC support; the Java port compiles with
+          # clang-cl and links with the MSVC linker.
+          $clangCandidates = @(
+            "$vsPath\VC\Tools\Llvm\x64\bin\clang-cl.exe",
+            "$env:ProgramFiles\LLVM\bin\clang-cl.exe",
+            "${env:ProgramFiles(x86)}\LLVM\bin\clang-cl.exe"
+          )
+          $clang = $clangCandidates | Where-Object { Test-Path $_ } | Select-Object -First 1
+          if (-not $clang) {
+            choco install -y --no-progress llvm
+            $clang = "$env:ProgramFiles\LLVM\bin\clang-cl.exe"
+          }
+          if (-not (Test-Path $clang)) { throw "clang-cl.exe was not found" }
+          Write-Host "Using clang-cl at $clang"
+          (Split-Path -Parent $clang) | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+
+          # Source/cmake/WebKitFS.cmake creates <RT_BUILD_ROOT>/ws and /wb
+          # junctions so that generated command lines stay under MAX_PATH.
+          # mklink /J needs the parent directory to exist.
+          New-Item -ItemType Directory -Force -Path "C:\w" | Out-Null
+          "RT_BUILD_ROOT=C:/w" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+
+          # webkitdirs.pm only recognises Windows when $^O is "MSWin32" or
+          # "cygwin". Git Bash ships a Perl that reports "msys", which would
+          # silently send build-webkit down the Unix code paths, so put native
+          # Strawberry Perl first on PATH. Only perl\bin is added; Strawberry's
+          # c\bin would shadow the MSVC toolchain with MinGW.
+          $strawberry = "C:\Strawberry\perl\bin"
+          if (-not (Test-Path "$strawberry\perl.exe")) {
+            throw "Strawberry Perl was not found at $strawberry"
+          }
+          $strawberry | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+
+      - name: Check the toolchain
+        run: |
+          set -eux
+          cmake --version
+          ninja --version
+          ruby --version
+          python3 --version || python --version
+          gperf --version
+
+          # build-webkit branches on $^O, so make sure the Perl that will run it
+          # identifies the platform correctly (see webkitdirs.pm isAnyWindows).
+          perl -e 'print "perl $] on $^O\n"'
+          if [ "${{ matrix.os }}" = "windows" ]; then
+            perl -e 'exit($^O eq "MSWin32" ? 0 : 1)' || {
+              echo "::error::build-webkit needs a native Windows Perl (\$^O = MSWin32)"
+              exit 1
+            }
+          fi
+
+          # The ICU data archive is unpacked with the JDK's jar tool
+          # (Source/ThirdParty/icu/CMakeLists.txt), so a JDK must be present.
+          if command -v jar > /dev/null 2>&1; then
+            jar --version
+          else
+            "${JAVA_HOME}/bin/jar" --version
+          fi
+
+      - name: Restore the ccache directory
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ env.CCACHE_DIR }}
+          key: webkit-ccache-${{ matrix.platform }}-${{ inputs.configuration }}-${{ github.sha }}
+          restore-keys: |
+            webkit-ccache-${{ matrix.platform }}-${{ inputs.configuration }}-
+
+      - name: Configure ccache
+        run: |
+          set -eux
+          ccache --set-config=max_size=2G
+          ccache --set-config=compression=true
+          ccache --zero-stats
+
+      - name: Download the ICU data archive
+        run: |
+          set -eux
+          # Source/ThirdParty/icu/CMakeLists.txt globs
+          # ${CMAKE_BINARY_DIR}/icu/data/icu4c-*.zip, and CMAKE_BINARY_DIR is
+          # WEBKIT_OUTPUTDIR because WEBKIT_OUTPUTDIR is set (webkitdirs.pm:
+          # usesPerConfigurationBuildDirectory).
+          mkdir -p "${WEBKIT_OUTPUTDIR}/icu/data"
+          curl -fsSL --retry 3 \
+            -o "${WEBKIT_OUTPUTDIR}/icu/data/icu4c-${ICU_FILE_VERSION}-data-bin-l.zip" \
+            "https://github.com/unicode-org/icu/releases/download/release-${ICU_RELEASE_VERSION}/icu4c-${ICU_FILE_VERSION}-data-bin-l.zip"
+
+      - name: Compile the version resource (Windows)
+        if: matrix.os == 'windows'
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          # Source/WebKitLegacy/PlatformJava.cmake links jfxwebkit.dll against
+          # ${CMAKE_BINARY_DIR}/WebCore/obj/version.res (JDK-8166265). The
+          # Gradle build produced it with a separate CompileResourceTask.
+          $out = Join-Path $env:WEBKIT_OUTPUTDIR "WebCore\obj"
+          New-Item -ItemType Directory -Force -Path $out | Out-Null
+
+          $res = Join-Path $out "version.res"
+          $rc = Join-Path $env:GITHUB_WORKSPACE "modules\javafx.graphics\src\main\resources\version.rc"
+          $year = (Get-Date).Year
+          $ver = $env:JFX_VERSION
+
+          # GPLv2 section 2(a): a redistributed binary that has been modified has
+          # to say so. This is a fork with the WebKit JNI layer replaced by FFM,
+          # so it must not be stamped as an official OpenJFX build.
+          & rc.exe /nologo `
+            /d "JFX_COMPANY=$env:GITHUB_REPOSITORY_OWNER" `
+            /d "JFX_COMPONENT=jfx-ffm WebKit binary (modified OpenJFX)" `
+            /d "JFX_NAME=jfx-ffm WebKit $ver" `
+            /d "JFX_VER=$ver" `
+            /d "JFX_BUILD_ID=$ver-jfx-ffm" `
+            /d "JFX_COPYRIGHT=Copyright (c) $year Oracle and/or its affiliates and other contributors" `
+            /d "JFX_FVER=$ver,0,0,0" `
+            /d "JFX_FTYPE=0x2L" `
+            /d "JFX_FNAME=jfxwebkit.dll" `
+            /d "JFX_INTERNAL_NAME=webkit" `
+            /fo "$res" `
+            "$rc"
+          if ($LASTEXITCODE -ne 0) { throw "rc.exe failed with exit code $LASTEXITCODE" }
+
+      - name: Build jfxwebkit
+        run: |
+          set -eux
+
+          perl "${WEBKIT_SRCDIR}/Tools/Scripts/set-webkit-configuration" "${CONFIGURATION_FLAG}"
+
+          cmake_args="-DENABLE_TOOLS=${ENABLE_TOOLS}"
+          cmake_args="${cmake_args} -DWEBVIEW_BROWSER_VERSION=${WEBVIEW_BROWSER_VERSION}"
+          cmake_args="${cmake_args} -DJAVAFX_RELEASE_VERSION=${JFX_VERSION}"
+
+          case "${{ matrix.os }}" in
+            windows)
+              cmake_args="${cmake_args} -DCMAKE_C_COMPILER=clang-cl.exe"
+              cmake_args="${cmake_args} -DCMAKE_CXX_COMPILER=clang-cl.exe"
+              cmake_args="${cmake_args} -DCMAKE_LINKER=link.exe"
+              cmake_args="${cmake_args} -DRT_BUILD_ROOT=${RT_BUILD_ROOT}"
+              cmake_args="${cmake_args} -DWEBKIT_OUTPUTDIR=${WEBKIT_OUTPUTDIR}"
+              ;;
+            macos)
+              cmake_args="${cmake_args} -DCMAKE_OSX_DEPLOYMENT_TARGET=${MACOSX_DEPLOYMENT_TARGET}"
+              ;;
+          esac
+
+          perl "${WEBKIT_SRCDIR}/Tools/Scripts/build-webkit" \
+            --java \
+            --icu-unicode \
+            --64-bit \
+            --no-experimental-features \
+            "--makeargs=-j ${BUILD_JOBS}" \
+            "--cmakeargs=${cmake_args}"
+
+      - name: Report ccache statistics
+        if: always()
+        run: ccache --show-stats || true
+
+      - name: Locate the built libraries
+        id: locate
+        run: |
+          set -eu
+          lib="${WEBKIT_OUTPUTDIR}/${{ matrix.libdir }}/${{ matrix.libfile }}"
+          if [ ! -f "$lib" ]; then
+            echo "::error::${{ matrix.libfile }} was not produced at ${lib}"
+            find "${WEBKIT_OUTPUTDIR}" -maxdepth 2 -name '*jfxwebkit*' || true
+            exit 1
+          fi
+          ls -l "$lib"
+          echo "lib=${lib}" >> "$GITHUB_OUTPUT"
+
+      - name: Verify the wkj_* exports (Linux/macOS)
+        if: matrix.os != 'windows'
+        run: |
+          set -eu
+          lib='${{ steps.locate.outputs.lib }}'
+          if [ "${{ matrix.os }}" = "macos" ]; then
+            count="$(nm -gU "$lib" | grep -c ' T _wkj_' || true)"
+          else
+            count="$(nm -D --defined-only "$lib" | grep -c ' T wkj_' || true)"
+          fi
+          echo "Exported wkj_* symbols: ${count}"
+          if [ "$count" -eq 0 ]; then
+            echo "::error::${lib} exports no wkj_* symbols; the FFM ABI would not bind."
+            exit 1
+          fi
+
+      - name: Verify the wkj_* exports (Windows)
+        if: matrix.os == 'windows'
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $lib = '${{ steps.locate.outputs.lib }}'
+          $count = (& dumpbin.exe /EXPORTS $lib | Select-String -Pattern '\bwkj_\w+').Count
+          Write-Host "Exported wkj_* symbols: $count"
+          if ($count -eq 0) {
+            Write-Host "::error::$lib exports no wkj_* symbols; the FFM ABI would not bind."
+            exit 1
+          }
+
+      - name: Assemble the license and provenance files
+        run: |
+          set -eux
+          stage="${RUNNER_TEMP}/stage"
+          rm -rf "$stage"
+          mkdir -p "${stage}/${{ matrix.libdir }}" "${stage}/legal/webkit"
+
+          # LGPL-2.1 section 4 and GPLv2 section 3 both require the license text
+          # to travel with a binary distribution, so ship every license that
+          # covers code linked into jfxwebkit.
+          cp LICENSE ADDITIONAL_LICENSE_INFO ASSEMBLY_EXCEPTION "${stage}/legal/"
+
+          webkit_src="modules/javafx.web/src/main/native/Source"
+          cp "${webkit_src}/WebCore/LICENSE-LGPL-2"        "${stage}/legal/webkit/"
+          cp "${webkit_src}/WebCore/LICENSE-LGPL-2.1"      "${stage}/legal/webkit/"
+          cp "${webkit_src}/WebCore/LICENSE-APPLE"         "${stage}/legal/webkit/"
+          cp "${webkit_src}/WebKitLegacy/LICENSE"          "${stage}/legal/webkit/LICENSE-WebKitLegacy"
+          cp "${webkit_src}/JavaScriptCore/COPYING.LIB"    "${stage}/legal/webkit/COPYING.LIB-JavaScriptCore"
+          cp "${webkit_src}/ThirdParty/icu/LICENSE"        "${stage}/legal/webkit/LICENSE-icu"
+          cp "${webkit_src}"/WTF/LICENSE-*.txt             "${stage}/legal/webkit/"
+
+          # GPLv2 section 2(a) modification notice plus the LGPL-2.1 section 4
+          # "corresponding source" pointer. Both are satisfied by naming the
+          # exact revision this binary was produced from.
+          cat > "${stage}/legal/README.md" <<EOF
+          # jfxwebkit ${JFX_VERSION} (${{ matrix.platform }})
+
+          This archive contains \`${{ matrix.libfile }}\`, the JavaFX WebKit native
+          library, built from source by a GitHub Actions workflow.
+
+          ## This is a modified build
+
+          This binary was **not** produced by Oracle and is **not** an official OpenJFX
+          release. It was built from ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}, a fork of
+          OpenJFX in which the WebKit JNI bindings have been replaced with the Java
+          Foreign Function & Memory API. Oracle, Apple and the other upstream copyright
+          holders do not endorse or support this build.
+
+          "Java", "JavaFX" and "OpenJFX" are trademarks of Oracle and/or its affiliates
+          and are used here only to describe what this software is derived from.
+
+          ## Corresponding source
+
+          | | |
+          |---|---|
+          | Repository | ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY} |
+          | Commit | \`${GITHUB_SHA}\` |
+          | Tree | ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/tree/${GITHUB_SHA} |
+          | Configuration | ${CONFIGURATION} |
+          | Platform | ${{ matrix.platform }} |
+          | Workflow run | ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID} |
+
+          The complete corresponding source for every component of this library,
+          including the LGPL-licensed parts, is that commit. It can be rebuilt with the
+          \`.github/workflows/build-webkit.yml\` workflow in that repository.
+
+          Because \`${{ matrix.libfile }}\` is a shared library, you may relink it
+          against a modified version of its LGPL components as permitted by
+          LGPL-2.1 section 6.
+
+          ## Licenses
+
+          | Component | License | File |
+          |---|---|---|
+          | JavaFX / OpenJFX code | GPLv2 with the Classpath Exception | \`LICENSE\`, \`ASSEMBLY_EXCEPTION\` |
+          | WebCore | LGPL-2.1, LGPL-2 and BSD 2-clause | \`webkit/LICENSE-LGPL-2.1\`, \`webkit/LICENSE-LGPL-2\`, \`webkit/LICENSE-APPLE\` |
+          | JavaScriptCore | LGPL-2.1 and BSD 2-clause | \`webkit/COPYING.LIB-JavaScriptCore\` |
+          | WebKitLegacy | BSD 2-clause | \`webkit/LICENSE-WebKitLegacy\` |
+          | WTF bundled code | Apache-2.0 with LLVM exception, BSD and MIT | \`webkit/LICENSE-*.txt\` |
+          | ICU | Unicode license | \`webkit/LICENSE-icu\` |
+
+          Per-file copyright notices are preserved in the source tree at the commit
+          above. See \`ADDITIONAL_LICENSE_INFO\` for how the Classpath Exception applies.
+          EOF
+
+          cat "${stage}/legal/README.md"
+
+      - name: Package the libraries
+        id: package
+        run: |
+          set -eux
+          stage="${RUNNER_TEMP}/stage"
+
+          cp '${{ steps.locate.outputs.lib }}' "${stage}/${{ matrix.libdir }}/"
+
+          # Debug builds and the DumpRenderTree harness are optional extras.
+          drt="${WEBKIT_OUTPUTDIR}/${{ matrix.libdir }}/${{ matrix.drtfile }}"
+          if [ -f "$drt" ]; then
+            cp "$drt" "${stage}/${{ matrix.libdir }}/"
+          fi
+          pdb="${WEBKIT_OUTPUTDIR}/${{ matrix.libdir }}/jfxwebkit.pdb"
+          if [ -f "$pdb" ]; then
+            cp "$pdb" "${stage}/${{ matrix.libdir }}/"
+          fi
+
+          out="${RUNNER_TEMP}/dist"
+          mkdir -p "$out"
+          archive="${out}/${ARCHIVE_NAME}.zip"
+          rm -f "$archive"
+
+          # cmake -E is the only archiver available on all three platforms.
+          ( cd "$stage" && cmake -E tar cf "$archive" --format=zip "${{ matrix.libdir }}" legal )
+          ( cd "$out" && cmake -E sha256sum "${ARCHIVE_NAME}.zip" > "${ARCHIVE_NAME}.zip.sha256" )
+
+          ls -l "$out"
+          echo "dist=${out}" >> "$GITHUB_OUTPUT"
+
+      - name: Upload the platform artifact
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: ${{ env.ARCHIVE_NAME }}
+          path: ${{ steps.package.outputs.dist }}/
+          if-no-files-found: error
+          retention-days: 7
+
+  publish:
+    name: Publish the release
+    needs: [prepare, build]
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+
+    steps:
+      - name: Download every platform artifact
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          path: dist
+          pattern: jfxwebkit-*
+          merge-multiple: true
+
+      - name: Write the release notes
+        id: notes
+        run: |
+          set -eu
+          ls -l dist
+
+          {
+            echo "WebKit native libraries (\`jfxwebkit\`) built from this source tree."
+            echo
+            echo "| | |"
+            echo "|---|---|"
+            echo "| Commit | \`${GITHUB_SHA}\` |"
+            echo "| Ref | \`${GITHUB_REF}\` |"
+            echo "| Configuration | ${{ inputs.configuration }} |"
+            echo "| Platforms | ${{ inputs.platforms }} |"
+            echo "| JavaFX version | ${{ needs.prepare.outputs.jfx_version }} |"
+            echo "| DumpRenderTree | ${{ inputs.build_dumprendertree }} |"
+            echo "| Workflow run | ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID} |"
+            echo
+            echo "## Using these libraries"
+            echo
+            echo "Extract the archive for your platform into \`caches/sdk\` next to the repository"
+            echo "(the archive already contains the \`bin/\` or \`lib/\` directory that the build"
+            echo "expects), then run the web tests:"
+            echo
+            echo '```'
+            echo "mvn -pl modules/javafx.web test -Djfx.web.skipTests=false"
+            echo '```'
+            echo
+            echo "See \`WEBKIT-MEDIA-STUBS.md\` for the other supported locations."
+            echo
+            echo "> These libraries are ABI-matched to the commit above. A \`jfxwebkit\` built from"
+            echo "> a different revision may load but still fail \`WebKitLibraryAbiTest\`."
+            echo
+            echo "## Licensing"
+            echo
+            echo "These are **modified** builds. They were not produced by Oracle and are not"
+            echo "official OpenJFX binaries: the WebKit JNI bindings have been replaced with the"
+            echo "Java Foreign Function & Memory API."
+            echo
+            echo "Each archive carries a \`legal/\` directory with the full license texts and a"
+            echo "\`legal/README.md\` recording the exact source revision. The complete"
+            echo "corresponding source, including the LGPL-licensed WebCore and JavaScriptCore"
+            echo "components, is commit \`${GITHUB_SHA}\` of this repository:"
+            echo "${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/tree/${GITHUB_SHA}"
+            echo
+            echo "| Component | License |"
+            echo "|---|---|"
+            echo "| JavaFX / OpenJFX code | GPLv2 with the Classpath Exception |"
+            echo "| WebCore | LGPL-2.1, LGPL-2, BSD 2-clause |"
+            echo "| JavaScriptCore | LGPL-2.1, BSD 2-clause |"
+            echo "| WebKitLegacy | BSD 2-clause |"
+            echo "| ICU | Unicode license |"
+          } > release-notes.md
+
+          cat release-notes.md
+
+      - name: Publish to the Releases page
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ needs.prepare.outputs.release_tag }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -eu
+
+          flags=""
+          case "${{ inputs.release_type }}" in
+            draft)      flags="--draft" ;;
+            prerelease) flags="--prerelease" ;;
+          esac
+
+          if gh release view "$TAG" -R "$REPO" > /dev/null 2>&1; then
+            echo "Release ${TAG} already exists; uploading assets."
+            gh release upload "$TAG" -R "$REPO" --clobber dist/*
+          else
+            # shellcheck disable=SC2086
+            gh release create "$TAG" -R "$REPO" \
+              --target "$GITHUB_SHA" \
+              --title "jfxwebkit ${{ needs.prepare.outputs.jfx_version }} (build ${{ github.run_number }})" \
+              --notes-file release-notes.md \
+              $flags \
+              dist/*
+          fi
+
+          gh release view "$TAG" -R "$REPO"

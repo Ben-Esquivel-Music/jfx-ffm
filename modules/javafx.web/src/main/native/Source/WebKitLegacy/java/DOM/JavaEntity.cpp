@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2013, 2019, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2013, 2026, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -26,24 +26,34 @@
 #undef IMPL
 
 
-#include <wtf/java/JavaEnv.h>
+#include <WebCore/WKJDOMUtils.h>
+#include <webkit_java_api.h>
 
 extern "C" {
 
 // Attributes
-JNIEXPORT jstring JNICALL Java_com_sun_webkit_dom_EntityImpl_getPublicIdImpl(JNIEnv*, jclass, jlong)
+WKJ_EXPORT int32_t wkj_dom_Entity_getPublicId(int64_t arg0, uint16_t* result_buf, int32_t result_cap, int32_t* result_length)
 {
-    return nullptr;
+    WebCore::WKJCallScope wkjScope;
+    if (result_length)
+        *result_length = 0;
+    return WKJ_STR_NULL;
 }
 
-JNIEXPORT jstring JNICALL Java_com_sun_webkit_dom_EntityImpl_getSystemIdImpl(JNIEnv*, jclass, jlong)
+WKJ_EXPORT int32_t wkj_dom_Entity_getSystemId(int64_t arg0, uint16_t* result_buf, int32_t result_cap, int32_t* result_length)
 {
-    return nullptr;
+    WebCore::WKJCallScope wkjScope;
+    if (result_length)
+        *result_length = 0;
+    return WKJ_STR_NULL;
 }
 
-JNIEXPORT jstring JNICALL Java_com_sun_webkit_dom_EntityImpl_getNotationNameImpl(JNIEnv*, jclass, jlong)
+WKJ_EXPORT int32_t wkj_dom_Entity_getNotationName(int64_t arg0, uint16_t* result_buf, int32_t result_cap, int32_t* result_length)
 {
-    return nullptr;
+    WebCore::WKJCallScope wkjScope;
+    if (result_length)
+        *result_length = 0;
+    return WKJ_STR_NULL;
 }
 
 }

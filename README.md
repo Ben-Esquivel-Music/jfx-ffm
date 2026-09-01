@@ -33,10 +33,16 @@ the headless unit test suite. Useful flags:
 - `-DskipTests` — skip the test suite
 - `-DskipNative=true` — skip the native build (tests that need natives will fail)
 - `-pl modules/javafx.base -am` — build a single module (plus its dependencies)
-- `-DFULL_TEST=true -DUSE_ROBOT=true` — also run the system/robot tests
+- `-DFULL_TEST=true -DUSE_ROBOT=true` — also run the eligible system/robot tests; add
+  `-Dsurefire.includes='test/robot/**/*.java'` to select only Robot tests
 - `-DHEADLESS_TEST=true` — force headless mode for the system tests
-- `-Djfx.web.skipTests=false` — run the web module tests (see
+- `-Djfx.web.skipTests=false` — run the web module tests and enable the WebKit-dependent system
+  Robot tests (see
   [WEBKIT-MEDIA-STUBS.md](WEBKIT-MEDIA-STUBS.md))
+
+`jfx.web.skipTests` defaults to `true`, which also excludes the WebKit-dependent Robot tests even
+when `-DUSE_ROBOT=true` is passed. Setting it to `false` requires an ABI-compatible `jfxwebkit`
+rebuilt for the current source tree.
 
 The media and WebKit native libraries are not compiled from source; see
 [WEBKIT-MEDIA-STUBS.md](WEBKIT-MEDIA-STUBS.md) for how to supply prebuilt

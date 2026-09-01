@@ -142,7 +142,7 @@ class EmptyChromeClient : public ChromeClient {
 
     void didFinishLoadingImageForElement(HTMLImageElement&) final { }
 
-    PlatformPageClient platformPageClient() const final { return 0; }
+    PlatformPageClient platformPageClient() const final { return { }; }
     void contentsSizeChanged(LocalFrame&, const IntSize&) const final { }
     void intrinsicContentsSizeChanged(const IntSize&) const final { }
 

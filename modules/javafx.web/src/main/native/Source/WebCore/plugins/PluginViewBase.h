@@ -80,7 +80,7 @@ public:
     virtual void releaseMemory() { }
 
 protected:
-    explicit PluginViewBase(PlatformWidget widget = 0) : Widget(widget) { }
+    explicit PluginViewBase(PlatformWidget widget = { }) : Widget(widget) { }
 
 private:
     bool isPluginViewBase() const final { return true; }

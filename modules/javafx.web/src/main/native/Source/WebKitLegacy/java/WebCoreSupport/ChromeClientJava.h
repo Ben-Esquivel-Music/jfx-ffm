@@ -26,14 +26,33 @@
 #pragma once
 
 #include <WebCore/ChromeClient.h>
-#include <WebCore/PlatformJavaClasses.h>
+#include <webkit_java_api_page.h>
 
 namespace WebCore {
+
+class WebPage;
 
 class ChromeClientJava final : public ChromeClient {
     WTF_DEPRECATED_MAKE_FAST_ALLOCATED(ChromeClientJava);
 public:
-    ChromeClientJava(const JLObject &webPage);
+    ChromeClientJava() = default;
+
+    /*
+     * Installs the page this client drives. Called by wkj_page_set_callbacks, once,
+     * before the page is initialized.
+     *
+     * `pageRef` is borrowed: the WebPage owns the retained id and outlives this client.
+     * `webPagePeer` is the WebPage the six HostWindow methods below forward to; it
+     * replaces WebPage::webPageFromJObject(m_webPage), and with it the WebPage.getPage
+     * upcall that call made on every repaint and scroll.
+     */
+    void setJavaPage(wkj_ref pageRef, const WKJChromeCallbacks* callbacks, WebPage* webPagePeer)
+    {
+        m_pageRef = pageRef;
+        m_callbacks = callbacks;
+        m_webPagePeer = webPagePeer;
+    }
+
     void chromeDestroyed() override;
 
     void setWindowRect(const FloatRect&) override;
@@ -187,7 +206,10 @@ public:
 
 private:
     void repaint(const IntRect&);
-    JGObject m_webPage;
+
+    wkj_ref m_pageRef { 0 };
+    const WKJChromeCallbacks* m_callbacks { nullptr };
+    WebPage* m_webPagePeer { nullptr };
 };
 
 } // namespace WebCore

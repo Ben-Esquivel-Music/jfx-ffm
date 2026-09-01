@@ -506,7 +506,7 @@ public:
 
     bool isWidget() const override { return false; }
     Widget* widget() const override { return nullptr; }
-    PlatformWidget platformWidget() const override { return nullptr; }
+    PlatformWidget platformWidget() const override { return { }; }
     Widget* widgetForAttachmentView() const override { return nullptr; }
     bool isPlugin() const override { return false; }
 
