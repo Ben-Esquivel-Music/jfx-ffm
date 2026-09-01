@@ -141,10 +141,9 @@ WKJ_EXPORT void wkj_main_thread_dispatch_functions(void);
  * down, and ThreadTimers stops rescheduling the shared timer.
  *
  * This replaces the write to the g_ShuttingDown global that
- * Java_com_sun_webkit_MainThread_twkSetShutdown performed. The flag is still a plain C
- * global inside the library (WTF::wkjIsShuttingDown reads it); only the way Java sets it
- * changes. It is a downcall, not a callback: Java tells the library, the library does not
- * ask.
+ * Java_com_sun_webkit_MainThread_twkSetShutdown performed. The flag is atomic inside the
+ * library (WTF::wkjIsShuttingDown reads it); only the way Java sets it changes. It is a
+ * downcall, not a callback: Java tells the library, the library does not ask.
  *
  * `shutting_down` is 0 or 1. Safe to call from any thread and idempotent.
  */

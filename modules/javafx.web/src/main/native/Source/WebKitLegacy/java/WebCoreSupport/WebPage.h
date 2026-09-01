@@ -40,6 +40,7 @@
 
 namespace WebCore {
 
+class DragClientJava;
 class Frame;
 class GraphicsContext;
 class GraphicsLayer;
@@ -54,7 +55,7 @@ class WebPage
     : GraphicsLayerClient
 {
 public:
-    WebPage(RefPtr<Page> page);
+    WebPage(RefPtr<Page> page, DragClientJava& dragClient);
     ~WebPage();
 
     inline Page* page()
@@ -140,6 +141,7 @@ private:
     Node* focusedWebCoreNode();
 
     RefPtr<Page> m_page;
+    DragClientJava& m_dragClient;
     const WKJPageCallbacks* m_callbacks { nullptr };
     WKJHandle m_javaPage;
     RefPtr<PrintContext> m_printContext;

@@ -168,11 +168,11 @@ inline WTF::String wkjFetchString(const Fetch& fetch)
 
     WTF::Vector<uint16_t, initialCapacity> buffer(static_cast<size_t>(initialCapacity));
     int32_t length = 0;
-    int32_t status = fetch(buffer.span().data(), initialCapacity, &length);
+    int32_t status = fetch(buffer.mutableSpan().data(), initialCapacity, &length);
 
     if (status == WKJ_STR_OVERFLOW && length > 0) {
         buffer.grow(static_cast<size_t>(length));
-        status = fetch(buffer.span().data(), length, &length);
+        status = fetch(buffer.mutableSpan().data(), length, &length);
     }
 
     if (status != WKJ_STR_OK)

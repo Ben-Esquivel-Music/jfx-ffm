@@ -102,8 +102,8 @@ void DragClientJava::startDrag(DragItem item, DataTransfer& dataTransfer, Frame&
         for(const auto& mime : mimeTypes) {
             String value = dataTransfer.getData(*document, mime);
 
-            mimeArgs.append(makeUnique<WKJStringArg>(mime));
-            valueArgs.append(makeUnique<WKJStringArg>(value));
+            mimeArgs.append(makeUniqueWithoutFastMallocCheck<WKJStringArg>(mime));
+            valueArgs.append(makeUniqueWithoutFastMallocCheck<WKJStringArg>(value));
             mimePtrs.append(mimeArgs.last()->data());
             mimeLengths.append(mimeArgs.last()->length());
             valuePtrs.append(valueArgs.last()->data());

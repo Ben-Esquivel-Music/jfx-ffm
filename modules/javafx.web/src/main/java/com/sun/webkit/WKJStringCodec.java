@@ -190,8 +190,9 @@ public final class WKJStringCodec {
         }
         if (bytes == 0) {
             // Same reason as the empty UTF-16 case above: a zero length allocation may have a zero
-            // address, and the C side reads a NULL pointer as the Java value having been null.
-            return allocator.allocate(JAVA_BYTE);
+            // address, and the C side reads a NULL pointer as the Java value having been null. Keep
+            // the allocation's non-zero address while exposing the encoded length of zero.
+            return allocator.allocate(JAVA_BYTE).asSlice(0, 0);
         }
         byte[] encoded = new byte[bytes];
         int at = 0;

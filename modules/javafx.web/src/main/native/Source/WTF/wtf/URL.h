@@ -240,7 +240,6 @@ public:
     WTF_EXPORT_PRIVATE RetainPtr<NSURL> createNSURL() const;
     WTF_EXPORT_PRIVATE static NSURL *emptyNSURL();
 #endif
-#endif
 
 #if USE(GLIB) && HAVE(GURI)
     WTF_EXPORT_PRIVATE URL(GUri*);

@@ -1171,10 +1171,12 @@ exercise and its removal is the completion criterion for this scope.**
 
 ### 12.3 Tests
 
-Web tests are compiled always and skipped unless `-Djfx.web.skipTests=false`
-(`javafx.web/pom.xml:48, :272`), and need a prebuilt `jfxwebkit` on `${jfx.native.librarypath}`
-(root `pom.xml:174`). The surefire `argLine` already carries
-`--enable-native-access=javafx.graphics,javafx.media,javafx.web` (`:278`).
+Web tests are compiled always and skipped unless `-Djfx.web.skipTests=false` (the default is in
+root `pom.xml:150`; `javafx.web/pom.xml:290` applies it), and need a prebuilt `jfxwebkit` on
+`${jfx.native.librarypath}` (root `pom.xml:176`). The same default excludes WebKit-dependent Robot
+tests from `tests/system`; explicitly setting it to `false` requires an ABI-compatible rebuilt
+`jfxwebkit`. The surefire `argLine` already carries
+`--enable-native-access=javafx.graphics,javafx.media,javafx.web` (`javafx.web/pom.xml:328`).
 
 | Scope area | Tests | Notes |
 |---|---|---|
@@ -1185,7 +1187,7 @@ Web tests are compiled always and skipped unless `-Djfx.web.skipTests=false`
 | `graphics/java` (RQ, Canvas, Path) | `CanvasTest.java` (6), `PathContructorTest.java`, `SVGTest.java`, `MathMLRenderTest.java`, `ShadowTest.java`, `OpacityTest.java` | the RQ path's coverage |
 | `FileSystemJava` | `FileTest.java` (76), `FileReaderTest.java` (287), `DirectoryLockTest.java`, `UserDataDirectoryTest.java`, `LocalStorageTest.java` | indirect |
 | `TextBreakIteratorJava` *(dead)* | `test/com/sun/webkit/text/TextBreakIteratorTest.java` (72) | tests `TextBreakIteratorShim`, the **Java** class; passes with the C++ dead |
-| System/robot | `tests/system/src/test/java/test/robot/javafx/web/{PointerEventTest,TextSelectionTest,TooltipFXTest}.java` | `mvn -pl tests/system test -DFULL_TEST=true -DUSE_ROBOT=true` |
+| System/robot | `tests/system/src/test/java/test/robot/javafx/web/{PointerEventTest,TextSelectionTest,TooltipFXTest}.java` | `mvn -pl tests/system test -DFULL_TEST=true -DUSE_ROBOT=true -Djfx.web.skipTests=false -Dsurefire.includes='test/robot/javafx/web/**/*.java'` |
 
 **No test stubs or overrides any native in this scope** — there is no `_initIDs` test double and no
 `StubToolkit` hook for `jfxwebkit`. Every test above needs the real library.
@@ -1296,7 +1298,7 @@ Ordering, each step its own commit:
 3. **`WCRenderQueue` / `RQRef` / `GraphicsContextJava`** (section 9.1). Four JNI calls and one
    export; Java already owns the id registry (`WCGraphicsManager.java:150-164`). Best ratio in the
    scope. Verify with `CanvasTest`, `SVGTest`, `MathMLRenderTest`, `ShadowTest`, `OpacityTest`, then
-   `mvn -pl tests/system test -DFULL_TEST=true -DUSE_ROBOT=true -Dtest='test/robot/javafx/web/**'`.
+   `mvn -pl tests/system test -DFULL_TEST=true -DUSE_ROBOT=true -Djfx.web.skipTests=false -Dsurefire.includes='test/robot/javafx/web/**/*.java'`.
 4. **`SharedBufferJava`** — 5 exports, 46 tests already written (`SharedBufferTest`). The
    best-covered surface; use it to validate `critical(true)`.
 5. **Network** — `URLLoader` (6 exports, 4 upcalls) and `SocketStreamHandleImplJava` (4 exports,
@@ -1521,7 +1523,7 @@ every `grep` must come back **empty** (exit 1). Run from
   ```
   # 1. rebuild jfxwebkit from this tree with your WebKit toolchain, then:
   mvn -pl modules/javafx.web test -Djfx.web.skipTests=false
-  mvn -pl tests/system test -DFULL_TEST=true -DUSE_ROBOT=true -Dtest='test/robot/javafx/web/**'
+  mvn -pl tests/system test -DFULL_TEST=true -DUSE_ROBOT=true -Djfx.web.skipTests=false -Dsurefire.includes='test/robot/javafx/web/**/*.java'
   ```
   `PARITY: exact` holds because nothing deleted contributed a single instruction to the shipping
   library: every `.cpp` is either absent from its build list or an empty translation unit, and every

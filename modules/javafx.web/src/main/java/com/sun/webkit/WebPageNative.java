@@ -419,7 +419,10 @@ final class WebPageNative {
     /** Page handle to the {@code wkj_ref} of the Java {@link WebPage} that owns it. */
     private static final ConcurrentHashMap<Long, Long> PAGE_REFS = new ConcurrentHashMap<>();
 
-    /** Page {@code wkj_ref} to the {@code wkj_ref} of its host {@code WCWidget}, minted on demand. */
+    /**
+     * Page {@code wkj_ref} to the base registry reference for its host {@code WCWidget}. Each
+     * callback return is retained separately because {@code PlatformPageClient} adopts it.
+     */
     private static final ConcurrentHashMap<Long, Long> HOST_WINDOW_REFS = new ConcurrentHashMap<>();
 
     /**
@@ -1497,8 +1500,8 @@ final class WebPageNative {
             if (page == null) {
                 return 0L;
             }
-            return HOST_WINDOW_REFS.computeIfAbsent(ref,
-                    key -> WebKitNative.register(page.getHostWindow()));
+            return WebKitNative.retain(HOST_WINDOW_REFS.computeIfAbsent(ref,
+                    key -> WebKitNative.register(page.getHostWindow())));
         } catch (Throwable t) {
             failed("get_host_window", t);
             return 0L;

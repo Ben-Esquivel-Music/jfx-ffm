@@ -1045,11 +1045,12 @@ Coverage of these classes, from `grep -rln` over `modules/javafx.web/src/test/ja
 
 **No test stubs or overrides any of these natives.** There is no `_initIDs` test double and no
 `StubToolkit` hook for javafx.web, so every test above needs a real `jfxwebkit` on
-`java.library.path` and is skipped by default (`jfx.web.skipTests=true`,
-`modules/javafx.web/pom.xml:48`). Run with:
+`java.library.path`. The default `jfx.web.skipTests=true` excludes both the module suite and the
+WebKit-dependent system Robot tests. Explicitly setting it to `false` requires an ABI-compatible
+rebuilt `jfxwebkit`. Run with:
 
     mvn -pl modules/javafx.web test -Djfx.web.skipTests=false
-    mvn -pl tests/system test -DFULL_TEST=true -DUSE_ROBOT=true -Dtest="test/robot/javafx/web/**"
+    mvn -pl tests/system test -DFULL_TEST=true -DUSE_ROBOT=true -Djfx.web.skipTests=false -Dsurefire.includes='test/robot/javafx/web/**/*.java'
 
 CI (`.github/workflows/submit.yml`, plain `mvn -B -ntp -fae install`) runs neither and does not build
 WebKit. Every migration PR in this slice must state which local WebKit build and which prebuilt

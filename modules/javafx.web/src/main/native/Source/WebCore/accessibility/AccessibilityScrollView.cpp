@@ -148,7 +148,7 @@ AccessibilityObject* AccessibilityScrollView::scrollBar(AccessibilityOrientation
 bool AccessibilityScrollView::isAttachment() const
 {
     if (RefPtr scrollView = currentScrollView())
-        return scrollView->platformWidget();
+        return !!scrollView->platformWidget();
     return false;
 }
 

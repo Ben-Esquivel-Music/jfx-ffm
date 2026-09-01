@@ -204,11 +204,11 @@ void ComplexTextController::collectComplexTextRunsForCharacters(std::span<const 
 
     Vector<wkj_ref, 32> runIds(characters.size());
     int32_t total = cb->font_get_text_runs(wkj_ref(*jFont), textArg.data(), textArg.length(),
-                                           runIds.span().data(), static_cast<int32_t>(runIds.size()));
+                                           runIds.mutableSpan().data(), static_cast<int32_t>(runIds.size()));
     if (total > static_cast<int32_t>(runIds.size())) {
         runIds.grow(static_cast<size_t>(total));
         total = cb->font_get_text_runs(wkj_ref(*jFont), textArg.data(), textArg.length(),
-                                       runIds.span().data(), total);
+                                       runIds.mutableSpan().data(), total);
     }
     wkjCheckAndClearException();
 

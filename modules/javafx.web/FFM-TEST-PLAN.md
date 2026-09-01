@@ -690,22 +690,25 @@ Constraints on the change:
 ### `tests/system` robot web tests
 
 `PointerEventTest`, `TextSelectionTest`, `TooltipFXTest` in
-`tests/system/src/test/java/test/robot/javafx/web/`. They are already doubly opt-in
-(`-DFULL_TEST=true -DUSE_ROBOT=true`), CI never runs them, and they need a display **and** a real
-rendering WebView - `wkjstub` cannot help them, since a recording stub renders nothing.
+`tests/system/src/test/java/test/robot/javafx/web/`. They need three explicit opt-ins:
+`-DFULL_TEST=true`, `-DUSE_ROBOT=true`, and `-Djfx.web.skipTests=false`. The default
+`jfx.web.skipTests=true` keeps these WebKit-dependent Robot tests excluded. CI never runs them, and
+they need a display **and** an ABI-compatible rebuilt `jfxwebkit`; `wkjstub` cannot help them,
+since a recording stub renders nothing.
 
-* **Leave them hard-failing.** No assumption. Two explicit flags are already a strong enough
-  forcing function, and a developer who passes both has asked for the real thing.
+* **Leave them hard-failing.** No assumption. Three explicit flags are already a strong enough
+  forcing function, and a developer who passes all three has asked for the real thing.
 * They must be run, on a machine with a display, once `jfxwebkit` is rebuilt, on **each** of
   Windows, Linux and macOS, and the result recorded in the PR:
-  `mvn -pl tests/system test -DFULL_TEST=true -DUSE_ROBOT=true -Dtest='test/robot/javafx/web/**'`.
+  `mvn -pl tests/system test -DFULL_TEST=true -DUSE_ROBOT=true -Djfx.web.skipTests=false -Dsurefire.includes='test/robot/javafx/web/**/*.java'`.
   They cover the paths `wkjstub` structurally cannot: pointer-event delivery through
   `WebPage`'s upcalls into `WebView`, text selection through the editor client, and tooltips
   through the chrome client - three of the host-table groups that are still `reserved`
   placeholders today.
-* `tests/system` needs no wiring change for this migration: its argLine already carries
-  `--enable-native-access=javafx.graphics,javafx.media,javafx.web` and
-  `--add-exports javafx.web/com.sun.webkit=ALL-UNNAMED`.
+* `tests/system` needs no additional module-access or argLine wiring for this migration: its
+  argLine already carries `--enable-native-access=javafx.graphics,javafx.media,javafx.web` and
+  `--add-exports javafx.web/com.sun.webkit=ALL-UNNAMED`. Its test selection separately follows the
+  `jfx.web.skipTests` opt-in described above.
 * DumpRenderTree stays the deeper net for phases B-D and is a manual run against a WebKit build;
   record the exact command in the PR (`jfx-web-native`, "Build & test").
 
@@ -722,7 +725,8 @@ rendering WebView - `wkjstub` cannot help them, since a recording stub renders n
 4. With a rebuilt `jfxwebkit`: `mvn -pl modules/javafx.web test -Djfx.web.skipTests=false` reports
    473 tests with the single pre-existing `LoadTest.loadJarFile` failure and 113 skipped - the
    baseline in section 1.1, unchanged - and `WebKitLibraryAbiTest` passes.
-5. The robot web tests pass on all three platforms with `-DFULL_TEST=true -DUSE_ROBOT=true`.
+5. The robot web tests pass on all three platforms with
+   `-DFULL_TEST=true -DUSE_ROBOT=true -Djfx.web.skipTests=false`.
 6. Any C replaced by Java rather than bound carries its golden-capture parity test
    (`jfx-ffm-testing` pattern 7), captured before deletion, with the deletion in its own commit.
    Nothing in the DOM layer qualifies: it is all `OS-CALL` into WebKit.

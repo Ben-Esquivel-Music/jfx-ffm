@@ -29,15 +29,18 @@
 
 #include "WKJPlatformJava.h"
 
+#include <wtf/java/WKJRuntime.h>
+
 namespace WebCore {
 
 RQRef::~RQRef()
 {
     if (-1 != m_refID) {
-        const WKJHostGraphics* cb = wkjGraphics();
+        // This destructor can run after the VM has detached. Preserve the JNI null-environment
+        // check explicitly now that the host table is process-wide.
+        WKJ_RETURN_IF_SHUTTING_DOWN();
 
-        // Do it only if the host table is here. The JNI version made the same test against
-        // the JNI environment, because this destructor can run after the VM has detached.
+        const WKJHostGraphics* cb = wkjGraphics();
         if (cb && cb->ref_deref) {
             cb->ref_deref(m_ref.get());
             wkjCheckAndClearException();

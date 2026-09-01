@@ -59,7 +59,7 @@ public:
     }
 
     /* The Java-assigned int id, fetching it and ref()ing the object on first use. */
-    operator int32_t();
+    explicit operator int32_t();
 
     /* The registry id, borrowed: ownership stays with this RQRef. */
     operator wkj_ref() const { return m_ref.get(); }

@@ -32,6 +32,7 @@
 
 #include <wtf/HashMap.h>
 #include <wtf/NeverDestroyed.h>
+#include <wtf/java/WKJRuntime.h>
 
 // WKJ_EXPORT, wkj_rq_release and WKJHostGraphics all arrive with webkit_java_api.h, which
 // WKJPlatformJava.h includes; webkit_java_api_platform.h is not includable on its own.
@@ -95,7 +96,9 @@ void RenderingQueue::flush() {
 
 void RenderingQueue::disposeGraphics() {
     // The method is called from the dtor which potentially can be called after VM detach.
-    // So the check for a host table, which is what the null environment check meant.
+    // Preserve the JNI null-environment check explicitly now that the host table is process-wide.
+    WKJ_RETURN_IF_SHUTTING_DOWN();
+
     const WKJHostGraphics* cb = wkjGraphics();
     if (!cb || !cb->rq_dispose_graphics)
        return;

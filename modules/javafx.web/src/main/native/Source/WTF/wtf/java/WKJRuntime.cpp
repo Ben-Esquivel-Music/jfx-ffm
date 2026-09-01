@@ -30,7 +30,7 @@
  * hooks; the mapping is one for one:
  *
  *   JavaVM* jvm                       ->  const WKJHost* wkj_host
- *   volatile bool g_ShuttingDown      ->  unchanged, still here, still that name
+ *   volatile bool g_ShuttingDown      ->  private atomic shutdown gate
  *   JNI_OnLoad / JNI_OnLoad_jfxwebkit ->  wkj_init
  *   JNI_OnUnload                      ->  nothing; see BELOW
  *   DllMain                           ->  unchanged, still here (it was never JNI)
@@ -59,23 +59,66 @@
 
 #include "config.h"
 
+#include <atomic>
+
 #include <wtf/java/WKJRuntime.h>
 
 #if PLATFORM(JAVA_WIN) && !defined(NDEBUG)
 #include <crtdbg.h>
 #endif
 
-/*
- * The installed callback table, NULL until wkj_init succeeds. Read on the hot path of every
- * upcall and of WKJHandle retain/release, exactly the way `extern JavaVM* jvm` was read.
- */
+/* The guarded copy published to native callers, NULL until wkj_init succeeds. */
 const WKJHost* wkj_host = nullptr;
 
+namespace {
+
 /*
- * Set by wkj_set_shutdown (com.sun.webkit.MainThread.twkSetShutdown) and read by
- * WTF::wkjIsShuttingDown() and WebCore/platform/ThreadTimers.cpp. Declared in WKJRuntime.h.
+ * Java owns the original table for the life of the process. Native callers use a copy whose
+ * four handle callbacks pass through the shutdown gate below. This keeps wkj_host immutable
+ * after publication while restoring the JNI rule that reference operations stop once Java is
+ * tearing down.
  */
-volatile bool g_ShuttingDown = false;
+const WKJHost* s_javaHost = nullptr;
+WKJHost s_guardedHost { };
+std::atomic_bool s_shuttingDown { false };
+
+wkj_ref guardedRetain(wkj_ref ref)
+{
+    if (WTF::wkjIsShuttingDown())
+        return 0;
+    return s_javaHost->core.retain(ref);
+}
+
+wkj_ref guardedRetainWeak(wkj_ref ref)
+{
+    if (WTF::wkjIsShuttingDown())
+        return 0;
+    return s_javaHost->core.retain_weak(ref);
+}
+
+void guardedRelease(wkj_ref ref)
+{
+    if (!WTF::wkjIsShuttingDown())
+        s_javaHost->core.release(ref);
+}
+
+int32_t guardedIsLive(wkj_ref ref)
+{
+    if (WTF::wkjIsShuttingDown())
+        return 0;
+    return s_javaHost->core.is_live(ref);
+}
+
+} // namespace
+
+namespace WTF {
+
+bool wkjIsShuttingDown()
+{
+    return s_shuttingDown.load(std::memory_order_acquire);
+}
+
+} // namespace WTF
 
 extern "C" {
 
@@ -116,8 +159,31 @@ int32_t wkj_init(const WKJHost* host, int32_t host_size, uint32_t abi_version)
     _CrtSetDbgFlag(tmpFlag);
 #endif
 
-    wkj_host = host;
+    s_javaHost = host;
+    s_guardedHost = *host;
+    if (host->core.retain)
+        s_guardedHost.core.retain = guardedRetain;
+    if (host->core.retain_weak)
+        s_guardedHost.core.retain_weak = guardedRetainWeak;
+    if (host->core.release)
+        s_guardedHost.core.release = guardedRelease;
+    if (host->core.is_live)
+        s_guardedHost.core.is_live = guardedIsLive;
+
+    /* Publish only after both the original pointer and the complete copy are ready. */
+    wkj_host = &s_guardedHost;
     return WKJ_INIT_OK;
+}
+
+/*
+ * MainThread.twkSetShutdown(boolean); was Java_com_sun_webkit_MainThread_twkSetShutdown.
+ * Block handle callbacks first so a later static destructor cannot enter a JVM that is already
+ * at its shutdown safepoint. The legacy flag continues to gate the other migrated JNI sites.
+ */
+void wkj_set_shutdown(int32_t shutting_down)
+{
+    const bool value = shutting_down != 0;
+    s_shuttingDown.store(value, std::memory_order_release);
 }
 
 } // extern "C"

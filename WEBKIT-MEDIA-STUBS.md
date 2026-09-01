@@ -49,9 +49,17 @@ Note that these libraries may not be compatible with the source tree you are wor
 
 ## Skip Web tests
 
-The web module tests are skipped by default in the Maven build (they require
-the native `jfxwebkit` library). To run them, pass:
+The web module tests and the WebKit-dependent Robot tests in `tests/system` are excluded by
+default (`jfx.web.skipTests=true`). To run the web module tests, pass:
 
     -Djfx.web.skipTests=false
+
+To run only the WebKit-dependent Robot tests, use:
+
+    mvn -pl tests/system test -DFULL_TEST=true -DUSE_ROBOT=true -Djfx.web.skipTests=false -Dsurefire.includes='test/robot/javafx/web/**/*.java'
+
+Setting `jfx.web.skipTests=false` requires an ABI-compatible `jfxwebkit` rebuilt for the current
+source tree. A released binary from another JavaFX revision may load but still have an incompatible
+native ABI.
 
 Note that skipping is fine for local work. But a full test *is* required before submitting a PR, see [CONTRIBUTING.md](https://github.com/openjdk/jfx/blob/master/CONTRIBUTING.md).

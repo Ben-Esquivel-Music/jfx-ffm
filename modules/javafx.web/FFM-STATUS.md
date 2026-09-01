@@ -555,6 +555,8 @@ no pom or CMake file reachable from the Maven build compiles WebKit. So:
   and zero `wkj_*`. The 473 module tests therefore cannot pass until the library is rebuilt from
   these sources with the WebKit CMake/ninja/clang toolchain. `WebKitLibraryAbiTest` is a deliberate
   non-skippable sentinel so that a green build cannot hide a stale library.
+* The default `jfx.web.skipTests=true` excludes both the web module suite and the WebKit-dependent
+  system Robot tests. Setting it to `false` requires that ABI-compatible rebuilt `jfxwebkit`.
 * Everything compiled here was **MSVC x64**. GCC 14 and Xcode 15 have seen none of it, nor has the
   `__attribute__((visibility("default")))` branch of `WKJ_EXPORT`, nor the ELF/Mach-O export globs.
 
@@ -564,7 +566,7 @@ no pom or CMake file reachable from the Maven build compiles WebKit. So:
    `nm -D --defined-only` and `nm -gU` that the `wkj_*` symbols are exported — the globs `wkj_*;`
    and `_wkj_*` are the only thing standing between the ABI and a silent link-time hole.
 2. `mvn -pl modules/javafx.web test -Djfx.web.skipTests=false` against that library, and
-   `mvn -pl tests/system test -DFULL_TEST=true -DUSE_ROBOT=true -Dtest='test/robot/javafx/web/**'`
+   `mvn -pl tests/system test -DFULL_TEST=true -DUSE_ROBOT=true -Djfx.web.skipTests=false -Dsurefire.includes='test/robot/javafx/web/**/*.java'`
    with a display. Those robot tests cover the pointer, editor and chrome upcall paths.
 3. A DumpRenderTree `LayoutTests` run, diffed against the expected results.
 4. Fix the `WKJ_EXPORT` export/import split before any second library calls a `wkj_*` function —

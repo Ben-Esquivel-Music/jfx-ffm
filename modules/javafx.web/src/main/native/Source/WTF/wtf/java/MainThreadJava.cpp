@@ -108,16 +108,4 @@ void wkj_main_thread_dispatch_functions(void)
     WTF::RunLoop::mainSingleton().dispatchFunctionsFromMainThread();
 }
 
-/*
- * MainThread.twkSetShutdown(boolean); was Java_com_sun_webkit_MainThread_twkSetShutdown.
- *
- * The flag it sets is the one every shutdown gate in the library reads, so this is the single
- * point at which Java tells the library to stop calling back. It is a downcall, not a
- * callback: the JNI version was a native method too.
- */
-void wkj_set_shutdown(int32_t shutting_down)
-{
-    g_ShuttingDown = shutting_down != 0;
-}
-
 } // extern "C"

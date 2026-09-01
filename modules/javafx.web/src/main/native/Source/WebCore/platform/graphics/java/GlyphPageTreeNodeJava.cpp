@@ -51,7 +51,7 @@ bool GlyphPage::fill(std::span<const UChar> characterBuffer)
     int32_t count = cb->font_get_glyph_codes(wkj_ref(*jFont),
                                              reinterpret_cast<const uint16_t*>(characterBuffer.data()),
                                              static_cast<int32_t>(characterBuffer.size()),
-                                             glyphs.span().data(),
+                                             glyphs.mutableSpan().data(),
                                              static_cast<int32_t>(characterBuffer.size()));
     wkjCheckAndClearException();
     if (count < 0)

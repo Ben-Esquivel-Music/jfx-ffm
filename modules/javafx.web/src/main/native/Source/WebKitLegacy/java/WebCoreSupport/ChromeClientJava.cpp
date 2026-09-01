@@ -303,7 +303,7 @@ bool ChromeClientJava::runJavaScriptPrompt(LocalFrame&, const String& text,
     int32_t length = 0;
     int32_t status = m_callbacks->prompt(m_pageRef, textArg.data(), textArg.length(),
         defaultArg.data(), defaultArg.length(),
-        reinterpret_cast<uint16_t*>(buffer.data()), static_cast<int32_t>(buffer.size()), &length);
+        reinterpret_cast<uint16_t*>(buffer.mutableSpan().data()), static_cast<int32_t>(buffer.size()), &length);
 
     if (status == WKJ_STR_OVERFLOW) {
         /* The callee serves the retry from the result it already has; the dialog is modal
@@ -311,14 +311,14 @@ bool ChromeClientJava::runJavaScriptPrompt(LocalFrame&, const String& text,
         buffer.resize(static_cast<size_t>(length));
         status = m_callbacks->prompt(m_pageRef, textArg.data(), textArg.length(),
             defaultArg.data(), defaultArg.length(),
-            reinterpret_cast<uint16_t*>(buffer.data()), static_cast<int32_t>(buffer.size()), &length);
+            reinterpret_cast<uint16_t*>(buffer.mutableSpan().data()), static_cast<int32_t>(buffer.size()), &length);
     }
 
     /* A cancelled prompt is WKJ_STR_NULL, which is the null string the JNI code tested. */
     if (status != WKJ_STR_OK)
         return false;
 
-    result = String(std::span<const char16_t>(buffer.data(), static_cast<size_t>(length)));
+    result = String(std::span<const char16_t>(buffer.span().data(), static_cast<size_t>(length)));
     return true;
 }
 
@@ -358,8 +358,8 @@ void ChromeClientJava::runOpenPanel(LocalFrame&, FileChooser& fileChooser)
     int32_t count = m_callbacks->choose_file(m_pageRef,
         initialArg.data(), initialArg.length(), multiple ? 1 : 0,
         mimeFiltersArg.data(), mimeFiltersArg.length(),
-        reinterpret_cast<uint16_t*>(chars.data()), static_cast<int32_t>(chars.size()),
-        lengths.data(), static_cast<int32_t>(lengths.size()), &requiredUnits);
+        reinterpret_cast<uint16_t*>(chars.mutableSpan().data()), static_cast<int32_t>(chars.size()),
+        lengths.mutableSpan().data(), static_cast<int32_t>(lengths.size()), &requiredUnits);
 
     /* A negative count is the null array for which the JNI code skipped chooseFiles. */
     if (count < 0)
@@ -372,8 +372,8 @@ void ChromeClientJava::runOpenPanel(LocalFrame&, FileChooser& fileChooser)
         count = m_callbacks->choose_file(m_pageRef,
             initialArg.data(), initialArg.length(), multiple ? 1 : 0,
             mimeFiltersArg.data(), mimeFiltersArg.length(),
-            reinterpret_cast<uint16_t*>(chars.data()), static_cast<int32_t>(chars.size()),
-            lengths.data(), static_cast<int32_t>(lengths.size()), &requiredUnits);
+            reinterpret_cast<uint16_t*>(chars.mutableSpan().data()), static_cast<int32_t>(chars.size()),
+            lengths.mutableSpan().data(), static_cast<int32_t>(lengths.size()), &requiredUnits);
         if (count < 0)
             return;
     }
@@ -383,7 +383,7 @@ void ChromeClientJava::runOpenPanel(LocalFrame&, FileChooser& fileChooser)
     size_t offset = 0;
     for (int32_t i = 0; i < count; i++) {
         size_t length = static_cast<size_t>(lengths[i]);
-        files.append(String(std::span<const char16_t>(chars.data() + offset, length)));
+        files.append(String(std::span<const char16_t>(chars.span().data() + offset, length)));
         offset += length;
     }
     fileChooser.chooseFiles(files);

@@ -105,9 +105,10 @@ run, and the global that goes with them. It is what `wtf/java/JavaEnv.cpp` becam
 * `uint32_t wkj_abi_version(void)` - returns `WKJ_ABI_VERSION`.
 * `int32_t wkj_init(const WKJHost*, int32_t, uint32_t)` - validates `abi_version` against
   `WKJ_ABI_VERSION` and `host_size` against both `host->size` and `sizeof(WKJHost)`, then
-  stores the pointer in `wkj_host`. It replaces `JNI_OnLoad`, `JNI_OnUnload` and
-  `JNI_OnLoad_jfxwebkit`, all three of which are gone.
-* `const WKJHost* wkj_host` - the stored table, `NULL` until `wkj_init` succeeds.
+  retains the Java table and publishes a native copy in `wkj_host`. The copy routes the four
+  reference-handle callbacks through the shutdown gate before delegating to Java. It replaces
+  `JNI_OnLoad`, `JNI_OnUnload` and `JNI_OnLoad_jfxwebkit`, all three of which are gone.
+* `const WKJHost* wkj_host` - the guarded native table, `NULL` until `wkj_init` succeeds.
 
 Two consequences of that replacement are worth knowing.
 

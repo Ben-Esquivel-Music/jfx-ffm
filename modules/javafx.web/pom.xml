@@ -45,7 +45,6 @@
          library is available on java.library.path. -->
 
     <properties>
-        <jfx.web.skipTests>true</jfx.web.skipTests>
         <!-- The FFM binding tests are a separate surefire execution: they run
              against the wkjstub recording stub built from src/test/native/wkjstub,
              not against jfxwebkit, so they need neither a prebuilt WebKit nor
@@ -204,7 +203,7 @@
                                 <mkdir dir="${project.build.directory}/testing/resources"/>
                                 <jar destfile="${project.build.directory}/testing/resources/webArchiveJar.jar">
                                     <fileset dir="${project.basedir}/src/test/resources/test/html"
-                                             includes="archive-*.*"/>
+                                             includes="**/archive-*.*"/>
                                 </jar>
                             </target>
                         </configuration>

@@ -362,7 +362,6 @@ void MediaPlayerPrivate::prepareToPlay()
 //#endif
 
 void MediaPlayerPrivate::play()
-void MediaPlayerPrivate::play()
 {
     PLOG_TRACE0(">>MediaPlayerPrivate::play\n");
 

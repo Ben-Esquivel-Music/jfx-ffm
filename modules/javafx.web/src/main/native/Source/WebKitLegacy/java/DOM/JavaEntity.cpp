@@ -26,6 +26,7 @@
 #undef IMPL
 
 
+#include <WebCore/WKJDOMUtils.h>
 #include <webkit_java_api.h>
 
 extern "C" {
@@ -33,7 +34,7 @@ extern "C" {
 // Attributes
 WKJ_EXPORT int32_t wkj_dom_Entity_getPublicId(int64_t arg0, uint16_t* result_buf, int32_t result_cap, int32_t* result_length)
 {
-    WKJCallScope wkjScope;
+    WebCore::WKJCallScope wkjScope;
     if (result_length)
         *result_length = 0;
     return WKJ_STR_NULL;
@@ -41,7 +42,7 @@ WKJ_EXPORT int32_t wkj_dom_Entity_getPublicId(int64_t arg0, uint16_t* result_buf
 
 WKJ_EXPORT int32_t wkj_dom_Entity_getSystemId(int64_t arg0, uint16_t* result_buf, int32_t result_cap, int32_t* result_length)
 {
-    WKJCallScope wkjScope;
+    WebCore::WKJCallScope wkjScope;
     if (result_length)
         *result_length = 0;
     return WKJ_STR_NULL;
@@ -49,7 +50,7 @@ WKJ_EXPORT int32_t wkj_dom_Entity_getSystemId(int64_t arg0, uint16_t* result_buf
 
 WKJ_EXPORT int32_t wkj_dom_Entity_getNotationName(int64_t arg0, uint16_t* result_buf, int32_t result_cap, int32_t* result_length)
 {
-    WKJCallScope wkjScope;
+    WebCore::WKJCallScope wkjScope;
     if (result_length)
         *result_length = 0;
     return WKJ_STR_NULL;

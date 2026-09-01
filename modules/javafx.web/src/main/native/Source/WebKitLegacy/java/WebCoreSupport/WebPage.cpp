@@ -77,6 +77,7 @@
 #include <WebCore/FloatSize.h>
 #include <WebCore/FocusController.h>
 #include <WebCore/Frame.h>
+#include <WebCore/FrameDestructionObserverInlines.h>
 #include <WebCore/FrameLoadRequest.h>
 #include <WebCore/FrameTree.h>
 #include <WebCore/FrameView.h>
@@ -138,8 +139,9 @@
 
 namespace WebCore {
 
-WebPage::WebPage(RefPtr<Page> page)
+WebPage::WebPage(RefPtr<Page> page, DragClientJava& dragClient)
     : m_page(WTF::move(page))
+    , m_dragClient(dragClient)
     , m_printContext(PrintContext::create(m_page->localMainFrame()))
 {
 #if ENABLE(NOTIFICATIONS) || ENABLE(LEGACY_NOTIFICATIONS)
@@ -188,7 +190,7 @@ void WebPage::setCallbacks(const WKJPageCallbacks* callbacks, wkj_ref webPage)
     static_cast<EditorClientJava&>(page->editorClient()).setJavaPage(
         pageRef, callbacks ? callbacks->editor : nullptr);
 
-    static_cast<DragClientJava&>(page->dragController().client()).setJavaPage(
+    m_dragClient.setJavaPage(
         pageRef, callbacks ? callbacks->drag : nullptr, page);
 
     if (auto* inspectorClient = static_cast<InspectorClientJava*>(
@@ -958,7 +960,9 @@ WKJ_EXPORT int64_t wkj_page_create(int32_t editable, const WKJPageCallbacks* cal
     pc.chromeClient = makeUniqueRef<ChromeClientJava>();
     pc.contextMenuClient = makeUniqueRef<ContextMenuClientJava>();
     pc.editorClient = makeUniqueRef<EditorClientJava>();
-    pc.dragClient = makeUnique<DragClientJava>();
+    auto dragClient = makeUnique<DragClientJava>();
+    auto& dragClientRef = *dragClient;
+    pc.dragClient = WTF::move(dragClient);
     pc.inspectorBackendClient = makeUnique<InspectorClientJava>();
     pc.databaseProvider = &WebDatabaseProvider::singleton();
     pc.storageNamespaceProvider = adoptRef(new WebStorageNamespaceProviderJava());
@@ -984,7 +988,7 @@ WKJ_EXPORT int64_t wkj_page_create(int32_t editable, const WKJPageCallbacks* cal
 #if ENABLE(GEOLOCATION)
     WebCore::provideGeolocationTo(&page.get(), GeolocationClientMock::create());
 #endif
-    WebPage* webPage = new WebPage(WTF::move(page));
+    WebPage* webPage = new WebPage(WTF::move(page), dragClientRef);
     webPage->setCallbacks(callbacks, web_page);
     return wkj_from_ptr(webPage);
 }

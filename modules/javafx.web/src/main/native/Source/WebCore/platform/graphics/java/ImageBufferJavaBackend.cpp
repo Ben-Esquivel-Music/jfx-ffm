@@ -122,11 +122,11 @@ Vector<uint8_t> ImageBufferJavaBackend::toDataJava(const String& mimeType, std::
         int32_t length = 0;
 
         int32_t status = cb->image_to_data(getWCImage(), mime.data(), mime.length(),
-                                           data.span().data(), capacity, &length);
+                                           data.mutableSpan().data(), capacity, &length);
         if (status == WKJ_STR_OVERFLOW && length > 0) {
             data.grow(static_cast<size_t>(length));
             status = cb->image_to_data(getWCImage(), mime.data(), mime.length(),
-                                       data.span().data(), length, &length);
+                                       data.mutableSpan().data(), length, &length);
         }
         wkjCheckAndClearException();
 

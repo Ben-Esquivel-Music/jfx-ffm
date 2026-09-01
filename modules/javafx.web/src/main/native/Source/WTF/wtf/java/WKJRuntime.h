@@ -96,14 +96,6 @@
 #include <wtf/Vector.h>
 #include <wtf/text/WTFString.h>
 
-/*
- * Set by wkj_set_shutdown, i.e. by com.sun.webkit.MainThread.twkSetShutdown. Kept as a plain
- * global with the name it has always had, so that the sites reading it - here and
- * WebCore/platform/ThreadTimers.cpp - change their include and nothing else. Read
- * WTF::wkjIsShuttingDown() rather than this directly in new code.
- */
-extern volatile bool g_ShuttingDown;
-
 namespace WTF {
 
 /*
@@ -126,12 +118,11 @@ inline const WKJHostFileSystem* wkjFileSystem()
 }
 
 /*
- * True once Java has told the library it is shutting down. See THE SHUTDOWN GATE above.
+ * True once Java has told the library it is shutting down. The atomic storage stays private to
+ * WKJRuntime.cpp so this widely included header does not expose its synchronization mechanism.
+ * See THE SHUTDOWN GATE above.
  */
-inline bool wkjIsShuttingDown()
-{
-    return g_ShuttingDown;
-}
+bool wkjIsShuttingDown();
 
 /*
  * The replacement for WTF::CheckAndClearException(env): true when the last upcall on this

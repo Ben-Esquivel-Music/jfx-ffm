@@ -32,7 +32,6 @@ import java.lang.foreign.MemorySegment;
 import java.lang.invoke.MethodHandle;
 import java.lang.invoke.MethodHandles;
 import java.util.Arrays;
-import java.util.concurrent.ConcurrentHashMap;
 import static java.lang.foreign.ValueLayout.ADDRESS;
 import static java.lang.foreign.ValueLayout.JAVA_CHAR;
 import static java.lang.foreign.ValueLayout.JAVA_INT;
@@ -119,14 +118,6 @@ final class BackForwardListNative {
     /** The slots of {@code WKJBackForwardCallbacks}, in declaration order. */
     private static final int CALLBACK_SLOTS =
             WKJLayouts.slotCount(WKJLayouts.BACK_FORWARD_CALLBACKS);
-
-    /**
-     * Page handle to the {@code wkj_ref} of the {@link BackForwardList} attached to it. The JNI form
-     * kept a global reference in {@code BackForwardList::m_hostObject} and dropped it when the host
-     * was replaced; this map is the Java half of the same bookkeeping, so that detaching a list
-     * frees its registry entry instead of leaking one per {@code addChangeListener} cycle.
-     */
-    private static final ConcurrentHashMap<Long, Long> HOST_REFS = new ConcurrentHashMap<>();
 
     static {
         installCallbacks();
@@ -274,24 +265,21 @@ final class BackForwardListNative {
     }
 
     /**
-     * Attaches or detaches the Java list that {@code list_changed} is fired at. A {@code null} host
-     * detaches, and the registry entry the previous host held is dropped here rather than waiting
-     * for {@code WKJHostCore::release}, so that attaching and detaching a listener repeatedly cannot
-     * accumulate registry entries.
+     * Attaches or detaches the Java list that {@code list_changed} is fired at. The registered id is
+     * call-scoped: {@code wkj_bfl_set_host} retains the new host before replacing its native handle,
+     * so this method always drops the reference it registered after the downcall returns.
      *
      * @param page the page handle
      * @param host the list, or {@code null} to detach
      */
     static void setHostObject(long page, BackForwardList host) {
         long ref = WebKitNative.register(host);
-        Long previous = ref == 0L ? HOST_REFS.remove(page) : HOST_REFS.put(page, ref);
         try {
             SET_HOST.invokeExact(page, ref);
         } catch (Throwable t) {
             throw new AssertionError(t);
-        }
-        if (previous != null) {
-            WebKitNative.unregister(previous);
+        } finally {
+            WebKitNative.unregister(ref);
         }
     }
 

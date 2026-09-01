@@ -32,6 +32,8 @@
 #include "Logging.h"
 #include "WKJPlatformJava.h"
 
+#include <wtf/java/WKJRuntime.h>
+
 namespace WebCore {
 
 WTF_MAKE_TZONE_ALLOCATED_IMPL(ImageDecoderJava);
@@ -74,8 +76,10 @@ ImageDecoderJava::~ImageDecoderJava()
 #ifndef NDEBUG
     ++ImageDecoderCounter::deleted;
 #endif
-    // The host table could be absent here, in case of deallocation of static BitmapImage
-    // objects after the VM has gone; that is what the null environment check meant.
+    // Static BitmapImage objects can be deallocated after the VM has gone. Preserve the JNI
+    // null-environment check explicitly now that the host table is process-wide.
+    WKJ_RETURN_IF_SHUTTING_DOWN();
+
     const WKJHostGraphics* cb = wkjGraphics();
     if (!cb || !cb->image_decoder_destroy || !m_nativeDecoder) {
         return;
@@ -210,7 +214,6 @@ IntSize ImageDecoderJava::size() const
     return m_size;
 }
 
-IntSize ImageDecoderJava::frameSizeAtIndex(size_t idx, SubsamplingLevel) const
 IntSize ImageDecoderJava::frameSizeAtIndex(size_t idx, SubsamplingLevel) const
 {
     const WKJHostGraphics* cb = wkjGraphics();
