@@ -31,7 +31,6 @@ import java.lang.foreign.MemorySegment;
 import java.lang.invoke.MethodHandle;
 import java.lang.invoke.MethodHandles;
 import static java.lang.foreign.ValueLayout.ADDRESS;
-import static java.lang.foreign.ValueLayout.JAVA_CHAR;
 import static java.lang.foreign.ValueLayout.JAVA_INT;
 import static java.lang.foreign.ValueLayout.JAVA_LONG;
 
@@ -154,7 +153,7 @@ final class PopupMenuNative {
         try {
             if (WebKitNative.lookup(ref) instanceof PopupMenu menu) {
                 WCFont wcFont = WebKitNative.lookup(font) instanceof WCFont f ? f : null;
-                menu.fwkAppendItem(readString(text, textLength),
+                menu.fwkAppendItem(WebKitNative.readString(text, textLength),
                         isLabel != 0, isSeparator != 0, isEnabled != 0,
                         backgroundArgb, foregroundArgb, wcFont);
             }
@@ -215,24 +214,5 @@ final class PopupMenuNative {
     /* See WebPageNative.failed: one place, so that check_and_clear_exception cannot miss one. */
     private static void failed(String slot, Throwable t) {
         WebKitNative.upcallFailed("popup menu callback " + slot, t);
-    }
-
-    /*
-     * A pointer arriving through an upcall is a zero length segment carrying only its address, so
-     * it has to be given the size the C prototype promises before it can be read. A NULL pointer is
-     * the Java null, which is what an item with no text was.
-     */
-    @SuppressWarnings("restricted")
-    private static String readString(MemorySegment s, int length) {
-        if (s.address() == 0L) {
-            return null;
-        }
-        if (length <= 0) {
-            return "";
-        }
-        char[] chars = new char[length];
-        MemorySegment.copy(s.reinterpret((long) length * Character.BYTES), JAVA_CHAR, 0L, chars, 0,
-                length);
-        return new String(chars);
     }
 }

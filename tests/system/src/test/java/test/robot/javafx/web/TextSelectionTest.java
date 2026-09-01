@@ -48,13 +48,14 @@ public class TextSelectionTest extends RobotTestBase {
         </html>
         """;
 
-    private static CountDownLatch webviewLoadLatch = new CountDownLatch(1);
+    private CountDownLatch webviewLoadLatch;
     private WebView webview;
     private volatile Color colorBefore;
     private volatile Color colorAfter;
 
     @BeforeEach
     public void beforeEach() {
+        webviewLoadLatch = new CountDownLatch(1);
         Util.runAndWait(() -> {
             webview = new WebView();
             webview.getEngine().getLoadWorker().stateProperty().addListener((ov, o, n) -> {

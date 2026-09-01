@@ -265,6 +265,11 @@ public class WebKitLayoutTest {
      * The C side of the comparison is derived from the header by {@code gen-wkjstub.pl}, which reads
      * the same declaration the C++ compiler does, so this is a genuine second source rather than a
      * restatement of what the Java side already says.
+     * <p>
+     * The Java side records the descriptors only when the JVM was started with
+     * {@code -Dcom.sun.webkit.recordBindings=true}, which the {@code ffm-binding-test} surefire
+     * execution sets; without it {@code hostSlotSignatures} fails with a message naming the flag
+     * rather than this test failing on an empty map.
      */
     @Test
     public void everyFilledHostSlotWasBoundWithTheShapeTheCPrototypeDeclares() {

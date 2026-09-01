@@ -77,8 +77,9 @@
  *        (Latin-1) String one code unit at a time rather than calling span16() on it.
  *        That branch is load-bearing: StringImpl::span16() asserts !is8Bit(), and in a
  *        release build the assert is gone, leaving a length()-byte heap overread.
- *        WKJStringArg branches the same way and always copies, like NewString, so the
- *        pointer it hands out never aliases the String it was built from.
+ *        WKJStringArg keeps that 8-bit branch (wkjCopyToUTF16 below) and always copies,
+ *        like NewString, so the pointer it hands out never aliases the String it was built
+ *        from; the 16-bit case is a single memcpy rather than a per-unit loop.
  *
  * WebCore/platform/graphics/java/WKJPlatformJava.h carries a WebCore-namespace copy of these
  * three helpers, put there because WebCore needed them before WTF had a home for them; its
@@ -88,6 +89,7 @@
 
 #pragma once
 
+#include <cstring>
 #include <stdint.h>
 
 #include <webkit_java_api.h>
@@ -158,6 +160,31 @@ inline WTF::String wkjMakeString(const uint16_t* s, int32_t length)
 }
 
 /*
+ * Copies the first `count` code units of `value` into `destination` as UTF-16, with no NUL
+ * terminator. `count` must not exceed value.length(), and `destination` must have room.
+ *
+ * The Latin-1 branch is not an optimisation, it is required: StringImpl::span16() asserts
+ * !is8Bit(), and in a release build the assert is compiled out, so calling it on an 8-bit
+ * string reads length() bytes past the end of the heap allocation. Most DOM strings are
+ * Latin-1. The 16-bit branch is one memcpy; only the 8-bit branch widens per unit, because
+ * it has to.
+ */
+inline void wkjCopyToUTF16(const WTF::String& value, uint16_t* destination, unsigned count)
+{
+    if (!count)
+        return;
+
+    if (value.is8Bit()) {
+        auto characters = value.span8();
+        for (unsigned i = 0; i < count; ++i)
+            destination[i] = characters[i];
+    } else {
+        auto characters = value.span16();
+        std::memcpy(destination, characters.data(), count * sizeof(char16_t));
+    }
+}
+
+/*
  * A WTF::String presented to a callback slot as (pointer, length). Hold it in a named local
  * for the duration of the call:
  *
@@ -182,8 +209,7 @@ public:
         }
 
         m_buffer.grow(static_cast<size_t>(m_length));
-        for (int32_t i = 0; i < m_length; ++i)
-            m_buffer[static_cast<size_t>(i)] = static_cast<uint16_t>(value.characterAt(static_cast<unsigned>(i)));
+        wkjCopyToUTF16(value, m_buffer.mutableSpan().data(), static_cast<unsigned>(m_length));
         m_data = m_buffer.span().data();
     }
 
@@ -220,7 +246,13 @@ inline WTF::String wkjFetchString(const Fetch& fetch)
     int32_t length = 0;
     int32_t status = fetch(buffer.mutableSpan().data(), initialCapacity, &length);
 
-    if (status == WKJ_STR_OVERFLOW && length > 0) {
+    /*
+     * Retry only on a coherent overflow: a reported length greater than the capacity just
+     * offered. A non-positive length, or one that fits the buffer the library claims was too
+     * small, is a protocol violation - fall through, and the status test below turns it into
+     * the null String. The bound also keeps Vector::grow() from shrinking, which asserts.
+     */
+    if (status == WKJ_STR_OVERFLOW && length > initialCapacity) {
         buffer.grow(static_cast<size_t>(length));
         status = fetch(buffer.mutableSpan().data(), length, &length);
     }
@@ -238,6 +270,11 @@ inline WTF::String wkjFetchString(const Fetch& fetch)
 /*
  * The shutdown gate, shaped like the WC_GETJAVAENV_CHKRET it replaces so that converting a
  * call site is a substitution. Takes the value to return, or nothing in a void function.
+ * The do/while wrapper keeps the hidden `if` from binding a following `else` at a call
+ * site, which the bare statement form silently did.
  */
 #define WKJ_RETURN_IF_SHUTTING_DOWN(... /* ret val */) \
-    if (WTF::wkjIsShuttingDown()) return __VA_ARGS__;
+    do { \
+        if (WTF::wkjIsShuttingDown()) \
+            return __VA_ARGS__; \
+    } while (0)

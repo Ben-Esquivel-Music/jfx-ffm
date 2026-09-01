@@ -105,7 +105,7 @@ jobs:
           # -fae (fail-at-end) approximates the "gradlew --continue" that the old CI
           # passed to its separate test run: after a failure Maven still builds and
           # tests every module that does not depend on the failed one.
-          mvn -B -ntp -fae install
+          mvn -B -ntp -fae install "-Djfx.web.skipFfmTests=false"
 
   linux_aarch64_build:
     name: Linux aarch64
@@ -157,7 +157,7 @@ jobs:
           # -fae (fail-at-end) approximates the "gradlew --continue" that the old CI
           # passed to its separate test run: after a failure Maven still builds and
           # tests every module that does not depend on the failed one.
-          mvn -B -ntp -fae install
+          mvn -B -ntp -fae install "-Djfx.web.skipFfmTests=false"
 
   macos_x64_build:
     name: macOS x64
@@ -203,7 +203,7 @@ jobs:
           # -fae (fail-at-end) approximates the "gradlew --continue" that the old CI
           # passed to its separate test run: after a failure Maven still builds and
           # tests every module that does not depend on the failed one.
-          mvn -B -ntp -fae install
+          mvn -B -ntp -fae install "-Djfx.web.skipFfmTests=false"
 
   macos_aarch64_build:
     name: macOS aarch64
@@ -249,7 +249,7 @@ jobs:
           # -fae (fail-at-end) approximates the "gradlew --continue" that the old CI
           # passed to its separate test run: after a failure Maven still builds and
           # tests every module that does not depend on the failed one.
-          mvn -B -ntp -fae install
+          mvn -B -ntp -fae install "-Djfx.web.skipFfmTests=false"
 
   windows_x64_build:
     name: Windows x64
@@ -297,4 +297,4 @@ jobs:
           # -fae (fail-at-end) approximates the "gradlew --continue" that the old CI
           # passed to its separate test run: after a failure Maven still builds and
           # tests every module that does not depend on the failed one.
-          mvn -B -ntp -fae install
+          mvn -B -ntp -fae install "-Djfx.web.skipFfmTests=false"

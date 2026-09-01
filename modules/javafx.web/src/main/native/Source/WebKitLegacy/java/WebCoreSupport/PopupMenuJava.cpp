@@ -35,6 +35,7 @@
 #include <WebCore/NotImplemented.h>
 #include <WebCore/Page.h>
 #include <WebCore/PlatformJavaClasses.h>
+#include <wtf/java/WKJRuntime.h>
 #include <WebCore/PopupMenuClient.h>
 #include <WebCore/WKJDOMUtils.h>
 
@@ -68,6 +69,10 @@ PopupMenuJava::~PopupMenuJava()
 {
     if (!m_popup)
         return;
+
+    /* WC_GETJAVAENV_CHKRET gated this destroy upcall during teardown; see THE SHUTDOWN
+       GATE in wtf/java/WKJRuntime.h. */
+    WKJ_RETURN_IF_SHUTTING_DOWN();
 
     if (s_wkjPopupCallbacks && s_wkjPopupCallbacks->destroy)
         s_wkjPopupCallbacks->destroy(m_popup.get());

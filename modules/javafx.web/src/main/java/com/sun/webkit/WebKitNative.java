@@ -51,7 +51,6 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
-import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicLong;
 import org.w3c.dom.DOMException;
 import static java.lang.foreign.ValueLayout.ADDRESS;
@@ -148,14 +147,28 @@ public final class WebKitNative {
 
     private static final Linker LINKER = Linker.nativeLinker();
 
-    /** Names of the symbols bound so far, in binding order; read by the symbol resolution smoke test. */
+    /**
+     * Whether {@link #BOUND_SYMBOLS} and {@link #HOST_SLOT_DESCRIPTORS} record anything. Only the
+     * binding tests read those collections, and unguarded they would grow one interned name per
+     * bound symbol and one descriptor per host slot for the life of a production process. The flag
+     * is read once, here, because the first symbols are bound inside this class's own initializer:
+     * setting the property any later than JVM startup is too late, which is why the
+     * {@code ffm-binding-test} surefire execution passes it on its {@code argLine}.
+     */
+    private static final boolean RECORD_BINDINGS =
+            Boolean.getBoolean("com.sun.webkit.recordBindings");
+
+    /**
+     * Names of the symbols bound so far, in binding order; read by the binding tests through
+     * {@link #boundSymbols}. Empty unless {@link #RECORD_BINDINGS} is set.
+     */
     private static final List<String> BOUND_SYMBOLS = Collections.synchronizedList(new ArrayList<>());
 
     /**
      * The descriptor each filled {@code WKJHost} slot was bound with, in installation order. It
      * exists so that the layout test can compare all 159 of them against the C prototypes the
      * library reports, which is the only check that catches a descriptor naming the right slot with
-     * the wrong shape.
+     * the wrong shape. Empty unless {@link #RECORD_BINDINGS} is set.
      */
     private static final Map<String, FunctionDescriptor> HOST_SLOT_DESCRIPTORS =
             Collections.synchronizedMap(new LinkedHashMap<>());
@@ -172,12 +185,14 @@ public final class WebKitNative {
 
     /**
      * The {@code wkj_ref} registry: one {@link Entry} per id, each carrying its own reference count.
-     * There is no lock over the map. An id is looked up with one {@link ConcurrentHashMap} read and
-     * its count is changed under that entry's own monitor, so two threads working on two ids never
-     * contend - which matters because these calls arrive on WebKit's main thread, on its network
-     * threads and on JavaScript worker threads at the same time.
+     * There is no lock over a read. An id is looked up with one lock-free, allocation-free
+     * {@link WKJLongMap} read and its count is changed under that entry's own monitor, so two
+     * threads working on two ids never contend - which matters because these calls arrive on
+     * WebKit's main thread, on its network threads and on JavaScript worker threads at the same
+     * time. The map is keyed by primitive {@code long} because {@link #lookup} sits on the hottest
+     * upcall path in this module and a {@code ConcurrentHashMap<Long, Entry>} would box every id.
      */
-    private static final ConcurrentHashMap<Long, Entry> REGISTRY = new ConcurrentHashMap<>();
+    private static final WKJLongMap<Entry> REGISTRY = new WKJLongMap<>();
 
     /** Registry ids are Java assigned and monotonic; zero is reserved for null (contract section 3). */
     private static final AtomicLong NEXT_REF = new AtomicLong(1L);
@@ -313,7 +328,9 @@ public final class WebKitNative {
         MemorySegment symbol = lookup.find(name)
                 .orElseThrow(() -> new UnsatisfiedLinkError("missing native symbol: " + name));
         MethodHandle handle = LINKER.downcallHandle(symbol, descriptor, options);
-        BOUND_SYMBOLS.add(name);
+        if (RECORD_BINDINGS) {
+            BOUND_SYMBOLS.add(name);
+        }
         return handle;
     }
 
@@ -332,6 +349,25 @@ public final class WebKitNative {
         return bindOptional(LOOKUP, name, descriptor, options);
     }
 
+    /**
+     * Creates a downcall handle for a symbol the caller has already resolved. This exists for the
+     * one facade that binds a library other than {@code jfxwebkit} -
+     * {@code com.sun.javafx.webkit.drt.DumpRenderTreeNative}, whose {@code DumpRenderTreeJava} is
+     * versioned and rebuilt separately and therefore owns its own lookup and its own failure
+     * message - while keeping the restricted linker call in this class. Every {@code wkj_*} facade
+     * goes through {@link #downcall} instead.
+     *
+     * @param symbol the resolved symbol
+     * @param descriptor the descriptor matching the C prototype
+     * @param options linker options
+     * @return the downcall handle
+     */
+    @SuppressWarnings("restricted")
+    public static MethodHandle downcallHandle(MemorySegment symbol, FunctionDescriptor descriptor,
+                                              Linker.Option... options) {
+        return LINKER.downcallHandle(symbol, descriptor, options);
+    }
+
     @SuppressWarnings("restricted")
     private static MethodHandle bindOptional(SymbolLookup lookup, String name, FunctionDescriptor descriptor,
                                              Linker.Option... options) {
@@ -340,7 +376,9 @@ public final class WebKitNative {
             return null;
         }
         MethodHandle handle = LINKER.downcallHandle(symbol.get(), descriptor, options);
-        BOUND_SYMBOLS.add(name);
+        if (RECORD_BINDINGS) {
+            BOUND_SYMBOLS.add(name);
+        }
         return handle;
     }
 
@@ -348,10 +386,23 @@ public final class WebKitNative {
      * Returns the names of the symbols bound so far, in binding order.
      *
      * @return a snapshot of the bound symbol names
+     * @throws IllegalStateException if binding recording is off, so that a test run without the
+     *         flag fails with the cure in the message rather than with an empty-list assertion
      */
     static List<String> boundSymbols() {
+        requireRecordedBindings();
         synchronized (BOUND_SYMBOLS) {
             return List.copyOf(BOUND_SYMBOLS);
+        }
+    }
+
+    private static void requireRecordedBindings() {
+        if (!RECORD_BINDINGS) {
+            throw new IllegalStateException("binding recording is off, so no symbol names or host"
+                    + " slot descriptors were kept: start the JVM with"
+                    + " -Dcom.sun.webkit.recordBindings=true (the ffm-binding-test surefire"
+                    + " execution in modules/javafx.web/pom.xml does), before WebKitNative is"
+                    + " initialized");
         }
     }
 
@@ -606,6 +657,19 @@ public final class WebKitNative {
     }
 
     /**
+     * Gives an out parameter the size the C prototype promises, passing a {@code NULL} pointer
+     * through untouched so that a caller's own {@code NULL} tests keep working. This is
+     * {@link #resize} for the slots whose caller may legitimately pass no buffer at all.
+     *
+     * @param pointer the segment an upcall stub was handed, may be {@link MemorySegment#NULL}
+     * @param byteSize the number of bytes the C caller guarantees are there
+     * @return the same address, bounded, or {@code pointer} itself when it is {@code NULL}
+     */
+    public static MemorySegment outSegment(MemorySegment pointer, long byteSize) {
+        return pointer.address() == 0L ? pointer : resize(pointer, byteSize);
+    }
+
+    /**
      * Reads a {@code const uint16_t* s, int32_t s_len} parameter pair.
      *
      * @param chars the characters, may be {@link MemorySegment#NULL}
@@ -845,6 +909,18 @@ public final class WebKitNative {
     public static void writeLong(MemorySegment out, long value) {
         if (out.address() != 0L) {
             resize(out, Long.BYTES).set(JAVA_LONG, 0L, value);
+        }
+    }
+
+    /**
+     * Writes one {@code float} out parameter.
+     *
+     * @param out the pointer, may be {@link MemorySegment#NULL}
+     * @param value the value
+     */
+    public static void writeFloat(MemorySegment out, float value) {
+        if (out.address() != 0L) {
+            resize(out, Float.BYTES).set(JAVA_FLOAT, 0L, value);
         }
     }
 
@@ -1151,7 +1227,9 @@ public final class WebKitNative {
                                        MethodHandles.Lookup lookup, String method,
                                        FunctionDescriptor descriptor) {
         host.set(ADDRESS, hostSlotOffset(dottedPath), stub(dottedPath, lookup, method, descriptor));
-        HOST_SLOT_DESCRIPTORS.put(dottedPath, descriptor);
+        if (RECORD_BINDINGS) {
+            HOST_SLOT_DESCRIPTORS.put(dottedPath, descriptor);
+        }
     }
 
     /**
@@ -1161,8 +1239,11 @@ public final class WebKitNative {
      * stack on the first call, and nothing else in this module would notice.
      *
      * @return the descriptors, in installation order
+     * @throws IllegalStateException if binding recording is off, so that a test run without the
+     *         flag fails with the cure in the message rather than with an empty-map assertion
      */
     static Map<String, FunctionDescriptor> hostSlotDescriptors() {
+        requireRecordedBindings();
         synchronized (HOST_SLOT_DESCRIPTORS) {
             return new LinkedHashMap<>(HOST_SLOT_DESCRIPTORS);
         }
@@ -1197,6 +1278,22 @@ public final class WebKitNative {
                                    FunctionDescriptor descriptor) {
         table.set(ADDRESS, layout.byteOffset(PathElement.groupElement(member)),
                 stub(member, lookup, method, descriptor));
+    }
+
+    /**
+     * Writes an already created pointer into a named slot of a table, for the two cases the
+     * stub-creating overload cannot serve: a slot that deliberately shares one stub with another
+     * slot ({@code fire_load_event}, which two clients call), and an aggregate whose members point
+     * at sub-tables rather than at functions ({@code WKJPageCallbacks}).
+     *
+     * @param table the table
+     * @param layout the layout the table was allocated with
+     * @param member the member name, exactly as the C struct spells it
+     * @param pointer the stub or sub-table to install
+     */
+    public static void installSlot(MemorySegment table, MemoryLayout layout, String member,
+                                   MemorySegment pointer) {
+        table.set(ADDRESS, layout.byteOffset(PathElement.groupElement(member)), pointer);
     }
 
     private static MemorySegment stub(String slot, MethodHandles.Lookup lookup, String method,

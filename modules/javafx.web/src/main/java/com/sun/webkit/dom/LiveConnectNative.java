@@ -519,8 +519,11 @@ final class LiveConnectNative {
      * WKJ_JT_INVALID, which is what the zeroed jvalue meant. Default when NULL: 0.
      */
     private static int fieldGet(long field, long instance, int type, MemorySegment out) {
-        MemorySegment value = sizedValue(out);
+        // Assigned inside the try: sizedValue is a restricted resize and nothing that can throw
+        // may precede the catch, because a Throwable escaping an upcall stub terminates the JVM.
+        MemorySegment value = MemorySegment.NULL;
         try {
+            value = sizedValue(out);
             if (!(WebKitNative.lookup(field) instanceof Field target)) {
                 setInvalid(value);
                 return 0;
@@ -606,8 +609,10 @@ final class LiveConnectNative {
      * the JVM to report. Default when NULL: 0.
      */
     private static int arrayGet(long array, int index, int type, MemorySegment out) {
-        MemorySegment value = sizedValue(out);
+        // Assigned inside the try, for the reason given in fieldGet.
+        MemorySegment value = MemorySegment.NULL;
         try {
+            value = sizedValue(out);
             Object target = WebKitNative.lookup(array);
             if (target == null || !target.getClass().isArray() || index < 0
                     || index >= Array.getLength(target)) {
@@ -708,8 +713,10 @@ final class LiveConnectNative {
      * Utilities allow list, and so does this. Default when NULL: 0.
      */
     private static int unbox(long boxed, int type, MemorySegment out) {
-        MemorySegment value = sizedValue(out);
+        // Assigned inside the try, for the reason given in fieldGet.
+        MemorySegment value = MemorySegment.NULL;
         try {
+            value = sizedValue(out);
             Object target = WebKitNative.lookup(boxed);
             switch (type) {
                 case JT_BOOLEAN -> {
@@ -806,10 +813,12 @@ final class LiveConnectNative {
      * weak global reference this replaces. Default when NULL: WKJ_JS_KIND_NULL, WKJ_STR_OK.
      */
     private static int describeObject(long obj, MemorySegment out) {
-        MemorySegment value = out.address() == 0L
-                ? MemorySegment.NULL
-                : WebKitNative.resize(out, JSObjectNative.JS_VALUE_LAYOUT.byteSize());
+        // Assigned inside the try, for the reason given in fieldGet.
+        MemorySegment value = MemorySegment.NULL;
         try {
+            if (out.address() != 0L) {
+                value = WebKitNative.resize(out, JSObjectNative.JS_VALUE_LAYOUT.byteSize());
+            }
             if (value.address() == 0L) {
                 return WKJStringCodec.OK;
             }

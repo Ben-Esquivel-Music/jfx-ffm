@@ -29,7 +29,6 @@ import com.sun.webkit.WKJStringCodec;
 import com.sun.webkit.WebKitNative;
 import java.lang.foreign.Arena;
 import java.lang.foreign.FunctionDescriptor;
-import java.lang.foreign.Linker;
 import java.lang.foreign.MemorySegment;
 import java.lang.foreign.SymbolLookup;
 import java.lang.invoke.MethodHandle;
@@ -46,10 +45,13 @@ import static java.lang.foreign.ValueLayout.JAVA_LONG;
  * <p>
  * {@code DumpRenderTreeJava} is a <em>separate</em> shared library from {@code jfxwebkit}, with its
  * own entry points, its own {@code DRT_ABI_VERSION} and its own host table, so this class does its
- * own symbol resolution rather than going through {@link WebKitNative}. What the two share is the
- * string protocol in {@link WKJStringCodec}, which is exactly the vocabulary
- * {@code drt_java_api.h} includes {@code webkit_java_api.h} for, and which loads no library of its
- * own.
+ * own symbol resolution rather than going through {@link WebKitNative#downcall}: the two libraries
+ * are versioned and rebuilt separately, and a missing {@code drt_*} symbol must be reported as a
+ * stale {@code DumpRenderTreeJava}, not as a {@code jfxwebkit} problem. What the two share is the
+ * string protocol in {@link WKJStringCodec} and the restricted {@code java.lang.foreign}
+ * operations, which live in {@link WebKitNative} for the whole module: the resolved symbols are
+ * linked through {@link WebKitNative#downcallHandle} and the callbacks through
+ * {@link WebKitNative#upcallStub}.
  * <p>
  * Ordering matters and is preserved: {@link DumpRenderTree} calls
  * {@code System.loadLibrary("DumpRenderTreeJava")} before the first entry point below, so that
@@ -74,8 +76,6 @@ final class DumpRenderTreeNative {
     private static final int DRT_SLOTS = 8;
     private static final int EVENT_SENDER_SLOTS = 22;
 
-    private static final Linker LINKER = Linker.nativeLinker();
-
     /*
      * The library is loaded by DumpRenderTree before anything here runs, so loaderLookup sees it.
      * Resolving it here rather than in WebKitNative is deliberate: the two libraries are versioned
@@ -87,7 +87,8 @@ final class DumpRenderTreeNative {
     /*
      * The host table outlives everything and is created exactly once, which is the case the
      * migration playbook allows a shared, never closed arena for. The library keeps the pointer for
-     * as long as it is loaded.
+     * as long as it is loaded. The upcall stubs the table carries live in WebKitNative's
+     * process-wide upcall arena, which has the same lifetime.
      */
     private static final Arena HOST_ARENA = Arena.ofShared();
 
@@ -245,6 +246,13 @@ final class DumpRenderTreeNative {
                         WKJStringCodec.CAPACITY, resultLength);
                 if (status == WKJStringCodec.OVERFLOW) {
                     int required = resultLength.get(JAVA_INT, 0);
+                    if (required <= WKJStringCodec.CAPACITY) {
+                        // An overflow of a CAPACITY-unit buffer can only report a strictly larger
+                        // length; retrying with what was reported would allocate a zero length
+                        // buffer C may read as NULL, or throw on a negative length. The protocol
+                        // violation degrades to the null result, as WKJ_STR_NULL would have.
+                        return null;
+                    }
                     resultBuffer = arena.allocate(JAVA_CHAR, required);
                     status = (int) OPEN_PANEL_FILE.invokeExact(index, resultBuffer, required,
                             resultLength);
@@ -268,12 +276,11 @@ final class DumpRenderTreeNative {
     // Library binding and the host table
     // =====================================================================================
 
-    @SuppressWarnings("restricted")
     private static MethodHandle downcall(String name, FunctionDescriptor descriptor) {
         MemorySegment symbol = LOOKUP.find(name).orElseThrow(() -> new UnsatisfiedLinkError(
                 "DumpRenderTreeJava does not export " + name + ": the library on"
                         + " java.library.path is stale, rebuild it from this source tree"));
-        return LINKER.downcallHandle(symbol, descriptor);
+        return WebKitNative.downcallHandle(symbol, descriptor);
     }
 
     private static void checkAbiVersion() {
@@ -380,7 +387,6 @@ final class DumpRenderTreeNative {
      * descriptor that does not match the method it names fails here, at class initialization, with
      * the method name in the message - instead of corrupting the stack at the first callback.
      */
-    @SuppressWarnings("restricted")
     private static MemorySegment stub(String name, FunctionDescriptor descriptor) {
         MethodHandle target;
         try {
@@ -389,7 +395,7 @@ final class DumpRenderTreeNative {
         } catch (ReflectiveOperationException e) {
             throw new AssertionError("no upcall target " + name + descriptor.toMethodType(), e);
         }
-        return LINKER.upcallStub(target, descriptor, HOST_ARENA);
+        return WebKitNative.upcallStub(target, descriptor);
     }
 
     // =====================================================================================
@@ -436,8 +442,8 @@ final class DumpRenderTreeNative {
     static void overridePreference(MemorySegment key, int keyLength, MemorySegment value,
                                    int valueLength) {
         try {
-            DumpRenderTree.overridePreference(readString(key, keyLength),
-                    readString(value, valueLength));
+            DumpRenderTree.overridePreference(WebKitNative.readString(key, keyLength),
+                    WebKitNative.readString(value, valueLength));
         } catch (Throwable t) {
             failed("override_preference", t);
         }
@@ -463,10 +469,9 @@ final class DumpRenderTreeNative {
     static int resolveURL(MemorySegment relative, int relativeLength, MemorySegment resultBuffer,
                           int resultCapacity, MemorySegment resultLength) {
         try {
-            String resolved = DumpRenderTree.resolveURL(readString(relative, relativeLength));
-            return WKJStringCodec.emit(resolved,
-                    outSegment(resultBuffer, (long) resultCapacity * Character.BYTES),
-                    resultCapacity, outSegment(resultLength, Integer.BYTES));
+            String resolved =
+                    DumpRenderTree.resolveURL(WebKitNative.readString(relative, relativeLength));
+            return WebKitNative.emitString(resolved, resultBuffer, resultCapacity, resultLength);
         } catch (Throwable t) {
             failed("resolve_url", t);
             return WKJStringCodec.NULL;
@@ -475,7 +480,7 @@ final class DumpRenderTreeNative {
 
     static void loadURL(MemorySegment url, int urlLength) {
         try {
-            DumpRenderTree.loadURL(readString(url, urlLength));
+            DumpRenderTree.loadURL(WebKitNative.readString(url, urlLength));
         } catch (Throwable t) {
             failed("load_url", t);
         }
@@ -497,7 +502,7 @@ final class DumpRenderTreeNative {
         try {
             EventSender sender = sender(user);
             if (sender != null) {
-                sender.keyDown(readString(key, keyLength), modifiers);
+                sender.keyDown(WebKitNative.readString(key, keyLength), modifiers);
             }
         } catch (Throwable t) {
             failed("key_down", t);
@@ -721,11 +726,11 @@ final class DumpRenderTreeNative {
             String[] names = new String[Math.max(count, 0)];
             if (names.length > 0 && files.address() != 0L && fileLengths.address() != 0L) {
                 MemorySegment pointers =
-                        outSegment(files, (long) names.length * ADDRESS.byteSize());
+                        WebKitNative.outSegment(files, (long) names.length * ADDRESS.byteSize());
                 MemorySegment lengths =
-                        outSegment(fileLengths, (long) names.length * Integer.BYTES);
+                        WebKitNative.outSegment(fileLengths, (long) names.length * Integer.BYTES);
                 for (int i = 0; i < names.length; i++) {
-                    names[i] = readString(pointers.getAtIndex(ADDRESS, i),
+                    names[i] = WebKitNative.readString(pointers.getAtIndex(ADDRESS, i),
                             lengths.getAtIndex(JAVA_INT, i));
                 }
             }
@@ -772,24 +777,5 @@ final class DumpRenderTreeNative {
     /* See WebPageNative.failed: one place, so that check_and_clear_exception cannot miss one. */
     private static void failed(String slot, Throwable t) {
         WebKitNative.upcallFailed("DumpRenderTree callback " + slot, t);
-    }
-
-    @SuppressWarnings("restricted")
-    private static String readString(MemorySegment s, int length) {
-        if (s.address() == 0L) {
-            return null;
-        }
-        if (length <= 0) {
-            return "";
-        }
-        char[] chars = new char[length];
-        MemorySegment.copy(s.reinterpret((long) length * Character.BYTES), JAVA_CHAR, 0L, chars, 0,
-                length);
-        return new String(chars);
-    }
-
-    @SuppressWarnings("restricted")
-    private static MemorySegment outSegment(MemorySegment segment, long byteSize) {
-        return segment.address() == 0L ? segment : segment.reinterpret(byteSize);
     }
 }

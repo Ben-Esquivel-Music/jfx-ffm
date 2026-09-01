@@ -32,9 +32,13 @@ import com.sun.webkit.graphics.WCRenderQueue;
 import com.sun.webkit.network.NetworkContext;
 import java.lang.foreign.Arena;
 import java.lang.foreign.FunctionDescriptor;
+import java.lang.foreign.MemoryLayout;
+import java.lang.foreign.MemoryLayout.PathElement;
 import java.lang.foreign.MemorySegment;
+import java.lang.foreign.StructLayout;
 import java.lang.invoke.MethodHandle;
 import java.lang.invoke.MethodHandles;
+import java.util.Objects;
 import java.util.concurrent.ConcurrentHashMap;
 import static java.lang.foreign.ValueLayout.ADDRESS;
 import static java.lang.foreign.ValueLayout.JAVA_CHAR;
@@ -383,31 +387,6 @@ final class WebPageNative {
             "wkj_install_network_callbacks",
             FunctionDescriptor.ofVoid(ADDRESS));
 
-    /*
-     * Slot counts, one per callback table in webkit_java_api_page.h. They are asserted against the
-     * number of stubs actually written, so a slot added to the C struct without a Java stub - or the
-     * other way round - fails at class initialization with a message rather than by dispatching
-     * through a pointer one place further along the table than it should.
-     *
-     * A table of N function pointers has the layout of N ADDRESS elements on every ABI this module
-     * supports: every member is a pointer, so there is no padding and no alignment question, which
-     * is why the tables below are allocated as sequences. The counts themselves come from the named
-     * layouts in {@link WKJLayouts}, which {@code WebKitLayoutTest} checks against the C
-     * {@code sizeof} and {@code offsetof}, so a slot added to a C struct changes this file by
-     * failing here rather than by being silently ignored.
-     */
-    private static final int CHROME_SLOTS = WKJLayouts.slotCount(WKJLayouts.CHROME_CALLBACKS);
-    private static final int FRAME_LOADER_SLOTS =
-            WKJLayouts.slotCount(WKJLayouts.FRAME_LOADER_CALLBACKS);
-    private static final int EDITOR_SLOTS = WKJLayouts.slotCount(WKJLayouts.EDITOR_CALLBACKS);
-    private static final int INSPECTOR_SLOTS = WKJLayouts.slotCount(WKJLayouts.INSPECTOR_CALLBACKS);
-    private static final int PROGRESS_SLOTS = WKJLayouts.slotCount(WKJLayouts.PROGRESS_CALLBACKS);
-    private static final int NOTIFY_SLOTS =
-            WKJLayouts.slotCount(WKJLayouts.PAGE_NOTIFY_CALLBACKS);
-    private static final int DRAG_SLOTS = WKJLayouts.slotCount(WKJLayouts.DRAG_CALLBACKS);
-    private static final int PAGE_CALLBACKS_SLOTS = WKJLayouts.slotCount(WKJLayouts.PAGE_CALLBACKS);
-    private static final int NETWORK_SLOTS = WKJLayouts.slotCount(WKJLayouts.NETWORK_CALLBACKS);
-
     /**
      * The one {@code WKJPageCallbacks} the whole process shares. Only the {@code wkj_ref} is per
      * page, so one table built once is what the header asks for, and it lives in
@@ -429,9 +408,37 @@ final class WebPageNative {
      * The file chooser and the prompt open modal UI, so a {@code WKJ_STR_OVERFLOW} retry has to be
      * served from the answer the user already gave rather than by running the dialog again. Both are
      * confined to the calling thread and cleared as soon as the value has been handed over.
+     * <p>
+     * The parked state carries the identity of the request it answers - the page ref and the exact
+     * arguments of the original call - and is consumed only by a call that presents the same
+     * identity. The library is not obliged to make the retry: if it abandons one, the parked answer
+     * would otherwise sit on the thread forever and be served, dialogless, to the <em>next</em>
+     * prompt or chooser on that thread. A mismatch therefore discards the parked state and runs the
+     * call as a fresh one.
      */
-    private static final ThreadLocal<String[]> PENDING_CHOSEN_FILES = new ThreadLocal<>();
-    private static final ThreadLocal<String> PENDING_PROMPT = new ThreadLocal<>();
+    private static final ThreadLocal<PendingPrompt> PENDING_PROMPT = new ThreadLocal<>();
+    private static final ThreadLocal<PendingChosenFiles> PENDING_CHOSEN_FILES = new ThreadLocal<>();
+
+    /** A prompt answer parked for a {@code WKJ_STR_OVERFLOW} retry, with the request it answers. */
+    private record PendingPrompt(long ref, String text, String defaultValue, String answer) {
+
+        boolean matches(long ref, String text, String defaultValue) {
+            return this.ref == ref && Objects.equals(this.text, text)
+                    && Objects.equals(this.defaultValue, defaultValue);
+        }
+    }
+
+    /** A file selection parked for an overflow retry, with the request it answers. */
+    private record PendingChosenFiles(long ref, String initialFileName, boolean allowMultiple,
+                                      String mimeFilters, String[] files) {
+
+        boolean matches(long ref, String initialFileName, boolean allowMultiple,
+                        String mimeFilters) {
+            return this.ref == ref && this.allowMultiple == allowMultiple
+                    && Objects.equals(this.initialFileName, initialFileName)
+                    && Objects.equals(this.mimeFilters, mimeFilters);
+        }
+    }
 
     static {
         // NetworkContext.canHandleURL belongs to no page, so it is installed once for the process
@@ -1126,6 +1133,9 @@ final class WebPageNative {
                         commandLength, resultBuffer, WKJStringCodec.CAPACITY, resultLength);
                 if (status == WKJStringCodec.OVERFLOW) {
                     int required = resultLength.get(JAVA_INT, 0);
+                    if (required <= WKJStringCodec.CAPACITY) {
+                        return overflowLengthViolation(required, WKJStringCodec.CAPACITY);
+                    }
                     resultBuffer = arena.allocate(JAVA_CHAR, required);
                     status = (int) PAGE_QUERY_COMMAND_VALUE.invokeExact(page, commandSegment,
                             commandLength, resultBuffer, required, resultLength);
@@ -1316,6 +1326,9 @@ final class WebPageNative {
                         resultLength);
                 if (status == WKJStringCodec.OVERFLOW) {
                     int required = resultLength.get(JAVA_INT, 0);
+                    if (required <= WKJStringCodec.CAPACITY) {
+                        return overflowLengthViolation(required, WKJStringCodec.CAPACITY);
+                    }
                     resultBuffer = arena.allocate(JAVA_CHAR, required);
                     status = (int) handle.invokeExact(peer, resultBuffer, required, resultLength);
                 }
@@ -1324,6 +1337,21 @@ final class WebPageNative {
             }
             return WKJStringCodec.decode(status, resultBuffer, resultLength);
         }
+    }
+
+    /*
+     * The length WKJ_STR_OVERFLOW reports is written by the library and is trusted for nothing: an
+     * overflow of a buffer of `offered` code units can only be a length strictly greater than
+     * `offered`. Retrying with anything else would allocate a zero length buffer whose address the
+     * library may read as NULL, or throw IllegalArgumentException out of this facade on a negative
+     * length; a protocol violation degrades to the null result instead, exactly as WKJ_STR_NULL
+     * would have, and says so in the log.
+     */
+    private static String overflowLengthViolation(int required, int offered) {
+        log.severe("WKJ_STR_OVERFLOW against a buffer of " + offered
+                + " code units reported a required capacity of " + required
+                + ", which cannot have overflowed it; treating the string result as null");
+        return null;
     }
 
     /*
@@ -1354,113 +1382,173 @@ final class WebPageNative {
 
     /*
      * Builds the six sub-tables and the WKJPageCallbacks aggregate that points at them, once, in the
-     * process-wide upcall arena. The order of the writes below is the declaration order of each C
-     * struct and must stay that way: these are sequences of function pointers, so a slot inserted in
-     * the header without the matching line here would shift every later slot.
+     * process-wide upcall arena. Every slot is installed under the member name the C struct declares
+     * it with, through the named layouts in {@link WKJLayouts} that {@code WebKitLayoutTest} checks
+     * against the C compiler's own offsetof - so two members reordered in webkit_java_api_page.h
+     * move the Java stubs with them instead of landing each call on its neighbour's stub.
+     * allSlotsFilled then proves coverage: a slot the header declares that no install call here
+     * names fails at class initialization, which is the count check the positional builder had,
+     * strengthened to name the missing slot.
      */
     private static MemorySegment buildPageCallbacks() {
-        MemorySegment chrome = table(CHROME_SLOTS, new MemorySegment[] {
-            stub("chromeGetHostWindow", FunctionDescriptor.of(JAVA_LONG, JAVA_LONG)),
-            stub("chromeGetWindowBounds", FunctionDescriptor.of(JAVA_INT, JAVA_LONG, ADDRESS,
-                    ADDRESS, ADDRESS, ADDRESS)),
-            stub("chromeSetWindowBounds", FunctionDescriptor.ofVoid(JAVA_LONG, JAVA_INT, JAVA_INT,
-                    JAVA_INT, JAVA_INT)),
-            stub("chromeGetPageBounds", FunctionDescriptor.of(JAVA_INT, JAVA_LONG, ADDRESS, ADDRESS,
-                    ADDRESS, ADDRESS)),
-            stub("chromeScreenToWindow", FunctionDescriptor.ofVoid(JAVA_LONG, JAVA_FLOAT, JAVA_FLOAT,
-                    ADDRESS, ADDRESS)),
-            stub("chromeWindowToScreen", FunctionDescriptor.ofVoid(JAVA_LONG, JAVA_FLOAT, JAVA_FLOAT,
-                    ADDRESS, ADDRESS)),
-            stub("chromeSetFocus", FunctionDescriptor.ofVoid(JAVA_LONG, JAVA_INT)),
-            stub("chromeTransferFocus", FunctionDescriptor.ofVoid(JAVA_LONG, JAVA_INT)),
-            stub("chromeSetCursor", FunctionDescriptor.ofVoid(JAVA_LONG, JAVA_LONG)),
-            stub("chromeSetTooltip", FunctionDescriptor.ofVoid(JAVA_LONG, ADDRESS, JAVA_INT)),
-            stub("chromeSetScrollbarsVisible", FunctionDescriptor.ofVoid(JAVA_LONG, JAVA_INT)),
-            stub("chromeSetStatusbarText", FunctionDescriptor.ofVoid(JAVA_LONG, ADDRESS, JAVA_INT)),
-            stub("chromeCreateWindow", FunctionDescriptor.of(JAVA_LONG, JAVA_LONG, JAVA_INT,
-                    JAVA_INT, JAVA_INT, JAVA_INT)),
-            stub("chromeShowWindow", FunctionDescriptor.ofVoid(JAVA_LONG)),
-            stub("chromeCloseWindow", FunctionDescriptor.ofVoid(JAVA_LONG)),
-            stub("chromeAlert", FunctionDescriptor.ofVoid(JAVA_LONG, ADDRESS, JAVA_INT)),
-            stub("chromeConfirm", FunctionDescriptor.of(JAVA_INT, JAVA_LONG, ADDRESS, JAVA_INT)),
-            stub("chromePrompt", FunctionDescriptor.of(JAVA_INT, JAVA_LONG, ADDRESS, JAVA_INT,
-                    ADDRESS, JAVA_INT, ADDRESS, JAVA_INT, ADDRESS)),
-            stub("chromeCanRunBeforeUnload", FunctionDescriptor.of(JAVA_INT, JAVA_LONG)),
-            stub("chromeRunBeforeUnload", FunctionDescriptor.of(JAVA_INT, JAVA_LONG, ADDRESS,
-                    JAVA_INT)),
-            stub("chromeAddMessageToConsole", FunctionDescriptor.ofVoid(JAVA_LONG, ADDRESS, JAVA_INT,
-                    JAVA_INT, ADDRESS, JAVA_INT)),
-            stub("chromePrint", FunctionDescriptor.ofVoid(JAVA_LONG)),
-            stub("chromeChooseFile", FunctionDescriptor.of(JAVA_INT, JAVA_LONG, ADDRESS, JAVA_INT,
-                    JAVA_INT, ADDRESS, JAVA_INT, ADDRESS, JAVA_INT, ADDRESS, JAVA_INT, ADDRESS)),
-        });
-
         // The one Java method two clients call: FrameLoaderClientJava and
         // ProgressTrackerClientJava cached the same jmethodID, so the same stub goes in both tables.
         MemorySegment fireLoadEvent = stub("loaderFireLoadEvent", FunctionDescriptor.ofVoid(
                 JAVA_LONG, JAVA_LONG, JAVA_INT, ADDRESS, JAVA_INT, ADDRESS, JAVA_INT, JAVA_DOUBLE,
                 JAVA_INT));
 
-        MemorySegment frameLoader = table(FRAME_LOADER_SLOTS, new MemorySegment[] {
-            stub("loaderFrameCreated", FunctionDescriptor.ofVoid(JAVA_LONG, JAVA_LONG)),
-            stub("loaderFrameDestroyed", FunctionDescriptor.ofVoid(JAVA_LONG, JAVA_LONG)),
-            stub("loaderSetRequestUrl", FunctionDescriptor.ofVoid(JAVA_LONG, JAVA_LONG, JAVA_INT,
-                    ADDRESS, JAVA_INT)),
-            stub("loaderRemoveRequestUrl", FunctionDescriptor.ofVoid(JAVA_LONG, JAVA_LONG,
-                    JAVA_INT)),
-            fireLoadEvent,
-            stub("loaderFireResourceLoadEvent", FunctionDescriptor.ofVoid(JAVA_LONG, JAVA_LONG,
-                    JAVA_INT, JAVA_INT, ADDRESS, JAVA_INT, JAVA_DOUBLE, JAVA_INT)),
-            stub("loaderPermitNavigate", FunctionDescriptor.of(JAVA_INT, JAVA_LONG, JAVA_LONG,
-                    ADDRESS, JAVA_INT)),
-            stub("loaderPermitRedirect", FunctionDescriptor.of(JAVA_INT, JAVA_LONG, JAVA_LONG,
-                    ADDRESS, JAVA_INT)),
-            stub("loaderPermitAcceptResource", FunctionDescriptor.of(JAVA_INT, JAVA_LONG, JAVA_LONG,
-                    ADDRESS, JAVA_INT)),
-            stub("loaderPermitNewWindow", FunctionDescriptor.of(JAVA_INT, JAVA_LONG, JAVA_LONG,
-                    ADDRESS, JAVA_INT)),
-            stub("loaderPermitSubmitData", FunctionDescriptor.of(JAVA_INT, JAVA_LONG, JAVA_LONG,
-                    ADDRESS, JAVA_INT, ADDRESS, JAVA_INT, JAVA_INT)),
-            stub("loaderDidClearWindowObject", FunctionDescriptor.ofVoid(JAVA_LONG, JAVA_LONG,
-                    ADDRESS, ADDRESS)),
-        });
+        StructLayout layout = WKJLayouts.PAGE_CALLBACKS;
+        MemorySegment callbacks = WebKitNative.allocateTable(layout);
+        WebKitNative.installSlot(callbacks, layout, "chrome", buildChromeCallbacks());
+        WebKitNative.installSlot(callbacks, layout, "frame_loader",
+                buildFrameLoaderCallbacks(fireLoadEvent));
+        WebKitNative.installSlot(callbacks, layout, "editor", buildEditorCallbacks());
+        WebKitNative.installSlot(callbacks, layout, "inspector", buildInspectorCallbacks());
+        WebKitNative.installSlot(callbacks, layout, "progress",
+                buildProgressCallbacks(fireLoadEvent));
+        WebKitNative.installSlot(callbacks, layout, "notify", buildNotifyCallbacks());
+        WebKitNative.installSlot(callbacks, layout, "drag", buildDragCallbacks());
+        return allSlotsFilled(callbacks, layout);
+    }
 
-        MemorySegment editor = table(EDITOR_SLOTS, new MemorySegment[] {
-            stub("editorSetInputMethodState", FunctionDescriptor.ofVoid(JAVA_LONG, JAVA_INT)),
-        });
+    private static MemorySegment buildChromeCallbacks() {
+        StructLayout layout = WKJLayouts.CHROME_CALLBACKS;
+        MemorySegment table = WebKitNative.allocateTable(layout);
+        install(table, layout, "get_host_window", "chromeGetHostWindow",
+                FunctionDescriptor.of(JAVA_LONG, JAVA_LONG));
+        install(table, layout, "get_window_bounds", "chromeGetWindowBounds",
+                FunctionDescriptor.of(JAVA_INT, JAVA_LONG, ADDRESS, ADDRESS, ADDRESS, ADDRESS));
+        install(table, layout, "set_window_bounds", "chromeSetWindowBounds",
+                FunctionDescriptor.ofVoid(JAVA_LONG, JAVA_INT, JAVA_INT, JAVA_INT, JAVA_INT));
+        install(table, layout, "get_page_bounds", "chromeGetPageBounds",
+                FunctionDescriptor.of(JAVA_INT, JAVA_LONG, ADDRESS, ADDRESS, ADDRESS, ADDRESS));
+        install(table, layout, "screen_to_window", "chromeScreenToWindow",
+                FunctionDescriptor.ofVoid(JAVA_LONG, JAVA_FLOAT, JAVA_FLOAT, ADDRESS, ADDRESS));
+        install(table, layout, "window_to_screen", "chromeWindowToScreen",
+                FunctionDescriptor.ofVoid(JAVA_LONG, JAVA_FLOAT, JAVA_FLOAT, ADDRESS, ADDRESS));
+        install(table, layout, "set_focus", "chromeSetFocus",
+                FunctionDescriptor.ofVoid(JAVA_LONG, JAVA_INT));
+        install(table, layout, "transfer_focus", "chromeTransferFocus",
+                FunctionDescriptor.ofVoid(JAVA_LONG, JAVA_INT));
+        install(table, layout, "set_cursor", "chromeSetCursor",
+                FunctionDescriptor.ofVoid(JAVA_LONG, JAVA_LONG));
+        install(table, layout, "set_tooltip", "chromeSetTooltip",
+                FunctionDescriptor.ofVoid(JAVA_LONG, ADDRESS, JAVA_INT));
+        install(table, layout, "set_scrollbars_visible", "chromeSetScrollbarsVisible",
+                FunctionDescriptor.ofVoid(JAVA_LONG, JAVA_INT));
+        install(table, layout, "set_statusbar_text", "chromeSetStatusbarText",
+                FunctionDescriptor.ofVoid(JAVA_LONG, ADDRESS, JAVA_INT));
+        install(table, layout, "create_window", "chromeCreateWindow",
+                FunctionDescriptor.of(JAVA_LONG, JAVA_LONG, JAVA_INT, JAVA_INT, JAVA_INT,
+                        JAVA_INT));
+        install(table, layout, "show_window", "chromeShowWindow",
+                FunctionDescriptor.ofVoid(JAVA_LONG));
+        install(table, layout, "close_window", "chromeCloseWindow",
+                FunctionDescriptor.ofVoid(JAVA_LONG));
+        install(table, layout, "alert", "chromeAlert",
+                FunctionDescriptor.ofVoid(JAVA_LONG, ADDRESS, JAVA_INT));
+        install(table, layout, "confirm", "chromeConfirm",
+                FunctionDescriptor.of(JAVA_INT, JAVA_LONG, ADDRESS, JAVA_INT));
+        install(table, layout, "prompt", "chromePrompt",
+                FunctionDescriptor.of(JAVA_INT, JAVA_LONG, ADDRESS, JAVA_INT, ADDRESS, JAVA_INT,
+                        ADDRESS, JAVA_INT, ADDRESS));
+        install(table, layout, "can_run_before_unload", "chromeCanRunBeforeUnload",
+                FunctionDescriptor.of(JAVA_INT, JAVA_LONG));
+        install(table, layout, "run_before_unload", "chromeRunBeforeUnload",
+                FunctionDescriptor.of(JAVA_INT, JAVA_LONG, ADDRESS, JAVA_INT));
+        install(table, layout, "add_message_to_console", "chromeAddMessageToConsole",
+                FunctionDescriptor.ofVoid(JAVA_LONG, ADDRESS, JAVA_INT, JAVA_INT, ADDRESS,
+                        JAVA_INT));
+        install(table, layout, "print", "chromePrint",
+                FunctionDescriptor.ofVoid(JAVA_LONG));
+        install(table, layout, "choose_file", "chromeChooseFile",
+                FunctionDescriptor.of(JAVA_INT, JAVA_LONG, ADDRESS, JAVA_INT, JAVA_INT, ADDRESS,
+                        JAVA_INT, ADDRESS, JAVA_INT, ADDRESS, JAVA_INT, ADDRESS));
+        return allSlotsFilled(table, layout);
+    }
 
-        MemorySegment inspector = table(INSPECTOR_SLOTS, new MemorySegment[] {
-            stub("inspectorRepaintAll", FunctionDescriptor.ofVoid(JAVA_LONG)),
-            stub("inspectorSendMessageToFrontend", FunctionDescriptor.ofVoid(JAVA_LONG, ADDRESS,
-                    JAVA_INT)),
-        });
+    private static MemorySegment buildFrameLoaderCallbacks(MemorySegment fireLoadEvent) {
+        StructLayout layout = WKJLayouts.FRAME_LOADER_CALLBACKS;
+        MemorySegment table = WebKitNative.allocateTable(layout);
+        install(table, layout, "frame_created", "loaderFrameCreated",
+                FunctionDescriptor.ofVoid(JAVA_LONG, JAVA_LONG));
+        install(table, layout, "frame_destroyed", "loaderFrameDestroyed",
+                FunctionDescriptor.ofVoid(JAVA_LONG, JAVA_LONG));
+        install(table, layout, "set_request_url", "loaderSetRequestUrl",
+                FunctionDescriptor.ofVoid(JAVA_LONG, JAVA_LONG, JAVA_INT, ADDRESS, JAVA_INT));
+        install(table, layout, "remove_request_url", "loaderRemoveRequestUrl",
+                FunctionDescriptor.ofVoid(JAVA_LONG, JAVA_LONG, JAVA_INT));
+        WebKitNative.installSlot(table, layout, "fire_load_event", fireLoadEvent);
+        install(table, layout, "fire_resource_load_event", "loaderFireResourceLoadEvent",
+                FunctionDescriptor.ofVoid(JAVA_LONG, JAVA_LONG, JAVA_INT, JAVA_INT, ADDRESS,
+                        JAVA_INT, JAVA_DOUBLE, JAVA_INT));
+        install(table, layout, "permit_navigate", "loaderPermitNavigate",
+                FunctionDescriptor.of(JAVA_INT, JAVA_LONG, JAVA_LONG, ADDRESS, JAVA_INT));
+        install(table, layout, "permit_redirect", "loaderPermitRedirect",
+                FunctionDescriptor.of(JAVA_INT, JAVA_LONG, JAVA_LONG, ADDRESS, JAVA_INT));
+        install(table, layout, "permit_accept_resource", "loaderPermitAcceptResource",
+                FunctionDescriptor.of(JAVA_INT, JAVA_LONG, JAVA_LONG, ADDRESS, JAVA_INT));
+        install(table, layout, "permit_new_window", "loaderPermitNewWindow",
+                FunctionDescriptor.of(JAVA_INT, JAVA_LONG, JAVA_LONG, ADDRESS, JAVA_INT));
+        install(table, layout, "permit_submit_data", "loaderPermitSubmitData",
+                FunctionDescriptor.of(JAVA_INT, JAVA_LONG, JAVA_LONG, ADDRESS, JAVA_INT, ADDRESS,
+                        JAVA_INT, JAVA_INT));
+        install(table, layout, "did_clear_window_object", "loaderDidClearWindowObject",
+                FunctionDescriptor.ofVoid(JAVA_LONG, JAVA_LONG, ADDRESS, ADDRESS));
+        return allSlotsFilled(table, layout);
+    }
 
-        MemorySegment progress = table(PROGRESS_SLOTS, new MemorySegment[] {
-            fireLoadEvent,
-        });
+    private static MemorySegment buildEditorCallbacks() {
+        StructLayout layout = WKJLayouts.EDITOR_CALLBACKS;
+        MemorySegment table = WebKitNative.allocateTable(layout);
+        install(table, layout, "set_input_method_state", "editorSetInputMethodState",
+                FunctionDescriptor.ofVoid(JAVA_LONG, JAVA_INT));
+        return allSlotsFilled(table, layout);
+    }
 
-        MemorySegment notify = table(NOTIFY_SLOTS, new MemorySegment[] {
-            stub("notifyRepaint", FunctionDescriptor.ofVoid(JAVA_LONG, JAVA_INT, JAVA_INT, JAVA_INT,
-                    JAVA_INT)),
-            stub("notifyScroll", FunctionDescriptor.ofVoid(JAVA_LONG, JAVA_INT, JAVA_INT, JAVA_INT,
-                    JAVA_INT, JAVA_INT, JAVA_INT)),
-        });
+    private static MemorySegment buildInspectorCallbacks() {
+        StructLayout layout = WKJLayouts.INSPECTOR_CALLBACKS;
+        MemorySegment table = WebKitNative.allocateTable(layout);
+        install(table, layout, "repaint_all", "inspectorRepaintAll",
+                FunctionDescriptor.ofVoid(JAVA_LONG));
+        install(table, layout, "send_message_to_frontend", "inspectorSendMessageToFrontend",
+                FunctionDescriptor.ofVoid(JAVA_LONG, ADDRESS, JAVA_INT));
+        return allSlotsFilled(table, layout);
+    }
 
-        MemorySegment drag = table(DRAG_SLOTS, new MemorySegment[] {
-            stub("dragStartDrag", FunctionDescriptor.ofVoid(JAVA_LONG, JAVA_LONG, JAVA_INT,
-                    JAVA_INT, JAVA_INT, JAVA_INT, ADDRESS, ADDRESS, ADDRESS, ADDRESS, JAVA_INT,
-                    JAVA_INT)),
-        });
+    private static MemorySegment buildProgressCallbacks(MemorySegment fireLoadEvent) {
+        StructLayout layout = WKJLayouts.PROGRESS_CALLBACKS;
+        MemorySegment table = WebKitNative.allocateTable(layout);
+        WebKitNative.installSlot(table, layout, "fire_load_event", fireLoadEvent);
+        return allSlotsFilled(table, layout);
+    }
 
-        return table(PAGE_CALLBACKS_SLOTS, new MemorySegment[] {
-            chrome, frameLoader, editor, inspector, progress, notify, drag,
-        });
+    private static MemorySegment buildNotifyCallbacks() {
+        StructLayout layout = WKJLayouts.PAGE_NOTIFY_CALLBACKS;
+        MemorySegment table = WebKitNative.allocateTable(layout);
+        install(table, layout, "repaint", "notifyRepaint",
+                FunctionDescriptor.ofVoid(JAVA_LONG, JAVA_INT, JAVA_INT, JAVA_INT, JAVA_INT));
+        install(table, layout, "scroll", "notifyScroll",
+                FunctionDescriptor.ofVoid(JAVA_LONG, JAVA_INT, JAVA_INT, JAVA_INT, JAVA_INT,
+                        JAVA_INT, JAVA_INT));
+        return allSlotsFilled(table, layout);
+    }
+
+    private static MemorySegment buildDragCallbacks() {
+        StructLayout layout = WKJLayouts.DRAG_CALLBACKS;
+        MemorySegment table = WebKitNative.allocateTable(layout);
+        install(table, layout, "start_drag", "dragStartDrag",
+                FunctionDescriptor.ofVoid(JAVA_LONG, JAVA_LONG, JAVA_INT, JAVA_INT, JAVA_INT,
+                        JAVA_INT, ADDRESS, ADDRESS, ADDRESS, ADDRESS, JAVA_INT, JAVA_INT));
+        return allSlotsFilled(table, layout);
     }
 
     private static void installNetworkCallbacks() {
-        MemorySegment network = table(NETWORK_SLOTS, new MemorySegment[] {
-            stub("networkCanHandleUrl", FunctionDescriptor.of(JAVA_INT, ADDRESS, JAVA_INT)),
-        });
+        StructLayout layout = WKJLayouts.NETWORK_CALLBACKS;
+        MemorySegment network = WebKitNative.allocateTable(layout);
+        install(network, layout, "can_handle_url", "networkCanHandleUrl",
+                FunctionDescriptor.of(JAVA_INT, ADDRESS, JAVA_INT));
+        allSlotsFilled(network, layout);
         try {
             INSTALL_NETWORK_CALLBACKS.invokeExact(network);
         } catch (Throwable t) {
@@ -1468,12 +1556,32 @@ final class WebPageNative {
         }
     }
 
-    private static MemorySegment table(int slots, MemorySegment[] pointers) {
-        if (pointers.length != slots) {
-            throw new AssertionError("a callback table of " + slots + " slots was given "
-                    + pointers.length + " function pointers");
+    /*
+     * Installs one stub into a table under the member name the C struct declares. The offset comes
+     * from the named layout, so a member reordered in the header moves the stub with it; a member
+     * name the layout does not declare fails inside installSlot with the name in the message.
+     */
+    private static void install(MemorySegment table, StructLayout layout, String member,
+                                String method, FunctionDescriptor descriptor) {
+        WebKitNative.installSlot(table, layout, member, MethodHandles.lookup(), method, descriptor);
+    }
+
+    /*
+     * Every named member of the layout must have been filled: a slot the C header declares that no
+     * install call named would otherwise stay NULL and silently fall back to the library's default
+     * behaviour. This subsumes the slot count check the positional builder had.
+     */
+    private static MemorySegment allSlotsFilled(MemorySegment table, StructLayout layout) {
+        for (MemoryLayout member : layout.memberLayouts()) {
+            String name = member.name().orElseThrow(() -> new AssertionError(
+                    layout.name().orElse("callback table") + " has an unnamed member"));
+            long offset = layout.byteOffset(PathElement.groupElement(name));
+            if (table.get(ADDRESS, offset).address() == 0L) {
+                throw new AssertionError(layout.name().orElse("callback table") + "." + name
+                        + " was left NULL: the C header declares a slot this class does not fill");
+            }
         }
-        return WebKitNative.upcallTable(pointers);
+        return table;
     }
 
     /*
@@ -1602,7 +1710,7 @@ final class WebPageNative {
         try {
             WebPage page = page(ref);
             if (page != null) {
-                page.fwkSetTooltip(readString(text, textLength));
+                page.fwkSetTooltip(WebKitNative.readString(text, textLength));
             }
         } catch (Throwable t) {
             failed("set_tooltip", t);
@@ -1624,7 +1732,7 @@ final class WebPageNative {
         try {
             WebPage page = page(ref);
             if (page != null) {
-                page.fwkSetStatusbarText(readString(text, textLength));
+                page.fwkSetStatusbarText(WebKitNative.readString(text, textLength));
             }
         } catch (Throwable t) {
             failed("set_statusbar_text", t);
@@ -1686,7 +1794,7 @@ final class WebPageNative {
         try {
             WebPage page = page(ref);
             if (page != null) {
-                page.fwkAlert(readString(text, textLength));
+                page.fwkAlert(WebKitNative.readString(text, textLength));
             }
         } catch (Throwable t) {
             failed("alert", t);
@@ -1696,7 +1804,7 @@ final class WebPageNative {
     static int chromeConfirm(long ref, MemorySegment text, int textLength) {
         try {
             WebPage page = page(ref);
-            return page != null && page.fwkConfirm(readString(text, textLength)) ? 1 : 0;
+            return page != null && page.fwkConfirm(WebKitNative.readString(text, textLength)) ? 1 : 0;
         } catch (Throwable t) {
             failed("confirm", t);
             return 0;
@@ -1705,7 +1813,10 @@ final class WebPageNative {
 
     /**
      * {@code window.prompt()}. The dialog is modal, so a {@code WKJ_STR_OVERFLOW} retry is served
-     * from the answer the user already gave: running it twice would ask the user twice.
+     * from the answer the user already gave: running it twice would ask the user twice. The parked
+     * answer is consumed only by a retry that presents the same page ref, prompt text and default
+     * value; a call that presents anything else is a fresh prompt, and the parked answer of a retry
+     * the library abandoned is discarded rather than served to it without a dialog.
      *
      * @param ref the registry id of the page
      * @param text the prompt text
@@ -1726,16 +1837,20 @@ final class WebPageNative {
             if (page == null) {
                 return WKJStringCodec.NULL;
             }
-            String answer = PENDING_PROMPT.get();
-            if (answer == null) {
-                answer = page.fwkPrompt(readString(text, textLength),
-                        readString(defaultValue, defaultValueLength));
+            String message = WebKitNative.readString(text, textLength);
+            String initial = WebKitNative.readString(defaultValue, defaultValueLength);
+            PendingPrompt pending = PENDING_PROMPT.get();
+            String answer;
+            if (pending != null && pending.matches(ref, message, initial)) {
+                answer = pending.answer();
+            } else {
+                PENDING_PROMPT.remove();
+                answer = page.fwkPrompt(message, initial);
             }
-            int status = WKJStringCodec.emit(answer,
-                    outSegment(resultBuffer, (long) resultCapacity * Character.BYTES),
-                    resultCapacity, outSegment(resultLength, Integer.BYTES));
+            int status = WebKitNative.emitString(answer, resultBuffer, resultCapacity,
+                    resultLength);
             if (status == WKJStringCodec.OVERFLOW) {
-                PENDING_PROMPT.set(answer);
+                PENDING_PROMPT.set(new PendingPrompt(ref, message, initial, answer));
             } else {
                 PENDING_PROMPT.remove();
             }
@@ -1761,7 +1876,7 @@ final class WebPageNative {
         try {
             WebPage page = page(ref);
             return page != null
-                    && page.fwkRunBeforeUnloadConfirmPanel(readString(message, messageLength))
+                    && page.fwkRunBeforeUnloadConfirmPanel(WebKitNative.readString(message, messageLength))
                     ? 1 : 0;
         } catch (Throwable t) {
             failed("run_before_unload", t);
@@ -1775,8 +1890,8 @@ final class WebPageNative {
         try {
             WebPage page = page(ref);
             if (page != null) {
-                page.fwkAddMessageToConsole(readString(message, messageLength), lineNumber,
-                        readString(sourceId, sourceIdLength));
+                page.fwkAddMessageToConsole(WebKitNative.readString(message, messageLength), lineNumber,
+                        WebKitNative.readString(sourceId, sourceIdLength));
             }
         } catch (Throwable t) {
             failed("add_message_to_console", t);
@@ -1797,7 +1912,10 @@ final class WebPageNative {
     /**
      * The file chooser. Returns the number of files chosen, or -1 when Java returned {@code null},
      * which the library distinguishes from an empty selection. As for the prompt, the dialog is
-     * modal, so an overflow retry is served from the selection the user already made.
+     * modal, so an overflow retry is served from the selection the user already made - and only by
+     * a retry presenting the same page ref, initial file name, multiplicity and mime filters; a
+     * selection parked for a retry the library abandoned is discarded rather than served to the
+     * next chooser without a dialog.
      *
      * @param ref the registry id of the page
      * @param initialFileName the initial file name
@@ -1822,10 +1940,16 @@ final class WebPageNative {
             if (page == null) {
                 return -1;
             }
-            String[] files = PENDING_CHOSEN_FILES.get();
-            if (files == null) {
-                files = page.fwkChooseFile(readString(initialFileName, initialFileNameLength),
-                        allowMultiple != 0, readString(mimeFilters, mimeFiltersLength));
+            String initial = WebKitNative.readString(initialFileName, initialFileNameLength);
+            String filters = WebKitNative.readString(mimeFilters, mimeFiltersLength);
+            boolean multiple = allowMultiple != 0;
+            PendingChosenFiles pending = PENDING_CHOSEN_FILES.get();
+            String[] files;
+            if (pending != null && pending.matches(ref, initial, multiple, filters)) {
+                files = pending.files();
+            } else {
+                PENDING_CHOSEN_FILES.remove();
+                files = page.fwkChooseFile(initial, multiple, filters);
                 if (files == null) {
                     return -1;
                 }
@@ -1841,13 +1965,16 @@ final class WebPageNative {
             if (count > resultLengthsCapacity || units > resultCapacity
                     || (count > 0 && resultLengths.address() == 0L)
                     || (units > 0 && resultBuffer.address() == 0L)) {
-                PENDING_CHOSEN_FILES.set(files);
-                writeInt(requiredUnits, units);
+                PENDING_CHOSEN_FILES.set(
+                        new PendingChosenFiles(ref, initial, multiple, filters, files));
+                WebKitNative.writeInt(requiredUnits, units);
                 return count;
             }
             PENDING_CHOSEN_FILES.remove();
-            MemorySegment paths = outSegment(resultBuffer, (long) units * Character.BYTES);
-            MemorySegment lengths = outSegment(resultLengths, (long) count * Integer.BYTES);
+            MemorySegment paths =
+                    WebKitNative.outSegment(resultBuffer, (long) units * Character.BYTES);
+            MemorySegment lengths =
+                    WebKitNative.outSegment(resultLengths, (long) count * Integer.BYTES);
             int at = 0;
             for (int i = 0; i < count; i++) {
                 String file = files[i];
@@ -1859,7 +1986,7 @@ final class WebPageNative {
                 lengths.setAtIndex(JAVA_INT, i, length);
                 at += length;
             }
-            writeInt(requiredUnits, units);
+            WebKitNative.writeInt(requiredUnits, units);
             return count;
         } catch (Throwable t) {
             PENDING_CHOSEN_FILES.remove();
@@ -1897,7 +2024,7 @@ final class WebPageNative {
         try {
             WebPage page = page(ref);
             if (page != null) {
-                page.fwkSetRequestURL(frame, id, readString(url, urlLength));
+                page.fwkSetRequestURL(frame, id, WebKitNative.readString(url, urlLength));
             }
         } catch (Throwable t) {
             failed("set_request_url", t);
@@ -1921,8 +2048,8 @@ final class WebPageNative {
         try {
             WebPage page = page(ref);
             if (page != null) {
-                page.fwkFireLoadEvent(frame, state, readString(url, urlLength),
-                        readString(contentType, contentTypeLength), progress, errorCode);
+                page.fwkFireLoadEvent(frame, state, WebKitNative.readString(url, urlLength),
+                        WebKitNative.readString(contentType, contentTypeLength), progress, errorCode);
             }
         } catch (Throwable t) {
             failed("fire_load_event", t);
@@ -1936,7 +2063,7 @@ final class WebPageNative {
             WebPage page = page(ref);
             if (page != null) {
                 page.fwkFireResourceLoadEvent(frame, state, id,
-                        readString(contentType, contentTypeLength), progress, errorCode);
+                        WebKitNative.readString(contentType, contentTypeLength), progress, errorCode);
             }
         } catch (Throwable t) {
             failed("fire_resource_load_event", t);
@@ -1946,7 +2073,7 @@ final class WebPageNative {
     static int loaderPermitNavigate(long ref, long frame, MemorySegment url, int urlLength) {
         try {
             WebPage page = page(ref);
-            return page != null && page.fwkPermitNavigateAction(frame, readString(url, urlLength))
+            return page != null && page.fwkPermitNavigateAction(frame, WebKitNative.readString(url, urlLength))
                     ? 1 : 0;
         } catch (Throwable t) {
             failed("permit_navigate", t);
@@ -1957,7 +2084,7 @@ final class WebPageNative {
     static int loaderPermitRedirect(long ref, long frame, MemorySegment url, int urlLength) {
         try {
             WebPage page = page(ref);
-            return page != null && page.fwkPermitRedirectAction(frame, readString(url, urlLength))
+            return page != null && page.fwkPermitRedirectAction(frame, WebKitNative.readString(url, urlLength))
                     ? 1 : 0;
         } catch (Throwable t) {
             failed("permit_redirect", t);
@@ -1969,7 +2096,7 @@ final class WebPageNative {
         try {
             WebPage page = page(ref);
             return page != null
-                    && page.fwkPermitAcceptResourceAction(frame, readString(url, urlLength))
+                    && page.fwkPermitAcceptResourceAction(frame, WebKitNative.readString(url, urlLength))
                     ? 1 : 0;
         } catch (Throwable t) {
             failed("permit_accept_resource", t);
@@ -1980,7 +2107,7 @@ final class WebPageNative {
     static int loaderPermitNewWindow(long ref, long frame, MemorySegment url, int urlLength) {
         try {
             WebPage page = page(ref);
-            return page != null && page.fwkPermitNewWindowAction(frame, readString(url, urlLength))
+            return page != null && page.fwkPermitNewWindowAction(frame, WebKitNative.readString(url, urlLength))
                     ? 1 : 0;
         } catch (Throwable t) {
             failed("permit_new_window", t);
@@ -1993,8 +2120,8 @@ final class WebPageNative {
                                       int isSubmit) {
         try {
             WebPage page = page(ref);
-            return page != null && page.fwkPermitSubmitDataAction(frame, readString(url, urlLength),
-                    readString(httpMethod, httpMethodLength), isSubmit != 0) ? 1 : 0;
+            return page != null && page.fwkPermitSubmitDataAction(frame, WebKitNative.readString(url, urlLength),
+                    WebKitNative.readString(httpMethod, httpMethodLength), isSubmit != 0) ? 1 : 0;
         } catch (Throwable t) {
             failed("permit_submit_data", t);
             return 0;
@@ -2047,7 +2174,7 @@ final class WebPageNative {
         try {
             WebPage page = page(ref);
             if (page != null) {
-                page.fwkSendInspectorMessageToFrontend(readString(message, messageLength));
+                page.fwkSendInspectorMessageToFrontend(WebKitNative.readString(message, messageLength));
             }
         } catch (Throwable t) {
             failed("send_message_to_frontend", t);
@@ -2120,7 +2247,7 @@ final class WebPageNative {
      */
     static int networkCanHandleUrl(MemorySegment url, int urlLength) {
         try {
-            return NetworkContext.canHandleURL(readString(url, urlLength)) ? 1 : 0;
+            return NetworkContext.canHandleURL(WebKitNative.readString(url, urlLength)) ? 1 : 0;
         } catch (Throwable t) {
             failed("can_handle_url", t);
             return 0;
@@ -2150,60 +2277,21 @@ final class WebPageNative {
         WebKitNative.upcallFailed("page callback " + slot, t);
     }
 
-    @SuppressWarnings("restricted")
-    private static String readString(MemorySegment s, int length) {
-        if (s.address() == 0L) {
-            return null;
-        }
-        if (length <= 0) {
-            return "";
-        }
-        char[] chars = new char[length];
-        MemorySegment.copy(s.reinterpret((long) length * Character.BYTES), JAVA_CHAR, 0L, chars, 0,
-                length);
-        return new String(chars);
-    }
-
-    @SuppressWarnings("restricted")
-    private static MemorySegment reinterpret(MemorySegment segment, long byteSize) {
-        return segment.reinterpret(byteSize);
-    }
-
-    /*
-     * A pointer arriving through an upcall is a zero length segment carrying only its address, so
-     * every out parameter has to be given the size the C prototype promises before anything can be
-     * written through it. A NULL pointer is passed through untouched: the callers below all test it.
-     */
-    private static MemorySegment outSegment(MemorySegment segment, long byteSize) {
-        return segment.address() == 0L ? segment : reinterpret(segment, byteSize);
-    }
-
-    private static void writeInt(MemorySegment target, int value) {
-        if (target.address() != 0L) {
-            reinterpret(target, Integer.BYTES).set(JAVA_INT, 0, value);
-        }
-    }
-
-    private static void writeFloat(MemorySegment target, float value) {
-        if (target.address() != 0L) {
-            reinterpret(target, Float.BYTES).set(JAVA_FLOAT, 0, value);
-        }
-    }
-
     /*
      * The four WCRectangle field reads ChromeClientJava used to make become these four out
      * parameters; a null rectangle answers 0 and the library falls back to an empty rect, which is
-     * what the JNI code did.
+     * what the JNI code did. The marshalling helpers all live in WebKitNative, which is where every
+     * restricted java.lang.foreign operation of this module belongs.
      */
     private static int emitRectangle(WCRectangle bounds, MemorySegment x, MemorySegment y,
                                      MemorySegment width, MemorySegment height) {
         if (bounds == null) {
             return 0;
         }
-        writeFloat(x, bounds.getX());
-        writeFloat(y, bounds.getY());
-        writeFloat(width, bounds.getWidth());
-        writeFloat(height, bounds.getHeight());
+        WebKitNative.writeFloat(x, bounds.getX());
+        WebKitNative.writeFloat(y, bounds.getY());
+        WebKitNative.writeFloat(width, bounds.getWidth());
+        WebKitNative.writeFloat(height, bounds.getHeight());
         return 1;
     }
 
@@ -2211,7 +2299,7 @@ final class WebPageNative {
         if (point == null) {
             return;
         }
-        writeFloat(outX, point.getX());
-        writeFloat(outY, point.getY());
+        WebKitNative.writeFloat(outX, point.getX());
+        WebKitNative.writeFloat(outY, point.getY());
     }
 }

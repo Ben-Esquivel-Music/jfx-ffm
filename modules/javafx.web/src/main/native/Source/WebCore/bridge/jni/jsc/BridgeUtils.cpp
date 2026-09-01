@@ -511,6 +511,7 @@ const WKJLiveConnectHost* wkj_live_connect_host = nullptr;
 WKJ_EXPORT int32_t wkj_live_connect_init(const WKJLiveConnectHost* host, int32_t host_size,
     uint32_t abi_version)
 {
+    WebCore::WKJCallScope wkjScope;
     if (!host)
         return WKJ_INIT_ERR_NULL_HOST;
     if (abi_version != WKJ_ABI_VERSION)
@@ -526,16 +527,19 @@ WKJ_EXPORT int32_t wkj_live_connect_init(const WKJLiveConnectHost* host, int32_t
 
 WKJ_EXPORT int32_t wkj_bridge_sizeof_java_value(void)
 {
+    WebCore::WKJCallScope wkjScope;
     return static_cast<int32_t>(sizeof(WKJJavaValue));
 }
 
 WKJ_EXPORT int32_t wkj_bridge_sizeof_js_value(void)
 {
+    WebCore::WKJCallScope wkjScope;
     return static_cast<int32_t>(sizeof(WKJJSValue));
 }
 
 WKJ_EXPORT int32_t wkj_bridge_sizeof_live_connect_host(void)
 {
+    WebCore::WKJCallScope wkjScope;
     return static_cast<int32_t>(sizeof(WKJLiveConnectHost));
 }
 

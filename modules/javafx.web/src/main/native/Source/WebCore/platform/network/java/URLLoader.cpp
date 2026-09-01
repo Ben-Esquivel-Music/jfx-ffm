@@ -46,6 +46,7 @@
 #include "URLLoader.h"
 #include "NetworkLoadMetrics.h"
 #include "WKJPlatformJava.h"
+#include "WKJDOMUtils.h"
 #include <wtf/CompletionHandler.h>
 
 namespace WebCore {
@@ -410,6 +411,7 @@ WKJ_EXPORT void wkj_url_loader_did_send_data(int64_t target_peer, int64_t total_
                                              int64_t total_bytes_to_be_sent)
 {
     using namespace WebCore;
+    WKJCallScope wkjScope;
     URLLoader::Target* target =
             static_cast<URLLoader::Target*>(wkj_to_ptr(target_peer));
     ASSERT(target);
@@ -427,6 +429,7 @@ WKJ_EXPORT void wkj_url_loader_will_send_request(int64_t target_peer, int32_t st
                                                  const uint16_t* url, int32_t url_len)
 {
     using namespace WebCore;
+    WKJCallScope wkjScope;
     URLLoader::Target* target =
             static_cast<URLLoader::Target*>(wkj_to_ptr(target_peer));
     ASSERT(target);
@@ -453,6 +456,7 @@ WKJ_EXPORT void wkj_url_loader_did_receive_response(int64_t target_peer, int32_t
                                                     const uint16_t* url, int32_t url_len)
 {
     using namespace WebCore;
+    WKJCallScope wkjScope;
     URLLoader::Target* target =
             static_cast<URLLoader::Target*>(wkj_to_ptr(target_peer));
     ASSERT(target);
@@ -472,6 +476,7 @@ WKJ_EXPORT void wkj_url_loader_did_receive_data(int64_t target_peer, const uint8
                                                 int32_t position, int32_t remaining)
 {
     using namespace WebCore;
+    WKJCallScope wkjScope;
     URLLoader::Target* target =
             static_cast<URLLoader::Target*>(wkj_to_ptr(target_peer));
     ASSERT(target);
@@ -488,6 +493,7 @@ WKJ_EXPORT void wkj_url_loader_did_receive_data(int64_t target_peer, const uint8
 WKJ_EXPORT void wkj_url_loader_did_finish_loading(int64_t target_peer)
 {
     using namespace WebCore;
+    WKJCallScope wkjScope;
     URLLoader::Target* target =
             static_cast<URLLoader::Target*>(wkj_to_ptr(target_peer));
     ASSERT(target);
@@ -499,6 +505,7 @@ WKJ_EXPORT void wkj_url_loader_did_fail(int64_t target_peer, int32_t error_code,
                                         const uint16_t* message, int32_t message_len)
 {
     using namespace WebCore;
+    WKJCallScope wkjScope;
     URLLoader::Target* target =
             static_cast<URLLoader::Target*>(wkj_to_ptr(target_peer));
     ASSERT(target);

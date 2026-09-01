@@ -33,6 +33,7 @@
 #include <cstring>
 #include <span>
 #include <wtf/Assertions.h>
+#include <wtf/java/WKJRuntime.h>
 #include <wtf/text/WTFString.h>
 
 /*
@@ -44,6 +45,9 @@
  * and no lifetime rule. The library writes it and clears it on entry to every wkj_*
  * function; Java reads it after a fallible call and clears it by storing WKJ_EXC_NONE into
  * `type`. Nothing may touch another thread's slot.
+ *
+ * wkj_exception_slot itself is the one wkj_* export without a WKJCallScope: clearing on
+ * entry here would wipe the very state the accessor exists to expose.
  */
 WKJ_EXPORT WKJExceptionSlot* wkj_exception_slot(void)
 {
@@ -59,31 +63,6 @@ namespace WebCore {
  * and therefore one anonymous namespace.
  */
 namespace {
-
-/*
- * Copies the first `count` code units of `value` into `destination` as UTF-16, with no NUL
- * terminator. `count` must not exceed value.length(), and `destination` must have room.
- *
- * The Latin-1 branch is not an optimisation, it is required: StringImpl::span16() asserts
- * !is8Bit(), and in a release build the assert is compiled out, so calling it on an 8-bit
- * string reads length() bytes past the end of the heap allocation. Most DOM strings are
- * Latin-1. Widening one code unit at a time is what String::toJavaString() did before
- * handing the characters to NewString (StringJava.cpp:62-73).
- */
-void wkjCopyToUTF16(const WTF::String& value, uint16_t* destination, unsigned count)
-{
-    if (!count)
-        return;
-
-    if (value.is8Bit()) {
-        auto characters = value.span8();
-        for (unsigned i = 0; i < count; ++i)
-            destination[i] = characters[i];
-    } else {
-        auto characters = value.span16();
-        std::memcpy(destination, characters.data(), count * sizeof(char16_t));
-    }
-}
 
 } // namespace
 
@@ -101,7 +80,7 @@ void WKJSetPendingException(int32_t type, int32_t code, const WTF::String& messa
     if (length > static_cast<unsigned>(WKJ_EXC_MESSAGE_MAX))
         length = WKJ_EXC_MESSAGE_MAX;
 
-    wkjCopyToUTF16(message, slot->message, length);
+    WTF::wkjCopyToUTF16(message, slot->message, length);
     slot->message_length = static_cast<int32_t>(length);
 
     slot->code = code;
@@ -147,7 +126,7 @@ int32_t WKJReturnString(uint16_t* resultBuf, int32_t resultCap, int32_t* resultL
     if (!resultBuf || resultCap < 0 || length > static_cast<unsigned>(resultCap))
         return WKJ_STR_OVERFLOW;
 
-    wkjCopyToUTF16(value, resultBuf, length);
+    WTF::wkjCopyToUTF16(value, resultBuf, length);
     return WKJ_STR_OK;
 }
 

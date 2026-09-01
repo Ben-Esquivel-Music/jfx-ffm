@@ -35,12 +35,19 @@
 #include "RenderingQueue.h"
 #include "SharedBuffer.h"
 #include "WKJPlatformJava.h"
+#include "WKJDOMUtils.h"
+
+#include <wtf/java/WKJRuntime.h>
 
 namespace WebCore {
 
 Ref<Image> BitmapImage::createFromName(const char* name)
 {
     Ref<BitmapImage> img(create());
+
+    /* Where WC_GETJAVAENV_CHKRET(env, WTF::move(img)) sat; see THE SHUTDOWN GATE in
+       wtf/java/WKJRuntime.h. Inert in the compiled branch below, kept for fidelity. */
+    WKJ_RETURN_IF_SHUTTING_DOWN(WTF::move(img));
 
 #if USE(IMAGEIO)
     // This is the branch the build compiles, and it has been inert for a long time: the only
@@ -96,6 +103,7 @@ WKJ_EXPORT void wkj_shared_buffer_builder_append(int64_t builder,
                                                  const uint8_t* data, int32_t count)
 {
     using namespace WebCore;
+    WKJCallScope wkjScope;
 
     ASSERT(builder);
     SharedBufferBuilder* pBuffer = static_cast<SharedBufferBuilder*>(wkj_to_ptr(builder));

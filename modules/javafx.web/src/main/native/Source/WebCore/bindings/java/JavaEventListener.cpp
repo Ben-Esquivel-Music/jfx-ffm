@@ -30,6 +30,8 @@
 
 #include <webkit_java_api.h>
 
+#include <wtf/java/WKJRuntime.h>
+
 namespace WebCore {
 
 /*
@@ -105,9 +107,12 @@ void JavaEventListener::handleEvent(ScriptExecutionContext& context, Event& even
 JavaEventListener::~JavaEventListener()
 {
     /*
-     * WC_GETJAVAENV_CHKRET(env) used to return early here when the JVM was no longer
-     * reachable, which is what an uninstalled or detached table now reproduces.
+     * WC_GETJAVAENV_CHKRET(env) returned early here once the JVM began tearing down. The
+     * callback table stays installed for the life of the process, so the explicit gate is
+     * what reproduces that early return. See THE SHUTDOWN GATE in wtf/java/WKJRuntime.h.
      */
+    WKJ_RETURN_IF_SHUTTING_DOWN();
+
     const WKJEventListenerCallbacks* callbacks = wkjEventListenerCallbacks;
     if (callbacks && callbacks->dispose)
         callbacks->dispose(wkj_from_ptr(this));

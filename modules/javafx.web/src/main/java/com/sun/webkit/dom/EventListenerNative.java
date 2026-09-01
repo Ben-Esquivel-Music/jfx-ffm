@@ -161,12 +161,18 @@ final class EventListenerNative {
 
     /**
      * {@code EventListenerImpl.fwkHandleEvent(long)}. An id that is unknown, that is zero, or whose
-     * object is no longer an {@code EventListenerImpl} is ignored, which is what a JNI call on a
-     * cleared reference would have amounted to.
+     * object is no longer an {@code EventListenerImpl} dispatches nothing, which is what a JNI call
+     * on a cleared reference would have amounted to.
      * <p>
-     * {@code eventPeer} has already been {@code ref()}ed for Java by the library, and
-     * {@code EventImpl.getImpl} drops that reference through its disposer - or immediately, on a
-     * cache hit. Neither side adds or removes one here, which is the pairing the leak tests measure.
+     * {@code eventPeer} has already been {@code ref()}ed for Java by
+     * {@code JavaEventListener::handleEvent}, and on the dispatch path {@code EventImpl.getImpl}
+     * hands that reference to the disposer of the {@code EventImpl} it creates, whose dispose runs
+     * {@code EventNative.dispose}. When the listener does not resolve, no {@code EventImpl} will
+     * ever exist to carry the reference, so this method drops it at once through the same
+     * {@code EventNative.dispose} - mirroring the immediate drop {@code NodeImpl.getCachedImpl}
+     * performs on a cache hit - because a skipped dispatch must not leak the
+     * {@code WebCore::Event}. A peer of zero is left alone, exactly as {@code EventImpl.create}
+     * leaves it: no reference was taken for it.
      *
      * @param listener the registry id of the listener
      * @param eventPeer the event peer
@@ -175,6 +181,8 @@ final class EventListenerNative {
         try {
             if (WebKitNative.lookup(listener) instanceof EventListenerImpl impl) {
                 impl.fwkHandleEvent(eventPeer);
+            } else if (eventPeer != 0L) {
+                EventNative.dispose(eventPeer);
             }
         } catch (Throwable t) {
             // Swallowed on purpose, and without a per event log line: see the class comment.

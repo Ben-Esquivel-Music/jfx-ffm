@@ -33,6 +33,7 @@
 #include <wtf/HashMap.h>
 #include <wtf/NeverDestroyed.h>
 #include <wtf/java/WKJRuntime.h>
+#include "WKJDOMUtils.h"
 
 // WKJ_EXPORT, wkj_rq_release and WKJHostGraphics all arrive with webkit_java_api.h, which
 // WKJPlatformJava.h includes; webkit_java_api_platform.h is not includable on its own.
@@ -131,6 +132,7 @@ extern "C" {
 WKJ_EXPORT void wkj_rq_release(const int64_t* buffer_addrs, int32_t count)
 {
     using namespace WebCore;
+    WKJCallScope wkjScope;
     /*
      * This method should be called on the Event thread to synchronize with JavaScript
      * by thread. JavaScript may access resources kept in ByteBuffer::m_refList,

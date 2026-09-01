@@ -55,6 +55,7 @@
 
 #pragma once
 
+#include <cstring>
 #include <stdint.h>
 
 #include <webkit_java_api.h>
@@ -132,8 +133,21 @@ public:
         }
 
         m_buffer.grow(static_cast<size_t>(m_length));
-        for (int32_t i = 0; i < m_length; ++i)
-            m_buffer[static_cast<size_t>(i)] = static_cast<uint16_t>(value.characterAt(static_cast<unsigned>(i)));
+        /*
+         * Same copy as WTF::wkjCopyToUTF16 (wtf/java/WKJRuntime.h), inlined because this
+         * header is a deliberately self-contained copy pending the collapse noted above.
+         * The 8-bit branch is required - span16() asserts !is8Bit() and release builds
+         * would overread - and the 16-bit branch is one memcpy, not a per-unit loop.
+         */
+        if (value.is8Bit()) {
+            auto characters = value.span8();
+            for (int32_t i = 0; i < m_length; ++i)
+                m_buffer[static_cast<size_t>(i)] = characters[static_cast<size_t>(i)];
+        } else {
+            auto characters = value.span16();
+            std::memcpy(m_buffer.mutableSpan().data(), characters.data(),
+                        static_cast<size_t>(m_length) * sizeof(char16_t));
+        }
         m_data = m_buffer.span().data();
     }
 

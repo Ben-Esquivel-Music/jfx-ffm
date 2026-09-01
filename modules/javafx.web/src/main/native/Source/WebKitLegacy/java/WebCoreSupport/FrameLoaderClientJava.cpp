@@ -27,6 +27,7 @@
 #include "FrameLoaderClientJava.h"
 #include <WebCore/PlatformJavaClasses.h>
 #include <WebCore/WKJDOMUtils.h>
+#include <wtf/java/WKJRuntime.h>
 #include <wkj_constants.h>
 #include "FrameNetworkingContextJava.h"
 #include "WebPage.h"
@@ -128,6 +129,14 @@ FrameLoaderClientJava::FrameLoaderClientJava(FrameLoader& loader)
 FrameLoaderClientJava::~FrameLoaderClientJava()
 {
     using namespace FrameLoaderClientJavaInternal;
+
+    /*
+     * WC_GETJAVAENV_CHKRET gated this frame_destroyed upcall once the JVM began tearing
+     * down; the callback table stays installed, so the explicit gate is the substitution.
+     * See THE SHUTDOWN GATE in wtf/java/WKJRuntime.h.
+     */
+    WKJ_RETURN_IF_SHUTTING_DOWN();
+
     ASSERT(m_frame);
     if (m_callbacks && m_callbacks->frame_destroyed)
         m_callbacks->frame_destroyed(m_pageRef, wkj_from_ptr(m_frame));

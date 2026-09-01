@@ -30,6 +30,9 @@
 #include "SocketStreamError.h"
 #include "SocketStreamHandleClient.h"
 #include "WKJPlatformJava.h"
+#include "WKJDOMUtils.h"
+
+#include <wtf/java/WKJRuntime.h>
 
 namespace WebCore {
 
@@ -56,8 +59,11 @@ SocketStreamHandleImpl::SocketStreamHandleImpl(const URL& url, Page* page,
 
 SocketStreamHandleImpl::~SocketStreamHandleImpl()
 {
-    // The host table can be gone by the time this runs; that is what the null environment
-    // check in the JNI version meant.
+    // The JNI version's null-environment check returned early here during teardown. The
+    // host table stays installed for the life of the process, so the explicit gate is the
+    // substitution. See THE SHUTDOWN GATE in wtf/java/WKJRuntime.h.
+    WKJ_RETURN_IF_SHUTTING_DOWN();
+
     const WKJHostNetwork* cb = wkjNetwork();
     if (!cb || !cb->socket_notify_disposed || !m_ref)
         return;
@@ -131,6 +137,7 @@ extern "C" {
 WKJ_EXPORT void wkj_socket_did_open(int64_t handle_peer)
 {
     using namespace WebCore;
+    WKJCallScope wkjScope;
     SocketStreamHandleImpl* handle =
             static_cast<SocketStreamHandleImpl*>(wkj_to_ptr(handle_peer));
     ASSERT(handle);
@@ -141,6 +148,7 @@ WKJ_EXPORT void wkj_socket_did_receive_data(int64_t handle_peer, const uint8_t* 
                                             int32_t length)
 {
     using namespace WebCore;
+    WKJCallScope wkjScope;
     SocketStreamHandleImpl* handle =
             static_cast<SocketStreamHandleImpl*>(wkj_to_ptr(handle_peer));
     ASSERT(handle);
@@ -151,6 +159,7 @@ WKJ_EXPORT void wkj_socket_did_fail(int64_t handle_peer, int32_t error_code,
                                     const uint16_t* description, int32_t description_len)
 {
     using namespace WebCore;
+    WKJCallScope wkjScope;
     SocketStreamHandleImpl* handle =
             static_cast<SocketStreamHandleImpl*>(wkj_to_ptr(handle_peer));
     ASSERT(handle);
@@ -160,6 +169,7 @@ WKJ_EXPORT void wkj_socket_did_fail(int64_t handle_peer, int32_t error_code,
 WKJ_EXPORT void wkj_socket_did_close(int64_t handle_peer)
 {
     using namespace WebCore;
+    WKJCallScope wkjScope;
     SocketStreamHandleImpl* handle =
             static_cast<SocketStreamHandleImpl*>(wkj_to_ptr(handle_peer));
     ASSERT(handle);

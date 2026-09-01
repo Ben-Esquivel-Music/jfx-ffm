@@ -95,9 +95,11 @@ final class SharedBufferNative {
 
     /**
      * Copies at most {@code length} bytes from {@code position} into {@code dst} at {@code offset}.
-     * The whole array is handed over and {@code offset} stays a separate argument, as the C
-     * prototype expects, so that the segment the library writes into has the same shape the
-     * {@code byte[]} had.
+     * {@code offset} stays a separate argument, as the C prototype expects, and the library writes
+     * only {@code dst + offset .. dst + offset + length}, so that extent is all the segment
+     * carries: {@code offset + length} bytes rather than {@code dst.length}, which for the
+     * streaming reads of {@code SimpleSharedBufferInputStream} is the bytes requested instead of
+     * the whole read buffer.
      *
      * @param buffer the buffer handle
      * @param position the position to read from
@@ -108,7 +110,7 @@ final class SharedBufferNative {
      */
     static int getSomeData(long buffer, long position, byte[] dst, int offset, int length) {
         try (Arena arena = Arena.ofConfined()) {
-            MemorySegment out = arena.allocate(JAVA_BYTE, dst.length);
+            MemorySegment out = arena.allocate(JAVA_BYTE, (long) offset + length);
             int copied;
             try {
                 copied = (int) GET_SOME_DATA.invokeExact(buffer, position, out, offset, length);
@@ -123,7 +125,10 @@ final class SharedBufferNative {
     }
 
     /**
-     * Appends {@code length} bytes read from {@code src} at {@code offset}.
+     * Appends {@code length} bytes read from {@code src} at {@code offset}. The library reads only
+     * {@code src + offset .. src + offset + length}, so, as in {@link #getSomeData}, the segment is
+     * {@code offset + length} bytes rather than {@code src.length}, with the payload staged at
+     * {@code offset} where the C prototype reads it.
      *
      * @param buffer the buffer handle
      * @param src the source array, already bounds checked by {@link SharedBuffer}
@@ -132,7 +137,7 @@ final class SharedBufferNative {
      */
     static void append(long buffer, byte[] src, int offset, int length) {
         try (Arena arena = Arena.ofConfined()) {
-            MemorySegment in = arena.allocate(JAVA_BYTE, src.length);
+            MemorySegment in = arena.allocate(JAVA_BYTE, (long) offset + length);
             MemorySegment.copy(src, offset, in, JAVA_BYTE, offset, length);
             try {
                 APPEND.invokeExact(buffer, in, offset, length);

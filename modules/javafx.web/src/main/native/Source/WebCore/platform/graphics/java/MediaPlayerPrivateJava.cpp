@@ -31,12 +31,14 @@
 #include "NotImplemented.h"
 #include "PlatformContextJava.h"
 #include "WKJPlatformJava.h"
+#include "WKJDOMUtils.h"
 
 #include "Document.h"
 #include "Settings.h"
 
 #include <wtf/text/CString.h> // todo tav remove when building w/ pch
 #include <wtf/text/StringView.h>
+#include <wtf/java/WKJRuntime.h>
 
 namespace WebCore {
 
@@ -296,6 +298,13 @@ MediaPlayerPrivate::MediaPlayerPrivate(MediaPlayer &player)
 
 MediaPlayerPrivate::~MediaPlayerPrivate()
 {
+    /*
+     * WC_GETJAVAENV_CHKRET gated this dispose upcall once the JVM began tearing down; the
+     * host table stays installed, so the explicit gate is the substitution. See THE
+     * SHUTDOWN GATE in wtf/java/WKJRuntime.h.
+     */
+    WKJ_RETURN_IF_SHUTTING_DOWN();
+
     const WKJHostMedia* cb = wkjMedia();
     if (!cb || !cb->dispose || !m_jPlayer)
         return;
@@ -797,30 +806,35 @@ extern "C" {
 
 WKJ_EXPORT void wkj_media_notify_network_state(int64_t player_peer, int32_t state)
 {
+    WKJCallScope wkjScope;
     MediaPlayerPrivate* player = MediaPlayerPrivate::getPlayer(player_peer);
     player->notifyNetworkStateChanged(state);
 }
 
 WKJ_EXPORT void wkj_media_notify_ready_state(int64_t player_peer, int32_t state)
 {
+    WKJCallScope wkjScope;
     MediaPlayerPrivate* player = MediaPlayerPrivate::getPlayer(player_peer);
     player->notifyReadyStateChanged(state);
 }
 
 WKJ_EXPORT void wkj_media_notify_paused(int64_t player_peer, int32_t paused)
 {
+    WKJCallScope wkjScope;
     MediaPlayerPrivate* player = MediaPlayerPrivate::getPlayer(player_peer);
     player->notifyPaused(paused != 0);
 }
 
 WKJ_EXPORT void wkj_media_notify_seeking(int64_t player_peer, int32_t seeking, int32_t /*ready_state*/)
 {
+    WKJCallScope wkjScope;
     MediaPlayerPrivate* player = MediaPlayerPrivate::getPlayer(player_peer);
     player->notifySeeking(seeking != 0);
 }
 
 WKJ_EXPORT void wkj_media_notify_finished(int64_t player_peer)
 {
+    WKJCallScope wkjScope;
     MediaPlayerPrivate* player = MediaPlayerPrivate::getPlayer(player_peer);
     player->notifyFinished();
 }
@@ -828,6 +842,7 @@ WKJ_EXPORT void wkj_media_notify_finished(int64_t player_peer)
 WKJ_EXPORT void wkj_media_notify_ready(int64_t player_peer, int32_t has_video,
                                        int32_t has_audio, float duration)
 {
+    WKJCallScope wkjScope;
     MediaPlayerPrivate* player = MediaPlayerPrivate::getPlayer(player_peer);
     player->notifyReady(has_video != 0, has_audio != 0);
     if (duration >= 0) {
@@ -837,6 +852,7 @@ WKJ_EXPORT void wkj_media_notify_ready(int64_t player_peer, int32_t has_video,
 
 WKJ_EXPORT void wkj_media_notify_duration_changed(int64_t player_peer, float duration)
 {
+    WKJCallScope wkjScope;
     MediaPlayerPrivate* player = MediaPlayerPrivate::getPlayer(player_peer);
     if (duration != player->duration().toFloat()) {
         player->notifyDurationChanged(duration);
@@ -845,12 +861,14 @@ WKJ_EXPORT void wkj_media_notify_duration_changed(int64_t player_peer, float dur
 
 WKJ_EXPORT void wkj_media_notify_size_changed(int64_t player_peer, int32_t width, int32_t height)
 {
+    WKJCallScope wkjScope;
     MediaPlayerPrivate* player = MediaPlayerPrivate::getPlayer(player_peer);
     player->notifySizeChanged(width, height);
 }
 
 WKJ_EXPORT void wkj_media_notify_new_frame(int64_t player_peer)
 {
+    WKJCallScope wkjScope;
     MediaPlayerPrivate* player = MediaPlayerPrivate::getPlayer(player_peer);
     player->notifyNewFrame();
 }
@@ -858,6 +876,7 @@ WKJ_EXPORT void wkj_media_notify_new_frame(int64_t player_peer)
 WKJ_EXPORT void wkj_media_notify_buffer_changed(int64_t player_peer, const float* ranges,
                                                 int32_t count, int32_t bytes_loaded)
 {
+    WKJCallScope wkjScope;
     MediaPlayerPrivate* player = MediaPlayerPrivate::getPlayer(player_peer);
 
     // `count` is the number of floats, as GetArrayLength on the float[] was; the pairs are

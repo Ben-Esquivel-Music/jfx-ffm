@@ -38,6 +38,8 @@
 
 #include "BackForwardList.h"
 #include "WebPage.h"
+
+#include <wtf/java/WKJRuntime.h>
 #include "PlatformJavaClasses.h"
 #include <WebCore/WKJDOMUtils.h>
 #include <webkit_java_api_page.h>
@@ -125,6 +127,10 @@ void notifyBackForwardListChanged(wkj_ref host)
  */
 void notifyHistoryItemDestroyed(wkj_ref host)
 {
+    /* WC_GETJAVAENV_CHKRET gated this notification during teardown; see THE SHUTDOWN GATE
+       in wtf/java/WKJRuntime.h. */
+    WKJ_RETURN_IF_SHUTTING_DOWN();
+
     if (host && s_wkjBackForwardCallbacks && s_wkjBackForwardCallbacks->item_destroyed)
         s_wkjBackForwardCallbacks->item_destroyed(host);
 }

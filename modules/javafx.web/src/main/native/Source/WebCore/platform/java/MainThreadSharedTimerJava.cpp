@@ -31,6 +31,8 @@
 
 #include <webkit_java_api.h>
 
+#include <wtf/java/WKJRuntime.h>
+
 #include <wtf/Assertions.h>
 #include <wtf/MainThread.h>
 
@@ -47,11 +49,13 @@ void MainThreadSharedTimer::setFireInterval(Seconds timeout)
     }
 
     /*
-     * The null-table test is the shape of the shutdown guard that used to sit here: it
-     * returned early when the environment was gone, which during teardown it was. Detaching
-     * the host table is how the Java side reaches the same state now, so the guard is a
-     * substitution rather than a deletion.
+     * WC_GETJAVAENV_CHKRET returned early here when the environment was gone, which during
+     * teardown it was. The host table stays installed for the life of the process, so the
+     * explicit gate is the substitution; the null-slot test below only covers a table that
+     * was never installed. See THE SHUTDOWN GATE in wtf/java/WKJRuntime.h.
      */
+    WKJ_RETURN_IF_SHUTTING_DOWN();
+
     const WKJHostTheme* cb = wkjTheme();
     if (!cb || !cb->timer_set_fire_time)
         return;
@@ -62,6 +66,8 @@ void MainThreadSharedTimer::setFireInterval(Seconds timeout)
 
 void MainThreadSharedTimer::stop()
 {
+    WKJ_RETURN_IF_SHUTTING_DOWN();
+
     const WKJHostTheme* cb = wkjTheme();
     if (!cb || !cb->timer_stop)
         return;
