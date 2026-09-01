@@ -81,3 +81,6 @@ Thumbs.db
 .agents/**
 .codex/**
 .codex-runtime/**
+.github/agents/**
+.github/skills/**
+.github/hooks/**

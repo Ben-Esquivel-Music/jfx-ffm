@@ -6,9 +6,33 @@ These can be supplied in a number of ways. See sections below.
 
 ## Compiled from source
 
-The Maven build in this fork does not yet compile the WebKit and Media native
+The Maven build in this fork does not compile the WebKit and Media native
 libraries from source (the former Gradle COMPILE_WEBKIT / COMPILE_MEDIA
-switches). Use one of the options below to supply prebuilt libraries.
+switches).
+
+For WebKit there is a GitHub Actions workflow that does it instead:
+`.github/workflows/build-webkit.yml` ("Build jfxwebkit"). It is
+`workflow_dispatch` only, and drives the WebKit CMake tree through
+`modules/javafx.web/src/main/native/Tools/Scripts/build-webkit` on every
+supported platform:
+
+| Platform | Runner | Produces |
+|---|---|---|
+| linux-x64 | `ubuntu-24.04` | `lib/libjfxwebkit.so` |
+| linux-aarch64 | `ubuntu-24.04-arm` | `lib/libjfxwebkit.so` |
+| macos-x64 | `macos-15-intel` | `lib/libjfxwebkit.dylib` |
+| macos-aarch64 | `macos-15` | `lib/libjfxwebkit.dylib` |
+| windows-x64 | `windows-2022` | `bin/jfxwebkit.dll` |
+
+Each job verifies that the library exports the `wkj_*` FFM entry points before
+publishing, and the run uploads one zip per platform to the repository's
+Releases page. Because the archives contain the `bin/` or `lib/` directory
+already, they extract straight into `caches/sdk` (see below).
+
+The build takes hours per platform, so run it only when the WebKit native
+sources or the FFM ABI change. `ccache` is enabled and cached between runs.
+
+For Media there is no equivalent yet; use one of the options below.
 
 
 ## Prebuilt libraries
