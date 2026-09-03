@@ -37,7 +37,7 @@
 
 using namespace std;
 
-// Level difinitions. These mirror the constants of com.sun.media.jfxmedia.logging.Logger, which
+// Level definitions. These mirror the constants of com.sun.media.jfxmedia.logging.Logger, which
 // the generated JNI header com_sun_media_jfxmedia_logging_Logger.h used to supply.
 #define LOGGER_OFF     2147483647
 #define LOGGER_ERROR   4

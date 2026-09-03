@@ -25,6 +25,7 @@
 
 package test.com.sun.media.jfxmediaimpl;
 
+import com.sun.media.jfxmedia.Media;
 import com.sun.media.jfxmedia.MediaError;
 import com.sun.media.jfxmedia.MediaPlayer;
 import com.sun.media.jfxmedia.effects.AudioEqualizer;
@@ -33,6 +34,7 @@ import com.sun.media.jfxmedia.locator.ConnectionHolder;
 import com.sun.media.jfxmedia.locator.Locator;
 import com.sun.media.jfxmedia.logging.Logger;
 import com.sun.media.jfxmediaimpl.JfxMediaNative;
+import com.sun.media.jfxmediaimpl.NativeMedia;
 import com.sun.media.jfxmediaimpl.NativeMediaPlayer;
 import com.sun.media.jfxmediaimpl.platform.gstreamer.GSTPlatform;
 import java.io.ByteArrayOutputStream;
@@ -47,6 +49,7 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
+import java.util.Locale;
 import java.util.concurrent.CopyOnWriteArrayList;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.MethodOrderer;
@@ -57,17 +60,24 @@ import org.junit.jupiter.api.io.TempDir;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assertions.fail;
+import static org.junit.jupiter.api.Assumptions.abort;
 import static org.junit.jupiter.api.Assumptions.assumeTrue;
 
 /**
  * Binding tests for {@link JfxMediaNative}, the {@code jfxm_*} facade that replaced the module's JNI
- * (see {@code modules/javafx.media/FFM-ABI-CONTRACT.md}). Everything here is hardware free: no player
- * is started and no audio device is opened. The class is skipped when {@code jfxmedia} cannot be
+ * (see {@code modules/javafx.media/FFM-ABI-CONTRACT.md}). All but one of them are hardware free: no
+ * audio device is opened, and the pipeline {@link #mediaOverATinyWavFileDisposesWithoutLeaks} builds is
+ * only created and linked, never started. The exception is
+ * {@link #playerOverATinyWavFileDisposesWithoutLeaks}: {@code jfxm_player_init} takes the pipeline to
+ * {@code PAUSED}, which does open the platform's audio sink, so that one test - and only that one - is
+ * skipped where no audio output exists. The class as a whole is skipped when {@code jfxmedia} cannot be
  * loaded, so a build without the media natives stays green.
  * <p>
  * The tests are ordered because two of them depend on being the first caller of
@@ -90,6 +100,24 @@ public class JfxMediaNativeTest {
 
     private static final int ERROR_NONE = MediaError.ERROR_NONE.code();
     private static final int ERROR_MEDIA_NULL = MediaError.ERROR_MEDIA_NULL.code();
+
+    /**
+     * How long a failed player creation gets to explain itself. The GStreamer error that explains it is
+     * posted on the pipeline's bus and logged from the bus thread, so it can arrive just after
+     * {@code createMediaPlayer} has returned null.
+     */
+    private static final long LOG_GRACE_MILLIS = 5_000L;
+
+    /**
+     * What a captured media log looks like when the platform could not open its audio output. GStreamer
+     * reports that as an ERROR message carrying the sink's own text, followed by a DEBUG message naming
+     * the element that failed, so both the wording and the element name are worth looking for: the
+     * wording differs per platform (ALSA says "Could not open audio device for playback",
+     * {@code directsoundsink} reports whatever {@code DirectSoundCreate} returned) while the element
+     * name is always in the debug line.
+     */
+    private static final List<String> NO_AUDIO_OUTPUT_MARKERS =
+            List.of("audiosink", "alsasink", "directsoundsink", "could not open audio device");
 
     @BeforeAll
     static void loadLibrary() {
@@ -378,60 +406,236 @@ public class JfxMediaNativeTest {
     }
 
     /**
-     * The end-to-end path that needs no audio hardware: a 64 byte WAV file whose data chunk is 2.5 ms
-     * of silence goes through {@code Locator} -> {@code GSTMedia} -> {@code jfxm_media_create}, which
-     * drives the {@code JfxmStreamCallbacks} upcalls into the connection holder, then through
+     * The half of the end-to-end path that genuinely needs no audio hardware, and therefore runs
+     * everywhere: a 64 byte WAV file whose data chunk is 2.5 ms of silence goes through
+     * {@code Locator} -> {@code GSTMedia} -> {@code jfxm_media_create}, which builds and links the
+     * pipeline's elements and drives the {@code JfxmStreamCallbacks} upcalls into the connection
+     * holder, and is then disposed. {@code jfxm_media_create} never changes the pipeline's state, so
+     * no sink is opened and nothing here can be skipped: this is what keeps the registry, the shared
+     * arena and the stream callbacks covered on a machine with no audio output, where
+     * {@link #playerOverATinyWavFileDisposesWithoutLeaks} cannot run.
+     * <p>
+     * The registry has to be back where it started afterwards, which is what proves the callbacks'
+     * arena and its registry ids were released in the right order.
+     */
+    @Test
+    @Order(9)
+    void mediaOverATinyWavFileDisposesWithoutLeaks() throws IOException {
+        Path file = tinyWavFile();
+        try {
+            Locator locator = tinyWavLocator(file);
+            int baseline = JfxMediaNative.registrySize();
+
+            Media created = GSTPlatform.getPlatformInstance().createMedia(locator);
+            assertNotNull(created, "GSTPlatform.createMedia returned null");
+            NativeMedia media = assertInstanceOf(NativeMedia.class, created);
+            try {
+                assertSame(locator, media.getLocator());
+                assertTrue(JfxMediaNative.registrySize() > baseline,
+                        "the connection holder must be registered while the media lives");
+            } finally {
+                media.dispose();
+            }
+            assertEquals(baseline, JfxMediaNative.registrySize(), "dispose left a registry entry behind");
+        } finally {
+            deleteWhenPossible(file);
+        }
+    }
+
+    /**
+     * The rest of that path, the half that does need an audio device: the same media goes on through
      * {@code GSTMediaPlayer} -> {@code jfxm_player_init}, which installs the 13 player stubs and the
-     * spectrum band memory, and is finally disposed. Nothing is ever played. The registry has to be
-     * back where it started afterwards, which is what proves the arenas and the ids were released in
-     * the right order.
+     * spectrum band memory and takes the pipeline to {@code PAUSED}, and is finally disposed. Nothing
+     * is ever played, but {@code PAUSED} already opens the audio sink, and
+     * {@code CGstPipelineFactory::CreateAudioSinkElement} hardcodes {@code directsoundsink},
+     * {@code osxaudiosink} or {@code alsasink} with no null sink to fall back to. On a machine with no
+     * audio output the state change therefore fails, {@code GSTMediaPlayer}'s constructor throws
+     * {@code MediaException}, and {@code GSTPlatform.createMediaPlayer} swallows it, logs it at DEBUG
+     * and returns null - pre-existing upstream behaviour that this test is not the place to change.
+     * <p>
+     * That null is the one this test tolerates, and only with the evidence for it: the media log is
+     * captured around the call, a null player is a skip when the log shows the platform could not open
+     * its audio output and a failure when it does not, and the whole captured log goes into either
+     * message so that neither outcome is a mystery. What still covers this path when it is skipped is
+     * {@link #mediaOverATinyWavFileDisposesWithoutLeaks}, which exercises the same registry, arena and
+     * stream-callback lifecycle without a sink, plus the Linux and macOS CI jobs, where a sink does open
+     * (the Linux workflow installs a null ALSA device for exactly that reason).
+     * <p>
+     * The registry has to be back where it started afterwards, which is what proves the arenas and the
+     * ids were released in the right order.
      */
     @Test
     @Order(10)
-    void playerOverATinyWavFileDisposesWithoutLeaks(@TempDir Path dir) throws IOException {
-        Path file = TinyWav.writeTo(dir.resolve("silence.wav"));
-        assertEquals(TinyWav.SIZE, Files.size(file));
+    void playerOverATinyWavFileDisposesWithoutLeaks() throws IOException {
+        Path file = tinyWavFile();
+        try {
+            Locator locator = tinyWavLocator(file);
+            int baseline = JfxMediaNative.registrySize();
 
-        int baseline = JfxMediaNative.registrySize();
+            PlayerAttempt attempt = createPlayer(locator);
+            if (attempt.player() == null) {
+                reportNoPlayer(attempt.log());      // never returns: aborts or fails
+            }
+            MediaPlayer player = attempt.player();
+            try {
+                assertTrue(JfxMediaNative.registrySize() > baseline,
+                        "the connection holder and the player must be registered while the player lives");
+
+                // Downcalls through the pipeline the player just built.
+                assertEquals(0.0025, player.getDuration(), 1.0e-6, "20 bytes of 8 bit mono at 8 kHz");
+                assertNotNull(player.getState());
+
+                AudioEqualizer equalizer = player.getEqualizer();
+                assertNotNull(equalizer);
+                assertFalse(equalizer.getEnabled(), "the equalizer is off until it is asked for");
+
+                // The band arrays live in an arena of their own and are filled by C; before any audio
+                // has been processed they still hold the value NativeAudioSpectrum seeded them with.
+                AudioSpectrum spectrum = player.getAudioSpectrum();
+                assertNotNull(spectrum);
+                assertEquals(128, spectrum.getBandCount());
+                float[] magnitudes = spectrum.getMagnitudes(null);
+                assertEquals(128, magnitudes.length);
+                assertEquals(-60.0f, magnitudes[0]);
+                assertEquals(128, spectrum.getPhases(null).length);
+                spectrum.setBandCount(64);
+                assertEquals(64, spectrum.getBandCount());
+                assertEquals(64, spectrum.getMagnitudes(null).length);
+            } finally {
+                player.dispose();
+            }
+            assertEquals(baseline, JfxMediaNative.registrySize(), "dispose left a registry entry behind");
+        } finally {
+            deleteWhenPossible(file);
+        }
+    }
+
+    /** What {@link #createPlayer} saw: the player, {@code null} when none was built, and the log. */
+    private record PlayerAttempt(MediaPlayer player, String log) {
+    }
+
+    /**
+     * Creates the player with the media log turned up to DEBUG and captured, so that a null player can
+     * be told apart from a broken one.
+     * <p>
+     * Both streams are captured because {@link Logger} splits them: ERROR and WARNING go to
+     * {@code System.err} and INFO and DEBUG to {@code System.out}, and the explanation for a failed
+     * player arrives one part on each - the sink's own error message on {@code System.err}, and on
+     * {@code System.out} the GStreamer debug line naming the element that failed together with
+     * {@code GSTPlatform}'s note that it caught the exception.
+     * <p>
+     * The native level is set through the facade rather than through {@code Logger.setLevel}, which only
+     * reaches C once {@code Logger.initNative()} has run: these tests drive the facade directly and
+     * never build a {@code NativeMediaManager}. Both levels and both streams are restored afterwards.
+     */
+    private static PlayerAttempt createPlayer(Locator locator) {
+        ByteArrayOutputStream captured = new ByteArrayOutputStream();
+        PrintStream out = System.out;
+        PrintStream err = System.err;
+        int level = loggerLevel();
+        System.setOut(new PrintStream(captured, true, StandardCharsets.UTF_8));
+        System.setErr(new PrintStream(captured, true, StandardCharsets.UTF_8));
+        Logger.setLevel(Logger.DEBUG);
+        JfxMediaNative.logSetLevel(Logger.DEBUG);
+        try {
+            MediaPlayer player = GSTPlatform.getPlatformInstance().createMediaPlayer(locator);
+            if (player == null) {
+                awaitNativeError(captured);
+            }
+            return new PlayerAttempt(player, captured.toString(StandardCharsets.UTF_8));
+        } finally {
+            JfxMediaNative.logSetLevel(Logger.OFF);
+            Logger.setLevel(level);
+            System.setErr(err);
+            System.setOut(out);
+        }
+    }
+
+    /**
+     * Waits, for at most {@link #LOG_GRACE_MILLIS}, for the bus thread to log the error that explains a
+     * null player. Returning early when it never comes is fine: the caller reports the log it has, and
+     * an unexplained null player is a failure.
+     */
+    private static void awaitNativeError(ByteArrayOutputStream captured) {
+        long deadline = System.currentTimeMillis() + LOG_GRACE_MILLIS;
+        while (System.currentTimeMillis() < deadline) {
+            if (reportsNoAudioOutput(captured.toString(StandardCharsets.UTF_8))) {
+                return;
+            }
+            try {
+                Thread.sleep(50L);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                return;
+            }
+        }
+    }
+
+    /**
+     * Never returns: aborts the test when the captured log shows the platform could not open its audio
+     * output, and fails it otherwise. Both carry the whole log, because a skip that cannot be explained
+     * is as bad as a failure that cannot be.
+     */
+    private static void reportNoPlayer(String log) {
+        String detail = "GSTPlatform.createMediaPlayer returned null; the captured media log was:\n" + log;
+        if (reportsNoAudioOutput(log)) {
+            abort("this machine has no audio output, so GStreamer could not build a playback pipeline; "
+                    + "jfxm_media_create is still covered by mediaOverATinyWavFileDisposesWithoutLeaks. "
+                    + detail);
+        }
+        fail(detail);
+    }
+
+    /**
+     * Whether the captured log says the platform could not open its audio output, which is the one
+     * reason for a null player that is not a regression. Both halves have to be there: the swallowed
+     * exception, so that this cannot match a log left over from something else, and one of the
+     * {@link #NO_AUDIO_OUTPUT_MARKERS}, so that a null player for any other reason - a failing
+     * {@code jfxm_media_create} above all, which reports a {@link MediaError} and no sink - is not
+     * quietly skipped.
+     */
+    private static boolean reportsNoAudioOutput(String log) {
+        String lower = log.toLowerCase(Locale.ROOT);
+        if (!lower.contains("caught exception while creating media player")) {
+            return false;
+        }
+        return NO_AUDIO_OUTPUT_MARKERS.stream().anyMatch(lower::contains);
+    }
+
+    /**
+     * The tiny WAV file, in the system temp directory rather than in a {@code @TempDir}: a pipeline that
+     * never left {@code GST_STATE_NULL} - the media of the hardware-free test, and a player whose
+     * {@code jfxm_player_init} failed - never makes the {@code READY -> NULL} transition on which
+     * {@code javasource} emits {@code close-connection}, so its connection holder keeps the file open
+     * until it is collected. Windows will not delete an open file, and a {@code @TempDir} that cannot be
+     * cleaned up fails the test it belongs to, which would turn "no audio device" back into a failure.
+     */
+    private static Path tinyWavFile() throws IOException {
+        Path file = TinyWav.writeTo(Files.createTempFile("jfx-media-silence", ".wav"));
+        file.toFile().deleteOnExit();
+        assertEquals(TinyWav.SIZE, Files.size(file));
+        return file;
+    }
+
+    /** Deletes the file when the platform allows it; {@code deleteOnExit} is the fallback. */
+    private static void deleteWhenPossible(Path file) {
+        try {
+            Files.deleteIfExists(file);
+        } catch (IOException e) {
+            // A connection holder the pipeline never closed still has it open; it goes at exit.
+        }
+    }
+
+    /** {@code file} as an initialised {@link Locator}; the platform has to recognise it as WAV. */
+    private static Locator tinyWavLocator(Path file) {
         Locator locator;
         try {
             locator = new Locator(file.toUri());
             locator.init();
         } catch (Exception e) {
-            assumeTrue(false, "the platform cannot play audio/x-wav here: " + e);
-            return;
+            return abort("the platform cannot play audio/x-wav here: " + e);
         }
         assertEquals("audio/x-wav", locator.getContentType());
-
-        MediaPlayer player = GSTPlatform.getPlatformInstance().createMediaPlayer(locator);
-        assertNotNull(player, "GSTPlatform.createMediaPlayer returned null");
-        try {
-            assertTrue(JfxMediaNative.registrySize() > baseline,
-                    "the connection holder and the player must be registered while the player lives");
-
-            // Downcalls through the pipeline the player just built.
-            assertEquals(0.0025, player.getDuration(), 1.0e-6, "20 bytes of 8 bit mono at 8 kHz");
-            assertNotNull(player.getState());
-
-            AudioEqualizer equalizer = player.getEqualizer();
-            assertNotNull(equalizer);
-            assertFalse(equalizer.getEnabled(), "the equalizer is off until it is asked for");
-
-            // The band arrays live in an arena of their own and are filled by C; before any audio has
-            // been processed they still hold the value NativeAudioSpectrum seeded them with.
-            AudioSpectrum spectrum = player.getAudioSpectrum();
-            assertNotNull(spectrum);
-            assertEquals(128, spectrum.getBandCount());
-            float[] magnitudes = spectrum.getMagnitudes(null);
-            assertEquals(128, magnitudes.length);
-            assertEquals(-60.0f, magnitudes[0]);
-            assertEquals(128, spectrum.getPhases(null).length);
-            spectrum.setBandCount(64);
-            assertEquals(64, spectrum.getBandCount());
-            assertEquals(64, spectrum.getMagnitudes(null).length);
-        } finally {
-            player.dispose();
-        }
-        assertEquals(baseline, JfxMediaNative.registrySize(), "dispose left a registry entry behind");
+        return locator;
     }
 }

@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2021, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2021, 2026, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -62,10 +62,18 @@ private:
   IFACEMETHODIMP OnDefaultDeviceChanged(EDataFlow flow, ERole role, LPCWSTR pwstrDefaultDeviceId);
   IFACEMETHODIMP OnPropertyValueChanged(LPCWSTR pwstrDeviceId, const PROPERTYKEY key) { return S_OK; }
 
+  // Releases the CoInitialize() reference taken by Init(), if this thread owns it.
+  void ReleaseApartment();
+
   long m_cRef;
   IMMDeviceEnumerator* m_pEnumerator;
   GSTDSNotfierCallback m_pCallback;
   void *m_pData;
+  // The CoInitialize() reference owned by this object. It has to outlive m_pEnumerator:
+  // CoUninitialize() may unload MMDevAPI.dll and leave the enumerator's vtable unmapped.
+  bool m_bCoUninitialize;
+  // CoUninitialize() only balances a CoInitialize() made on the same thread.
+  DWORD m_dwApartmentThreadId;
 
   // IUnknown
   IFACEMETHODIMP QueryInterface(const IID& iid, void** ppUnk);

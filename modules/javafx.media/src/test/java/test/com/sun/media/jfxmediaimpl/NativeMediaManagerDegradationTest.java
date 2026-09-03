@@ -133,6 +133,15 @@ public class NativeMediaManagerDegradationTest {
      * class path, where the module is unnamed: that is how the child says "javafx.media has native
      * access", the same grant this build makes with {@code --enable-native-access=javafx.media}, and not
      * a widening of it. Nothing in the test code itself calls a restricted method.
+     * <p>
+     * Its output goes to a file and the timed {@link Process#waitFor(long, TimeUnit)} happens before
+     * that file is read. Reading the child's pipe instead would block until the child closed its end,
+     * which a hung child never does, so {@link #TIMEOUT_SECONDS} would never be reached and this
+     * regression probe would hang the run rather than fail it; a file also cannot fill up and block the
+     * child mid-write, and it keeps whatever the child had printed when it had to be killed, so a
+     * timeout is still diagnosable. The file is a sibling of {@code libraries}, never inside it: that
+     * directory is the child's whole {@code java.library.path} and has to stay exactly as the caller
+     * set it up.
      */
     private static String runProbe(Path libraries) throws IOException, InterruptedException {
         List<String> command = new ArrayList<>();
@@ -144,13 +153,21 @@ public class NativeMediaManagerDegradationTest {
         command.add("--enable-native-access=ALL-UNNAMED");
         command.add(MediaWithoutNativesProbe.class.getName());
 
-        Process child = new ProcessBuilder(command).redirectErrorStream(true).start();
-        String output;
-        try (var stream = child.getInputStream()) {
-            output = new String(stream.readAllBytes(), StandardCharsets.UTF_8);
+        Path log = libraries.resolveSibling(libraries.getFileName() + "-output.txt");
+        Process child = new ProcessBuilder(command)
+                .redirectErrorStream(true)
+                .redirectOutput(log.toFile())
+                .start();
+        boolean finished = child.waitFor(TIMEOUT_SECONDS, TimeUnit.SECONDS);
+        if (!finished) {
+            child.destroyForcibly().waitFor(TIMEOUT_SECONDS, TimeUnit.SECONDS);
         }
-        assertTrue(child.waitFor(TIMEOUT_SECONDS, TimeUnit.SECONDS),
-                () -> "the child JVM did not finish:\n" + command);
+
+        // Not Files.readString: a child killed mid-write can leave a truncated multi-byte sequence,
+        // which readString rejects and this constructor replaces - the output is a failure message here,
+        // never data, so a replacement character is always better than losing it.
+        String output = new String(Files.readAllBytes(log), StandardCharsets.UTF_8);
+        assertTrue(finished, () -> "the child JVM did not finish:\n" + command + "\n" + output);
         assertEquals(0, child.exitValue(), () -> "the child JVM failed:\n" + output);
         return output;
     }
