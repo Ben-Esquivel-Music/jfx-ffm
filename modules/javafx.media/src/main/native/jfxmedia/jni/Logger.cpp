@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2010, 2023, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2010, 2026, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -24,7 +24,6 @@
  */
 
 #include "Logger.h"
-#include "JniUtils.h"
 
 #include <Common/VSMemory.h>
 
@@ -46,113 +45,60 @@ bool CLogger::canLog(int level)
 
 void CLogger::logMsg(int level, const char *msg)
 {
-    CJavaEnvironment javaEnv(m_jvm);
-    JNIEnv *env = javaEnv.getEnvironment(); // env could be NULL
-
-    if (!env || level < m_currentLevel || !m_areJMethodIDsInitialized) {
+    if (level < m_currentLevel) {
         return;
     }
 
-    jstring jmsg = env->NewStringUTF(msg);
-    if (javaEnv.clearException() && jmsg != NULL) {
-        return;
+    // The sink installed by jfxm_log_init; without one there is nowhere to log to.
+    if (NULL != m_sinkFn) {
+        if (NULL != msg) {
+            m_sinkFn(m_sinkUser, (int32_t)level, msg);
+        }
     }
-
-    env->CallStaticVoidMethod(m_cls, m_logMsg1Method, (jint)level, jmsg);
-    env->DeleteLocalRef(jmsg);
-    javaEnv.clearException();
 }
 
 void CLogger::logMsg(int level, const char *sourceClass, const char *sourceMethod, const char *msg)
 {
-    CJavaEnvironment javaEnv(m_jvm);
-    JNIEnv *env = javaEnv.getEnvironment();
-
-    if (!env || level < m_currentLevel || !m_areJMethodIDsInitialized) {
+    if (level < m_currentLevel) {
         return;
     }
 
-    jstring jsourceClass = NULL;
-    jstring jsourceMethod = NULL;
-    jstring jmsg = NULL;
-    jsourceClass = env->NewStringUTF(sourceClass);
-    bool hasException = (javaEnv.clearException() || (jsourceClass == NULL));
-    if (!hasException) {
-        jsourceMethod = env->NewStringUTF(sourceMethod);
-        hasException = (javaEnv.clearException() || (jsourceMethod == NULL));
-    }
-
-    if (!hasException) {
-        jmsg = env->NewStringUTF(msg);
-        hasException = (javaEnv.clearException() || (jmsg == NULL));
-    }
-
-    if (!hasException) {
-        env->CallStaticVoidMethod(m_cls, m_logMsg2Method, (jint)level, jsourceClass, jsourceMethod, jmsg);
-        javaEnv.clearException();
-    }
-
-    if (jsourceClass) {
-        env->DeleteLocalRef(jsourceClass);
-    }
-
-    if (jsourceMethod) {
-        env->DeleteLocalRef(jsourceMethod);
-    }
-
-    if (jmsg) {
-        env->DeleteLocalRef(jmsg);
-    }
-}
-
-// Do NOT use this function. Instead use init() from Java layer.
-bool CLogger::init(JNIEnv *pEnv, jclass cls)
-{
-    if (!pEnv || !cls) {
-        return false;
-    }
-
-    CJavaEnvironment javaEnv(pEnv);
-
-    pEnv->GetJavaVM(&m_jvm);
-    if (javaEnv.clearException()) {
-        return false;
-    }
-
-    if (!m_areJMethodIDsInitialized) {
-        jclass local_cls = pEnv->FindClass("com/sun/media/jfxmedia/logging/Logger");
-        if (javaEnv.clearException() || NULL == local_cls) {
-            return false;
+    // The sink has a single message slot, so fold the source into the text. No caller uses this
+    // overload today.
+    if (NULL != m_sinkFn) {
+        string formatted;
+        if (NULL != sourceClass) {
+            formatted += sourceClass;
         }
-
-        // Get global reference
-        m_cls = (jclass)pEnv->NewWeakGlobalRef(local_cls);
-        pEnv->DeleteLocalRef(local_cls);
-
-        if (NULL != m_cls) {
-            m_logMsg1Method = pEnv->GetStaticMethodID(m_cls, "logMsg", "(ILjava/lang/String;)V");
-            if (javaEnv.clearException()) {
-                return false;
-            }
-
-            m_logMsg2Method = pEnv->GetStaticMethodID(m_cls, "logMsg", "(ILjava/lang/String;Ljava/lang/String;Ljava/lang/String;)V");
-            if (javaEnv.clearException()) {
-                return false;
-            }
-
-            if (NULL != m_logMsg1Method && NULL != m_logMsg2Method) {
-                m_areJMethodIDsInitialized = true;
-            }
+        if (NULL != sourceMethod) {
+            formatted += ".";
+            formatted += sourceMethod;
         }
+        if (NULL != msg) {
+            formatted += ": ";
+            formatted += msg;
+        }
+        m_sinkFn(m_sinkUser, (int32_t)level, formatted.c_str());
     }
-
-    return m_areJMethodIDsInitialized;
 }
 
 // Do NOT use this function. Instead use setLevel() from Java layer.
 void CLogger::setLevel(int level)
 {
     m_currentLevel = level;
+}
+
+bool CLogger::initSink(JfxmLogFn fn, void* user)
+{
+    CLogger *pLogger = NULL;
+    s_Singleton.GetInstance(&pLogger);
+    if (NULL == pLogger) {
+        return false;
+    }
+
+    pLogger->m_sinkFn = fn;
+    pLogger->m_sinkUser = user;
+    return true;
 }
 
 uint32_t CLogger::CreateInstance(CLogger **ppLogger)

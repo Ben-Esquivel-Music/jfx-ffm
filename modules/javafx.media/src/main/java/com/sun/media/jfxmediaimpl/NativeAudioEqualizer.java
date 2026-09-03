@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2010, 2014, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2010, 2026, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -56,34 +56,29 @@ final class NativeAudioEqualizer implements AudioEqualizer {
 
     @Override
     public boolean getEnabled() {
-        return nativeGetEnabled(nativeRef);
+        return JfxMediaNative.eqGetEnabled(nativeRef);
     }
 
     @Override
     public void setEnabled(boolean enable) {
-        nativeSetEnabled(nativeRef, enable);
+        JfxMediaNative.eqSetEnabled(nativeRef, enable);
     }
 
     @Override
     public EqualizerBand addBand(double centerFrequency, double bandwidth, double gain) {
-        return (nativeGetNumBands(nativeRef) >= MAX_NUM_BANDS &&
-                gain >= EqualizerBand.MIN_GAIN && gain <= EqualizerBand.MAX_GAIN) ?
-                null : nativeAddBand(nativeRef, centerFrequency, bandwidth, gain);
+        if (JfxMediaNative.eqGetNumBands(nativeRef) >= MAX_NUM_BANDS &&
+                gain >= EqualizerBand.MIN_GAIN && gain <= EqualizerBand.MAX_GAIN) {
+            return null;
+        }
+
+        // jfxm_eq_add_band returns the CEqualizerBand handle; the JNI code constructed the peer
+        // with NewObject and returned null when AddBand did (contract section 11).
+        long bandRef = JfxMediaNative.eqAddBand(nativeRef, centerFrequency, bandwidth, gain);
+        return (bandRef != 0) ? new NativeEqualizerBand(bandRef) : null;
     }
 
     @Override
     public boolean removeBand(double centerFrequency) {
-        return (centerFrequency > 0) ? nativeRemoveBand(nativeRef, centerFrequency) : false;
+        return (centerFrequency > 0) ? JfxMediaNative.eqRemoveBand(nativeRef, centerFrequency) : false;
     }
-
-    //**************************************************************************
-    //***** JNI methods
-    //**************************************************************************
-    private native boolean nativeGetEnabled(long nativeRef);
-    private native void nativeSetEnabled(long nativeRef, boolean enable);
-    private native int nativeGetNumBands(long nativeRef);
-    private native EqualizerBand nativeAddBand(long nativeRef,
-                                               double centerFrequency, double bandwidth,
-                                               double gain);
-    private native boolean nativeRemoveBand(long nativeRef, double centerFrequency);
 }

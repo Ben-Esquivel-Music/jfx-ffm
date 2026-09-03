@@ -75,7 +75,7 @@ jobs:
           set -x
           sudo apt-get update
           sudo apt-get -y install libgl1-mesa-dev libx11-dev libxxf86vm-dev libxt-dev \
-            pkg-config libgtk-3-dev libxtst-dev libfreetype-dev libpango1.0-dev
+            pkg-config libgtk-3-dev libxtst-dev libfreetype-dev libpango1.0-dev libasound2-dev
 
       - name: Download boot JDK
         run: |
@@ -127,7 +127,7 @@ jobs:
           set -x
           sudo apt-get update
           sudo apt-get -y install libgl1-mesa-dev libx11-dev libxxf86vm-dev libxt-dev \
-            pkg-config libgtk-3-dev libxtst-dev libfreetype-dev libpango1.0-dev
+            pkg-config libgtk-3-dev libxtst-dev libfreetype-dev libpango1.0-dev libasound2-dev
 
       - name: Download boot JDK
         run: |

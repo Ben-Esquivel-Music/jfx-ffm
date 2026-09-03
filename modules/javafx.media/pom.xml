@@ -37,11 +37,12 @@
     <name>javafx-media</name>
     <description>JavaFX media module (javafx.media)</description>
 
-    <!-- The native media stack (jfxmedia, gstreamer-lite, fxplugins, glib-lite) is
-         only built with COMPILE_MEDIA=true in the Gradle build and requires a
-         make-based toolchain. It is not ported to Maven; prebuilt media libraries
-         from an OpenJFX SDK can be used at runtime instead. The headergen tool
-         (src/tools/java) is likewise only needed for that native build. -->
+    <!-- The native media stack (jfxmedia, gstreamer-lite, fxplugins, glib-lite, and
+         on macOS jfxmedia_avf) is built by the native/CMakeLists.txt project in the
+         native-win / native-linux / native-mac profiles below, exactly like the
+         javafx.graphics natives. Pass -DskipNative=true to compile Java only and use
+         prebuilt media libraries from an OpenJFX SDK at runtime instead. The headergen
+         tool (src/tools/java) generates jfxmedia_errors.h for that native build. -->
 
     <dependencies>
         <dependency>
@@ -54,6 +55,16 @@
             <artifactId>javafx-graphics</artifactId>
             <version>${project.version}</version>
         </dependency>
+        <dependency>
+            <groupId>org.junit.jupiter</groupId>
+            <artifactId>junit-jupiter</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.junit.platform</groupId>
+            <artifactId>junit-platform-launcher</artifactId>
+            <scope>test</scope>
+        </dependency>
     </dependencies>
 
     <build>
@@ -65,10 +76,27 @@
                     <compilerArgs combine.children="append">
                         <arg>--module-version</arg>
                         <arg>${jfx.release.version.short}</arg>
-                        <!-- JNI headers for the native media build -->
-                        <arg>-h</arg>
-                        <arg>${project.build.directory}/gensrc/headers</arg>
                     </compilerArgs>
+                </configuration>
+            </plugin>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-surefire-plugin</artifactId>
+                <configuration>
+                    <!-- The module runs as a module (its classes and the base/graphics shims on
+                         the upgrade module path) while the tests run on the classpath, so the
+                         internals they touch are opened by src/test/addExports. The freshly built
+                         media natives come first on java.library.path, ahead of the prebuilt
+                         caches in ${jfx.native.librarypath}. -->
+                    <argLine>
+                        --upgrade-module-path "${jfx.shims.base}${path.separator}${jfx.shims.graphics}${path.separator}${jfx.classes.media}"
+                        --add-modules javafx.base,javafx.graphics,javafx.media
+                        @${project.basedir}/src/test/addExports
+                        @${jfx.root}/buildtools/addExports
+                        --enable-native-access=javafx.graphics,javafx.media
+                        "-Djava.library.path=${project.build.directory}/native/bin${path.separator}${jfx.native.librarypath}"
+                        ${jfx.headless.args}
+                    </argLine>
                 </configuration>
             </plugin>
         </plugins>
@@ -76,9 +104,10 @@
 
     <profiles>
         <!-- Platform-specific module jar contents, mirroring the Gradle
-             buildModuleClasses excludes for each platform: the iOS platform
-             classes are never shipped on a desktop build, and the OS X platform
-             classes only on macOS. -->
+             buildModuleClasses excludes for each platform: the OS X platform classes
+             are shipped on macOS only. The iOS platform is gone (this fork never built
+             it - FFM-ABI-CONTRACT.md section 12), so there is nothing left to exclude
+             on macOS. -->
         <profile>
             <id>jar-excludes-win</id>
             <activation>
@@ -94,7 +123,6 @@
                         <configuration>
                             <excludes>
                                 <exclude>com/sun/media/jfxmediaimpl/platform/osx/**</exclude>
-                                <exclude>com/sun/media/jfxmediaimpl/platform/ios/**</exclude>
                             </excludes>
                         </configuration>
                     </plugin>
@@ -116,30 +144,290 @@
                         <configuration>
                             <excludes>
                                 <exclude>com/sun/media/jfxmediaimpl/platform/osx/**</exclude>
-                                <exclude>com/sun/media/jfxmediaimpl/platform/ios/**</exclude>
                             </excludes>
                         </configuration>
                     </plugin>
                 </plugins>
             </build>
         </profile>
+        <!-- Native Windows media libraries via CMake + Visual Studio. Skip with -DskipNative=true -->
         <profile>
-            <id>jar-excludes-mac</id>
+            <id>native-win</id>
             <activation>
                 <os>
-                    <name>mac os x</name>
+                    <family>windows</family>
                 </os>
+                <property>
+                    <name>skipNative</name>
+                    <value>!true</value>
+                </property>
             </activation>
             <build>
                 <plugins>
                     <plugin>
                         <groupId>org.apache.maven.plugins</groupId>
-                        <artifactId>maven-jar-plugin</artifactId>
-                        <configuration>
-                            <excludes>
-                                <exclude>com/sun/media/jfxmediaimpl/platform/ios/**</exclude>
-                            </excludes>
-                        </configuration>
+                        <artifactId>maven-antrun-plugin</artifactId>
+                        <executions>
+                            <execution>
+                                <!-- jfxmedia_errors.h, generated from MediaError.java by the
+                                     in-tree headergen tool so that the C error codes and the
+                                     Java enum cannot drift. Runs before CMake configures. -->
+                                <id>media-errors-header</id>
+                                <phase>process-classes</phase>
+                                <goals>
+                                    <goal>run</goal>
+                                </goals>
+                                <configuration>
+                                    <target>
+                                        <mkdir dir="${project.build.directory}/gensrc/headers"/>
+                                        <exec executable="${java.home}/bin/java" failonerror="true">
+                                            <arg value="--module-path"/>
+                                            <arg value="${jfx.root}/modules/javafx.base/target/classes${path.separator}${jfx.root}/modules/javafx.graphics/target/classes${path.separator}${project.build.outputDirectory}"/>
+                                            <arg value="--add-modules"/>
+                                            <arg value="javafx.media"/>
+                                            <arg value="--add-exports"/>
+                                            <arg value="javafx.media/com.sun.media.jfxmedia=ALL-UNNAMED"/>
+                                            <arg value="${project.basedir}/src/tools/java/headergen/HeaderGen.java"/>
+                                            <arg value="${project.build.directory}/gensrc/headers/jfxmedia_errors.h"/>
+                                            <arg value="${project.basedir}/src/main/java"/>
+                                        </exec>
+                                    </target>
+                                </configuration>
+                            </execution>
+                        </executions>
+                    </plugin>
+                    <plugin>
+                        <groupId>org.codehaus.mojo</groupId>
+                        <artifactId>exec-maven-plugin</artifactId>
+                        <executions>
+                            <execution>
+                                <id>cmake-configure</id>
+                                <phase>process-classes</phase>
+                                <goals>
+                                    <goal>exec</goal>
+                                </goals>
+                                <configuration>
+                                    <executable>cmake</executable>
+                                    <arguments>
+                                        <argument>-S</argument>
+                                        <argument>${project.basedir}/native</argument>
+                                        <argument>-B</argument>
+                                        <argument>${project.build.directory}/native/cmake</argument>
+                                        <argument>-A</argument>
+                                        <argument>x64</argument>
+                                        <argument>-DGENSRC_DIR=${project.build.directory}/gensrc</argument>
+                                        <argument>-DHEADERS_DIR=${project.build.directory}/gensrc/headers</argument>
+                                        <argument>-DBIN_DIR=${project.build.directory}/native/bin</argument>
+                                        <argument>-DJFX_VER=${jfx.release.version}</argument>
+                                        <argument>-DJFX_FVER=${jfx.release.major.version},${jfx.release.minor.version},${jfx.release.security.version},${jfx.release.patch.version}</argument>
+                                        <argument>-DJFX_BUILD_ID=${jfx.release.version.long}</argument>
+                                    </arguments>
+                                </configuration>
+                            </execution>
+                            <execution>
+                                <id>cmake-build</id>
+                                <phase>process-classes</phase>
+                                <goals>
+                                    <goal>exec</goal>
+                                </goals>
+                                <configuration>
+                                    <executable>cmake</executable>
+                                    <arguments>
+                                        <argument>--build</argument>
+                                        <argument>${project.build.directory}/native/cmake</argument>
+                                        <argument>--config</argument>
+                                        <argument>${CONF}</argument>
+                                        <argument>--parallel</argument>
+                                    </arguments>
+                                </configuration>
+                            </execution>
+                        </executions>
+                    </plugin>
+                </plugins>
+            </build>
+        </profile>
+        <!-- Native Linux media libraries via CMake + make/gcc. Skip with -DskipNative=true -->
+        <profile>
+            <id>native-linux</id>
+            <activation>
+                <os>
+                    <name>linux</name>
+                </os>
+                <property>
+                    <name>skipNative</name>
+                    <value>!true</value>
+                </property>
+            </activation>
+            <build>
+                <plugins>
+                    <plugin>
+                        <groupId>org.apache.maven.plugins</groupId>
+                        <artifactId>maven-antrun-plugin</artifactId>
+                        <executions>
+                            <execution>
+                                <!-- jfxmedia_errors.h, generated from MediaError.java by the
+                                     in-tree headergen tool so that the C error codes and the
+                                     Java enum cannot drift. Runs before CMake configures. -->
+                                <id>media-errors-header</id>
+                                <phase>process-classes</phase>
+                                <goals>
+                                    <goal>run</goal>
+                                </goals>
+                                <configuration>
+                                    <target>
+                                        <mkdir dir="${project.build.directory}/gensrc/headers"/>
+                                        <exec executable="${java.home}/bin/java" failonerror="true">
+                                            <arg value="--module-path"/>
+                                            <arg value="${jfx.root}/modules/javafx.base/target/classes${path.separator}${jfx.root}/modules/javafx.graphics/target/classes${path.separator}${project.build.outputDirectory}"/>
+                                            <arg value="--add-modules"/>
+                                            <arg value="javafx.media"/>
+                                            <arg value="--add-exports"/>
+                                            <arg value="javafx.media/com.sun.media.jfxmedia=ALL-UNNAMED"/>
+                                            <arg value="${project.basedir}/src/tools/java/headergen/HeaderGen.java"/>
+                                            <arg value="${project.build.directory}/gensrc/headers/jfxmedia_errors.h"/>
+                                            <arg value="${project.basedir}/src/main/java"/>
+                                        </exec>
+                                    </target>
+                                </configuration>
+                            </execution>
+                        </executions>
+                    </plugin>
+                    <plugin>
+                        <groupId>org.codehaus.mojo</groupId>
+                        <artifactId>exec-maven-plugin</artifactId>
+                        <executions>
+                            <execution>
+                                <id>cmake-configure</id>
+                                <phase>process-classes</phase>
+                                <goals>
+                                    <goal>exec</goal>
+                                </goals>
+                                <configuration>
+                                    <executable>cmake</executable>
+                                    <arguments>
+                                        <argument>-S</argument>
+                                        <argument>${project.basedir}/native</argument>
+                                        <argument>-B</argument>
+                                        <argument>${project.build.directory}/native/cmake</argument>
+                                        <argument>-DCMAKE_BUILD_TYPE=${CONF}</argument>
+                                        <argument>-DGENSRC_DIR=${project.build.directory}/gensrc</argument>
+                                        <argument>-DHEADERS_DIR=${project.build.directory}/gensrc/headers</argument>
+                                        <argument>-DBIN_DIR=${project.build.directory}/native/bin</argument>
+                                        <argument>-DJFX_VER=${jfx.release.version}</argument>
+                                        <argument>-DJFX_FVER=${jfx.release.major.version},${jfx.release.minor.version},${jfx.release.security.version},${jfx.release.patch.version}</argument>
+                                        <argument>-DJFX_BUILD_ID=${jfx.release.version.long}</argument>
+                                    </arguments>
+                                </configuration>
+                            </execution>
+                            <execution>
+                                <id>cmake-build</id>
+                                <phase>process-classes</phase>
+                                <goals>
+                                    <goal>exec</goal>
+                                </goals>
+                                <configuration>
+                                    <executable>cmake</executable>
+                                    <arguments>
+                                        <argument>--build</argument>
+                                        <argument>${project.build.directory}/native/cmake</argument>
+                                        <argument>--parallel</argument>
+                                    </arguments>
+                                </configuration>
+                            </execution>
+                        </executions>
+                    </plugin>
+                </plugins>
+            </build>
+        </profile>
+        <!-- Native macOS media libraries (jfxmedia and jfxmedia_avf) via CMake + clang. Skip with -DskipNative=true -->
+        <profile>
+            <id>native-mac</id>
+            <activation>
+                <os>
+                    <name>mac os x</name>
+                </os>
+                <property>
+                    <name>skipNative</name>
+                    <value>!true</value>
+                </property>
+            </activation>
+            <build>
+                <plugins>
+                    <plugin>
+                        <groupId>org.apache.maven.plugins</groupId>
+                        <artifactId>maven-antrun-plugin</artifactId>
+                        <executions>
+                            <execution>
+                                <!-- jfxmedia_errors.h, generated from MediaError.java by the
+                                     in-tree headergen tool so that the C error codes and the
+                                     Java enum cannot drift. Runs before CMake configures. -->
+                                <id>media-errors-header</id>
+                                <phase>process-classes</phase>
+                                <goals>
+                                    <goal>run</goal>
+                                </goals>
+                                <configuration>
+                                    <target>
+                                        <mkdir dir="${project.build.directory}/gensrc/headers"/>
+                                        <exec executable="${java.home}/bin/java" failonerror="true">
+                                            <arg value="--module-path"/>
+                                            <arg value="${jfx.root}/modules/javafx.base/target/classes${path.separator}${jfx.root}/modules/javafx.graphics/target/classes${path.separator}${project.build.outputDirectory}"/>
+                                            <arg value="--add-modules"/>
+                                            <arg value="javafx.media"/>
+                                            <arg value="--add-exports"/>
+                                            <arg value="javafx.media/com.sun.media.jfxmedia=ALL-UNNAMED"/>
+                                            <arg value="${project.basedir}/src/tools/java/headergen/HeaderGen.java"/>
+                                            <arg value="${project.build.directory}/gensrc/headers/jfxmedia_errors.h"/>
+                                            <arg value="${project.basedir}/src/main/java"/>
+                                        </exec>
+                                    </target>
+                                </configuration>
+                            </execution>
+                        </executions>
+                    </plugin>
+                    <plugin>
+                        <groupId>org.codehaus.mojo</groupId>
+                        <artifactId>exec-maven-plugin</artifactId>
+                        <executions>
+                            <execution>
+                                <id>cmake-configure</id>
+                                <phase>process-classes</phase>
+                                <goals>
+                                    <goal>exec</goal>
+                                </goals>
+                                <configuration>
+                                    <executable>cmake</executable>
+                                    <arguments>
+                                        <argument>-S</argument>
+                                        <argument>${project.basedir}/native</argument>
+                                        <argument>-B</argument>
+                                        <argument>${project.build.directory}/native/cmake</argument>
+                                        <argument>-DCMAKE_BUILD_TYPE=${CONF}</argument>
+                                        <argument>-DGENSRC_DIR=${project.build.directory}/gensrc</argument>
+                                        <argument>-DHEADERS_DIR=${project.build.directory}/gensrc/headers</argument>
+                                        <argument>-DBIN_DIR=${project.build.directory}/native/bin</argument>
+                                        <argument>-DJFX_VER=${jfx.release.version}</argument>
+                                        <argument>-DJFX_FVER=${jfx.release.major.version},${jfx.release.minor.version},${jfx.release.security.version},${jfx.release.patch.version}</argument>
+                                        <argument>-DJFX_BUILD_ID=${jfx.release.version.long}</argument>
+                                    </arguments>
+                                </configuration>
+                            </execution>
+                            <execution>
+                                <id>cmake-build</id>
+                                <phase>process-classes</phase>
+                                <goals>
+                                    <goal>exec</goal>
+                                </goals>
+                                <configuration>
+                                    <executable>cmake</executable>
+                                    <arguments>
+                                        <argument>--build</argument>
+                                        <argument>${project.build.directory}/native/cmake</argument>
+                                        <argument>--parallel</argument>
+                                    </arguments>
+                                </configuration>
+                            </execution>
+                        </executions>
                     </plugin>
                 </plugins>
             </build>

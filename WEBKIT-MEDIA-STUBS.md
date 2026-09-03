@@ -37,6 +37,22 @@ For Media there is no equivalent yet; use one of the options below.
 
 ## Prebuilt libraries
 
+> **The Media libraries are now built from source, and a prebuilt `jfxmedia`
+> from an older OpenJFX SDK no longer works.** On the `ffm/media` branch
+> `javafx.media` calls a plain C ABI (`jfxm_*`) instead of JNI, and
+> `modules/javafx.media/pom.xml` builds `jfxmedia`, `gstreamer-lite`,
+> `glib-lite` and `fxplugins` through CMake like the graphics natives (see
+> `modules/javafx.media/FFM-BUILD-PLAN.md`); `-DskipNative=true` skips that.
+> A JNI-era `jfxmedia` exports `Java_*` entry points but none of the `jfxm_*`
+> symbols, so loading one fails with
+> `UnsatisfiedLinkError: missing native symbol: jfxm_abi_version` and the media
+> stack reports itself unavailable. Delete any stale `jfxmedia*`,
+> `gstreamer-lite*`, `glib-lite*` and `fxplugins*` from `../caches/sdk/{bin,lib}`
+> rather than letting them shadow the freshly built ones — the root pom puts
+> `modules/javafx.media/target/native/bin` first on `java.library.path`, but the
+> cache directories are still on it. This note does not apply to `jfxwebkit`,
+> which is still supplied prebuilt.
+
 You can manually place the WebKit and Media shared libraries (`*.dll`, `*.so`
 or `*.dylib`) in the directory the build already uses as `java.library.path`:
 

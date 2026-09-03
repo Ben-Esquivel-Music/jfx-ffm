@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2010, 2024, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2010, 2026, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -30,7 +30,6 @@
 #include <PipelineManagement/PlayerEventDispatcher.h>
 #include <MediaManagement/Media.h>
 #include <Common/VSMemory.h>
-#include <Utils/LowLevelPerf.h>
 #include <jni/Logger.h>
 #include <fxplugins_common.h>
 
@@ -462,8 +461,6 @@ void CGstAudioPlaybackPipeline::Dispose()
  */
 uint32_t CGstAudioPlaybackPipeline::Play()
 {
-    LOWLEVELPERF_EXECTIMESTART("GST_STATE_PLAYING");
-
     m_StateLock->Enter();
     bool ready = (Finished != m_PlayerState && Error != m_PlayerState && Playing != m_PlayerState);
     if (!ready && Playing == m_PlayerState) // Re-check if we ready with pipeline
@@ -577,8 +574,6 @@ uint32_t CGstAudioPlaybackPipeline::Pause()
 
 uint32_t CGstAudioPlaybackPipeline::InternalPause()
 {
-    LOWLEVELPERF_EXECTIMESTART("GST_STATE_PAUSED");
-
     m_StateLock->Enter();
     bool ready = (((Finished != m_PlayerState || m_bSeekInvoked) || m_PlayerPendingState == Stopped) && Error != m_PlayerState);
     m_bSeekInvoked = false;
@@ -1117,8 +1112,6 @@ gboolean CGstAudioPlaybackPipeline::BusCallback(GstBus* bus, GstMessage* msg, sB
 {
     pBusCallbackContent->m_DisposeLock->Enter();
 
-    LOWLEVELPERF_EXECTIMESTART("BusCallback()");
-
     if (pBusCallbackContent->m_bIsDisposed)
     {
         pBusCallbackContent->m_DisposeLock->Exit();
@@ -1436,8 +1429,6 @@ gboolean CGstAudioPlaybackPipeline::BusCallback(GstBus* bus, GstMessage* msg, sB
             {
                 if (GST_STATE_PAUSED == newState)
                 {
-                    LOWLEVELPERF_EXECTIMESTOP("GST_STATE_PAUSED");
-
 #if ENABLE_PROGRESS_BUFFER
                     // Update buffer position only if progress buffer got EOS.
                     // In some case progress may not be reported yet, because duration was not available yet.
@@ -1566,8 +1557,6 @@ gboolean CGstAudioPlaybackPipeline::BusCallback(GstBus* bus, GstMessage* msg, sB
         default:
             break;
     }
-
-    LOWLEVELPERF_EXECTIMESTOP("BusCallback()");
 
     pBusCallbackContent->m_DisposeLock->Exit();
 

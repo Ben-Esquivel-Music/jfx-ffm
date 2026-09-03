@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2010, 2013, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2010, 2026, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -27,7 +27,6 @@ package com.sun.media.jfxmediaimpl;
 
 import java.net.URI;
 import com.sun.media.jfxmedia.AudioClip;
-import com.sun.media.jfxmedia.logging.Logger;
 import java.net.URISyntaxException;
 import java.io.FileNotFoundException;
 import java.io.IOException;
@@ -37,7 +36,6 @@ import java.io.IOException;
  */
 public class AudioClipProvider {
     private static AudioClipProvider primaDonna;
-    private boolean useNative;
 
     public static synchronized AudioClipProvider getProvider() {
         if (null == primaDonna) {
@@ -47,38 +45,21 @@ public class AudioClipProvider {
     }
 
     private AudioClipProvider() {
-        // Attempt to init the native audio clip stack
-        // if that fails, fall back on the NativeMediaAudioClip impl
-        useNative = false;
-        try {
-            useNative = NativeAudioClip.init();
-        } catch (UnsatisfiedLinkError ule) {
-            Logger.logMsg(Logger.DEBUG, "JavaFX AudioClip native methods not linked, using NativeMedia implementation");
-        } catch (Exception t) {
-            Logger.logMsg(Logger.ERROR, "Exception while loading native AudioClip library: "+t);
-        }
+        // NativeAudioClip was implemented by the iOS platform only, which this fork does not build;
+        // every desktop platform already fell back on NativeMediaAudioClip.
     }
 
     public AudioClip load(URI source) throws URISyntaxException, FileNotFoundException, IOException {
-        if (useNative) {
-            return NativeAudioClip.load(source);
-        }
         return NativeMediaAudioClip.load(source);
     }
 
     public AudioClip create(byte[] data, int dataOffset, int sampleCount, int sampleFormat, int channels, int sampleRate)
             throws IllegalArgumentException
     {
-        if (useNative) {
-            return NativeAudioClip.create(data, dataOffset, sampleCount, sampleFormat, channels, sampleRate);
-        }
         return NativeMediaAudioClip.create(data, dataOffset, sampleCount, sampleFormat, channels, sampleRate);
     }
 
     public void stopAllClips() {
-        if (useNative) {
-            NativeAudioClip.stopAllClips();
-        }
         NativeMediaAudioClip.stopAllClips();
     }
 }

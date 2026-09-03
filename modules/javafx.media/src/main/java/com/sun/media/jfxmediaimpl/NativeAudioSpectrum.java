@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2010, 2022, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2010, 2026, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -26,9 +26,12 @@
 package com.sun.media.jfxmediaimpl;
 
 import com.sun.media.jfxmedia.effects.AudioSpectrum;
+import java.lang.foreign.Arena;
+import java.lang.foreign.MemorySegment;
+import java.util.concurrent.atomic.AtomicReference;
+import static java.lang.foreign.ValueLayout.JAVA_FLOAT;
 
 final class NativeAudioSpectrum implements AudioSpectrum {
-    private static final float[] EMPTY_FLOAT_ARRAY  = new float[0];
     public static final int      DEFAULT_THRESHOLD = -60;
     public static final int      DEFAULT_BANDS = 128;
     public static final double   DEFAULT_INTERVAL = 0.1;
@@ -38,8 +41,28 @@ final class NativeAudioSpectrum implements AudioSpectrum {
      */
     private final long nativeRef;
 
-    private float[] magnitudes = EMPTY_FLOAT_ARRAY;
-    private float[] phases = EMPTY_FLOAT_ARRAY;
+    /**
+     * The pair of band arrays the native spectrum currently fills, replaced as a unit by
+     * {@link #setBandCount(int)}.
+     */
+    private final AtomicReference<Bands> bands = new AtomicReference<>(Bands.NONE);
+
+    /**
+     * One pair of off-heap band arrays, the number of bands they hold and the arena that owns them.
+     * The native bands holder is reference counted and its writer is lock free, so a pair can still
+     * be written to after a newer {@code jfxm_spectrum_set_bands} call has returned; C says when it
+     * is done with a pair by running that call's release action (contract section 11).
+     * <p>
+     * The arena is an {@link Arena#ofAuto() automatic} one on purpose. C may run the release action
+     * on the AVFoundation audio tap thread while it holds the band lock, where closing a shared arena
+     * - a thread handshake - would be exactly the kind of blocking the ABI forbids there. Dropping the
+     * last reference instead is free, and the memory cannot be reclaimed before that moment: until C
+     * releases it, the pair is reachable both from this spectrum and from the facade's registry entry
+     * for the handover.
+     */
+    private record Bands(Arena arena, MemorySegment magnitudes, MemorySegment phases, int count) {
+        static final Bands NONE = new Bands(null, MemorySegment.NULL, MemorySegment.NULL, 0);
+    }
 
     //**************************************************************************
     //***** Constructors
@@ -47,7 +70,7 @@ final class NativeAudioSpectrum implements AudioSpectrum {
 
     /**
      * Constructor.
-     * @param refNativePlayer A reference to the native player.
+     * @param refMedia A reference to the native spectrum.
      */
     NativeAudioSpectrum(long refMedia) {
         if (refMedia == 0) {
@@ -63,33 +86,39 @@ final class NativeAudioSpectrum implements AudioSpectrum {
     //**************************************************************************
     @Override
     public boolean getEnabled() {
-        return nativeGetEnabled(nativeRef);
+        return JfxMediaNative.spectrumGetEnabled(nativeRef);
     }
 
     @Override
     public void setEnabled(boolean enabled) {
-        nativeSetEnabled(nativeRef, enabled);
+        JfxMediaNative.spectrumSetEnabled(nativeRef, enabled);
     }
 
     @Override
     public int getBandCount() {
         // just return the current size of one of the band arrays
-        return phases.length;
+        return bands.get().count();
     }
 
     @Override
     public void setBandCount(int bands) {
         if (bands > 1) {
-            magnitudes = new float[bands];
-            for (int i = 0; i < magnitudes.length; i++) {
-                magnitudes[i] = DEFAULT_THRESHOLD;//Float.NEGATIVE_INFINITY;
+            Arena arena = Arena.ofAuto();
+            MemorySegment magnitudes = arena.allocate(JAVA_FLOAT, bands);
+            MemorySegment phases = arena.allocate(JAVA_FLOAT, bands);
+            for (int i = 0; i < bands; i++) {
+                magnitudes.setAtIndex(JAVA_FLOAT, i, DEFAULT_THRESHOLD);//Float.NEGATIVE_INFINITY;
             }
 
-            phases = new float[bands];
-            nativeSetBands(nativeRef, bands, magnitudes, phases);
+            Bands pair = new Bands(arena, magnitudes, phases, bands);
+            this.bands.set(pair);
+            // The release action has to be non-null even though it does nothing to this spectrum: it is
+            // what gives C a way to hand the pair back, and so what lets the facade hold the pair for
+            // exactly as long as C may still write through it. A superseded pair is reachable from
+            // nowhere else.
+            JfxMediaNative.spectrumSetBands(nativeRef, bands, magnitudes, phases, () -> release(pair));
         } else {
-            magnitudes = EMPTY_FLOAT_ARRAY;
-            phases = EMPTY_FLOAT_ARRAY;
+            this.bands.set(Bands.NONE);
 
             throw new IllegalArgumentException("Number of bands must at least be 2");
         }
@@ -97,13 +126,13 @@ final class NativeAudioSpectrum implements AudioSpectrum {
 
     @Override
     public double getInterval() {
-        return nativeGetInterval(nativeRef);
+        return JfxMediaNative.spectrumGetInterval(nativeRef);
     }
 
     @Override
     public void setInterval(double interval) {
         if (interval * NativeMediaPlayer.ONE_SECOND >= 1) {
-            nativeSetInterval(nativeRef, interval);
+            JfxMediaNative.spectrumSetInterval(nativeRef, interval);
         } else {
             throw new IllegalArgumentException("Interval can't be less that 1 nanosecond");
         }
@@ -111,13 +140,13 @@ final class NativeAudioSpectrum implements AudioSpectrum {
 
     @Override
     public int getSensitivityThreshold() {
-        return nativeGetThreshold(nativeRef);
+        return JfxMediaNative.spectrumGetThreshold(nativeRef);
     }
 
     @Override
     public void setSensitivityThreshold(int threshold) {
         if (threshold <= 0) {
-            nativeSetThreshold(nativeRef, threshold);
+            JfxMediaNative.spectrumSetThreshold(nativeRef, threshold);
         } else {
             throw new IllegalArgumentException(String.format("Sensitivity threshold must be less than 0: %d", threshold));
         }
@@ -125,32 +154,53 @@ final class NativeAudioSpectrum implements AudioSpectrum {
 
     @Override
     public float[] getMagnitudes(float[] mag) {
-        int size = magnitudes.length;
-        if(mag == null || mag.length < size) {
-            mag = new float[size];
-        }
-        System.arraycopy(magnitudes, 0, mag, 0, size);
-        return mag;
+        Bands current = bands.get();
+        return copyOut(current.magnitudes(), current.count(), mag);
     }
 
     @Override
     public float[] getPhases(float[] phs) {
-        int size = phases.length;
-        if(phs == null || phs.length < size) {
-            phs = new float[size];
-        }
-        System.arraycopy(phases, 0, phs, 0, size);
-        return phs;
+        Bands current = bands.get();
+        return copyOut(current.phases(), current.count(), phs);
     }
 
-    //**************************************************************************
-    //***** JNI methods
-    //**************************************************************************
-    private native boolean nativeGetEnabled(long nativeRef);
-    private native void    nativeSetEnabled(long nativeRef, boolean enable);
-    private native void    nativeSetBands(long nativeRef, int bands, float[] magnitudes, float[] phases);
-    private native double  nativeGetInterval(long nativeRef);
-    private native void    nativeSetInterval(long nativeRef, double interval);
-    private native int     nativeGetThreshold(long nativeRef);
-    private native void    nativeSetThreshold(long nativeRef, int threshold);
+    /**
+     * Runs when C has dropped its last reference to {@code pair}, on whichever thread did so: a
+     * GStreamer main loop or spectrum thread, the AVF audio tap with the band lock held, or the caller
+     * of {@code setBandCount} or of the media dispose. It must not block.
+     * <p>
+     * It deliberately leaves {@link #bands} alone, so what this spectrum reports does not change when C
+     * hands a pair back. C releases the <em>current</em> pair in three situations that have nothing to
+     * do with the band count changing: the media is disposed, {@code jfxm_spectrum_set_bands} failed,
+     * and the spectrum handle was NULL. Retiring the pair in any of them would drop
+     * {@link #getBandCount()} to zero and turn {@link #getMagnitudes(float[])} into an empty array,
+     * where the JNI implementation kept ordinary Java {@code float[]}s that survived all three and went
+     * on reporting the last values written - or, for a spectrum that never ran, the seeded
+     * {@link #DEFAULT_THRESHOLD}. That behaviour is what callers were written against, so it is what is
+     * kept here.
+     * <p>
+     * Nothing leaks by keeping it. The release call is only a promise that C will not read or write the
+     * memory again; the memory itself is Java's, held by an {@link Arena#ofAuto() automatic} arena, and
+     * is reclaimed when the pair becomes unreachable - at the latest when this spectrum does. A pair
+     * that <em>was</em> superseded by {@link #setBandCount(int)} is already unreachable from here, and
+     * the facade drops its registry entry for the handover as it runs this action, so that one is
+     * reclaimed as soon as C is done with it.
+     */
+    private void release(Bands pair) {
+        // Intentionally empty; see above. The pair stays readable until this spectrum is collected.
+    }
+
+    /**
+     * Copies {@code size} floats out of the off-heap band array, where the JNI implementation copied
+     * them into the Java array from native code with {@code SetFloatArrayRegion}.
+     */
+    private static float[] copyOut(MemorySegment source, int size, float[] target) {
+        if (target == null || target.length < size) {
+            target = new float[size];
+        }
+        if (size > 0) {
+            MemorySegment.copy(source, JAVA_FLOAT, 0L, target, 0, size);
+        }
+        return target;
+    }
 }

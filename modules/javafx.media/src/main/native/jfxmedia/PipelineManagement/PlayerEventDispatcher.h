@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2010, 2020, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2010, 2026, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -35,7 +35,18 @@ using namespace std;
 class CVideoFrame;
 class CAudioTrack;
 class CVideoTrack;
+class CSubtitleTrack;
 
+/*
+ * NOTE: add new virtual functions at the END of this class, never in the middle.
+ *
+ * On macOS the AVFoundation player (platform/osx/avf/AVFMediaPlayer.mm) is built into a separate
+ * dynamic library, libjfxmedia_avf.dylib, and reaches the dispatcher that libjfxmedia.dylib gave it
+ * only through this vtable. The two libraries are loaded independently, so a stale one against a
+ * fresh one is a real deployment state; inserting a virtual function shifts every slot after it and
+ * turns that into a call through the wrong slot - a crash or, worse, silently wrong events.
+ * Appending keeps slots 0..N-1 meaning what they meant before.
+ */
 class CPlayerEventDispatcher
 {
 public:
@@ -53,5 +64,7 @@ public:
     virtual bool SendDurationUpdateEvent(double time) = 0;
     virtual bool SendAudioSpectrumEvent(double time, double duration, bool queryTimestamp) = 0;
     virtual void Warning(int warningCode, const char* warningMessage) = 0;
+    // Added for the FFM ABI; appended so the slots above keep their indices (see the note above).
+    virtual bool SendSubtitleTrackEvent(CSubtitleTrack* pTrack) = 0;
 };
 #endif // _PLAYER_EVENT_DISPATCHER_H_

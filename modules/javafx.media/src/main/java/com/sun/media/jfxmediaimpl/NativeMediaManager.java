@@ -25,8 +25,6 @@
 
 package com.sun.media.jfxmediaimpl;
 
-import com.sun.glass.utils.NativeLibLoader;
-import com.sun.javafx.PlatformUtil;
 import com.sun.media.jfxmedia.*;
 import com.sun.media.jfxmedia.events.MediaErrorListener;
 import com.sun.media.jfxmedia.locator.Locator;
@@ -92,6 +90,23 @@ public class NativeMediaManager {
     //**************************************************************************
     /**
      * Create a <code>NativeMediaManager</code>.
+     * <p>
+     * Nothing here may throw. This constructor runs inside
+     * {@link NativeMediaManagerInitializer}'s class initializer, so anything that escapes it turns
+     * every later {@link #getDefaultInstance()} into a {@code NoClassDefFoundError} instead of the
+     * "media is unavailable" degradation the rest of the stack is written for.
+     * <p>
+     * Two things can escape. The first is the library load itself:
+     * {@link JfxMediaNative#loadLibraries()} reports a library that cannot be loaded, a missing
+     * {@code jfxm_*} symbol or an ABI version mismatch as an {@link UnsatisfiedLinkError}, which is an
+     * {@code Error} and so is not caught by {@code catch (Exception)}. Under JNI the first call into the
+     * library was lazy and this only showed up later, inside
+     * {@code GSTPlatform.loadPlatform()}, which catches it. The second is the report itself:
+     * {@link MediaUtils#error} calls back into {@code getDefaultInstance()}, which is still {@code null}
+     * while this constructor runs, and even once it is not, it throws {@code MediaException} when no
+     * error listener is registered - and none can be, this early. So the failure is logged here and
+     * reported where it was reported under JNI: by the platform that then cannot initialise, as
+     * {@code ERROR_MANAGER_ENGINEINIT_FAIL}.
      */
     protected NativeMediaManager() {
         /*
@@ -100,50 +115,19 @@ public class NativeMediaManager {
          * This is a slight performance hit, but necessary otherwise we could
          * erroneously report content types for platforms that cannot be loaded
          */
+        boolean librariesLoaded = false;
         try {
-            ArrayList<String> dependencies = new ArrayList<>();
-            if (PlatformUtil.isWindows() || PlatformUtil.isMac()) {
-                NativeLibLoader.loadLibrary("glib-lite");
-            }
-
-            if (!PlatformUtil.isLinux() && !PlatformUtil.isIOS()) {
-                NativeLibLoader.loadLibrary("gstreamer-lite");
-            } else {
-                dependencies.add("gstreamer-lite");
-            }
-            if (PlatformUtil.isLinux()) {
-                dependencies.add("fxplugins");
-                dependencies.add("avplugin");
-                dependencies.add("avplugin-54");
-                dependencies.add("avplugin-56");
-                dependencies.add("avplugin-57");
-                dependencies.add("avplugin-ffmpeg-56");
-                dependencies.add("avplugin-ffmpeg-57");
-                dependencies.add("avplugin-ffmpeg-58");
-                dependencies.add("avplugin-ffmpeg-59");
-                dependencies.add("avplugin-ffmpeg-60");
-                dependencies.add("avplugin-ffmpeg-61");
-                dependencies.add("avplugin-ffmpeg-62");
-            }
-            if (PlatformUtil.isMac()) {
-                dependencies.add("fxplugins");
-                dependencies.add("glib-lite");
-                dependencies.add("jfxmedia_avf");
-            }
-            if (PlatformUtil.isWindows()) {
-                dependencies.add("fxplugins");
-                dependencies.add("glib-lite");
-            }
-            NativeLibLoader.loadLibrary("jfxmedia", dependencies);
-        } catch (Exception pae) {
-            MediaUtils.error(null, MediaError.ERROR_MANAGER_ENGINEINIT_FAIL.code(),
-                    "Unable to load one or more dependent libraries.", pae);
+            JfxMediaNative.loadLibraries();
+            librariesLoaded = true;
+        } catch (Exception | UnsatisfiedLinkError pae) {
+            Logger.logMsg(Logger.ERROR, NativeMediaManager.class.getName(), "<init>",
+                    "Unable to load one or more dependent libraries: " + pae);
         }
 
         // Get the Logger native side rolling before we load platforms
-        if (!Logger.initNative()) {
-            MediaUtils.error(null, MediaError.ERROR_MANAGER_LOGGER_INIT.code(),
-                    "Unable to init logger", null);
+        if (librariesLoaded && !Logger.initNative()) {
+            Logger.logMsg(Logger.ERROR, NativeMediaManager.class.getName(), "<init>",
+                    "Unable to init logger");
         }
     }
 

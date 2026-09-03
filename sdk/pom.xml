@@ -199,6 +199,8 @@
                                 <copy todir="${jfx.sdk.dir}/${jfx.sdk.native.dir}" failonerror="false" quiet="true">
                                     <fileset dir="${jfx.root}/modules/javafx.graphics/target/native/bin"
                                              includes="*.dll,*.so,*.dylib" erroronmissingdir="false"/>
+                                    <fileset dir="${jfx.root}/modules/javafx.media/target/native/bin"
+                                             includes="*.dll,*.so,*.dylib" erroronmissingdir="false"/>
                                 </copy>
                                 <echo file="${jfx.sdk.dir}/lib/javafx.properties">javafx.version=${jfx.release.version.short}
 javafx.runtime.version=${jfx.release.version.long}

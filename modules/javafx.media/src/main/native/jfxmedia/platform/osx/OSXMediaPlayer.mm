@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2010, 2025, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2010, 2026, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -25,46 +25,21 @@
 
 #import "OSXMediaPlayer.h"
 #import "OSXPlayerProtocol.h"
-#import "com_sun_media_jfxmediaimpl_platform_osx_OSXMediaPlayer.h"
-#import <Utils/JObjectPeers.h>
-#import <Utils/JavaUtils.h>
 #import <CoreAudio/CoreAudio.h>
 #import <jni/Logger.h>
-#import <jni/JniUtils.h>
-#import <jni/JavaInputStreamCallbacks.h>
-#import <Locator/Locator.h>
 #import <Locator/LocatorStream.h>
 #import <jfxmedia_errors.h>
+#import <jfxmedia_api.h>
+#import <ffi/jfxmedia_avf.h>
+#import <ffi/JfxmMediaHandle.h>
+#import <ffi/FfiPlayerEventDispatcher.h>
+#import <ffi/FfiStreamCallbacks.h>
 
 #import <objc/runtime.h>
 
-#define USE_WEAK_REFS 0
-
-// Don't access directly, use the OSXMediaPlayer static methods to ensure thread safe access
-static JObjectPeers *gMediaPlayerPeers = nil;
 static Class gMediaPlayerClass = nil;
 
 @implementation OSXMediaPlayer
-
-+ (void) initialize
-{
-    gMediaPlayerPeers = [[JObjectPeers alloc] init];
-}
-
-+ (OSXMediaPlayer*) peerForPlayer:(jobject)javaPlayer andEnv:(JNIEnv*)javaEnv
-{
-    return [gMediaPlayerPeers peerForJObject:javaPlayer javaEnv:javaEnv];
-}
-
-+ (void) setPeer:(OSXMediaPlayer*)player forJavaPlayer:(jobject)javaPlayer andEnv:(JNIEnv*)javaEnv
-{
-    [gMediaPlayerPeers setPeer:player forJObject:javaPlayer javaEnv:javaEnv];
-}
-
-+ (void) removePlayerPeers:(OSXMediaPlayer*)player
-{
-    [gMediaPlayerPeers removePeer:player];
-}
 
 + (BOOL) initPlayerPlatform
 {
@@ -101,42 +76,23 @@ static Class gMediaPlayerClass = nil;
     return self;
 }
 
-- (id) initWithURL:(NSURL *)source javaPlayer:(jobject)jp andEnv:(JNIEnv*)env eventHandler:(CJavaPlayerEventDispatcher*)hdlr locatorStream:(CLocatorStream*)ls
+- (id) initWithURL:(NSURL *)source eventHandler:(CPlayerEventDispatcher*)hdlr locatorStream:(CLocatorStream*)ls
 {
+    // jfxm_avf_player_init: the dispatcher carries the callback table.
     if (!gMediaPlayerClass) {
         // No player class available, abort
+        [self release];
         return nil;
     }
 
     if ((self = [super init]) != nil) {
         movieURL = [source retain];
-
-        env->GetJavaVM(&javaPlayerVM);
-        if (env->ExceptionCheck()) {
-            env->ExceptionClear();
-            return nil;
-        }
-#if USE_WEAK_REFS
-        javaPlayer = env->NewWeakGlobalRef(jp);
-#else
-        javaPlayer = env->NewGlobalRef(jp);
-#endif
-        // set up the peer association
-        [OSXMediaPlayer setPeer:self forJavaPlayer:javaPlayer andEnv:env];
-
         eventHandler = hdlr;
 
         // create the player object
         player = [[gMediaPlayerClass alloc] initWithURL:movieURL eventHandler:eventHandler locatorStream:ls];
     }
     return self;
-}
-
-- (id) initWithURL:(NSURL *)source eventHandler:(CJavaPlayerEventDispatcher*)hdlr locatorStream:(CLocatorStream*)ls
-{
-    // stub initWithURL message to satisfy the protocol requirements, this should
-    // never be called
-    return nil;
 }
 
 - (void) dealloc
@@ -154,29 +110,9 @@ static Class gMediaPlayerClass = nil;
         player = nil;
 
         if (eventHandler) {
-            eventHandler->Dispose();
             delete eventHandler;
         }
         eventHandler = NULL;
-
-        [OSXMediaPlayer removePlayerPeers:self];
-        if (javaPlayerVM && javaPlayer) {
-            BOOL attached = NO;
-            JNIEnv *env = GetJavaEnvironment(javaPlayerVM, &attached);
-
-            // remove peer association
-            [OSXMediaPlayer removePlayerPeers:self];
-#if USE_WEAK_REFS
-            env->DeleteWeakGlobalRef(javaPlayer);
-#else
-            env->DeleteGlobalRef(javaPlayer);
-#endif
-            if (attached) {
-                javaPlayerVM->DetachCurrentThread();
-            }
-        }
-        javaPlayer = 0;
-        javaPlayerVM = NULL;
     }
 }
 
@@ -283,439 +219,346 @@ static Class gMediaPlayerClass = nil;
 @end
 
 #pragma mark -
-#pragma mark JNI Methods
+#pragma mark FFM entry points (ffi/jfxmedia_avf.h)
+
+// The jfxm_avf_* functions are the AVFoundation half of jfxmedia_api.h. They are reached only
+// through ffi/jfxmedia_api.cpp for handles created with JFXM_BACKEND_AVF. Relative to the former
+// Java_..._OSXMediaPlayer_osx* exports: the handle's retained OSXMediaPlayer replaces the
+// JObjectPeers lookup, ERROR_MEDIA_NULL / ERROR_PIPELINE_NULL replace the silent defaults for a
+// missing player (Java keeps returning those defaults), and out-params are written only on
+// ERROR_NONE.
+
+static int32_t AvfResolvePlayer(JfxmMedia *media, OSXMediaPlayer **ppPlayer)
+{
+    *ppPlayer = nil;
+    if (media == NULL) {
+        return ERROR_MEDIA_NULL;
+    }
+    *ppPlayer = (OSXMediaPlayer *)media->osx_player;
+    return (*ppPlayer != nil) ? ERROR_NONE : ERROR_PIPELINE_NULL;
+}
 
 /*
- * Class:     com_sun_media_jfxmediaimpl_platform_osx_OSXMediaPlayer
- * Method:    osxCreatePlayer
- * Signature: (Ljava/lang/String;)V
+ * What Java_..._OSXMediaPlayer_osxCreatePlayer did, without the JNIEnv. Its six ThrowJavaException
+ * sites map to: sourceURIString / callbacks / content type allocation failures ->
+ * ERROR_MEMORY_ALLOCATION, an unparsable URI -> ERROR_FACTORY_INVALID_URI, a nil OSXMediaPlayer ->
+ * ERROR_MEDIA_CREATION.
  */
-JNIEXPORT void JNICALL Java_com_sun_media_jfxmediaimpl_platform_osx_OSXMediaPlayer_osxCreatePlayer
-    (JNIEnv *env, jobject playerObject, jobject jLocator, jstring jContentType,
-    jlong jSizeHint)
+int32_t jfxm_avf_player_init(JfxmMedia *media, const JfxmPlayerCallbacks *cb, void *user)
 {
-    CLocatorStream *locatorStream = NULL;
-    jstring jSourceURI = CLocator::LocatorGetStringLocation(env, jLocator);
-    char *pjSourceURI = NULL;
-    char *pjContent = NULL;
+    if (media == NULL) {
+        return ERROR_MEDIA_NULL;
+    }
+    if (media->osx_player != NULL) {
+        return ERROR_MEDIA_CREATION; // already initialised
+    }
 
-    // create the event dispatcher, init later
-    CJavaPlayerEventDispatcher *eventHandler = new CJavaPlayerEventDispatcher();
-    eventHandler->Init(env, playerObject, NULL);
+    CLocatorStream *locatorStream = NULL;
+    CFfiStreamCallbacks *callbacks = NULL;
+
+    // create the event dispatcher first, as osxCreatePlayer did
+    CFfiPlayerEventDispatcher *eventHandler = new (nothrow) CFfiPlayerEventDispatcher(cb, user);
+    if (eventHandler == NULL) {
+        return ERROR_MEMORY_ALLOCATION;
+    }
 
     NSAutoreleasePool *pool = [[NSAutoreleasePool alloc] init];
-    NSString *sourceURIString = NSStringFromJavaString(env, jSourceURI);
+    NSString *sourceURIString = [NSString stringWithUTF8String:media->location.c_str()];
     if (!sourceURIString) {
         LOGGER_ERRORMSG("OSXMediaPlayer: Unable to create sourceURIString\n");
-        ThrowJavaException(env, "com/sun/media/jfxmedia/MediaException",
-                           "OSXMediaPlayer: Unable to create sourceURIString");
-        return;
+        delete eventHandler;
+        [pool drain];
+        return ERROR_MEMORY_ALLOCATION;
     }
 
     NSURL *mediaURL = [[NSURL alloc] initWithString:sourceURIString];
     if (!mediaURL) {
         LOGGER_WARNMSG("OSXMediaPlayer: Unable to create mediaURL\n");
-        ThrowJavaException(env, "com/sun/media/jfxmedia/MediaException",
-                           "OSXMediaPlayer: Unable to create mediaURL");
-        return;
+        delete eventHandler;
+        [pool drain];
+        return ERROR_FACTORY_INVALID_URI;
     }
 
     // Check if we need to use Locator to read data. For FILE/HTTP/HTTPS
     // AVFoundation will read data directly. For JAR/JRT we will use Locator to
-    // read data.
+    // read data; Java passed a stream table exactly for those schemes.
     NSString *scheme = [mediaURL scheme];
     if ([scheme caseInsensitiveCompare:@"jar"] == NSOrderedSame ||
         [scheme caseInsensitiveCompare:@"jrt"] == NSOrderedSame) {
-        CJavaInputStreamCallbacks *callbacks = new (nothrow) CJavaInputStreamCallbacks();
-        jobject jConnectionHolder = CLocator::CreateConnectionHolder(env, jLocator);
-        if (callbacks == NULL || jConnectionHolder == NULL) {
-            if (callbacks) delete callbacks;
+        if (media->has_stream) {
+            callbacks = new (nothrow) CFfiStreamCallbacks(&media->stream, media->stream_user);
+        }
+        if (callbacks == NULL) {
             [mediaURL release];
-            LOGGER_WARNMSG("OSXMediaPlayer: Unable to create CJavaInputStreamCallbacks\n");
-            ThrowJavaException(env, "com/sun/media/jfxmedia/MediaException",
-                               "OSXMediaPlayer: Unable to create CJavaInputStreamCallbacks");
-            return;
+            delete eventHandler;
+            LOGGER_WARNMSG("OSXMediaPlayer: Unable to create CFfiStreamCallbacks\n");
+            [pool drain];
+            return ERROR_MEMORY_ALLOCATION;
         }
 
-        if (!callbacks->Init(env, jConnectionHolder)) {
-            [mediaURL release];
-            delete callbacks;
-            LOGGER_WARNMSG("OSXMediaPlayer: callbacks->Init() failed\n");
-            ThrowJavaException(env, "com/sun/media/jfxmedia/MediaException",
-                               "OSXMediaPlayer: callbacks->Init() failed");
-            return;
-        }
-
-        pjContent = (char*)env->GetStringUTFChars(jContentType, NULL);
-        pjSourceURI = (char*)env->GetStringUTFChars(jSourceURI, NULL);
-        if (pjContent == NULL || pjSourceURI == NULL) {
-            [mediaURL release];
-            delete callbacks;
-            if (pjContent != NULL) {
-                env->ReleaseStringUTFChars(jContentType, pjContent);
-            }
-            if (pjSourceURI != NULL) {
-                env->ReleaseStringUTFChars(jSourceURI, pjSourceURI);
-            }
-            LOGGER_WARNMSG("OSXMediaPlayer: memory allocation failed\n");
-            ThrowJavaException(env, "com/sun/media/jfxmedia/MediaException",
-                                    "OSXMediaPlayer: memory allocation failed");
-            return;
-        }
-
-        locatorStream = new(nothrow) CLocatorStream(callbacks, pjContent, pjSourceURI, jSizeHint);
-        env->ReleaseStringUTFChars(jContentType, pjContent);
-        env->ReleaseStringUTFChars(jSourceURI, pjSourceURI);
+        locatorStream = new (nothrow) CLocatorStream(callbacks, media->content_type.c_str(),
+                                                     media->location.c_str(), media->size_hint);
     }
 
-    OSXMediaPlayer *player = [[OSXMediaPlayer alloc] initWithURL:mediaURL javaPlayer:playerObject andEnv:env eventHandler:eventHandler locatorStream:locatorStream];
+    OSXMediaPlayer *player = [[OSXMediaPlayer alloc] initWithURL:mediaURL
+                                                    eventHandler:eventHandler
+                                                   locatorStream:locatorStream];
     if (!player) {
         LOGGER_WARNMSG("OSXMediaPlayer: Unable to create player\n");
-        ThrowJavaException(env, "com/sun/media/jfxmedia/MediaException",
-                           "OSXMediaPlayer: Unable to create player");
         [mediaURL release];
-        return;
+        delete eventHandler;
+        delete locatorStream;
+        delete callbacks;
+        [pool drain];
+        return ERROR_MEDIA_CREATION;
     }
 
-    [player release]; // The player peer list retains for us
+    [mediaURL release]; // the player retained its own reference
+    media->osx_player = player; // +1 from alloc; released by jfxm_avf_player_dispose
+    [pool drain];
+    return ERROR_NONE;
+}
+
+void jfxm_avf_player_dispose(JfxmMedia *media)
+{
+    if (media == NULL || media->osx_player == NULL) {
+        return;
+    }
+    NSAutoreleasePool *pool = [[NSAutoreleasePool alloc] init];
+    OSXMediaPlayer *player = (OSXMediaPlayer *)media->osx_player;
+    media->osx_player = NULL;
+    [player dispose];
+    // osxDispose let the peer list drop the last retain; here the handle held it.
+    [player release];
     [pool drain];
 }
 
-/*
- * Class:     com_sun_media_jfxmediaimpl_platform_osx_OSXMediaPlayer
- * Method:    osxGetAudioEqualizerRef
- * Signature: ()J
- */
-JNIEXPORT jlong JNICALL Java_com_sun_media_jfxmediaimpl_platform_osx_OSXMediaPlayer_osxGetAudioEqualizerRef
-(JNIEnv *env, jobject playerObject) {
+void *jfxm_avf_player_get_audio_equalizer(JfxmMedia *media)
+{
     NSAutoreleasePool *pool = [[NSAutoreleasePool alloc] init];
-    OSXMediaPlayer *player = [OSXMediaPlayer peerForPlayer:playerObject andEnv:env];
-    CAudioEqualizer *eq = 0;
+    OSXMediaPlayer *player = nil;
+    (void)AvfResolvePlayer(media, &player);
+    CAudioEqualizer *eq = NULL;
     if (player) {
         eq = player.audioEqualizer;
     }
     [pool drain];
-    return ptr_to_jlong(eq);
+    return eq;
 }
 
-/*
- * Class:     com_sun_media_jfxmediaimpl_platform_osx_OSXMediaPlayer
- * Method:    osxGetAudioSpectrumRef
- * Signature: ()J
- */
-JNIEXPORT jlong JNICALL Java_com_sun_media_jfxmediaimpl_platform_osx_OSXMediaPlayer_osxGetAudioSpectrumRef
-(JNIEnv *env, jobject playerObject) {
+void *jfxm_avf_player_get_audio_spectrum(JfxmMedia *media)
+{
     NSAutoreleasePool *pool = [[NSAutoreleasePool alloc] init];
-    OSXMediaPlayer *player = [OSXMediaPlayer peerForPlayer:playerObject andEnv:env];
+    OSXMediaPlayer *player = nil;
+    (void)AvfResolvePlayer(media, &player);
     CAudioSpectrum *spectrum = NULL;
     if (player) {
         spectrum = player.audioSpectrum;
     }
     [pool drain];
-    return ptr_to_jlong(spectrum);
+    return spectrum;
 }
 
-/*
- * Class:     com_sun_media_jfxmediaimpl_platform_osx_OSXMediaPlayer
- * Method:    osxGetAudioSyncDelay
- * Signature: ()J
- */
-JNIEXPORT jlong JNICALL Java_com_sun_media_jfxmediaimpl_platform_osx_OSXMediaPlayer_osxGetAudioSyncDelay
-    (JNIEnv *env, jobject playerObject)
+int32_t jfxm_avf_player_get_audio_sync_delay(JfxmMedia *media, int64_t *out_millis)
 {
     NSAutoreleasePool *pool = [[NSAutoreleasePool alloc] init];
-    OSXMediaPlayer *player = [OSXMediaPlayer peerForPlayer:playerObject andEnv:env];
-    jlong asd = 0;
-    if (player) {
-        asd = (jlong)player.audioSyncDelay;
+    OSXMediaPlayer *player = nil;
+    int32_t result = AvfResolvePlayer(media, &player);
+    if (player && out_millis != NULL) {
+        *out_millis = (int64_t)player.audioSyncDelay;
     }
     [pool drain];
-    return asd;
+    return result;
 }
 
-/*
- * Class:     com_sun_media_jfxmediaimpl_platform_osx_OSXMediaPlayer
- * Method:    osxSetAudioSyncDelay
- * Signature: (J)V
- */
-JNIEXPORT void JNICALL Java_com_sun_media_jfxmediaimpl_platform_osx_OSXMediaPlayer_osxSetAudioSyncDelay
-    (JNIEnv *env, jobject playerObject, jlong delay)
+int32_t jfxm_avf_player_set_audio_sync_delay(JfxmMedia *media, int64_t millis)
 {
     NSAutoreleasePool *pool = [[NSAutoreleasePool alloc] init];
-    OSXMediaPlayer *player = [OSXMediaPlayer peerForPlayer:playerObject andEnv:env];
+    OSXMediaPlayer *player = nil;
+    int32_t result = AvfResolvePlayer(media, &player);
     if (player) {
-        player.audioSyncDelay = (int64_t)delay;
+        player.audioSyncDelay = millis; // stored by AVFAudioProcessor, never applied (as before)
     }
     [pool drain];
+    return result;
 }
 
-/*
- * Class:     com_sun_media_jfxmediaimpl_platform_osx_OSXMediaPlayer
- * Method:    osxPlay
- * Signature: ()V
- */
-JNIEXPORT void JNICALL Java_com_sun_media_jfxmediaimpl_platform_osx_OSXMediaPlayer_osxPlay
-    (JNIEnv *env, jobject playerObject)
+int32_t jfxm_avf_player_play(JfxmMedia *media)
 {
     NSAutoreleasePool *pool = [[NSAutoreleasePool alloc] init];
-    OSXMediaPlayer *player = [OSXMediaPlayer peerForPlayer:playerObject andEnv:env];
+    OSXMediaPlayer *player = nil;
+    int32_t result = AvfResolvePlayer(media, &player);
     if (player) {
         [player play];
     }
     [pool drain];
+    return result;
 }
 
-/*
- * Class:     com_sun_media_jfxmediaimpl_platform_osx_OSXMediaPlayer
- * Method:    osxStop
- * Signature: ()V
- */
-JNIEXPORT void JNICALL Java_com_sun_media_jfxmediaimpl_platform_osx_OSXMediaPlayer_osxStop
-    (JNIEnv *env, jobject playerObject)
+int32_t jfxm_avf_player_pause(JfxmMedia *media)
 {
     NSAutoreleasePool *pool = [[NSAutoreleasePool alloc] init];
-    OSXMediaPlayer *player = [OSXMediaPlayer peerForPlayer:playerObject andEnv:env];
-    if (player) {
-        [player stop];
-    }
-    [pool drain];
-}
-
-/*
- * Class:     com_sun_media_jfxmediaimpl_platform_osx_OSXMediaPlayer
- * Method:    osxPause
- * Signature: ()V
- */
-JNIEXPORT void JNICALL Java_com_sun_media_jfxmediaimpl_platform_osx_OSXMediaPlayer_osxPause
-    (JNIEnv *env, jobject playerObject)
-{
-    NSAutoreleasePool *pool = [[NSAutoreleasePool alloc] init];
-    OSXMediaPlayer *player = [OSXMediaPlayer peerForPlayer:playerObject andEnv:env];
+    OSXMediaPlayer *player = nil;
+    int32_t result = AvfResolvePlayer(media, &player);
     if (player) {
         [player pause];
     }
     [pool drain];
+    return result;
 }
 
-/*
- * Class:     com_sun_media_jfxmediaimpl_platform_osx_OSXMediaPlayer
- * Method:    osxFinish
- * Signature: ()V
- */
-JNIEXPORT void JNICALL Java_com_sun_media_jfxmediaimpl_platform_osx_OSXMediaPlayer_osxFinish
-(JNIEnv *env, jobject playerObject)
+int32_t jfxm_avf_player_stop(JfxmMedia *media)
 {
     NSAutoreleasePool *pool = [[NSAutoreleasePool alloc] init];
-    OSXMediaPlayer *player = [OSXMediaPlayer peerForPlayer:playerObject andEnv:env];
+    OSXMediaPlayer *player = nil;
+    int32_t result = AvfResolvePlayer(media, &player);
+    if (player) {
+        [player stop];
+    }
+    [pool drain];
+    return result;
+}
+
+int32_t jfxm_avf_player_finish(JfxmMedia *media)
+{
+    NSAutoreleasePool *pool = [[NSAutoreleasePool alloc] init];
+    OSXMediaPlayer *player = nil;
+    int32_t result = AvfResolvePlayer(media, &player);
     if (player) {
         [player finish];
     }
     [pool drain];
+    return result;
 }
 
-/*
- * Class:     com_sun_media_jfxmediaimpl_platform_osx_OSXMediaPlayer
- * Method:    osxGetRate
- * Signature: ()F
- */
-JNIEXPORT jfloat JNICALL Java_com_sun_media_jfxmediaimpl_platform_osx_OSXMediaPlayer_osxGetRate
-    (JNIEnv *env, jobject playerObject)
+int32_t jfxm_avf_player_get_rate(JfxmMedia *media, float *out_rate)
 {
     NSAutoreleasePool *pool = [[NSAutoreleasePool alloc] init];
-    OSXMediaPlayer *player = [OSXMediaPlayer peerForPlayer:playerObject andEnv:env];
-    jfloat rc = 0.0;
-    if (player) {
-        rc = (jfloat)player.rate;
+    OSXMediaPlayer *player = nil;
+    int32_t result = AvfResolvePlayer(media, &player);
+    if (player && out_rate != NULL) {
+        *out_rate = player.rate;
     }
     [pool drain];
-    return rc;
+    return result;
 }
 
-/*
- * Class:     com_sun_media_jfxmediaimpl_platform_osx_OSXMediaPlayer
- * Method:    osxSetRate
- * Signature: (F)V
- */
-JNIEXPORT void JNICALL Java_com_sun_media_jfxmediaimpl_platform_osx_OSXMediaPlayer_osxSetRate
-    (JNIEnv *env, jobject playerObject, jfloat rate)
+int32_t jfxm_avf_player_set_rate(JfxmMedia *media, float rate)
 {
     NSAutoreleasePool *pool = [[NSAutoreleasePool alloc] init];
-    OSXMediaPlayer *player = [OSXMediaPlayer peerForPlayer:playerObject andEnv:env];
+    OSXMediaPlayer *player = nil;
+    int32_t result = AvfResolvePlayer(media, &player);
     if (player) {
-        player.rate = (double)rate;
+        player.rate = rate;
     }
     [pool drain];
+    return result;
 }
 
-/*
- * Class:     com_sun_media_jfxmediaimpl_platform_osx_OSXMediaPlayer
- * Method:    osxGetPresentationTime
- * Signature: ()D
- */
-JNIEXPORT jdouble JNICALL Java_com_sun_media_jfxmediaimpl_platform_osx_OSXMediaPlayer_osxGetPresentationTime
-    (JNIEnv *env, jobject playerObject)
+int32_t jfxm_avf_player_get_presentation_time(JfxmMedia *media, double *out_seconds)
 {
     NSAutoreleasePool *pool = [[NSAutoreleasePool alloc] init];
-    OSXMediaPlayer *player = [OSXMediaPlayer peerForPlayer:playerObject andEnv:env];
-    jdouble rc = 0.0;
-    if (player) {
-        rc = player.currentTime;
+    OSXMediaPlayer *player = nil;
+    int32_t result = AvfResolvePlayer(media, &player);
+    if (player && out_seconds != NULL) {
+        *out_seconds = player.currentTime;
     }
     [pool drain];
-    return rc;
+    return result;
 }
 
-/*
- * Class:     com_sun_media_jfxmediaimpl_platform_osx_OSXMediaPlayer
- * Method:    osxGetMute
- * Signature: ()Z
- */
-JNIEXPORT jboolean JNICALL Java_com_sun_media_jfxmediaimpl_platform_osx_OSXMediaPlayer_osxGetMute
-    (JNIEnv *env, jobject playerObject)
+int32_t jfxm_avf_player_get_mute(JfxmMedia *media, int32_t *out_mute)
 {
     NSAutoreleasePool *pool = [[NSAutoreleasePool alloc] init];
-    OSXMediaPlayer *player = [OSXMediaPlayer peerForPlayer:playerObject andEnv:env];
-    jboolean rc = JNI_FALSE;
-    if (player) {
-        rc = (player.mute != NO);
+    OSXMediaPlayer *player = nil;
+    int32_t result = AvfResolvePlayer(media, &player);
+    if (player && out_mute != NULL) {
+        *out_mute = (player.mute != NO) ? 1 : 0;
     }
     [pool drain];
-    return rc;
+    return result;
 }
 
-/*
- * Class:     com_sun_media_jfxmediaimpl_platform_osx_OSXMediaPlayer
- * Method:    osxSetMute
- * Signature: (Z)V
- */
-JNIEXPORT void JNICALL Java_com_sun_media_jfxmediaimpl_platform_osx_OSXMediaPlayer_osxSetMute
-    (JNIEnv *env, jobject playerObject, jboolean mute)
+int32_t jfxm_avf_player_set_mute(JfxmMedia *media, int32_t mute)
 {
     NSAutoreleasePool *pool = [[NSAutoreleasePool alloc] init];
-    OSXMediaPlayer *player = [OSXMediaPlayer peerForPlayer:playerObject andEnv:env];
+    OSXMediaPlayer *player = nil;
+    int32_t result = AvfResolvePlayer(media, &player);
     if (player) {
-        player.mute = (mute != JNI_FALSE);
+        player.mute = (mute != 0);
     }
     [pool drain];
+    return result;
 }
 
-/*
- * Class:     com_sun_media_jfxmediaimpl_platform_osx_OSXMediaPlayer
- * Method:    osxGetVolume
- * Signature: ()F
- */
-JNIEXPORT jfloat JNICALL Java_com_sun_media_jfxmediaimpl_platform_osx_OSXMediaPlayer_osxGetVolume
-    (JNIEnv *env, jobject playerObject)
+int32_t jfxm_avf_player_get_volume(JfxmMedia *media, float *out_volume)
 {
     NSAutoreleasePool *pool = [[NSAutoreleasePool alloc] init];
-    OSXMediaPlayer *player = [OSXMediaPlayer peerForPlayer:playerObject andEnv:env];
-    jfloat rc = 0.0;
-    if (player) {
-        rc = (jfloat)player.volume;
+    OSXMediaPlayer *player = nil;
+    int32_t result = AvfResolvePlayer(media, &player);
+    if (player && out_volume != NULL) {
+        *out_volume = player.volume;
     }
     [pool drain];
-    return rc;
+    return result;
 }
 
-/*
- * Class:     com_sun_media_jfxmediaimpl_platform_osx_OSXMediaPlayer
- * Method:    osxSetVolume
- * Signature: (F)V
- */
-JNIEXPORT void JNICALL Java_com_sun_media_jfxmediaimpl_platform_osx_OSXMediaPlayer_osxSetVolume
-    (JNIEnv *env, jobject playerObject, jfloat volume)
+int32_t jfxm_avf_player_set_volume(JfxmMedia *media, float volume)
 {
     NSAutoreleasePool *pool = [[NSAutoreleasePool alloc] init];
-    OSXMediaPlayer *player = [OSXMediaPlayer peerForPlayer:playerObject andEnv:env];
+    OSXMediaPlayer *player = nil;
+    int32_t result = AvfResolvePlayer(media, &player);
     if (player) {
-        player.volume = (double)volume;
+        player.volume = volume;
     }
     [pool drain];
+    return result;
 }
 
-/*
- * Class:     com_sun_media_jfxmediaimpl_platform_osx_OSXMediaPlayer
- * Method:    osxGetBalance
- * Signature: ()F
- */
-JNIEXPORT jfloat JNICALL Java_com_sun_media_jfxmediaimpl_platform_osx_OSXMediaPlayer_osxGetBalance
-    (JNIEnv *env, jobject playerObject)
+int32_t jfxm_avf_player_get_balance(JfxmMedia *media, float *out_balance)
 {
     NSAutoreleasePool *pool = [[NSAutoreleasePool alloc] init];
-    OSXMediaPlayer *player = [OSXMediaPlayer peerForPlayer:playerObject andEnv:env];
-    jfloat rc = 0.0;
-    if (player) {
-        rc = (jfloat)player.balance;
+    OSXMediaPlayer *player = nil;
+    int32_t result = AvfResolvePlayer(media, &player);
+    if (player && out_balance != NULL) {
+        *out_balance = player.balance;
     }
     [pool drain];
-    return rc;
+    return result;
 }
 
-/*
- * Class:     com_sun_media_jfxmediaimpl_platform_osx_OSXMediaPlayer
- * Method:    osxSetBalance
- * Signature: (F)V
- */
-JNIEXPORT void JNICALL Java_com_sun_media_jfxmediaimpl_platform_osx_OSXMediaPlayer_osxSetBalance
-    (JNIEnv *env, jobject playerObject, jfloat balance)
+int32_t jfxm_avf_player_set_balance(JfxmMedia *media, float balance)
 {
     NSAutoreleasePool *pool = [[NSAutoreleasePool alloc] init];
-    OSXMediaPlayer *player = [OSXMediaPlayer peerForPlayer:playerObject andEnv:env];
+    OSXMediaPlayer *player = nil;
+    int32_t result = AvfResolvePlayer(media, &player);
     if (player) {
-        player.balance = (double)balance;
+        player.balance = balance;
     }
     [pool drain];
+    return result;
 }
 
-/*
- * Class:     com_sun_media_jfxmediaimpl_platform_osx_OSXMediaPlayer
- * Method:    osxGetDuration
- * Signature: ()D
- */
-JNIEXPORT jdouble JNICALL Java_com_sun_media_jfxmediaimpl_platform_osx_OSXMediaPlayer_osxGetDuration
-    (JNIEnv *env, jobject playerObject)
+int32_t jfxm_avf_player_get_duration(JfxmMedia *media, double *out_seconds)
 {
     NSAutoreleasePool *pool = [[NSAutoreleasePool alloc] init];
-    OSXMediaPlayer *player = [OSXMediaPlayer peerForPlayer:playerObject andEnv:env];
-    double duration = -1.0;
-    if (player) {
-        duration = (jdouble)player.duration;
+    OSXMediaPlayer *player = nil;
+    int32_t result = AvfResolvePlayer(media, &player);
+    if (player && out_seconds != NULL) {
+        *out_seconds = player.duration; // -1.0 while unknown, mapped to +Infinity in Java
     }
     [pool drain];
-    return duration;
+    return result;
 }
 
-/*
- * Class:     com_sun_media_jfxmediaimpl_platform_osx_OSXMediaPlayer
- * Method:    osxSeek
- * Signature: (D)V
- */
-JNIEXPORT void JNICALL Java_com_sun_media_jfxmediaimpl_platform_osx_OSXMediaPlayer_osxSeek
-    (JNIEnv *env, jobject playerObject, jdouble time)
+int32_t jfxm_avf_player_seek(JfxmMedia *media, double seconds)
 {
     NSAutoreleasePool *pool = [[NSAutoreleasePool alloc] init];
-    OSXMediaPlayer *player = [OSXMediaPlayer peerForPlayer:playerObject andEnv:env];
+    OSXMediaPlayer *player = nil;
+    int32_t result = AvfResolvePlayer(media, &player);
     if (player) {
-        player.currentTime = (double)time;
+        player.currentTime = seconds;
     }
     [pool drain];
-}
-
-/*
- * Class:     com_sun_media_jfxmediaimpl_platform_osx_OSXMediaPlayer
- * Method:    osxDispose
- * Signature: ()V
- */
-JNIEXPORT void JNICALL Java_com_sun_media_jfxmediaimpl_platform_osx_OSXMediaPlayer_osxDispose
-    (JNIEnv *env, jobject playerObject)
-{
-    NSAutoreleasePool *pool = [[NSAutoreleasePool alloc] init];
-    OSXMediaPlayer *player = [OSXMediaPlayer peerForPlayer:playerObject andEnv:env];
-    if (player) {
-        [player dispose];
-
-        // This should pop the last retain, aside from the autoreleased reference...
-        [OSXMediaPlayer removePlayerPeers:player];
-    }
-    [pool drain];
+    return result;
 }

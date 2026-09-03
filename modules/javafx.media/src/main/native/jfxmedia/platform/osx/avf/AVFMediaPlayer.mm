@@ -123,7 +123,7 @@ static CVReturn displayLinkCallback(CVDisplayLinkRef displayLink,
     return (klass != nil);
 }
 
-- (id) initWithURL:(NSURL *)source eventHandler:(CJavaPlayerEventDispatcher*)hdlr locatorStream:(CLocatorStream*)ls {
+- (id) initWithURL:(NSURL *)source eventHandler:(CPlayerEventDispatcher*)hdlr locatorStream:(CLocatorStream*)ls {
     if ((self = [super init]) != nil) {
         previousWidth = -1;
         previousHeight = -1;
