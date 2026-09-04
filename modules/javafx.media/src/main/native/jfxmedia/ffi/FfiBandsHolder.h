@@ -38,11 +38,12 @@
  * reaches zero.
  *
  * The holder owns the pair for its whole lifetime, which is what CJavaBandsHolder's two
- * NewGlobalRefs did. Because CGstAudioSpectrum::UpdateBands is lock-free, a spectrum thread can
- * still be writing through this holder when a newer holder has already been installed, so the
- * memory must stay valid until the last reference goes away - not until jfxm_spectrum_set_bands
- * returns. The destructor therefore calls the JfxmReleaseFn once, on whichever thread dropped that
- * last reference, and nothing touches the pair afterwards.
+ * NewGlobalRefs did. Both spectrum implementations retain the holder under a lock and then write
+ * through it with that lock dropped, so a spectrum thread can still be writing through this holder
+ * when a newer holder has already been installed, and the memory must stay valid until the last
+ * reference goes away - not until jfxm_spectrum_set_bands returns. The destructor therefore calls
+ * the JfxmReleaseFn once, on whichever thread dropped that last reference, and nothing touches the
+ * pair afterwards.
  */
 class CFfiBandsHolder : public CBandsHolder
 {
