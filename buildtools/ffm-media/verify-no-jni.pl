@@ -48,10 +48,14 @@ die "run from the repository root (no $module)\n" unless -d $module;
 
 # The native trees that are engine code, not JavaFX glue: they never contained
 # JNI and are not part of this migration (see FFM-AUDIT-plugins-libs.md).
+# target/ is build output, not source: the CMake configure step writes the JDK
+# include paths it was given into files there, which the build-file check below
+# would otherwise count as a JNI dependency of the module.
 my $skip_re = qr{
     /gstreamer/gstreamer-lite/ |
     /gstreamer/3rd_party/      |
-    /gstreamer/plugins/
+    /gstreamer/plugins/        |
+    /target/
 }x;
 
 sub collect {
@@ -71,15 +75,12 @@ sub collect {
 my @java   = collect($java_dir, qr{\.java$});
 my @native = collect($nat_dir,  qr{\.(c|cc|cpp|h|hpp|m|mm)$});
 my @tests  = collect($test_dir, qr{\.java$});
-my @build  = grep { -f $_ } (
-    "$module/pom.xml",
-    "$module/native/CMakeLists.txt",
-    "$module/native/win.cmake",
-    "$module/native/linux.cmake",
-    "$module/native/mac.cmake",
-    collect("$nat_dir/jfxmedia/projects", qr{Makefile}),
-    collect("$nat_dir/gstreamer/projects", qr{Makefile}),
-);
+# Every build file under the module, not a fixed list. The JNI-era makefiles this
+# check was written against - jfxmedia/projects and gstreamer/projects - are gone,
+# and naming those two directories would let one reintroduced anywhere else go
+# uncounted, which is the one thing this check exists to prevent.
+my @build  = collect($module,
+    qr{(?:^|/)(?:Makefile[^/]*|[^/]+\.mk|CMakeLists\.txt|[^/]+\.cmake|pom\.xml)$});
 
 sub slurp {
     my ($f) = @_;

@@ -168,11 +168,44 @@ final class OSXMedia extends NativeMedia {
 
         // Only now is it safe to free the upcall stubs and the registry entries.
         disposed = true;
-        releaseCallbacks();
+        finishDispose();
+    }
+
+    /**
+     * Frees the stubs and runs the registered actions, whatever any single step does.
+     * {@code Arena.close()} on the shared arena throws {@link IllegalStateException} while a native
+     * thread has not unwound from one of its stubs, and again when a second dispose races this one.
+     * Letting that escape would abort the rest of the teardown and leave
+     * {@code NativeMediaPlayer.dispose()} before it sets {@code isDisposed}, i.e. a player that is
+     * neither alive nor disposed, with its listeners un-cleared and its registry entry leaked. The JNI
+     * implementation had no way to fail here at all, so throwing is the drift: the failure is logged.
+     */
+    private void finishDispose() {
+        RuntimeException failure = null;
+        try {
+            releaseCallbacks();
+        } catch (RuntimeException e) {
+            failure = e;
+        }
         for (Runnable action : afterDispose) {
-            action.run();
+            try {
+                action.run();
+            } catch (RuntimeException e) {
+                if (failure == null) {
+                    failure = e;
+                } else {
+                    failure.addSuppressed(e);
+                }
+            }
         }
         afterDispose.clear();
+        if (failure != null) {
+            StringBuilder message = new StringBuilder("OSXMedia: dispose did not complete: ").append(failure);
+            for (Throwable suppressed : failure.getSuppressed()) {
+                message.append("; ").append(suppressed);
+            }
+            Logger.logMsg(Logger.ERROR, message.toString());
+        }
     }
 
     private void releaseCallbacks() {

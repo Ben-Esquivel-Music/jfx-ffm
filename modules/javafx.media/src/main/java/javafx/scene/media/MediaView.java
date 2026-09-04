@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2010, 2024, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2010, 2026, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -25,7 +25,6 @@
 
 package javafx.scene.media;
 
-import com.sun.javafx.PlatformUtil;
 import com.sun.javafx.geom.BaseBounds;
 import com.sun.javafx.geom.transform.Affine3D;
 import com.sun.javafx.geom.transform.BaseTransform;
@@ -204,6 +203,11 @@ public class MediaView extends AbstractNode {
         return (getParent() != null && isVisible());
     }
 
+    /*
+     * Only visibility and opacity have a per-property push; x, y, fitWidth, fitHeight and preserveRatio
+     * had one too, reached from invalidated() when PlatformUtil.isIOS(), and it went with the iOS
+     * platform this fork does not build. updateMediaPlayerOverlay() still seeds all of them.
+     */
     private synchronized void updateOverlayVisibility() {
         if (mediaPlayerOverlay != null) {
             mediaPlayerOverlay.setOverlayVisible(determineVisibility());
@@ -213,36 +217,6 @@ public class MediaView extends AbstractNode {
     private synchronized void updateOverlayOpacity() {
         if (mediaPlayerOverlay != null) {
             mediaPlayerOverlay.setOverlayOpacity(getOpacity());
-        }
-    }
-
-    private synchronized void updateOverlayX() {
-        if (mediaPlayerOverlay != null) {
-            mediaPlayerOverlay.setOverlayX(getX());
-        }
-    }
-
-    private synchronized void updateOverlayY() {
-        if (mediaPlayerOverlay != null) {
-            mediaPlayerOverlay.setOverlayY(getY());
-        }
-    }
-
-    private synchronized void updateOverlayWidth() {
-        if (mediaPlayerOverlay != null) {
-            mediaPlayerOverlay.setOverlayWidth(getFitWidth());
-        }
-    }
-
-    private synchronized void updateOverlayHeight() {
-        if (mediaPlayerOverlay != null) {
-            mediaPlayerOverlay.setOverlayHeight(getFitHeight());
-        }
-    }
-
-    private synchronized void updateOverlayPreserveRatio() {
-        if (mediaPlayerOverlay != null) {
-            mediaPlayerOverlay.setOverlayPreserveRatio(isPreserveRatio());
         }
     }
 
@@ -488,13 +462,8 @@ public class MediaView extends AbstractNode {
 
                 @Override
                 protected void invalidated() {
-                    if (PlatformUtil.isIOS()) {
-                        updateOverlayPreserveRatio();
-                    }
-                    else {
-                        NodeHelper.markDirty(MediaView.this, DirtyBits.NODE_VIEWPORT);
-                        NodeHelper.geomChanged(MediaView.this);
-                    }
+                    NodeHelper.markDirty(MediaView.this, DirtyBits.NODE_VIEWPORT);
+                    NodeHelper.geomChanged(MediaView.this);
                 }
 
                 @Override
@@ -589,13 +558,8 @@ public class MediaView extends AbstractNode {
 
                 @Override
                 protected void invalidated() {
-                    if (PlatformUtil.isIOS()) {
-                        updateOverlayX();
-                    }
-                    else {
-                        NodeHelper.markDirty(MediaView.this, DirtyBits.NODE_GEOMETRY);
-                        NodeHelper.geomChanged(MediaView.this);
-                    }
+                    NodeHelper.markDirty(MediaView.this, DirtyBits.NODE_GEOMETRY);
+                    NodeHelper.geomChanged(MediaView.this);
                 }
 
                 @Override
@@ -639,13 +603,8 @@ public class MediaView extends AbstractNode {
 
                 @Override
                 protected void invalidated() {
-                    if (PlatformUtil.isIOS()) {
-                        updateOverlayY();
-                    }
-                    else {
-                        NodeHelper.markDirty(MediaView.this, DirtyBits.NODE_GEOMETRY);
-                        NodeHelper.geomChanged(MediaView.this);
-                    }
+                    NodeHelper.markDirty(MediaView.this, DirtyBits.NODE_GEOMETRY);
+                    NodeHelper.geomChanged(MediaView.this);
                 }
 
                 @Override
@@ -698,13 +657,8 @@ public class MediaView extends AbstractNode {
 
                 @Override
                 protected void invalidated() {
-                    if (PlatformUtil.isIOS()) {
-                        updateOverlayWidth();
-                    }
-                    else {
-                        NodeHelper.markDirty(MediaView.this, DirtyBits.NODE_VIEWPORT);
-                        NodeHelper.geomChanged(MediaView.this);
-                    }
+                    NodeHelper.markDirty(MediaView.this, DirtyBits.NODE_VIEWPORT);
+                    NodeHelper.geomChanged(MediaView.this);
                 }
 
                 @Override
@@ -757,13 +711,8 @@ public class MediaView extends AbstractNode {
 
                 @Override
                 protected void invalidated() {
-                    if (PlatformUtil.isIOS()) {
-                        updateOverlayHeight();
-                    }
-                    else {
-                        NodeHelper.markDirty(MediaView.this, DirtyBits.NODE_VIEWPORT);
-                        NodeHelper.geomChanged(MediaView.this);
-                    }
+                    NodeHelper.markDirty(MediaView.this, DirtyBits.NODE_VIEWPORT);
+                    NodeHelper.geomChanged(MediaView.this);
                 }
 
                 @Override

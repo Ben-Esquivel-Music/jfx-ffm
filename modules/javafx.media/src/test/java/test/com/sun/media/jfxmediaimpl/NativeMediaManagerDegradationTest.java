@@ -25,6 +25,7 @@
 
 package test.com.sun.media.jfxmediaimpl;
 
+import com.sun.media.jfxmediaimpl.JfxMediaNative;
 import com.sun.media.jfxmediaimpl.NativeMediaManager;
 import java.io.File;
 import java.io.IOException;
@@ -57,10 +58,11 @@ import static org.junit.jupiter.api.Assumptions.assumeTrue;
  * The FFM facade binds and version-checks the library eagerly, which moves the same failure into the
  * constructor; these tests pin the behaviour that has to come out of it either way.
  * <p>
- * Both run in a JVM of their own: the facade's library, its singleton and the platform list are per class
- * loader, and this JVM already has a working {@code jfxmedia}, which cannot be unloaded. The child runs
- * everything from the class path (no module path), so it needs no {@code --add-exports}, and its
- * {@code java.library.path} is a directory this test controls.
+ * All three run in a JVM of their own: the facade's library, its singleton and the platform list are per
+ * class loader, and this JVM already has a working {@code jfxmedia}, which cannot be unloaded. The child
+ * runs everything from the class path (no module path), so it needs no {@code --add-exports}, and its
+ * {@code java.library.path} is either a directory this test controls or, for the denied-access case, this
+ * JVM's own.
  */
 public class NativeMediaManagerDegradationTest {
 
@@ -104,6 +106,48 @@ public class NativeMediaManagerDegradationTest {
     }
 
     /**
+     * The third door into the same wreckage, and the one the review found: the library is exactly where
+     * it always is and loads, and the only thing missing is the native-access grant.
+     * {@code System::load}, {@code Linker::upcallStub} and {@code Linker::downcallHandle} are all
+     * restricted methods, so a JVM run with {@code --illegal-native-access=deny} and no grant for this
+     * code refuses them with an {@link IllegalCallerException} - a {@code RuntimeException}, which
+     * neither {@code JfxMediaNative}'s {@code catch (UnsatisfiedLinkError)} nor anything above it used to
+     * catch. Applications that grant only {@code javafx.graphics} are common enough that this is not a
+     * hypothetical; this repository's own {@code apps/samples/RichTextAreaDemo} is one.
+     * <p>
+     * Which restricted call is refused first differs between the child and a modular run: on the class
+     * path the loader and the facade are both unnamed, so the library load goes first, while a modular
+     * JVM that grants javafx.graphics alone loads the library and then refuses the facade's upcall stubs.
+     * The requirement is the same either way - the class initializer records the refusal as an
+     * {@link UnsatisfiedLinkError} and does not throw - so either door proves it.
+     */
+    @Test
+    void mediaDegradesWhenNativeAccessIsDenied(@TempDir Path dir) throws Exception {
+        assumeTrue(mediaLibraryIsUsable(), "jfxmedia does not load in this JVM");
+
+        String output = runProbe(System.getProperty("java.library.path", ""),
+                dir.resolve("denied-output.txt"), "--illegal-native-access=deny");
+
+        assertDegradedGracefully(output);
+        assertTrue(output.contains("was not granted native access"),
+                () -> "the failure should name the missing grant, not just the symptom:\n" + output);
+    }
+
+    /**
+     * Whether this JVM's own {@code java.library.path} - the one the child is handed - carries a
+     * {@code jfxmedia} that loads. The denied-access case needs the grant to be the only thing missing,
+     * so a build without the media natives skips it rather than failing on the wrong cause.
+     */
+    private static boolean mediaLibraryIsUsable() {
+        try {
+            JfxMediaNative.loadLibraries();
+            return true;
+        } catch (UnsatisfiedLinkError | RuntimeException e) {
+            return false;
+        }
+    }
+
+    /**
      * The whole point: the singleton still answers, the content types and protocols still come back, and
      * the failure arrives as the {@code MediaException} the media stack is written around.
      */
@@ -126,34 +170,45 @@ public class NativeMediaManagerDegradationTest {
     }
 
     /**
-     * Runs {@link MediaWithoutNativesProbe} in a child JVM whose {@code java.library.path} is exactly
-     * {@code libraries}, and returns everything it printed on either stream.
+     * Runs the probe against a directory this test built, whose whole content is the child's
+     * {@code java.library.path}, and logs beside it - never inside it, because that directory has to stay
+     * exactly as the caller set it up.
      * <p>
      * The child gets {@code --enable-native-access=ALL-UNNAMED} because it loads javafx.media from its
      * class path, where the module is unnamed: that is how the child says "javafx.media has native
      * access", the same grant this build makes with {@code --enable-native-access=javafx.media}, and not
      * a widening of it. Nothing in the test code itself calls a restricted method.
+     */
+    private static String runProbe(Path libraries) throws IOException, InterruptedException {
+        return runProbe(libraries.toString(),
+                libraries.resolveSibling(libraries.getFileName() + "-output.txt"),
+                "--enable-native-access=ALL-UNNAMED");
+    }
+
+    /**
+     * Runs {@link MediaWithoutNativesProbe} in a child JVM whose {@code java.library.path} is exactly
+     * {@code libraryPath} and which is started with {@code jvmOptions}, and returns everything it printed
+     * on either stream. The native-access grant is one of those options rather than a fixture of this
+     * method: leaving it out is itself one of the failures under test.
      * <p>
-     * Its output goes to a file and the timed {@link Process#waitFor(long, TimeUnit)} happens before
+     * Its output goes to {@code log} and the timed {@link Process#waitFor(long, TimeUnit)} happens before
      * that file is read. Reading the child's pipe instead would block until the child closed its end,
      * which a hung child never does, so {@link #TIMEOUT_SECONDS} would never be reached and this
      * regression probe would hang the run rather than fail it; a file also cannot fill up and block the
      * child mid-write, and it keeps whatever the child had printed when it had to be killed, so a
-     * timeout is still diagnosable. The file is a sibling of {@code libraries}, never inside it: that
-     * directory is the child's whole {@code java.library.path} and has to stay exactly as the caller
-     * set it up.
+     * timeout is still diagnosable.
      */
-    private static String runProbe(Path libraries) throws IOException, InterruptedException {
+    private static String runProbe(String libraryPath, Path log, String... jvmOptions)
+            throws IOException, InterruptedException {
         List<String> command = new ArrayList<>();
         command.add(Path.of(System.getProperty("java.home"), "bin", "java").toString());
         command.add("-classpath");
         command.add(childClassPath());
-        command.add("-Djava.library.path=" + libraries);
+        command.add("-Djava.library.path=" + libraryPath);
         command.add("-Djfxmedia.loglevel=error");
-        command.add("--enable-native-access=ALL-UNNAMED");
+        command.addAll(List.of(jvmOptions));
         command.add(MediaWithoutNativesProbe.class.getName());
 
-        Path log = libraries.resolveSibling(libraries.getFileName() + "-output.txt");
         Process child = new ProcessBuilder(command)
                 .redirectErrorStream(true)
                 .redirectOutput(log.toFile())

@@ -89,6 +89,25 @@ int32_t jfxm_event_player_state(int32_t pipeline_state)
     return FfiMapPipelineStateToJavaEvent(pipeline_state);
 }
 
+int32_t jfxm_audio_track_channel(int32_t channel)
+{
+    // Reads the very constants CFfiPlayerEventDispatcher::SendAudioTrackEvent ORs into the mask.
+    return FfiAudioTrackChannel(channel);
+}
+
+int32_t jfxm_log_level(int32_t level)
+{
+    // The LOGGER_* macros of jni/Logger.h, which are what CLogger::logMsg filters on.
+    switch (level) {
+    case 0:  return LOGGER_DEBUG;
+    case 1:  return LOGGER_INFO;
+    case 2:  return LOGGER_WARNING;
+    case 3:  return LOGGER_ERROR;
+    case 4:  return LOGGER_OFF;
+    default: return -1;
+    }
+}
+
 int32_t jfxm_offsetof_frame_info(int32_t field)
 {
     switch (field) {
@@ -220,9 +239,10 @@ static int32_t InitGstMedia(const char* content_type, const char* location, int6
 
     // Load any additional streams if needed. Java evaluated HLS_PROP_HAS_AUDIO_EXT_STREAM on the
     // main holder and passes the audio table only when it was set (contract section 7).
+    CFfiStreamCallbacks* audioStreamCallbacks = NULL;
     if (NULL != audio_cb)
     {
-        CFfiStreamCallbacks* audioStreamCallbacks = new (nothrow) CFfiStreamCallbacks(audio_cb, audio_user);
+        audioStreamCallbacks = new (nothrow) CFfiStreamCallbacks(audio_cb, audio_user);
         if (NULL == audioStreamCallbacks)
         {
             delete callbacks;
@@ -249,7 +269,8 @@ static int32_t InitGstMedia(const char* content_type, const char* location, int6
         }
     }
 
-    // Free locator
+    // Free locator. CLocatorStream has no destructor and only stores the two adapter pointers, so
+    // this does not touch them.
     if (locator != NULL)
         delete locator;
 
@@ -258,6 +279,20 @@ static int32_t InitGstMedia(const char* content_type, const char* location, int6
     {
         if (NULL != pMedia)
             delete pMedia;
+
+        // Ownership of the adapters passes to the pipeline inside
+        // CGstPipelineFactory::CreateSourceElement, which hands each one to the javasource element
+        // as the user data of its "close-connection" signal; CGstPipelineFactory::SourceCloseConnection
+        // is what deletes it, and javasource only emits that signal on a READY->NULL state change.
+        // Nothing reached from CreatePlayer takes an element above GST_STATE_NULL - the first state
+        // change is in CGst*Pipeline::Init(), which jfxm_player_init calls much later - so on every
+        // failing exit the adapters are still ours and deleting them here cannot double free.
+        // Skipping this would leave them holding upcall-stub addresses that
+        // GSTMedia.createNativeMedia frees in its finally block, and would make the "nothing is
+        // retained by C" promise of jfxmedia_api.h false. close_connection is deliberately not
+        // invoked: the Java side closes the connection holders itself on this path.
+        delete audioStreamCallbacks;
+        delete callbacks;
     }
 
     return (int32_t)uErrCode;

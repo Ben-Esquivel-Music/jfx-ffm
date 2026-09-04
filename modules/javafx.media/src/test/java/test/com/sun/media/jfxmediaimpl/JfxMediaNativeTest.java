@@ -33,6 +33,7 @@ import com.sun.media.jfxmedia.effects.AudioSpectrum;
 import com.sun.media.jfxmedia.locator.ConnectionHolder;
 import com.sun.media.jfxmedia.locator.Locator;
 import com.sun.media.jfxmedia.logging.Logger;
+import com.sun.media.jfxmedia.track.AudioTrack;
 import com.sun.media.jfxmediaimpl.JfxMediaNative;
 import com.sun.media.jfxmediaimpl.NativeMedia;
 import com.sun.media.jfxmediaimpl.NativeMediaPlayer;
@@ -96,7 +97,7 @@ public class JfxMediaNativeTest {
     private static final int[] FRAME_INFO_OFFSETS = { 0, 8, 12, 16, 20, 24, 28, 32, 36, 40, 56, 88 };
 
     /** Every function {@code jfxmedia_api.h} exports, all of which the facade binds. */
-    private static final int BOUND_SYMBOL_COUNT = 54;
+    private static final int BOUND_SYMBOL_COUNT = 56;
 
     private static final int ERROR_NONE = MediaError.ERROR_NONE.code();
     private static final int ERROR_MEDIA_NULL = MediaError.ERROR_MEDIA_NULL.code();
@@ -186,7 +187,7 @@ public class JfxMediaNativeTest {
 
     @Test
     void abiVersionMatches() {
-        assertEquals(1, JfxMediaNative.JFXM_ABI_VERSION);
+        assertEquals(2, JfxMediaNative.JFXM_ABI_VERSION);
         assertEquals(JfxMediaNative.JFXM_ABI_VERSION, JfxMediaNative.abiVersion());
     }
 
@@ -236,19 +237,58 @@ public class JfxMediaNativeTest {
         assertEquals(-1, JfxMediaNative.eventPlayerState(-1));
     }
 
-    /**
-     * The {@code eventPlayer*} constants in {@code CPipeline::PlayerState} order, read reflectively
-     * rather than named in code: they are compile-time constants, so {@code javac} would fold this
-     * class's copy of them in and a later change to {@code NativeMediaPlayer} would not reach the
-     * comparison until something happened to recompile the tests.
-     */
+    /** The {@code eventPlayer*} constants in {@code CPipeline::PlayerState} order. */
     private static int[] eventPlayerConstants() throws ReflectiveOperationException {
         String[] names = { "eventPlayerUnknown", "eventPlayerReady", "eventPlayerPlaying",
             "eventPlayerPaused", "eventPlayerStopped", "eventPlayerStalled", "eventPlayerFinished",
             "eventPlayerError" };
+        return constantsOf(NativeMediaPlayer.class, names);
+    }
+
+    /**
+     * The same guard for {@code AudioTrack}'s channel mask bits, which {@code FfiPlayerEventDispatcher}
+     * carries its own copy of and ORs together for every audio track it reports. A renumbering on either
+     * side would mislabel every track's channels with nothing failing, so C is compared against the
+     * constants themselves.
+     */
+    @Test
+    void audioTrackChannelMappingMatchesTheTrackConstants() throws ReflectiveOperationException {
+        int[] expected = constantsOf(AudioTrack.class, new String[] { "UNKNOWN", "FRONT_LEFT",
+            "FRONT_RIGHT", "FRONT_CENTER", "REAR_LEFT", "REAR_RIGHT", "REAR_CENTER" });
+        for (int channel = 0; channel < expected.length; channel++) {
+            assertEquals(expected[channel], JfxMediaNative.audioTrackChannel(channel),
+                    "channel " + channel);
+        }
+        assertEquals(-1, JfxMediaNative.audioTrackChannel(expected.length));
+        assertEquals(-1, JfxMediaNative.audioTrackChannel(-1));
+    }
+
+    /**
+     * And for {@code Logger}'s levels, which {@code jni/Logger.h} carries its own copy of and stamps on
+     * every message the native log sink delivers. A renumbering on either side would shift every native
+     * log level - messages would still arrive, at the wrong severity - so C is compared against the
+     * constants themselves.
+     */
+    @Test
+    void logLevelMappingMatchesTheLoggerConstants() throws ReflectiveOperationException {
+        int[] expected = constantsOf(Logger.class,
+                new String[] { "DEBUG", "INFO", "WARNING", "ERROR", "OFF" });
+        for (int level = 0; level < expected.length; level++) {
+            assertEquals(expected[level], JfxMediaNative.logLevel(level), "level " + level);
+        }
+        assertEquals(-1, JfxMediaNative.logLevel(expected.length));
+        assertEquals(-1, JfxMediaNative.logLevel(-1));
+    }
+
+    /**
+     * Reads {@code int} constants reflectively rather than naming them in code: they are compile-time
+     * constants, so {@code javac} would fold this class's copy of them in and a later change to the
+     * declaring class would not reach the comparison until something happened to recompile the tests.
+     */
+    private static int[] constantsOf(Class<?> owner, String[] names) throws ReflectiveOperationException {
         int[] values = new int[names.length];
         for (int i = 0; i < names.length; i++) {
-            values[i] = NativeMediaPlayer.class.getField(names[i]).getInt(null);
+            values[i] = owner.getField(names[i]).getInt(null);
         }
         return values;
     }

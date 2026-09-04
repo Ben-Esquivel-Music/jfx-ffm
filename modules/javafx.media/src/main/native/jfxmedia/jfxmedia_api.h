@@ -56,7 +56,13 @@ extern "C" {
  * ABI version guard and layout checks (contract section 5)
  * ---------------------------------------------------------------------------------------------- */
 
-#define JFXM_ABI_VERSION 1u
+/*
+ * 2: added jfxm_audio_track_channel and jfxm_log_level. Adding a symbol bumps the version even
+ * though older callers would not miss it, because the binding works the other way round: Java
+ * resolves every symbol of this header eagerly, so a library built before those two exist fails
+ * with "missing native symbol" instead of the clean mismatch jfxm_abi_version is here to report.
+ */
+#define JFXM_ABI_VERSION 2u
 
 /* Field indices accepted by jfxm_offsetof_frame_info(); they follow JfxmFrameInfo's field order. */
 enum {
@@ -90,6 +96,22 @@ JFXM_EXPORT int32_t  jfxm_offsetof_frame_info(int32_t field);
  * that the generated JNI headers are gone. Pure function, any thread.
  */
 JFXM_EXPORT int32_t  jfxm_event_player_state(int32_t pipeline_state);
+/*
+ * The com.sun.media.jfxmedia.track.AudioTrack channel bit with the given index (0 UNKNOWN,
+ * 1 FRONT_LEFT, 2 FRONT_RIGHT, 3 FRONT_CENTER, 4 REAR_LEFT, 5 REAR_RIGHT, 6 REAR_CENTER); -1 for
+ * any other index. These are the constants the dispatcher ORs into the mask of the audio_track
+ * slot, exported for the same reason as jfxm_event_player_state: the generated JNI header
+ * com_sun_media_jfxmedia_track_AudioTrack.h no longer proves the C copy still matches the Java
+ * original, so a binding test does. Pure function, any thread.
+ */
+JFXM_EXPORT int32_t  jfxm_audio_track_channel(int32_t channel);
+/*
+ * The com.sun.media.jfxmedia.logging.Logger level with the given index (0 DEBUG, 1 INFO,
+ * 2 WARNING, 3 ERROR, 4 OFF); -1 for any other index. These are the levels this library filters
+ * on and reports through JfxmLogFn, so the same drift guard applies now that
+ * com_sun_media_jfxmedia_logging_Logger.h is gone. Pure function, any thread.
+ */
+JFXM_EXPORT int32_t  jfxm_log_level(int32_t level);
 
 /* ------------------------------------------------------------------------------------------------
  * Library initialisation and logging (contract section 6)
@@ -149,7 +171,9 @@ JFXM_EXPORT void    jfxm_log_set_level(int32_t level);
  *   close_connection: the thread driving READY->NULL, under the element lock (GST); the dispose
  *       caller under the player lock (AVF). It is the last call; C deletes its adapter right after.
  * The table and user must stay valid until close_connection has run AND jfxm_media_dispose has
- * returned. Never use Linker.Option.critical for anything that reaches these slots.
+ * returned. The one exception is a failed jfxm_media_create: close_connection never runs there, C
+ * destroys the adapter before returning, and the table may be released as soon as it does. Never
+ * use Linker.Option.critical for anything that reaches these slots.
  */
 typedef struct JfxmStreamCallbacks {
     int32_t (*need_buffer)(void* user);                                /* 1 => wrap in (hls)progressbuffer */
@@ -226,10 +250,12 @@ enum { JFXM_BACKEND_GST = 0, JFXM_BACKEND_AVF = 1 };
  *              ? locator.getAudioStreamConnectionHolder(holder) : null;   (GST only)
  * Tables are copied by value; the function pointers and user values must stay valid until
  * close_connection has run AND jfxm_media_dispose has returned. cb may be NULL (AVF file/http).
- * On any non-zero return *out_media is NULL and nothing is retained by C. Called on the Java
- * thread constructing the media; the GST backend invokes need_buffer/is_seekable/is_random_access/
- * property synchronously from inside this call. backend = JFXM_BACKEND_AVF on a non-Apple platform
- * returns ERROR_NOT_IMPLEMENTED.
+ * On any non-zero return *out_media is NULL and nothing is retained by C: the stream adapters
+ * built from the tables are destroyed before this function returns, and close_connection is NOT
+ * called on that path, so the caller both closes its own connection holders and is free to release
+ * the tables as soon as the call returns. Called on the Java thread constructing the media; the GST
+ * backend invokes need_buffer/is_seekable/is_random_access/property synchronously from inside this
+ * call. backend = JFXM_BACKEND_AVF on a non-Apple platform returns ERROR_NOT_IMPLEMENTED.
  */
 JFXM_EXPORT int32_t jfxm_media_create(int32_t backend,
                                       const char* content_type, const char* location, int64_t size_hint,

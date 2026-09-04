@@ -28,6 +28,17 @@
 
 #include <Common/ProductFlags.h>
 
+// Level definitions. These mirror the constants of com.sun.media.jfxmedia.logging.Logger, which
+// the generated JNI header com_sun_media_jfxmedia_logging_Logger.h used to supply; jfxm_log_level
+// exports them so a Java binding test can prove the copy still matches. Defined outside the
+// ENABLE_LOGGING guard because that guard controls whether messages are emitted, not what the
+// levels of the Java API are - jfxmedia_api.cpp needs them either way.
+#define LOGGER_OFF     2147483647
+#define LOGGER_ERROR   4
+#define LOGGER_WARNING 3
+#define LOGGER_INFO    2
+#define LOGGER_DEBUG   1
+
 #if ENABLE_LOGGING
 #include <jfxmedia_api.h>
 
@@ -36,14 +47,6 @@
 #include <string>
 
 using namespace std;
-
-// Level definitions. These mirror the constants of com.sun.media.jfxmedia.logging.Logger, which
-// the generated JNI header com_sun_media_jfxmedia_logging_Logger.h used to supply.
-#define LOGGER_OFF     2147483647
-#define LOGGER_ERROR   4
-#define LOGGER_WARNING 3
-#define LOGGER_INFO    2
-#define LOGGER_DEBUG   1
 
 // Macros for logging
 // These macros should be used instead of calling CLogger directly
@@ -77,7 +80,7 @@ public:
     }
 
     inline void logWarningMsg(const char *msg) {
-        logMsg(LOGGER_DEBUG, msg);
+        logMsg(LOGGER_WARNING, msg);
     }
 
     inline void logDebugMsg(const char *msg) {
@@ -93,7 +96,7 @@ public:
     }
 
     inline void logWarningMsg(const char *srcClass, const char *srcMethod, const char *msg) {
-        logMsg(LOGGER_DEBUG, srcClass, srcMethod, msg);
+        logMsg(LOGGER_WARNING, srcClass, srcMethod, msg);
     }
 
     inline void logDebugMsg(const char *srcClass, const char *srcMethod, const char *msg) {
@@ -122,6 +125,19 @@ public:
     static uint32_t CreateInstance(CLogger **ppLogger);
 
 private:
+    /*
+     * Reads m_currentLevel and copies m_sinkFn/m_sinkUser under the lock Logger.cpp owns, then
+     * releases it. Returns true, with *pFn and *ppUser set, only when the message passes the level
+     * filter and a sink is installed; otherwise *pFn is NULL and the caller drops the message.
+     * Callers must invoke the sink through the copy AFTER this returns, never with the lock held:
+     * that is what makes the pointer that was tested the pointer that is called, keeps (fn, user)
+     * a matched pair, and keeps a sink that logs re-entrantly from deadlocking.
+     */
+    bool copySink(int level, JfxmLogFn *pFn, void **ppUser);
+
+private:
+    // Written by setLevel and initSink from the Java caller thread, read by every native thread
+    // that logs; all accesses go through the lock in Logger.cpp.
     int m_currentLevel;
     // CreateInstance value-initialises the object, so these start out NULL.
     JfxmLogFn m_sinkFn;

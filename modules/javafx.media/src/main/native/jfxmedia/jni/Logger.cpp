@@ -26,14 +26,70 @@
 #include "Logger.h"
 
 #include <Common/VSMemory.h>
+#include <Utils/JfxCriticalSection.h>
 
 #if ENABLE_LOGGING
 
 CLogger::LSingleton CLogger::s_Singleton;
 
+/*
+ * jfxm_log_init and jfxm_log_set_level write the sink and the level from the Java caller thread
+ * while any native thread - the GLib main loop, a GStreamer streaming thread, an AVFoundation
+ * queue - is inside logMsg reading them. Without this lock logMsg tested m_sinkFn and then loaded
+ * it a second time to call it, so a jfxm_log_init(NULL, NULL) landing in between dereferenced
+ * NULL, and a sink swap could pair one sink's function pointer with the other's user value.
+ *
+ * One process-wide lock rather than a member, because Singleton<CLogger>::GetInstance is itself
+ * unsynchronised: a member lock would be reached through the very pointer whose publication is
+ * racy. It is created during the dynamic initialisation of this translation unit, which the
+ * dynamic loader runs before any exported function of the library can be called. Until then, and
+ * if the allocation fails, it stays NULL and access is simply unsynchronised - the behaviour this
+ * code had before - rather than a crash.
+ */
+static CJfxCriticalSection *s_pLoggerLock = CJfxCriticalSection::Create();
+
+static inline void EnterLoggerLock()
+{
+    if (NULL != s_pLoggerLock) {
+        s_pLoggerLock->Enter();
+    }
+}
+
+static inline void ExitLoggerLock()
+{
+    if (NULL != s_pLoggerLock) {
+        s_pLoggerLock->Exit();
+    }
+}
+
+bool CLogger::copySink(int level, JfxmLogFn *pFn, void **ppUser)
+{
+    JfxmLogFn sinkFn = NULL;
+    void     *sinkUser = NULL;
+    bool      bEnabled;
+
+    EnterLoggerLock();
+    bEnabled = (level >= m_currentLevel);
+    if (bEnabled) {
+        sinkFn = m_sinkFn;
+        sinkUser = m_sinkUser;
+    }
+    ExitLoggerLock();
+
+    *pFn = sinkFn;
+    *ppUser = sinkUser;
+    return bEnabled && NULL != sinkFn;
+}
+
 bool CLogger::canLog(int level)
 {
-    if (level < m_currentLevel)
+    int currentLevel;
+
+    EnterLoggerLock();
+    currentLevel = m_currentLevel;
+    ExitLoggerLock();
+
+    if (level < currentLevel)
     {
         return false;
     }
@@ -45,47 +101,52 @@ bool CLogger::canLog(int level)
 
 void CLogger::logMsg(int level, const char *msg)
 {
-    if (level < m_currentLevel) {
+    JfxmLogFn sinkFn = NULL;
+    void     *sinkUser = NULL;
+
+    // The sink installed by jfxm_log_init; without one there is nowhere to log to. It is called
+    // through the copy, outside the lock, so it may log re-entrantly and may block.
+    if (!copySink(level, &sinkFn, &sinkUser)) {
         return;
     }
 
-    // The sink installed by jfxm_log_init; without one there is nowhere to log to.
-    if (NULL != m_sinkFn) {
-        if (NULL != msg) {
-            m_sinkFn(m_sinkUser, (int32_t)level, msg);
-        }
+    if (NULL != msg) {
+        sinkFn(sinkUser, (int32_t)level, msg);
     }
 }
 
 void CLogger::logMsg(int level, const char *sourceClass, const char *sourceMethod, const char *msg)
 {
-    if (level < m_currentLevel) {
+    JfxmLogFn sinkFn = NULL;
+    void     *sinkUser = NULL;
+
+    if (!copySink(level, &sinkFn, &sinkUser)) {
         return;
     }
 
     // The sink has a single message slot, so fold the source into the text. No caller uses this
     // overload today.
-    if (NULL != m_sinkFn) {
-        string formatted;
-        if (NULL != sourceClass) {
-            formatted += sourceClass;
-        }
-        if (NULL != sourceMethod) {
-            formatted += ".";
-            formatted += sourceMethod;
-        }
-        if (NULL != msg) {
-            formatted += ": ";
-            formatted += msg;
-        }
-        m_sinkFn(m_sinkUser, (int32_t)level, formatted.c_str());
+    string formatted;
+    if (NULL != sourceClass) {
+        formatted += sourceClass;
     }
+    if (NULL != sourceMethod) {
+        formatted += ".";
+        formatted += sourceMethod;
+    }
+    if (NULL != msg) {
+        formatted += ": ";
+        formatted += msg;
+    }
+    sinkFn(sinkUser, (int32_t)level, formatted.c_str());
 }
 
 // Do NOT use this function. Instead use setLevel() from Java layer.
 void CLogger::setLevel(int level)
 {
+    EnterLoggerLock();
     m_currentLevel = level;
+    ExitLoggerLock();
 }
 
 bool CLogger::initSink(JfxmLogFn fn, void* user)
@@ -96,8 +157,10 @@ bool CLogger::initSink(JfxmLogFn fn, void* user)
         return false;
     }
 
+    EnterLoggerLock();
     pLogger->m_sinkFn = fn;
     pLogger->m_sinkUser = user;
+    ExitLoggerLock();
     return true;
 }
 

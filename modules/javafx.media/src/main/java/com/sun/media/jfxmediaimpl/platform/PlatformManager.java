@@ -87,7 +87,10 @@ public final class PlatformManager {
             }
         }
 
-        if (!PlatformUtil.isIOS() && isPlatformEnabled("GSTPlatform")) {
+        // The !isIOS() half of this test paired with an IOSPlatform registration that this fork does
+        // not have; on its own all it could do is leave iOS with JavaPlatform, i.e. ID3 metadata and no
+        // playback at all.
+        if (isPlatformEnabled("GSTPlatform")) {
             platty = getPlatformInstance(
                     "com.sun.media.jfxmediaimpl.platform.gstreamer.GSTPlatform");
             if (null != platty) {

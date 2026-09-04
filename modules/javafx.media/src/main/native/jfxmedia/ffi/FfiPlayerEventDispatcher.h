@@ -45,6 +45,19 @@ using namespace std;
 int32_t FfiMapPipelineStateToJavaEvent(int32_t pipelineState);
 
 /*
+ * The com.sun.media.jfxmedia.track.AudioTrack channel bit this build copies, selected by index:
+ * 0 UNKNOWN, 1 FRONT_LEFT, 2 FRONT_RIGHT, 3 FRONT_CENTER, 4 REAR_LEFT, 5 REAR_RIGHT,
+ * 6 REAR_CENTER; -1 for any other index. It reads the same file-static constants
+ * SendAudioTrackEvent ORs into the Java channel mask, so the copies cannot drift unnoticed:
+ * jfxm_audio_track_channel (jfxmedia_api.h) exports it for the Java binding test, which is the
+ * only guard left now that the generated JNI header com_sun_media_jfxmedia_track_AudioTrack.h is
+ * gone. An accessor rather than a move of the constants into this header, so the dispatcher stays
+ * the single definition site and nothing else can start using them by including it. Pure function,
+ * any thread.
+ */
+int32_t FfiAudioTrackChannel(int32_t index);
+
+/*
  * CPlayerEventDispatcher over a JfxmPlayerCallbacks table (FFM-ABI-CONTRACT.md section 10).
  * Replaces CJavaPlayerEventDispatcher with the same semantics: the pipeline state is mapped to the
  * NativeMediaPlayer.eventPlayer* constants, the audio channel mask is remapped to the Java

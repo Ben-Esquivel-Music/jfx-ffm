@@ -35,8 +35,18 @@ import java.io.IOException;
  * {@code needBuffer}, {@code isSeekable}, {@code isRandomAccess}, {@code readBlock} and {@code property}
  * through {@code CallBooleanMethod}/{@code CallIntMethod}, which does not perform an access check. The
  * FFM upcall targets are ordinary Java code and do, so the five members are forwarded here instead of
- * being widened on {@link ConnectionHolder} itself: the holder's own API is unchanged and the extra
- * reach stays inside this package.
+ * being widened on {@link ConnectionHolder} itself.
+ * <p>
+ * That leaves {@link ConnectionHolder}'s own API untouched, but it does not confine the widening to this
+ * package: {@code module-info.java} carries {@code exports com.sun.media.jfxmedia.locator to javafx.web},
+ * so this class is reachable from javafx.web too, on a holder a live pipeline owns. That reach is
+ * accepted rather than designed around. javafx.web is first-party, is built from this repository, and
+ * uses exactly one type of this package - {@link Locator}, in
+ * {@code com.sun.javafx.webkit.prism.WCMediaPlayerImpl}. Containing it would mean moving
+ * {@link ConnectionHolder} and {@code HLSConnectionHolder} out of an exported package, which
+ * {@link Locator#createConnectionHolder()} and
+ * {@link Locator#getAudioStreamConnectionHolder(ConnectionHolder)} would then name in public signatures
+ * javafx.web cannot resolve.
  * <p>
  * Every method delegates with no added behaviour; the callers keep the return and exception semantics
  * of the C ABI (contract section 9).

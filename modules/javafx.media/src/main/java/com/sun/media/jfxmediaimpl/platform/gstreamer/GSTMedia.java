@@ -126,9 +126,22 @@ final class GSTMedia extends NativeMedia {
             }
 
             // Load any additional streams if needed. HLS_PROP_HAS_AUDIO_EXT_STREAM was asked through
-            // the stream callbacks by GstMedia.cpp, on this thread and at this point.
-            if (ConnectionHolderBridge.property(holder,
-                    ConnectionHolderBridge.HLS_PROP_HAS_AUDIO_EXT_STREAM, 0) != 0) {
+            // the stream callbacks by GstMedia.cpp, on this thread and at this point - and the adapter
+            // that answered it, CJavaInputStreamCallbacks::Property, ran CallIntMethod followed by
+            // clearException(). A throw from property() therefore became 0 and InitMedia went on to
+            // create the media with no external audio stream; letting it reach the enclosing catch and
+            // fail media creation is the drift, so the swallow is kept. ConnectionHolder.property
+            // declares no checked exception, so unchecked is all there is to catch.
+            int hasAudioExtStream;
+            try {
+                hasAudioExtStream = ConnectionHolderBridge.property(holder,
+                        ConnectionHolderBridge.HLS_PROP_HAS_AUDIO_EXT_STREAM, 0);
+            } catch (RuntimeException e) {
+                Logger.logMsg(Logger.WARNING, "GSTMedia: the external audio stream probe failed,"
+                        + " continuing without one: " + e);
+                hasAudioExtStream = 0;
+            }
+            if (hasAudioExtStream != 0) {
                 audioHolder = locator.getAudioStreamConnectionHolder(holder);
                 if (audioHolder == null) {
                     return rc;
@@ -203,11 +216,44 @@ final class GSTMedia extends NativeMedia {
 
         // Only now is it safe to free the upcall stubs and the registry entries.
         disposed = true;
-        releaseCallbacks();
+        finishDispose();
+    }
+
+    /**
+     * Frees the stubs and runs the registered actions, whatever any single step does.
+     * {@code Arena.close()} on the shared arena throws {@link IllegalStateException} while a native
+     * thread has not unwound from one of its stubs, and again when a second dispose races this one.
+     * Letting that escape would abort the rest of the teardown and leave
+     * {@code NativeMediaPlayer.dispose()} before it sets {@code isDisposed}, i.e. a player that is
+     * neither alive nor disposed, with its listeners un-cleared and its registry entry leaked. The JNI
+     * implementation had no way to fail here at all, so throwing is the drift: the failure is logged.
+     */
+    private void finishDispose() {
+        RuntimeException failure = null;
+        try {
+            releaseCallbacks();
+        } catch (RuntimeException e) {
+            failure = e;
+        }
         for (Runnable action : afterDispose) {
-            action.run();
+            try {
+                action.run();
+            } catch (RuntimeException e) {
+                if (failure == null) {
+                    failure = e;
+                } else {
+                    failure.addSuppressed(e);
+                }
+            }
         }
         afterDispose.clear();
+        if (failure != null) {
+            StringBuilder message = new StringBuilder("GSTMedia: dispose did not complete: ").append(failure);
+            for (Throwable suppressed : failure.getSuppressed()) {
+                message.append("; ").append(suppressed);
+            }
+            Logger.logMsg(Logger.ERROR, message.toString());
+        }
     }
 
     private void releaseCallbacks() {

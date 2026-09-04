@@ -185,8 +185,13 @@ final class NativeAudioSpectrum implements AudioSpectrum {
      * that <em>was</em> superseded by {@link #setBandCount(int)} is already unreachable from here, and
      * the facade drops its registry entry for the handover as it runs this action, so that one is
      * reclaimed as soon as C is done with it.
+     * <p>
+     * Static on purpose: a lambda over an instance method captures {@code this}, which would pin the
+     * whole spectrum - and through it its player - in the facade's {@code static} registry until C ran
+     * the release function, and for the life of the JVM if C never did. Over a static method the lambda
+     * captures {@code pair} alone, which is exactly what the registry entry has to keep alive.
      */
-    private void release(Bands pair) {
+    private static void release(Bands pair) {
         // Intentionally empty; see above. The pair stays readable until this spectrum is collected.
     }
 

@@ -51,10 +51,11 @@ the first media test tree (`FFM-TEST-PLAN.md`).
    iOS (`pom.xml` excludes `platform/ios/**` from every jar; no makefile compiles
    `jfxmedia/platform/ios`; `PlatformUtil.isIOS()` is false on every supported JDK). `NativeAudioClip`
    is implemented only by that iOS code, so on every desktop platform `AudioClipProvider` already
-   falls back to `NativeMediaAudioClip` after catching `UnsatisfiedLinkError`; deleting
-   `NativeAudioClip` and the `useNative` branch is behaviour-neutral (only a DEBUG log line
-   disappears). This is a decision recorded here because it removes 5 217 lines of ObjC and 40 of
-   the 117 natives without a compiler for them existing anywhere in the project.
+   fell back to `NativeMediaAudioClip` after catching `UnsatisfiedLinkError`; deleting
+   `NativeAudioClip` and the `useNative` branch was behaviour-neutral (only a DEBUG log line
+   disappeared). `AudioClipProvider` itself has since gone the same way - see section 12. This
+   is a decision recorded here because it removes 5 217 lines of ObjC and 40 of the 117 natives
+   without a compiler for them existing anywhere in the project.
 4. **Behaviour-neutral migration first; deletions and reimplementations separate.** The
    migration produces the same events, same error codes, same threads, same ownership. Dead code
    (listed in section 11) is deleted in its own change. No C is reimplemented in Java in the
@@ -155,17 +156,30 @@ ObjC locks, and `gst_element_set_state` can block on preroll.
 ## 5. ABI version guard and layout checks
 
 ```c
-#define JFXM_ABI_VERSION 1u
+#define JFXM_ABI_VERSION 2u
 JFXM_EXPORT uint32_t jfxm_abi_version(void);
 JFXM_EXPORT int32_t  jfxm_sizeof_player_callbacks(void);
 JFXM_EXPORT int32_t  jfxm_sizeof_stream_callbacks(void);
 JFXM_EXPORT int32_t  jfxm_sizeof_frame_info(void);
 JFXM_EXPORT int32_t  jfxm_offsetof_frame_info(int32_t field);   /* field index per section 8; -1 if out of range */
+/* Drift guards: the Java constant this library copies, by index; -1 if out of range. */
+JFXM_EXPORT int32_t  jfxm_event_player_state(int32_t pipeline_state);
+JFXM_EXPORT int32_t  jfxm_audio_track_channel(int32_t channel);
+JFXM_EXPORT int32_t  jfxm_log_level(int32_t level);
 ```
 
 `JfxMediaNative` checks `jfxm_abi_version()` right after the library loads and throws an
 `UnsatisfiedLinkError` naming expected and actual versions. The binding test compares the three
 `StructLayout.byteSize()` values and every `JfxmFrameInfo` field offset with the C side.
+
+Version history: 1 was the initial ABI; 2 added `jfxm_audio_track_channel` and `jfxm_log_level`.
+Adding a symbol bumps the version even though it takes nothing away, because `JfxMediaNative` binds
+every handle eagerly - a library built before those two fails on symbol resolution and reports a
+missing symbol instead of the version mismatch this guard exists to produce.
+
+The three drift guards exist because the generated JNI headers that used to keep the C copies of
+`NativeMediaPlayer.eventPlayer*`, `AudioTrack.*` and `Logger.*` in step with Java are gone. Each
+returns the library's own named constant, so the binding test fails if either side is renumbered.
 
 ## 6. Library loading and initialisation
 
@@ -431,7 +445,7 @@ permission to free the pair (section 4). On the AVF side the destructor can run 
 
 | Path | Reason |
 |---|---|
-| `jfxmedia/platform/ios/**` (28 files), `java/.../platform/ios/{IOSPlatform,IOSMedia,IOSMediaPlayer}.java`, `NativeAudioClip.java`, the `useNative` branch of `AudioClipProvider`, the `isIOS()` platform branch in `PlatformManager`, the `platform/ios/**` jar excludes in `pom.xml` | decision 3 |
+| `jfxmedia/platform/ios/**` (28 files), `java/.../platform/ios/{IOSPlatform,IOSMedia,IOSMediaPlayer}.java`, `NativeAudioClip.java`, `AudioClipProvider` in full (with `NativeAudioClip` gone its three methods were unconditional delegations, so `com.sun.media.jfxmedia.AudioClip` calls `NativeMediaAudioClip` directly and that class is now `public` within the module), the `isIOS()` platform branch in `PlatformManager`, the `platform/ios/**` jar excludes in `pom.xml` | decision 3 |
 | `jfxmedia/jni/**` entirely (after the flip): `JavaPlayerEventDispatcher`, `JavaInputStreamCallbacks`, `JavaBandsHolder`, `JavaMediaWarningListener`, `JniUtils`, `Logger.cpp` JNI half, `NativeVideoBuffer.cpp`, `NativeAudioEqualizer.cpp`, `NativeAudioSpectrum.cpp`, `NativeEqualizerBand.cpp`, `com_sun_media_jfxmedia_logging_Logger.cpp`, `com_sun_media_jfxmediaimpl_NativeVideoConverter.cpp` (never compiled, no Java class) | replaced by `jfxmedia_api.cpp`, `FfiPlayerEventDispatcher`, `FfiStreamCallbacks`, `FfiBandsHolder`; `CLogger` keeps its level filter and becomes the FFM sink caller |
 | `platform/gstreamer/GstJniUtils.cpp/.h` | zero callers |
 | `Utils/MediaWarningDispatcher.cpp/.h` | never instantiated |

@@ -50,6 +50,20 @@ static const int32_t JAVA_AUDIO_TRACK_REAR_LEFT    = 8;
 static const int32_t JAVA_AUDIO_TRACK_REAR_RIGHT   = 16;
 static const int32_t JAVA_AUDIO_TRACK_REAR_CENTER  = 32;
 
+int32_t FfiAudioTrackChannel(int32_t index)
+{
+    switch (index) {
+    case 0:  return JAVA_AUDIO_TRACK_UNKNOWN;
+    case 1:  return JAVA_AUDIO_TRACK_FRONT_LEFT;
+    case 2:  return JAVA_AUDIO_TRACK_FRONT_RIGHT;
+    case 3:  return JAVA_AUDIO_TRACK_FRONT_CENTER;
+    case 4:  return JAVA_AUDIO_TRACK_REAR_LEFT;
+    case 5:  return JAVA_AUDIO_TRACK_REAR_RIGHT;
+    case 6:  return JAVA_AUDIO_TRACK_REAR_CENTER;
+    default: return -1;
+    }
+}
+
 CFfiPlayerEventDispatcher::CFfiPlayerEventDispatcher(const JfxmPlayerCallbacks* pCallbacks, void* pUser)
     : m_pUser(pUser)
 {

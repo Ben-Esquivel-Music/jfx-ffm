@@ -78,8 +78,15 @@ import static java.lang.foreign.ValueLayout.JAVA_LONG;
  */
 public final class JfxMediaNative {
 
-    /** The {@code jfxm_*} ABI revision this class is written against ({@code JFXM_ABI_VERSION}). */
-    public static final int JFXM_ABI_VERSION = 1;
+    /**
+     * The {@code jfxm_*} ABI revision this class is written against ({@code JFXM_ABI_VERSION}).
+     * <p>
+     * Revision 2 added {@code jfxm_audio_track_channel} and {@code jfxm_log_level}. Adding a symbol is
+     * a breaking change here even though it takes nothing away: every handle is bound eagerly, so a
+     * library built before them fails on symbol resolution and reports "missing native symbol" instead
+     * of the version mismatch {@link #checkAbiVersion()} exists to produce.
+     */
+    public static final int JFXM_ABI_VERSION = 2;
 
     /** Backend selector of {@code jfxm_media_create}: the GStreamer pipeline. */
     public static final int JFXM_BACKEND_GST = 0;
@@ -223,13 +230,18 @@ public final class JfxMediaNative {
     private static final Map<Long, Object> REGISTRY = new ConcurrentHashMap<>();
     private static final AtomicLong NEXT_ID = new AtomicLong(1L);
 
-    /** The one log sink stub of the process, in the global arena (contract section 4). */
+    /**
+     * The one log sink stub of the process, in the global arena (contract section 4), or
+     * {@link MemorySegment#NULL} when the initializer below could not build it. Nothing reads it in that
+     * case: the downcall that takes it fails first, with {@link #initFailure}.
+     */
     private static final MemorySegment LOG_SINK;
 
     /**
      * The one {@code JfxmReleaseFn} stub of the process, also in the global arena: every
      * {@code jfxm_spectrum_set_bands} handover shares it because only the {@code user} value differs,
-     * which keeps a stub from ever having to outlive the arena that owns it.
+     * which keeps a stub from ever having to outlive the arena that owns it. {@link MemorySegment#NULL}
+     * on the same failure path as {@link #LOG_SINK}.
      */
     private static final MemorySegment RELEASE_SINK;
 
@@ -239,10 +251,10 @@ public final class JfxMediaNative {
     private static boolean librariesLoaded;
 
     /**
-     * The failure that loading the library, resolving a symbol or checking the ABI version ended in, or
-     * {@code null}. It is raised by {@link #loadLibraries()} and by every downcall bound after it
-     * happened, so the tenth caller sees the same message as the first rather than a bare
-     * {@code NoClassDefFoundError}.
+     * The failure that loading the library, resolving a symbol, being denied native access or checking
+     * the ABI version ended in, or {@code null}. It is raised by {@link #loadLibraries()} and by every
+     * downcall bound after it happened, so the tenth caller sees the same message as the first rather
+     * than a bare {@code NoClassDefFoundError}.
      */
     private static UnsatisfiedLinkError initFailure;
 
@@ -250,15 +262,32 @@ public final class JfxMediaNative {
 
     static {
         SymbolLookup lookup = null;
+        MemorySegment logSink = MemorySegment.NULL;
+        MemorySegment releaseSink = MemorySegment.NULL;
         try {
             loadNativeLibraries();
             lookup = SymbolLookup.loaderLookup();
+            // The two stubs are built inside the guard, not after it: a library that failed to load has
+            // nothing to call them, and the degradation path must not trip over building them. Doing it
+            // here also settles the restricted-method question before the first bind() below, because
+            // Linker::upcallStub and Linker::downcallHandle are gated by the same grant.
+            logSink = upcallStub(upcallTarget("onLog", LOG_FD), LOG_FD, Arena.global());
+            releaseSink = upcallStub(upcallTarget("onRelease", RELEASE_FD), RELEASE_FD, Arena.global());
         } catch (UnsatisfiedLinkError e) {
             initFailure = e;
+        } catch (RuntimeException e) {
+            // Nothing may escape here. NativeMediaManager's constructor runs inside its own singleton's
+            // class initializer, so an escape turns every getDefaultInstance() into a
+            // NoClassDefFoundError instead of the "media is unavailable" degradation the stack is
+            // written for. The one that actually happens is IllegalCallerException, from a restricted
+            // call (Linker::upcallStub here, System::load inside NativeLibLoader) made by a module that
+            // --enable-native-access does not name; anything else is recorded the same way rather than
+            // left to take the class down.
+            initFailure = initializationFailed(e);
         }
         LOOKUP = lookup;
-        LOG_SINK = upcallStub(upcallTarget("onLog", LOG_FD), LOG_FD, Arena.global());
-        RELEASE_SINK = upcallStub(upcallTarget("onRelease", RELEASE_FD), RELEASE_FD, Arena.global());
+        LOG_SINK = logSink;
+        RELEASE_SINK = releaseSink;
     }
 
     /* Binding order matters: the ABI guard runs before any other symbol is bound. */
@@ -278,6 +307,10 @@ public final class JfxMediaNative {
     private static final MethodHandle JFXM_OFFSETOF_FRAME_INFO = bind("jfxm_offsetof_frame_info",
             FunctionDescriptor.of(JAVA_INT, JAVA_INT));
     private static final MethodHandle JFXM_EVENT_PLAYER_STATE = bind("jfxm_event_player_state",
+            FunctionDescriptor.of(JAVA_INT, JAVA_INT));
+    private static final MethodHandle JFXM_AUDIO_TRACK_CHANNEL = bind("jfxm_audio_track_channel",
+            FunctionDescriptor.of(JAVA_INT, JAVA_INT));
+    private static final MethodHandle JFXM_LOG_LEVEL = bind("jfxm_log_level",
             FunctionDescriptor.of(JAVA_INT, JAVA_INT));
 
     private static final MethodHandle JFXM_PLATFORM_INIT = bind("jfxm_platform_init",
@@ -397,11 +430,18 @@ public final class JfxMediaNative {
      * own initializer call it, so a binding test can touch the facade without constructing the manager.
      *
      * @throws UnsatisfiedLinkError if a library cannot be loaded, a {@code jfxm_*} symbol the facade
-     *         binds is missing, or the library's {@code jfxm_abi_version()} is not
-     *         {@link #JFXM_ABI_VERSION}
+     *         binds is missing, the module was left out of {@code --enable-native-access}, or the
+     *         library's {@code jfxm_abi_version()} is not {@link #JFXM_ABI_VERSION}
      */
     public static void loadLibraries() {
-        loadNativeLibraries();
+        try {
+            loadNativeLibraries();
+        } catch (IllegalCallerException e) {
+            // System::load is restricted too, so a denied grant can surface from the loader rather than
+            // from the facade's own stubs. Report it as this method documents, not as a RuntimeException
+            // the media stack has no handler for.
+            throw initFailure != null ? initFailure : initializationFailed(e);
+        }
         if (initFailure != null) {
             throw initFailure;
         }
@@ -449,11 +489,11 @@ public final class JfxMediaNative {
     }
 
     /**
-     * Binds an exported {@code jfxm_*} symbol. When the library could not be loaded, a symbol is missing
-     * or the ABI version does not match, the returned handle has the requested type and throws the
-     * recorded {@link UnsatisfiedLinkError} when invoked: the failure is reported once, by name, from
-     * {@link #loadLibraries()} and from the first call, instead of turning every later touch of this
-     * class into a {@code NoClassDefFoundError}.
+     * Binds an exported {@code jfxm_*} symbol. When the library could not be loaded, a symbol is missing,
+     * native access was denied or the ABI version does not match, the returned handle has the requested
+     * type and throws the recorded {@link UnsatisfiedLinkError} when invoked: the failure is reported
+     * once, by name, from {@link #loadLibraries()} and from the first call, instead of turning every
+     * later touch of this class into a {@code NoClassDefFoundError}.
      */
     @SuppressWarnings("restricted")
     private static MethodHandle bind(String name, FunctionDescriptor descriptor) {
@@ -466,10 +506,33 @@ public final class JfxMediaNative {
                     initFailure = new UnsatisfiedLinkError("missing native symbol: " + name);
                 }
             } else if (initFailure == null) {
-                return LINKER.downcallHandle(symbol.get(), descriptor);
+                try {
+                    return LINKER.downcallHandle(symbol.get(), descriptor);
+                } catch (IllegalCallerException e) {
+                    // Restricted, like the upcall stubs above, so denied access normally lands there
+                    // first. Caught here as well because this runs from a static field initializer, and
+                    // no field initializer of this class may be the one that throws.
+                    initFailure = initializationFailed(e);
+                }
             }
         }
         return failingHandle(descriptor, name);
+    }
+
+    /**
+     * Restates a failure to bring the library up as the {@link UnsatisfiedLinkError} that
+     * {@code NativeMediaManager} and the rest of the facade already handle, with the original attached.
+     * An {@link IllegalCallerException} - what a restricted {@code java.lang.foreign} or
+     * {@code System::load} call raises when this module is not named in {@code --enable-native-access} -
+     * gets a message an application can act on; it is the one case worth naming.
+     */
+    private static UnsatisfiedLinkError initializationFailed(RuntimeException e) {
+        UnsatisfiedLinkError error = new UnsatisfiedLinkError(e instanceof IllegalCallerException
+                ? "jfxmedia was not granted native access: add javafx.media - or ALL-UNNAMED, when it is"
+                        + " on the class path - to --enable-native-access"
+                : "jfxmedia could not be initialized: " + e);
+        error.initCause(e);
+        return error;
     }
 
     private static MethodHandle failingHandle(FunctionDescriptor descriptor, String name) {
@@ -1234,6 +1297,41 @@ public final class JfxMediaNative {
     public static int eventPlayerState(int pipelineState) {
         try {
             return (int) JFXM_EVENT_PLAYER_STATE.invokeExact(pipelineState);
+        } catch (Throwable t) {
+            throw unexpected(t);
+        }
+    }
+
+    /**
+     * Returns {@code jfxm_audio_track_channel(channel)}: the {@code AudioTrack} channel mask bit at
+     * {@code channel} in the C dispatcher's own copy of them. {@code FfiPlayerEventDispatcher} builds
+     * every audio track's channel mask out of that copy, so a renumbering on either side would silently
+     * mislabel every track's channels; this is the drift guard between the two.
+     *
+     * @param channel an index into UNKNOWN, FRONT_LEFT, FRONT_RIGHT, FRONT_CENTER, REAR_LEFT,
+     *        REAR_RIGHT, REAR_CENTER, in that order
+     * @return the matching {@code AudioTrack} constant, or -1 if the index is out of range
+     */
+    public static int audioTrackChannel(int channel) {
+        try {
+            return (int) JFXM_AUDIO_TRACK_CHANNEL.invokeExact(channel);
+        } catch (Throwable t) {
+            throw unexpected(t);
+        }
+    }
+
+    /**
+     * Returns {@code jfxm_log_level(level)}: the {@link Logger} level at {@code level} in the C logger's
+     * own copy of them. The native log sink stamps every message with a level from that copy, so a
+     * renumbering on either side would silently shift every native log level; this is the drift guard
+     * between the two.
+     *
+     * @param level an index into DEBUG, INFO, WARNING, ERROR, OFF, in that order
+     * @return the matching {@link Logger} constant, or -1 if the index is out of range
+     */
+    public static int logLevel(int level) {
+        try {
+            return (int) JFXM_LOG_LEVEL.invokeExact(level);
         } catch (Throwable t) {
             throw unexpected(t);
         }

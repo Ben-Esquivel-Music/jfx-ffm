@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2010, 2013, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2010, 2026, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -25,7 +25,7 @@
 
 package com.sun.media.jfxmedia;
 
-import com.sun.media.jfxmediaimpl.AudioClipProvider;
+import com.sun.media.jfxmediaimpl.NativeMediaAudioClip;
 import java.io.IOException;
 import java.net.URI;
 import java.io.FileNotFoundException;
@@ -132,7 +132,7 @@ public abstract class AudioClip {
      * @throws IllegalArgumentException If an invalid URI is provided.
      */
     public static AudioClip load(URI source) throws URISyntaxException, FileNotFoundException, IOException {
-        return AudioClipProvider.getProvider().load(source);
+        return NativeMediaAudioClip.load(source);
     }
 
     /**
@@ -157,14 +157,14 @@ public abstract class AudioClip {
     public static AudioClip create(byte [] data, int dataOffset, int sampleCount, int sampleFormat, int channels, int sampleRate)
             throws IllegalArgumentException
     {
-        return AudioClipProvider.getProvider().create(data, dataOffset, sampleCount, sampleFormat, channels, sampleRate);
+        return NativeMediaAudioClip.create(data, dataOffset, sampleCount, sampleFormat, channels, sampleRate);
     }
 
     /**
      * Stop all AudioClips that are currently playing.
      */
     public static void stopAllClips() {
-        AudioClipProvider.getProvider().stopAllClips();
+        NativeMediaAudioClip.stopAllClips();
     }
 
     /**

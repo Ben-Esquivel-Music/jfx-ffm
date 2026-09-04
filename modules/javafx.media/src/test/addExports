@@ -7,6 +7,7 @@
 --add-exports javafx.media/com.sun.media.jfxmedia=ALL-UNNAMED
 --add-exports javafx.media/com.sun.media.jfxmedia.locator=ALL-UNNAMED
 --add-exports javafx.media/com.sun.media.jfxmedia.logging=ALL-UNNAMED
+--add-exports javafx.media/com.sun.media.jfxmedia.track=ALL-UNNAMED
 --add-exports javafx.media/com.sun.media.jfxmediaimpl=ALL-UNNAMED
 --add-exports javafx.media/com.sun.media.jfxmediaimpl.platform=ALL-UNNAMED
 --add-exports javafx.media/com.sun.media.jfxmediaimpl.platform.gstreamer=ALL-UNNAMED

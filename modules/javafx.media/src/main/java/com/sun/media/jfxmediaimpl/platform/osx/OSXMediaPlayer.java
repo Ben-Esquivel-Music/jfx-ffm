@@ -63,9 +63,15 @@ final class OSXMediaPlayer extends NativeMediaPlayer {
             rc = JfxMediaNative.playerInit(sourceMedia.getNativeMediaRef(), callbacks);
         }
         if (rc != MediaError.ERROR_NONE.code()) {
-            // Where osxCreatePlayer threw a MediaException. The media handle stays alive on a failed
-            // jfxm_player_init, so this caller disposes it before propagating (contract section 7).
-            sourceMedia.dispose();
+            // Where osxCreatePlayer threw a MediaException. super(sourceMedia) and init() have already
+            // registered this player as a marker listener and started its PlayerEventLoop thread, so
+            // the whole player has to come down, not just the media: dispose() terminates the loop,
+            // runs the (empty) playerDispose() and then OSXMedia.dispose(), which is the same teardown
+            // GSTMediaPlayer runs on the same failure. Disposing the media alone left one live event
+            // loop thread behind per attempt at a bad URL. Safe from either failure point: the early
+            // one never created an arena, a callback table or a native player, and OSXMedia.dispose()
+            // is idempotent, so the media is not disposed twice.
+            dispose();
             MediaError error = MediaError.getFromCode(rc);
             throw new MediaException("OSXMediaPlayer: unable to create player", null, error);
         }
