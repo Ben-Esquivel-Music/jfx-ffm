@@ -53,12 +53,13 @@ final class NativeAudioSpectrum implements AudioSpectrum {
      * be written to after a newer {@code jfxm_spectrum_set_bands} call has returned; C says when it
      * is done with a pair by running that call's release action (contract section 11).
      * <p>
-     * The arena is an {@link Arena#ofAuto() automatic} one on purpose. C may run the release action
-     * on the AVFoundation audio tap thread while it holds the band lock, where closing a shared arena
-     * - a thread handshake - would be exactly the kind of blocking the ABI forbids there. Dropping the
-     * last reference instead is free, and the memory cannot be reclaimed before that moment: until C
-     * releases it, the pair is reachable both from this spectrum and from the facade's registry entry
-     * for the handover.
+     * The arena is an {@link Arena#ofAuto() automatic} one on purpose. C may run the release action on
+     * a GStreamer streaming thread: {@code CGstAudioSpectrum::UpdateBands} takes its own reference for
+     * the write rather than locking, so the thread that finishes a write can be the one that drops the
+     * last reference, and closing a shared arena there - a thread handshake - would be exactly the kind
+     * of blocking the ABI forbids. Dropping the last reference instead is free, and the memory cannot
+     * be reclaimed before that moment: until C releases it, the pair is reachable both from this
+     * spectrum and from the facade's registry entry for the handover.
      */
     private record Bands(Arena arena, MemorySegment magnitudes, MemorySegment phases, int count) {
         static final Bands NONE = new Bands(null, MemorySegment.NULL, MemorySegment.NULL, 0);
@@ -118,8 +119,10 @@ final class NativeAudioSpectrum implements AudioSpectrum {
             // nowhere else.
             JfxMediaNative.spectrumSetBands(nativeRef, bands, magnitudes, phases, () -> release(pair));
         } else {
-            this.bands.set(Bands.NONE);
-
+            // A deliberate deviation from the JNI implementation, which cleared both arrays here. The
+            // pair installed before this call is still owned by C, which may still be writing through
+            // it, so a rejected argument must not retire it - the reasoning spelled out on
+            // release(Bands) below.
             throw new IllegalArgumentException("Number of bands must at least be 2");
         }
     }
@@ -166,8 +169,8 @@ final class NativeAudioSpectrum implements AudioSpectrum {
 
     /**
      * Runs when C has dropped its last reference to {@code pair}, on whichever thread did so: a
-     * GStreamer main loop or spectrum thread, the AVF audio tap with the band lock held, or the caller
-     * of {@code setBandCount} or of the media dispose. It must not block.
+     * GStreamer main loop or spectrum thread, or the caller of {@code setBandCount} or of the media
+     * dispose. It must not block.
      * <p>
      * It deliberately leaves {@link #bands} alone, so what this spectrum reports does not change when C
      * hands a pair back. C releases the <em>current</em> pair in three situations that have nothing to

@@ -118,17 +118,20 @@ callbacks). A leak test asserts the map is empty after create/dispose loops.
 * **Stream callbacks**: 9 stubs per `ConnectionHolder` in one `Arena.ofShared()` owned by the Java
   media peer; closed after `jfxm_media_dispose` has returned (GST tears the pipeline down there,
   which joins the streaming threads; AVF cancels the resource loader and takes the player lock).
-* **Spectrum band memory**: two `float` arrays allocated by Java in an `Arena.ofShared()`, handed
-  to C by pointer together with a `JfxmReleaseFn` upcall stub and an id. C owns each pair until it
+* **Spectrum band memory**: two `float` arrays allocated by Java in an `Arena.ofAuto()`, handed to
+  C by pointer together with a `JfxmReleaseFn` upcall stub and an id. C owns each pair until it
   calls that stub - see section 11: the holder is reference counted, so a pair outlives the
   `setBandCount` that replaced it for as long as a spectrum thread is still writing through it.
-  Java frees the pair's memory **in the release callback and nowhere else**;
-  freeing on the next `setBandCount`, or assuming dispose is the only release point, is a
-  use-after-free. Shape that works: one `Arena.ofShared()` per pair, closed by that pair's release
-  callback, and a separate longer-lived `Arena.ofShared()` per `NativeAudioSpectrum` holding the
-  release stub - a callback must never close the arena its own upcall stub lives in. The callback
-  runs on a native thread, so it takes no locks Java holds across a downcall and catches
-  `Throwable` like every other upcall target.
+  That callback, and nothing else, is permission to reuse the pair; reusing it on the next
+  `setBandCount`, or assuming dispose is the only release point, is a use-after-free.
+  The shape used is an **automatic** arena per pair that is never closed at all: the registry
+  entry for the handover holds both segments, so the memory stays reachable until C runs the
+  release, and becomes collectable the moment it does. Closing an arena is the one thing this
+  callback must not do - it can run on a GStreamer spectrum thread, where closing a shared arena
+  is a thread handshake, i.e. precisely the blocking the callback is forbidden. The release stub
+  is a single process-wide one in `Arena.global()`, so no callback can close the arena its own
+  stub lives in. The callback runs on a native thread, so it takes no locks Java holds across a
+  downcall and catches `Throwable` like every other upcall target.
 
 Every upcall target catches `Throwable`, logs through `com.sun.media.jfxmedia.logging.Logger`, and
 returns the documented default. An escaping exception terminates the JVM.
@@ -148,7 +151,7 @@ stream callbacks, which are allowed to block on Java I/O):
 | `read_next_block`, `read_block`, `copy_block`, `seek`, `property(1,4,5)` | `javasource` task thread (push) or the pulling element's streaming thread; **may block** | `playerLoaderQueue` serial dispatch queue under the player lock; **may block** |
 | `close_connection` | thread driving READY->NULL, **under the element lock**; C deletes the adapter right after | dispose caller, under the player lock |
 | `JfxmLogFn` | any of the above | any of the above |
-| `JfxmReleaseFn` (band pair) | the thread that dropped the holder's last reference: MainLoop / spectrum thread, or the app thread inside `jfxm_spectrum_set_bands` / dispose | the audio tap **with the band lock held**, or the app thread inside `jfxm_spectrum_set_bands` / dispose |
+| `JfxmReleaseFn` (band pair) | the thread that dropped the holder's last reference: MainLoop / spectrum thread, or the app thread inside `jfxm_spectrum_set_bands` / dispose | the app thread inside `jfxm_spectrum_set_bands` / dispose, or the thread that tears the audio tap down. **Not** the audio tap itself: `AVFAudioSpectrumUnit::UpdateBands` takes the band lock rather than a reference, so it can never drop the last one, and `SetBands` releases outside that lock |
 
 Never use `Linker.Option.critical` for any function in this ABI: every downcall takes pipeline or
 ObjC locks, and `gst_element_set_state` can block on preroll.
@@ -396,10 +399,10 @@ JFXM_EXPORT double  jfxm_eq_band_get_gain(void* band);
 JFXM_EXPORT void    jfxm_eq_band_set_gain(void* band, double db);
 
 /* Handing memory back: C calls this once when it has dropped its last reference to a block Java
- * gave it, on whichever thread dropped that reference (GST MainLoop / spectrum thread, the AVF
- * audio tap with the band lock held, or the app thread doing set_bands / dispose). The Java target
- * must be thread-safe, must not block and must not throw. After it returns, C never touches the
- * memory again - and not before. */
+ * gave it, on whichever thread dropped that reference (GST MainLoop / streaming thread, the app
+ * thread doing set_bands / dispose, or the thread tearing an AVF audio tap down; no C lock is held
+ * across it). The Java target must be thread-safe, must not block and must not throw. After it
+ * returns, C never touches the memory again - and not before. */
 typedef void (*JfxmReleaseFn)(void* user);
 
 /* NativeAudioSpectrum (7). spectrum = handle from jfxm_player_get_audio_spectrum.
@@ -429,7 +432,18 @@ JFXM_EXPORT void    jfxm_spectrum_set_threshold(void* spectrum, int32_t db);
 out); it copies from the shared segments when asked, which happens on the event thread after the
 `audio_spectrum` event, i.e. at the same moment the JNI region copy used to be visible. The C
 `CFfiBandsHolder : CBandsHolder` (refcounted exactly like `CJavaBandsHolder`) writes with
-`memcpy`; `AVFAudioSpectrumUnit` and `CGstAudioSpectrum` are unchanged.
+`memcpy`.
+
+`CAudioSpectrum::SetBands` now says who owns the reference it is handed: the caller keeps it and
+drops it when the call returns, so an implementation that keeps the holder `AddRef`s it and
+`ReleaseRef`s whichever holder it held before. The two implementations disagreed about that -
+`CGstAudioSpectrum` consumed the caller's reference while `AVFAudioSpectrumUnit` added one of its
+own - which pinned every pair on the AVF path at one reference for ever: `release` never ran, so
+the facade's registry entry and the pair's arena were retained for the life of the JVM.
+`CGstAudioSpectrum` gained the `AddRef` (the number of references it holds is unchanged, so the
+GStreamer path behaves exactly as before), `AVFAudioSpectrumUnit`'s destructor gained the matching
+`ReleaseRef` for the pair it is still holding at teardown, `CNullAudioSpectrum` conforms too, and
+`jfxm_spectrum_set_bands` ends with a single `CBandsHolder::ReleaseRef` on every path.
 
 The `release`/`release_user` pair is what makes that safe. `CGstAudioSpectrum::UpdateBands` is
 lock-free - it `AddRef`s the current holder, writes, then `ReleaseRef`s it - so an application that
@@ -438,8 +452,16 @@ holder alive and writing into the *previous* Java arrays after `jfxm_spectrum_se
 returned. `CJavaBandsHolder` survived that because it held a `NewGlobalRef` on each `float[]`;
 `CFfiBandsHolder` reproduces it by calling `release(release_user)` from its destructor, i.e. at the
 moment the last reference goes away. Java must treat that callback, and only that callback, as
-permission to free the pair (section 4). On the AVF side the destructor can run under
-`AVFAudioSpectrumUnit`'s band lock, so the callback must not block.
+permission to free the pair (section 4). `AVFAudioSpectrumUnit::SetBands` drops the superseded
+reference *after* it releases the band lock, so no destructor - and so no upcall - runs under a
+lock the real-time audio tap is waiting on.
+
+The exactly-once guarantee assumes `set_bands` calls on one spectrum are serialised, which is what
+`NativeAudioSpectrum` does today. `CGstAudioSpectrum::SetBands` reads and then writes `m_pHolder`
+rather than exchanging it, so two threads calling `setBandCount()` on the same spectrum at once can
+both release the same superseded holder and neither release one of the new ones. That shape is
+older than this ABI and is listed in `FFM-STATUS.md` section 4a; making it an exchange is the fix
+if the assumption ever stops holding.
 
 ## 12. What is deleted (in a separate change from the migration)
 
@@ -530,14 +552,24 @@ Everything above is behaviour-neutral. These few points are not, and each one is
   * `CFfiStreamCallbacks` adapter built for a NULL callback table is destroyed instead of leaked;
   * the AVF `!player` path releases `eventHandler`, `locatorStream`, `callbacks` and `mediaURL`,
     which `osxCreatePlayer` leaked;
-  * `jfxm_spectrum_set_bands` with a NULL spectrum deletes the holder (and so runs `release`);
-    `nativeSetBands` leaked it;
+  * `jfxm_spectrum_set_bands` with a NULL spectrum drops the last reference to the holder (and so
+    runs `release`); `nativeSetBands` leaked it;
+  * `AVFAudioSpectrumUnit` releases the band holder it is still keeping when it is destroyed, and
+    no longer holds a reference the caller never drops (section 11); the JNI code leaked every
+    `CJavaBandsHolder` on macOS for the same reason;
   * `OSXMediaPlayer initWithURL:` sends `[self release]` on its early-return path.
 * Windows only: `/OPT:ICF` folds functions with identical bodies, and once `__APPLE__` is compiled
   out `jfxm_player_get_mute` and `jfxm_player_set_mute` have identical bodies (both just return
   `ERROR_NOT_IMPLEMENTED` after the handle check). `dumpbin /EXPORTS` therefore shows them at the
   same RVA. A symbol test must assert that each name **resolves**, never that two names resolve to
   distinct addresses.
+* `NativeAudioSpectrum.setBandCount(int)` leaves the installed pair alone when it rejects a count.
+  The JNI implementation set `magnitudes` and `phases` to `EMPTY_FLOAT_ARRAY` *before* throwing
+  `IllegalArgumentException`, so a rejected argument made `getBandCount()` report 0 and
+  `getMagnitudes()`/`getPhases()` report an empty spectrum while C went on writing through the
+  pair it still owned. Retiring a live pair is exactly what `release(Bands)` is documented not to
+  do, and the throw is unreachable from public API (`MediaPlayer` clamps to
+  `AUDIOSPECTRUM_NUMBANDS_MIN`), so the mutation is gone rather than reproduced.
 * `jfxm_spectrum_set_bands` takes `(JfxmReleaseFn release, void* release_user)` on top of the JNI
   argument list (sections 4 and 11). That is not decoration: without it C has no way to tell Java
   that a band pair is dead, and `setBandCount()` during playback corrupts the heap.

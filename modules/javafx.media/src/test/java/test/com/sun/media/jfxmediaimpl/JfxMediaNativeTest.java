@@ -43,6 +43,7 @@ import java.io.IOException;
 import java.io.PrintStream;
 import java.lang.foreign.Arena;
 import java.lang.foreign.MemoryLayout.PathElement;
+import java.lang.foreign.MemorySegment;
 import java.net.URISyntaxException;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
@@ -52,6 +53,7 @@ import java.nio.file.Path;
 import java.util.List;
 import java.util.Locale;
 import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.concurrent.atomic.AtomicInteger;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.MethodOrderer;
 import org.junit.jupiter.api.Order;
@@ -59,6 +61,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.TestMethodOrder;
 import org.junit.jupiter.api.io.TempDir;
 
+import static java.lang.foreign.ValueLayout.JAVA_FLOAT;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
@@ -66,6 +69,7 @@ import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertSame;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.junit.jupiter.api.Assertions.fail;
 import static org.junit.jupiter.api.Assumptions.abort;
@@ -324,6 +328,36 @@ public class JfxMediaNativeTest {
     }
 
     /**
+     * The one path through {@code jfxm_spectrum_set_bands} that no player can reach: a NULL spectrum,
+     * which takes the pair nowhere and hands it straight back. C still owes the release action exactly
+     * one call - contract section 11 and {@code jfxmedia_api.h} both promise it "including when spectrum
+     * is NULL" - because the facade registers the handover before it makes the call, and only that
+     * release retires the entry. Never running it strands the entry for the life of the JVM; running it
+     * twice would fire the upcall on a holder C has already destroyed.
+     * <p>
+     * With no spectrum there is nothing else that could be holding a reference, so the release happens
+     * inside the call and the counter can be read immediately after it.
+     */
+    @Test
+    void aNullSpectrumStillHandsTheBandsBackExactlyOnce() {
+        int baseline = JfxMediaNative.registrySize();
+        AtomicInteger released = new AtomicInteger();
+        try (Arena arena = Arena.ofConfined()) {
+            MemorySegment magnitudes = arena.allocate(JAVA_FLOAT, 8);
+            MemorySegment phases = arena.allocate(JAVA_FLOAT, 8);
+
+            JfxMediaNative.spectrumSetBands(0L, 8, magnitudes, phases, released::incrementAndGet);
+            assertEquals(1, released.get(), "a NULL spectrum released the pair a number of times that is not once");
+            assertEquals(baseline, JfxMediaNative.registrySize(), "the band handover was left in the registry");
+
+            // A null action asks for no handover at all: nothing is registered, C is handed no way to
+            // give the pair back, and the call still has to be harmless.
+            JfxMediaNative.spectrumSetBands(0L, 8, magnitudes, phases, null);
+            assertEquals(baseline, JfxMediaNative.registrySize(), "a null release action registered a handover");
+        }
+    }
+
+    /**
      * A plane the frame does not have reads as an empty buffer, never as {@code null} and never as an
      * exception. {@code CVideoFrame::GetDataForPlane} bounds-checked the index against
      * {@code MAX_PLANE_COUNT} rather than against the frame's own plane count and handed everything out
@@ -541,6 +575,28 @@ public class JfxMediaNativeTest {
                 spectrum.setBandCount(64);
                 assertEquals(64, spectrum.getBandCount());
                 assertEquals(64, spectrum.getMagnitudes(null).length);
+
+                // A rejected band count leaves the spectrum exactly as it was. The pair installed above
+                // still belongs to C, which goes on writing through it, so reporting an empty spectrum
+                // after the throw would describe memory that is still being filled. NativeAudioSpectrum
+                // deviates from the JNI implementation here for that reason, and this is the guard.
+                assertThrows(IllegalArgumentException.class, () -> spectrum.setBandCount(1));
+                assertEquals(64, spectrum.getBandCount(), "a rejected band count retired the live pair");
+                assertEquals(64, spectrum.getMagnitudes(null).length, "a rejected band count emptied the magnitudes");
+                assertEquals(64, spectrum.getPhases(null).length, "a rejected band count emptied the phases");
+
+                // Installing a pair registers a band handover that only C can retire, by running the
+                // release upcall once it has dropped its last reference to the superseded pair. On the
+                // GStreamer backend that happens inside jfxm_spectrum_set_bands itself, so however many
+                // times the count changes there is exactly one live handover per spectrum. A registry
+                // that grew would mean a superseded pair was never handed back - the leak; one that
+                // shrank would mean a pair was handed back while C could still write through it.
+                int afterFirst = JfxMediaNative.registrySize();
+                spectrum.setBandCount(32);
+                spectrum.setBandCount(64);
+                spectrum.setBandCount(128);
+                assertEquals(afterFirst, JfxMediaNative.registrySize(),
+                        "the superseded band handover was not released exactly once per set_bands");
             } finally {
                 player.dispose();
             }

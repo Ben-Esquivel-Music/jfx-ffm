@@ -59,6 +59,12 @@ AVFAudioSpectrumUnit::~AVFAudioSpectrumUnit() {
 
     ReleaseSpectralProcessor();
 
+    // The pair this unit still holds is handed back here and nowhere else. AVFMediaPlayer's
+    // dispose does call SetBands(0, NULL) first, but a unit torn down without it would otherwise
+    // keep its last holder - and so keep Java waiting for a release that never comes.
+    CBandsHolder::ReleaseRef(mBands);
+    mBands = NULL;
+
     pthread_mutex_destroy(&mBandLock);
 }
 
@@ -137,20 +143,22 @@ void AVFAudioSpectrumUnit::SetEnabled(bool isEnabled) {
 }
 
 void AVFAudioSpectrumUnit::SetBands(int bands, CBandsHolder* holder) {
+    // The reference the caller passes in stays the caller's (AudioSpectrum.h): this unit takes one
+    // of its own on the new holder and drops the one it was keeping.
+    //
+    // The drop happens after the lock is released, and has to. Dropping the last reference runs
+    // ~CFfiBandsHolder, which calls back into Java; the audio tap blocks on this same lock inside
+    // UpdateBands, so releasing under it would leave a real-time callback waiting on a native ->
+    // Java transition, a GC safepoint away from an audible dropout. Nothing reads mBands without
+    // the lock, so the swap is all the lock is needed for.
     lockBands();
-    if (mBands) {
-        CBandsHolder::ReleaseRef(mBands);
-        mBands = NULL;
-    }
-    mBandCount = 0;
-    if (holder) {
-        mBands = CBandsHolder::AddRef(holder);
-        if (mBands) {
-            mBandCount = bands;
-        }
-    }
+    CBandsHolder *oldHolder = mBands;
+    mBands = CBandsHolder::AddRef(holder);
+    mBandCount = (mBands != NULL) ? bands : 0;
     mRebuildCrunch = true;
     unlockBands();
+
+    CBandsHolder::ReleaseRef(oldHolder);
 }
 
 size_t AVFAudioSpectrumUnit::GetBands() {

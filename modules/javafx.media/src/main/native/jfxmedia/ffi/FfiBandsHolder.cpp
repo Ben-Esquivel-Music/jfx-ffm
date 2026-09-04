@@ -44,9 +44,9 @@ CFfiBandsHolder::~CFfiBandsHolder()
 {
     // Reached only when the reference count hit zero, so no spectrum thread can be inside
     // UpdateBands any more: this is the one moment at which the pair may be handed back. The
-    // caller of ReleaseRef decides the thread - GST MainLoop, the AVF audio tap with the band lock
-    // held, or the application thread doing set_bands / dispose - so the target must be
-    // thread-safe and must not block (jfxmedia_api.h, JfxmReleaseFn).
+    // caller of ReleaseRef decides the thread - a GST MainLoop / streaming thread, the application
+    // thread doing set_bands / dispose, or the thread that tears an AVF audio tap down - so the
+    // target must be thread-safe and must not block (jfxmedia_api.h, JfxmReleaseFn).
     JfxmReleaseFn release = m_Release;
     void* releaseUser = m_pReleaseUser;
 

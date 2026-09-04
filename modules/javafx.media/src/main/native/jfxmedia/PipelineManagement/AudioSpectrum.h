@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2010, 2013, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2010, 2026, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -57,6 +57,13 @@ public:
     virtual bool       IsEnabled() = 0;
     virtual void       SetEnabled(bool isEnabled) = 0;
 
+    /*
+     * Installs the holder that owns the band pair, or NULL to clear it. The caller keeps the
+     * reference it passes in and drops it once this returns, so an implementation that holds on to
+     * `holder` must CBandsHolder::AddRef it, and must CBandsHolder::ReleaseRef whichever holder it
+     * held before. A holder that nobody retained therefore reaches zero in the caller, and hands
+     * its pair back there.
+     */
     virtual void       SetBands(int bands, CBandsHolder* holder) = 0;
     virtual size_t     GetBands() = 0;
 

@@ -92,8 +92,12 @@ void CGstAudioSpectrum::SetBands(int bands, CBandsHolder* holder)
 {
     g_object_set(m_pSpectrum, "bands", bands, NULL);
 
+    // AddRef because the reference the caller passes in is the caller's, not this spectrum's
+    // (AudioSpectrum.h). The old holder is released only after the swap, so UpdateBands never
+    // reads a holder that has already gone; its pair stays alive until whichever spectrum thread
+    // is still inside UpdateBands drops the last reference to it.
     CBandsHolder *old_holder = (CBandsHolder*)g_atomic_pointer_get(&m_pHolder);
-    g_atomic_pointer_set((gpointer*)&m_pHolder, (gpointer)holder);
+    g_atomic_pointer_set((gpointer*)&m_pHolder, (gpointer)CBandsHolder::AddRef(holder));
     CBandsHolder::ReleaseRef(old_holder);
 }
 

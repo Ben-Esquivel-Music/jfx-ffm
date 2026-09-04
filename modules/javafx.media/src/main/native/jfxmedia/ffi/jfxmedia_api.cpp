@@ -939,15 +939,21 @@ void jfxm_spectrum_set_bands(void* spectrum, int32_t count, float* magnitudes, f
     }
 
     if (pSpectrum != NULL) {
-        // SetBands takes over the holder's initial reference and releases the previous holder;
-        // the previous holder's destructor releases the previous pair, possibly later and on
-        // another thread if a spectrum thread still holds a reference to it.
+        // SetBands retains the holder if it keeps it and releases the one it held before; the
+        // initial reference stays this call's and is dropped below (AudioSpectrum.h). The two
+        // implementations disagreed about that once - CGstAudioSpectrum consumed this reference
+        // while AVFAudioSpectrumUnit added one of its own - which left every pair on the AVF path
+        // pinned at one reference for ever, so its release never ran and Java was never told the
+        // pair was dead.
         pSpectrum->SetBands((int)count, pHolder);
-    } else {
-        // nativeSetBands leaked the holder here; deleting it runs release exactly once, which is
-        // the only way Java can learn the pair is dead.
-        delete pHolder;
     }
+
+    // Whatever the spectrum kept, it holds a reference of its own on; this drops the one the call
+    // was born with. Where nothing retained the holder - a NULL spectrum, which nativeSetBands
+    // simply leaked - the count reaches zero here and the destructor runs release exactly once,
+    // which is the only way Java learns the pair is dead. Otherwise release runs from whichever
+    // holder loses its last reference later, possibly on a spectrum thread.
+    CBandsHolder::ReleaseRef(pHolder);
 }
 
 double jfxm_spectrum_get_interval(void* spectrum)

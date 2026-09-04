@@ -369,10 +369,11 @@ JFXM_EXPORT void    jfxm_eq_band_set_gain(void* band, double db);
  * memory again once this call returns. It is the point at which Java may free or reuse it.
  *
  * Called exactly once per handover, with the `user` value supplied alongside the memory, on
- * whichever thread happens to drop the last reference: a GStreamer MainLoop / spectrum thread, an
- * AVFoundation thread while the audio-tap band lock is held, or the application thread that called
- * jfxm_spectrum_set_bands again or disposed the media. The Java target must therefore be
- * thread-safe, must not block and must not throw.
+ * whichever thread happens to drop the last reference: a GStreamer MainLoop / spectrum thread, the
+ * application thread that called jfxm_spectrum_set_bands again or disposed the media, or - on
+ * AVFoundation - the thread that tears the audio tap down. No lock of C's is held across it. The
+ * Java target must nevertheless be thread-safe, must not block and must not throw: a spectrum
+ * thread that is still writing when the pair is superseded runs it on its way out.
  */
 typedef void (*JfxmReleaseFn)(void* user);
 
