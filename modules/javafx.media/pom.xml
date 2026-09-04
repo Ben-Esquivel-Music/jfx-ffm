@@ -40,9 +40,13 @@
     <!-- The native media stack (jfxmedia, gstreamer-lite, fxplugins, glib-lite, and
          on macOS jfxmedia_avf) is built by the native/CMakeLists.txt project in the
          native-win / native-linux / native-mac profiles below, exactly like the
-         javafx.graphics natives. Pass -DskipNative=true to compile Java only and use
-         prebuilt media libraries from an OpenJFX SDK at runtime instead. The headergen
-         tool (src/tools/java) generates jfxmedia_errors.h for that native build. -->
+         javafx.graphics natives. Pass -DskipNative=true to skip only that CMake build:
+         the module then runs against jfxm_* libraries built earlier from this tree and
+         still present in modules/javafx.media/target/native/bin. Media libraries from an
+         OpenJFX SDK do not work here, because they export JNI Java_* entry points instead
+         of the jfxm_* ABI JfxMediaNative requires, so every lookup fails and the media
+         stack reports itself unavailable; see WEBKIT-MEDIA-STUBS.md. The headergen tool
+         (src/tools/java) generates jfxmedia_errors.h for that native build. -->
 
     <dependencies>
         <dependency>

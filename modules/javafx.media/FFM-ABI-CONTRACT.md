@@ -251,7 +251,8 @@ JFXM_EXPORT void    jfxm_media_dispose(void* media);
 
 /* Replaces Java_..._GSTMediaPlayer_gstInitPlayer and the player half of osxCreatePlayer. Creates the
  * backend event dispatcher over a by-value copy of *cb and initialises the pipeline / AVPlayer.
- * Return = MediaError code (AVF: the six former ThrowJavaException sites map to their codes). */
+ * Return = MediaError code (AVF: the six former ThrowJavaException sites map to their codes, plus
+ * the added CLocatorStream check of section 14.1). */
 JFXM_EXPORT int32_t jfxm_player_init(void* media, const JfxmPlayerCallbacks* cb, void* user);
 
 /* The 18 GSTMediaPlayer / 20 OSXMediaPlayer forwarding natives. media = jfxm_media handle.
@@ -557,7 +558,23 @@ Everything above is behaviour-neutral. These few points are not, and each one is
   * `AVFAudioSpectrumUnit` releases the band holder it is still keeping when it is destroyed, and
     no longer holds a reference the caller never drops (section 11); the JNI code leaked every
     `CJavaBandsHolder` on macOS for the same reason;
-  * `OSXMediaPlayer initWithURL:` sends `[self release]` on its early-return path.
+  * `OSXMediaPlayer initWithURL:` sends `[self release]` on its early-return path;
+  * the AVF `jar:`/`jrt:` path checks the `CLocatorStream` allocation and returns
+    `ERROR_MEMORY_ALLOCATION`, deleting the `CFfiStreamCallbacks` adapter with it. `osxCreatePlayer`
+    left that `new (nothrow)` unchecked, so a failure both leaked the adapter and built an `AVPlayer`
+    with no resource loader for a URL AVFoundation cannot open itself - the failure surfaced later
+    and elsewhere, as an asynchronous `AVPlayerItemStatusFailed`. This is the seventh return of
+    `jfxm_player_init` on AVF. A *throwing* `CLocatorStream` constructor is still uncovered, exactly
+    as in `InitGstMedia`.
+* `OSXMedia.dispose()` closes the `jar:`/`jrt:` `ConnectionHolder` once `jfxm_media_dispose` has
+  returned. On AVF the `close_connection` upcall fires only from `AVFMediaPlayer`'s own dispose,
+  so any failure after `jfxm_media_create` had already succeeded - a failing `jfxm_player_init`,
+  say - left the stream open for the life of the JVM: `ConnectionHolder` has no finalizer and no
+  `Cleaner`, and `CallbackTable.unregister()` only drops the registry entry. The JNI code was
+  worse still, leaking the global ref permanently. `ConnectionHolder.closeConnection` is
+  idempotent, so on the normal path - where the upcall already ran inside `jfxm_media_dispose` -
+  closing a second time is a no-op. `GSTMedia` needs none of this: its pipeline teardown drives
+  READY->NULL, which fires `close_connection` on every path.
 * Windows only: `/OPT:ICF` folds functions with identical bodies, and once `__APPLE__` is compiled
   out `jfxm_player_get_mute` and `jfxm_player_set_mute` have identical bodies (both just return
   `ERROR_NOT_IMPLEMENTED` after the handle check). `dumpbin /EXPORTS` therefore shows them at the

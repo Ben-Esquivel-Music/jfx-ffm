@@ -274,7 +274,8 @@ JFXM_EXPORT void    jfxm_media_dispose(void* media);
 /*
  * Replaces Java_..._GSTMediaPlayer_gstInitPlayer and the player half of osxCreatePlayer. Creates the
  * backend event dispatcher over a by-value copy of *cb and initialises the pipeline / AVPlayer.
- * Return = MediaError code (AVF: the six former ThrowJavaException sites map to their codes).
+ * Return = MediaError code (AVF: the six former ThrowJavaException sites map to their codes, plus
+ * the added CLocatorStream check - see section 14.1 of FFM-ABI-CONTRACT.md).
  * On failure the media handle stays alive and C retains nothing of the callback table; the Java
  * caller disposes it. Called on the Java thread constructing the player.
  */

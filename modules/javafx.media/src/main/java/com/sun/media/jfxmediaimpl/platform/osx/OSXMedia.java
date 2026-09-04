@@ -53,6 +53,13 @@ final class OSXMedia extends NativeMedia {
     private Arena streamArena;
     private JfxMediaNative.CallbackTable streamCallbacks;
 
+    /**
+     * The connection those callbacks read through, held for the lifetime of the media because nothing
+     * else closes it on every path: {@code close_connection} is fired by {@code AVFMediaPlayer}'s own
+     * dispose, which never runs when the native player failed to come up.
+     */
+    private ConnectionHolder streamConnection;
+
     /** Actions the player registered for the moment {@code jfxm_media_dispose} has returned. */
     private final List<Runnable> afterDispose = new ArrayList<>();
     private boolean disposed;
@@ -73,7 +80,8 @@ final class OSXMedia extends NativeMedia {
      * codes recorded in contract section 14.
      * <p>
      * As in {@code GSTMedia}, a failing return closes the connection holder it created: C never
-     * received the table, so its {@code close_connection} will never fire (contract section 14.1).
+     * received the table, so its {@code close_connection} will never fire (contract section 14.1). On
+     * a successful return the holder belongs to this media, which closes it in {@link #dispose()}.
      *
      * @return a {@link MediaError} code
      */
@@ -102,6 +110,7 @@ final class OSXMedia extends NativeMedia {
                 if (holder == null) {
                     return rc;
                 }
+                streamConnection = holder;
                 streamArena = Arena.ofShared();
                 streamCallbacks = JfxMediaNative.installStreamCallbacks(streamArena, holder);
             }
@@ -122,6 +131,7 @@ final class OSXMedia extends NativeMedia {
                 // fire: the holder is closed here rather than left open until it is collected.
                 releaseCallbacks();
                 closeQuietly(holder);
+                streamConnection = null;
             }
         }
     }
@@ -165,6 +175,15 @@ final class OSXMedia extends NativeMedia {
             JfxMediaNative.mediaDispose(refNativeMedia);
             refNativeMedia = 0L;
         }
+
+        // Now that jfxm_media_dispose has returned, no callback of any table can fire again (contract
+        // section 7). That is what makes freeing the stubs below safe, and it is what makes this the
+        // one point where the connection holder can be closed on every path: where playerInit failed,
+        // the AVFMediaPlayer whose dispose fires close_connection was never built, so nothing else
+        // ever closes it. Where it was built, close_connection already ran during mediaDispose and
+        // ConnectionHolder.closeConnection is idempotent, so closing again is a no-op.
+        closeQuietly(streamConnection);
+        streamConnection = null;
 
         // Only now is it safe to free the upcall stubs and the registry entries.
         disposed = true;

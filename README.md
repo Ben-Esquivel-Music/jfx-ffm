@@ -26,9 +26,9 @@ target passed to `javac --release`, not the build JDK):
 
     mvn install
 
-This compiles all modules, builds the javafx.graphics native libraries
-(CMake + MSVC/clang; on macOS this includes the Metal shader library) and runs
-the headless unit test suite. Useful flags:
+This compiles all modules, builds the javafx.graphics and javafx.media native
+libraries (CMake + MSVC/clang; on macOS this includes the Metal shader library)
+and runs the headless unit test suite. Useful flags:
 
 - `-DskipTests` — skip the test suite
 - `-DskipNative=true` — skip the native build (tests that need natives will fail)
@@ -44,12 +44,15 @@ the headless unit test suite. Useful flags:
 when `-DUSE_ROBOT=true` is passed. Setting it to `false` requires an ABI-compatible `jfxwebkit`
 rebuilt for the current source tree.
 
-The media and WebKit native libraries are not compiled from source; see
-[WEBKIT-MEDIA-STUBS.md](WEBKIT-MEDIA-STUBS.md) for how to supply prebuilt
-libraries. The assembled SDK lands in `sdk/target/sdk/`; it holds the module
-jars and `javafx.properties` under `lib/` plus the javafx.graphics native
-libraries. Legal notices, `src.zip`, jmods, javadoc and distribution archives
-are not produced.
+The media native libraries (`jfxmedia`, `gstreamer-lite`, `glib-lite`,
+`fxplugins`, and `jfxmedia_avf` on macOS) are compiled from source along with
+the javafx.graphics ones. The WebKit library is not; see
+[WEBKIT-MEDIA-STUBS.md](WEBKIT-MEDIA-STUBS.md) for how to supply a prebuilt
+`jfxwebkit`, and why a `jfxmedia` from an OpenJFX SDK cannot be used in its
+place any more. The assembled SDK lands in `sdk/target/sdk/`; it holds the
+module jars and `javafx.properties` under `lib/` plus the javafx.graphics and
+javafx.media native libraries. Legal notices, `src.zip`, jmods, javadoc and
+distribution archives are not produced.
 
 # Contribute
 

@@ -243,6 +243,12 @@ static int32_t AvfResolvePlayer(JfxmMedia *media, OSXMediaPlayer **ppPlayer)
  * sites map to: sourceURIString / callbacks / content type allocation failures ->
  * ERROR_MEMORY_ALLOCATION, an unparsable URI -> ERROR_FACTORY_INVALID_URI, a nil OSXMediaPlayer ->
  * ERROR_MEDIA_CREATION.
+ *
+ * The one addition is the CLocatorStream allocation: osxCreatePlayer left it unchecked and would
+ * have built a player without a resource loader for a jar:/jrt: URL, leaking the callback adapter
+ * with it. That is reported as ERROR_MEMORY_ALLOCATION here, as InitGstMedia already does. Like
+ * InitGstMedia, this covers a failing allocation only: a throwing CLocatorStream constructor is
+ * still uncovered.
  */
 int32_t jfxm_avf_player_init(JfxmMedia *media, const JfxmPlayerCallbacks *cb, void *user)
 {
@@ -298,6 +304,18 @@ int32_t jfxm_avf_player_init(JfxmMedia *media, const JfxmPlayerCallbacks *cb, vo
 
         locatorStream = new (nothrow) CLocatorStream(callbacks, media->content_type.c_str(),
                                                      media->location.c_str(), media->size_hint);
+        if (locatorStream == NULL) {
+            // A jar:/jrt: URL is readable only through the resource loader delegate this stream
+            // feeds, so carrying on without it would hand AVFoundation a URL it cannot open and
+            // strand the adapter that CLocatorStream was to take. InitGstMedia reports the same
+            // allocation failure the same way.
+            delete callbacks;
+            [mediaURL release];
+            delete eventHandler;
+            LOGGER_WARNMSG("OSXMediaPlayer: Unable to create CLocatorStream\n");
+            [pool drain];
+            return ERROR_MEMORY_ALLOCATION;
+        }
     }
 
     OSXMediaPlayer *player = [[OSXMediaPlayer alloc] initWithURL:mediaURL
