@@ -476,6 +476,53 @@ public class JfxMediaNativeTest {
     }
 
     /**
+     * The fixture every test over the tiny WAV file rests on is silence, and nothing else checks that it
+     * is. Its data chunk is filled with 0x80, the midpoint of unsigned 8 bit PCM; the obvious spelling -
+     * the zero fill this fixture used to leave behind - is full scale negative DC instead, and nothing
+     * else here would tell the two apart. {@link #copyBlockReportsHowManyBytesItCopied} compares what
+     * came back out of {@code copy_block} against {@code TinyWav.bytes()}, which holds the fixture up
+     * against itself and so passes on any fill at all.
+     * <p>
+     * The header fields the fill depends on are pinned with it. 0x80 is the silent level of 8 bit
+     * samples only, so the bits per sample field is checked; the samples have to begin where the header
+     * ends and run to the end of the file, so the data chunk's tag and its length are checked at the
+     * offsets the format fixes them at. The length check would not notice {@code TinyWav.HEADER_SIZE}
+     * move, being the very expression {@code TinyWav.bytes()} wrote that field from, and neither would
+     * the fill loop, which starts there; so two more assertions cover that. The constant is required to
+     * still be the canonical 44, and the RIFF chunk size - the one header field {@code TinyWav.bytes()}
+     * spells out the format's way instead of deriving from {@code HEADER_SIZE} - is required to agree
+     * with the length of the array it actually produced.
+     * <p>
+     * {@code TinyWav.SIZE} is not pinned here, because everything that could pin it tracks it instead:
+     * the size check, both chunk lengths and the fill loop's bound. A changed size shows up only as a
+     * changed duration in {@link #playerOverATinyWavFileDisposesWithoutLeaks}, the one test in this
+     * class that a machine with no audio output skips.
+     * <p>
+     * Nothing here touches the native layer. It sits in this class because the fixture does, which means
+     * it is skipped along with everything else on a build that produced no natives, even though it needs
+     * none.
+     */
+    @Test
+    void theTinyWavFixtureIsSilentAndNotZeroFilled() {
+        byte[] wav = TinyWav.bytes();
+        assertEquals(TinyWav.SIZE, wav.length, "the fixture's size");
+        assertEquals(44, TinyWav.HEADER_SIZE,
+                "the canonical RIFF/WAVE header size, which the data chunk length and the fill derive from");
+
+        // The header fields at the offsets the canonical RIFF/WAVE layout fixes them at.
+        ByteBuffer header = ByteBuffer.wrap(wav).order(ByteOrder.LITTLE_ENDIAN);
+        assertEquals(TinyWav.SIZE - 8, header.getInt(4),
+                "the RIFF chunk size, the one header field that does not derive from HEADER_SIZE");
+        assertEquals(8, header.getShort(34), "bits per sample");
+        assertEquals("data", new String(wav, 36, 4, StandardCharsets.US_ASCII), "the data chunk tag");
+        assertEquals(TinyWav.SIZE - TinyWav.HEADER_SIZE, header.getInt(40), "the data chunk length");
+
+        for (int i = TinyWav.HEADER_SIZE; i < TinyWav.SIZE; i++) {
+            assertEquals((byte) 0x80, wav[i], "sample byte " + i + " is not the unsigned 8 bit silent level");
+        }
+    }
+
+    /**
      * ABI revision 3 gave {@code copy_block} an {@code int32_t} return, because the {@code void} slot it
      * replaced could not tell a short copy from a good one and C pushed the window on to the demuxer as
      * media data either way (contract section 9). Three answers matter: the normal path returns
@@ -530,6 +577,42 @@ public class JfxMediaNativeTest {
         String logged = log.toString(StandardCharsets.UTF_8);
         assertTrue(logged.contains("copy_block"), logged);
         assertTrue(logged.contains("zero filled"), logged);
+    }
+
+    /**
+     * The other answer a read can give, and the only one this class did not pin. {@code ConnectionHolder}
+     * specifies -1 for a read that reached the end of the stream (and, for the positioned read, a
+     * position at or past the end of the file), and the two upcall targets hand that straight back:
+     * {@code onReadNextBlock} and {@code onReadBlock} return -2 only for a target the registry no longer
+     * has and for a target that threw.
+     * <p>
+     * C reads the difference. {@code javasource} takes -1 to {@code GST_EVENT_EOS} on its push path in
+     * the default mode and to a segment request in HLS mode, and to {@code GST_FLOW_EOS} on its pull
+     * path, while -2 becomes {@code GST_FLOW_FLUSHING} on both - its {@code EOS_CODE} and
+     * {@code OTHER_ERROR_CODE}. {@code AVFMediaPlayer}'s resource-loader delegate ends its fill loop on
+     * either, then finishes the request on -1 and fails it with {@code finishLoadingWithError:} on
+     * anything else negative - its {@code READ_EOS_CODE}. Every other read assertion in this class pins
+     * -2 or a byte count, so a holder or a target that stopped propagating -1 would turn an ordinary end
+     * of file into a failed load, and nothing here would say so.
+     */
+    @Test
+    void aReadAtTheEndOfTheStreamReportsEosAndNotAFailure(@TempDir Path dir) throws Exception {
+        ConnectionHolder holder = connectionHolder(dir);
+        try (Arena arena = Arena.ofConfined()) {
+            JfxMediaNative.CallbackTable callbacks = JfxMediaNative.installStreamCallbacks(arena, holder);
+            try {
+                assertEquals(TinyWav.SIZE, JfxMediaNative.invokeSlot(callbacks, "read_next_block"),
+                        "the first sequential read stages the whole file");
+                assertEquals(-1, JfxMediaNative.invokeSlot(callbacks, "read_next_block"),
+                        "a sequential read with the file already consumed is EOS, not a failed read");
+                assertEquals(-1, JfxMediaNative.invokeSlot(callbacks, "read_block", (long) TinyWav.SIZE, 16),
+                        "a positioned read starting at the end of the file is EOS, not a failed read");
+            } finally {
+                callbacks.unregister();
+            }
+        } finally {
+            holder.closeConnection();
+        }
     }
 
     /**
