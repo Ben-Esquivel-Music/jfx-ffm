@@ -34,8 +34,6 @@ import com.sun.media.jfxmediaimpl.NativeMedia;
 import com.sun.media.jfxmediaimpl.platform.Platform;
 import java.io.IOException;
 import java.lang.foreign.Arena;
-import java.util.ArrayList;
-import java.util.List;
 
 final class OSXMedia extends NativeMedia {
 
@@ -59,10 +57,6 @@ final class OSXMedia extends NativeMedia {
      * dispose, which never runs when the native player failed to come up.
      */
     private ConnectionHolder streamConnection;
-
-    /** Actions the player registered for the moment {@code jfxm_media_dispose} has returned. */
-    private final List<Runnable> afterDispose = new ArrayList<>();
-    private boolean disposed;
 
     OSXMedia(Locator source) {
         super(source);
@@ -136,37 +130,8 @@ final class OSXMedia extends NativeMedia {
         }
     }
 
-    /**
-     * Closes a connection holder the native side never took over. A failure to close must not mask the
-     * error the caller is about to report.
-     */
-    private static void closeQuietly(ConnectionHolder holder) {
-        if (holder == null) {
-            return;
-        }
-        try {
-            holder.closeConnection();
-        } catch (RuntimeException e) {
-            Logger.logMsg(Logger.WARNING, "OSXMedia: closing the connection holder failed: " + e);
-        }
-    }
-
     long getNativeMediaRef() {
         return refNativeMedia;
-    }
-
-    /**
-     * Registers an action to run once {@code jfxm_media_dispose} has returned, i.e. once no callback
-     * of this media can fire again.
-     *
-     * @param action the action, never {@code null}
-     */
-    synchronized void runAfterDispose(Runnable action) {
-        if (disposed) {
-            action.run();
-        } else {
-            afterDispose.add(action);
-        }
     }
 
     @Override
@@ -186,48 +151,11 @@ final class OSXMedia extends NativeMedia {
         streamConnection = null;
 
         // Only now is it safe to free the upcall stubs and the registry entries.
-        disposed = true;
         finishDispose();
     }
 
-    /**
-     * Frees the stubs and runs the registered actions, whatever any single step does.
-     * {@code Arena.close()} on the shared arena throws {@link IllegalStateException} while a native
-     * thread has not unwound from one of its stubs, and again when a second dispose races this one.
-     * Letting that escape would abort the rest of the teardown and leave
-     * {@code NativeMediaPlayer.dispose()} before it sets {@code isDisposed}, i.e. a player that is
-     * neither alive nor disposed, with its listeners un-cleared and its registry entry leaked. The JNI
-     * implementation had no way to fail here at all, so throwing is the drift: the failure is logged.
-     */
-    private void finishDispose() {
-        RuntimeException failure = null;
-        try {
-            releaseCallbacks();
-        } catch (RuntimeException e) {
-            failure = e;
-        }
-        for (Runnable action : afterDispose) {
-            try {
-                action.run();
-            } catch (RuntimeException e) {
-                if (failure == null) {
-                    failure = e;
-                } else {
-                    failure.addSuppressed(e);
-                }
-            }
-        }
-        afterDispose.clear();
-        if (failure != null) {
-            StringBuilder message = new StringBuilder("OSXMedia: dispose did not complete: ").append(failure);
-            for (Throwable suppressed : failure.getSuppressed()) {
-                message.append("; ").append(suppressed);
-            }
-            Logger.logMsg(Logger.ERROR, message.toString());
-        }
-    }
-
-    private void releaseCallbacks() {
+    @Override
+    protected void releaseCallbacks() {
         if (streamCallbacks != null) {
             streamCallbacks.unregister();
             streamCallbacks = null;

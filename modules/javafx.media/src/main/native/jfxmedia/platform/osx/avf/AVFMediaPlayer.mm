@@ -826,7 +826,15 @@ static CVReturn displayLinkCallback(CVDisplayLinkRef displayLink,
                         (unsigned int)dataRequest.requestedLength : blockSize;
                 readData = [NSMutableData dataWithLength:readSize];
 
-                locatorStream->GetCallbacks()->CopyBlock((void*)[readData bytes], readSize);
+                int copied = locatorStream->GetCallbacks()->CopyBlock((void*)[readData bytes],
+                                                                     readSize);
+                if (copied != (int)readSize) {
+                    // A short copy means the stream could not stage the bytes ReadBlock /
+                    // ReadNextBlock promised, so readData holds no usable media data. Stop
+                    // feeding this request without responding, exactly as a failed read
+                    // (blockSize <= 0) does above.
+                    break;
+                }
                 [loadingRequest.dataRequest respondWithData:readData];
 
                 requestedLength -= readSize;

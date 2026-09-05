@@ -30,7 +30,6 @@ import com.sun.media.jfxmedia.MediaException;
 import com.sun.media.jfxmedia.effects.AudioEqualizer;
 import com.sun.media.jfxmedia.effects.AudioSpectrum;
 import com.sun.media.jfxmedia.locator.Locator;
-import com.sun.media.jfxmedia.control.MediaPlayerOverlay;
 import com.sun.media.jfxmediaimpl.JfxMediaNative;
 import com.sun.media.jfxmediaimpl.NativeMediaPlayer;
 import java.lang.foreign.Arena;
@@ -54,11 +53,39 @@ final class GSTMediaPlayer extends NativeMediaPlayer {
         // names this player, must stay alive until jfxm_media_dispose has returned - which happens
         // in GSTMedia.dispose(), after playerDispose() (contract section 4).
         Arena playerArena = Arena.ofShared();
-        JfxMediaNative.CallbackTable callbacks = JfxMediaNative.installPlayerCallbacks(playerArena, this);
-        sourceMedia.runAfterDispose(() -> {
-            callbacks.unregister();
-            playerArena.close();
-        });
+        JfxMediaNative.CallbackTable callbacks;
+        try {
+            callbacks = JfxMediaNative.installPlayerCallbacks(playerArena, this);
+            // Registering the close action is the last statement of the block, so anything that throws
+            // above it leaves the arena with no owner at all: nothing else references it, and a shared
+            // arena frees neither its segment nor the stubs it has already allocated until it is closed.
+            // installPlayerCallbacks reaches two restricted methods per stub, so this is not
+            // theoretical: it throws IllegalCallerException when --enable-native-access does not name
+            // javafx.media, and it can run out of memory part-way through the 13 trampolines. Closing
+            // here cannot hit the case where Arena.close() throws because a native thread has not
+            // unwound from a stub: the table is handed to C by jfxm_player_init below, and until that
+            // call returns no native code has ever seen any of these stubs.
+            sourceMedia.runAfterDispose(() -> {
+                callbacks.unregister();
+                playerArena.close();
+            });
+        } catch (Throwable t) {
+            try {
+                playerArena.close();
+            } catch (Throwable closeFailure) {
+                t.addSuppressed(closeFailure);
+            }
+            // The media is this player's now, and nothing downstream would ever release it: the
+            // GSTMedia constructor has already created the native media, its stream arena and its
+            // connection holders, and GSTPlatform.createMediaPlayer only logs the exception and
+            // returns null. Same teardown as the rc != 0 path below, and dispose() is idempotent.
+            try {
+                dispose();
+            } catch (Throwable disposeFailure) {
+                t.addSuppressed(disposeFailure);
+            }
+            throw t;
+        }
 
         int rc = JfxMediaNative.playerInit(sourceMedia.getNativeMediaRef(), callbacks);
         if (0 != rc) {
@@ -83,11 +110,6 @@ final class GSTMediaPlayer extends NativeMediaPlayer {
     @Override
     public AudioSpectrum getAudioSpectrum() {
         return audioSpectrum;
-    }
-
-    @Override
-    public MediaPlayerOverlay getMediaPlayerOverlay() {
-        return null; // Not needed
     }
 
     // FIXME: this should be pushed down to native instead of returning an int value

@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2010, 2022, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2010, 2026, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -259,8 +259,8 @@ static void java_source_class_init (JavaSourceClass *klass)
         0,
         NULL, /* accumulator */
         NULL, /* accu_data */
-        source_marshal_VOID__POINTER_INT,
-        G_TYPE_NONE, /* return_type */
+        source_marshal_INT__POINTER_INT,
+        G_TYPE_INT, /* return_type: bytes actually copied; less than the requested size is an error */
         2,     /* n_params */
         G_TYPE_POINTER, G_TYPE_INT);
 
@@ -626,6 +626,7 @@ next_event:
         case GST_EVENT_UNKNOWN: // Pushing buffers
             {
                 gint     size;
+                gint     copied;
                 GstMapInfo info;
                 g_signal_emit(element, JAVA_SOURCE_GET_CLASS(element)->signals[SIGNAL_READ_NEXT_BLOCK], 0, &size);
                 if (size > 0)
@@ -641,9 +642,20 @@ next_event:
                             break;
                         }
 
-                        g_signal_emit(element, JAVA_SOURCE_GET_CLASS(element)->signals[SIGNAL_COPY_BLOCK], 0, info.data, size);
+                        copied = 0;
+                        g_signal_emit(element, JAVA_SOURCE_GET_CLASS(element)->signals[SIGNAL_COPY_BLOCK], 0, info.data, size, &copied);
 
                         gst_buffer_unmap(buffer, &info);
+
+                        // A short copy means the handler could not stage the bytes read-next-block
+                        // promised, so the buffer holds no usable media data. Fail the block the
+                        // same way the other unrecoverable errors of this function do.
+                        if (copied != size)
+                        {
+                            gst_buffer_unref(buffer);
+                            result = GST_FLOW_ERROR;
+                            break;
+                        }
 
                         if (element->discont)
                         {
@@ -811,6 +823,7 @@ static GstFlowReturn java_source_getrange(GstPad *pad, GstObject *parent, guint6
 {
     JavaSource *element = JAVA_SOURCE (parent);
     gint     size = 0;
+    gint     copied = 0;
     guint    read = 0;
     guint    toRead = 0;
     GstMapInfo info;
@@ -838,7 +851,16 @@ static GstFlowReturn java_source_getrange(GstPad *pad, GstObject *parent, guint6
         g_signal_emit(element, JAVA_SOURCE_GET_CLASS(element)->signals[SIGNAL_READ_BLOCK], 0, offset + read, toRead, &size);
         if (size > 0 && size <= toRead)
         {
-            g_signal_emit(element, JAVA_SOURCE_GET_CLASS(element)->signals[SIGNAL_COPY_BLOCK], 0, info.data + read, size);
+            copied = 0;
+            g_signal_emit(element, JAVA_SOURCE_GET_CLASS(element)->signals[SIGNAL_COPY_BLOCK], 0, info.data + read, size, &copied);
+            if (copied != size)
+            {
+                // A short copy means the handler could not stage the bytes read-block promised, so
+                // the buffer holds no usable media data. Fail as the other errors here do.
+                gst_buffer_unmap(buf, &info);
+                gst_buffer_unref(buf);
+                return GST_FLOW_ERROR;
+            }
             read += size;
 
             if (size < toRead)

@@ -106,7 +106,10 @@ public class NativeMediaManager {
      * while this constructor runs, and even once it is not, it throws {@code MediaException} when no
      * error listener is registered - and none can be, this early. So the failure is logged here and
      * reported where it was reported under JNI: by the platform that then cannot initialise, as
-     * {@code ERROR_MANAGER_ENGINEINIT_FAIL}.
+     * {@code ERROR_MANAGER_ENGINEINIT_FAIL}. Nothing is lost by that: {@code GSTPlatform.loadPlatform()}
+     * posts it through {@link MediaUtils#nativeError} on the first {@code getPlayer}/{@code getMedia}, so
+     * a listener registered before media is touched still sees it, and posting it here as well would
+     * deliver the same failure twice.
      */
     protected NativeMediaManager() {
         /*
@@ -124,7 +127,22 @@ public class NativeMediaManager {
                     "Unable to load one or more dependent libraries: " + pae);
         }
 
-        // Get the Logger native side rolling before we load platforms
+        // Get the Logger native side rolling before we load platforms. Since ABI revision 3 a false
+        // answer is unambiguous: jfxm_log_init returns 1 when logging is compiled out of jfxmedia
+        // (ENABLE_LOGGING 0), exactly as the JNI nativeInit it replaced returned JNI_TRUE for that
+        // branch, so the only 0 left is CLogger::initSink failing - which needs the logger singleton
+        // itself to fail to allocate. That is a real failure again, and so an ERROR again, as it was
+        // under JNI.
+        //
+        // It stays a log rather than an ERROR_MANAGER_LOGGER_INIT report because there is nobody to
+        // report it to yet. This constructor runs inside NativeMediaManagerInitializer's class
+        // initializer, so errorListeners is provably empty and globalInstance is still null;
+        // MediaUtils.error() reads both, and with no listener registered it throws MediaException -
+        // out of a <clinit>, i.e. as exactly the ExceptionInInitializerError this constructor exists to
+        // avoid. Nor is there anything to defer it to: ERROR_MANAGER_ENGINEINIT_FAIL reaches listeners
+        // only because GSTPlatform.loadPlatform() itself runs late, from initNativeLayer(), and not
+        // because the module has a pending-error queue. A logger sink that could not be allocated
+        // therefore has no raise site, and ERROR_MANAGER_LOGGER_INIT stays unused.
         if (librariesLoaded && !Logger.initNative()) {
             Logger.logMsg(Logger.ERROR, NativeMediaManager.class.getName(), "<init>",
                     "Unable to init logger");

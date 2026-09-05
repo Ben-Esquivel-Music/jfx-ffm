@@ -61,8 +61,12 @@ extern "C" {
  * though older callers would not miss it, because the binding works the other way round: Java
  * resolves every symbol of this header eagerly, so a library built before those two exist fails
  * with "missing native symbol" instead of the clean mismatch jfxm_abi_version is here to report.
+ * 3: JfxmStreamCallbacks::copy_block returns int32_t (the number of bytes it copied) instead of
+ * void, and jfxm_log_init reports success when logging is compiled out. Neither changes a symbol
+ * name or sizeof(JfxmStreamCallbacks), so only the upcall's FunctionDescriptor tells the two
+ * sides apart - which is exactly the drift jfxm_abi_version exists to catch.
  */
-#define JFXM_ABI_VERSION 2u
+#define JFXM_ABI_VERSION 3u
 
 /* Field indices accepted by jfxm_offsetof_frame_info(); they follow JfxmFrameInfo's field order. */
 enum {
@@ -145,8 +149,13 @@ typedef void (*JfxmLogFn)(void* user, int32_t level, const char* message);
 
 /*
  * Replaces Java_..._logging_Logger_nativeInit. Installs the sink once; a later call replaces the
- * pointer (tests). Returns 1 when logging is compiled in (ENABLE_LOGGING), else 0. fn may be NULL
- * to detach the sink; the library never dereferences user.
+ * pointer (tests). fn may be NULL to detach the sink; the library never dereferences user.
+ *
+ * Returns 1 on success, 0 on failure, and nothing else: a 0 means the sink was NOT installed and
+ * the caller may report it. A build with logging compiled out (ENABLE_LOGGING == 0) returns 1 -
+ * there is no sink to install, so the call has done everything that was asked of it, exactly as
+ * the JNI nativeInit returned JNI_TRUE for that branch. The only genuine failure is a native
+ * allocation failure while creating the logger singleton.
  */
 JFXM_EXPORT int32_t jfxm_log_init(JfxmLogFn fn, void* user);
 /* Replaces Java_..._logging_Logger_nativeSetNativeLevel: messages below level are dropped in C. */
@@ -159,8 +168,8 @@ JFXM_EXPORT void    jfxm_log_set_level(int32_t level);
 /*
  * One table per ConnectionHolder, copied by value by jfxm_media_create. Every slot may be NULL;
  * a NULL slot behaves like a Java target that threw: need_buffer/is_seekable/is_random_access/
- * property return 0, read_next_block/read_block return -2, seek returns -1, copy_block and
- * close_connection do nothing.
+ * property return 0, read_next_block/read_block return -2, seek returns -1, copy_block returns 0
+ * and close_connection does nothing.
  *
  * Calling threads (GStreamer backend / AVFoundation backend):
  *   need_buffer, is_seekable, is_random_access, property(2,3,6): the Java caller thread inside
@@ -181,7 +190,12 @@ typedef struct JfxmStreamCallbacks {
     int32_t (*is_random_access)(void* user);                           /* 1 => pull mode, read_block used */
     int32_t (*read_next_block)(void* user);                            /* >0 bytes staged; -1 EOS; -2 error */
     int32_t (*read_block)(void* user, int64_t position, int32_t size); /* size <= 65536 (GST), <= 1 MiB (AVF) */
-    void    (*copy_block)(void* user, void* dst, int32_t size);        /* copy the staged bytes into dst[0..size) */
+    /* Copy the staged bytes into dst[0..size) and return how many were copied. A return of size is
+     * success; anything less is a short copy and dst[copied..size) holds no meaningful data. The
+     * target must still fill the whole window (zeroing what it could not copy), because C may have
+     * handed out uninitialised buffer memory, but the caller treats a short copy as a read error
+     * rather than trusting the bytes. Returns 0 when the slot is NULL. */
+    int32_t (*copy_block)(void* user, void* dst, int32_t size);
     int64_t (*seek)(void* user, int64_t position);                     /* new position or -1; HLS: seconds*1000 */
     int32_t (*property)(void* user, int32_t prop, int32_t value);      /* HLSConnectionHolder.HLS_PROP_* 1..6 */
     void    (*close_connection)(void* user);                           /* last call; C deletes its adapter after it */
@@ -392,6 +406,14 @@ typedef void (*JfxmReleaseFn)(void* user);
  * thread that dropped the last reference, and after it returns C never touches that pair again.
  * Freeing or reusing the pair any earlier is a use-after-free. `release` may be NULL, in which
  * case nothing is called and the memory must outlive the media; `release_user` is opaque to C.
+ *
+ * set_bands validates its arguments as every other entry point validates its handle: `count` must
+ * be positive and `magnitudes` and `phases` must both be non-NULL, since a pair of `count` floats
+ * each is what they are declared to be. A call that fails that check installs nothing - the holder
+ * a previous call installed keeps its own pair - and is otherwise a no-op, exactly as a call with a
+ * NULL spectrum is; `release` still runs once, before the call returns, because it runs once per
+ * call on every path. No upper bound is checked: any positive `count` is taken as the caller's
+ * promise that both buffers hold that many floats.
  */
 JFXM_EXPORT int32_t jfxm_spectrum_get_enabled(void* spectrum);
 JFXM_EXPORT void    jfxm_spectrum_set_enabled(void* spectrum, int32_t enabled);

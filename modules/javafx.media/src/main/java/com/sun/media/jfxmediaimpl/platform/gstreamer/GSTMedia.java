@@ -37,8 +37,6 @@ import com.sun.media.jfxmediaimpl.NativeMedia;
 import com.sun.media.jfxmediaimpl.platform.Platform;
 import java.io.IOException;
 import java.lang.foreign.Arena;
-import java.util.ArrayList;
-import java.util.List;
 
 /**
  * GStreamer implementation of Media
@@ -64,11 +62,13 @@ final class GSTMedia extends NativeMedia {
     private JfxMediaNative.CallbackTable audioStreamCallbacks;
 
     /**
-     * Actions the player peer registered for the moment {@code jfxm_media_dispose} has returned:
-     * closing its own callback arena and releasing the spectrum's band memory.
+     * The connections those callbacks read through, held for the lifetime of the media because nothing
+     * else closes them on every path: {@code close_connection} is emitted by {@code javasource} on the
+     * pipeline's {@code READY -> NULL} transition, which a pipeline that never left
+     * {@code GST_STATE_NULL} never makes.
      */
-    private final List<Runnable> afterDispose = new ArrayList<>();
-    private boolean disposed;
+    private ConnectionHolder streamConnection;
+    private ConnectionHolder audioStreamConnection;
 
     GSTMedia(Locator locator) {
         super(locator);
@@ -149,8 +149,10 @@ final class GSTMedia extends NativeMedia {
             }
 
             streamArena = Arena.ofShared();
+            streamConnection = holder;
             streamCallbacks = JfxMediaNative.installStreamCallbacks(streamArena, holder);
             if (audioHolder != null) {
+                audioStreamConnection = audioHolder;
                 audioStreamCallbacks = JfxMediaNative.installStreamCallbacks(streamArena, audioHolder);
             }
 
@@ -169,42 +171,14 @@ final class GSTMedia extends NativeMedia {
                 releaseCallbacks();
                 closeQuietly(audioHolder);
                 closeQuietly(holder);
+                audioStreamConnection = null;
+                streamConnection = null;
             }
-        }
-    }
-
-    /**
-     * Closes a connection holder the native side never took over. A failure to close must not mask the
-     * error the caller is about to report.
-     */
-    private static void closeQuietly(ConnectionHolder holder) {
-        if (holder == null) {
-            return;
-        }
-        try {
-            holder.closeConnection();
-        } catch (RuntimeException e) {
-            Logger.logMsg(Logger.WARNING, "GSTMedia: closing the connection holder failed: " + e);
         }
     }
 
     long getNativeMediaRef() {
         return refNativeMedia;
-    }
-
-    /**
-     * Registers an action to run once {@code jfxm_media_dispose} has returned, i.e. once no callback
-     * of this media's player or streams can fire again. Used by {@link GSTMediaPlayer} for the
-     * resources whose lifetime the contract ties to the media's, not to {@code playerDispose()}.
-     *
-     * @param action the action, never {@code null}
-     */
-    synchronized void runAfterDispose(Runnable action) {
-        if (disposed) {
-            action.run();
-        } else {
-            afterDispose.add(action);
-        }
     }
 
     @Override
@@ -214,49 +188,38 @@ final class GSTMedia extends NativeMedia {
             refNativeMedia = 0L;
         }
 
+        // Now that jfxm_media_dispose has returned, no callback of any table can fire again (contract
+        // section 7). That is what makes freeing the stubs below safe, and it is what makes this the one
+        // point where the connection holders can be closed on every path: close_connection reaches them
+        // from CGstPipelineFactory::SourceCloseConnection, i.e. from the pipeline's READY -> NULL
+        // transition, so a pipeline that never left GST_STATE_NULL - a media whose jfxm_player_init
+        // failed, or one that MediaManager.getMedia() created and nothing ever played - never closes
+        // them at all, and the connection would stay open for the life of the JVM.
+        //
+        // Where the transition did happen, close_connection already ran inside mediaDispose and this is
+        // a second close. The base holder and its File and URI subclasses are written to be idempotent
+        // and make it a genuine no-op. HLSConnectionHolder is not: a second call releases its live
+        // semaphore again, queues a second STATE_EXIT into a queue nobody is draining any more, and
+        // calls currentPlaylist.close() unguarded. It happens to be harmless today - the worst of it
+        // lands in closeQuietly's catch (RuntimeException) and is logged at WARNING - but that is an
+        // accident of the current code, not a contract, so nothing here may come to depend on it.
+        //
+        // Note also that closing a holder does I/O - a FileChannel, a URLConnection, or for HLS a
+        // socket and a playlist loader - and dispose() runs it on the calling thread, usually the FX
+        // thread, while holding this object's monitor. That is a new blocking site: the JNI version
+        // left the close to whichever thread ran the pipeline's READY -> NULL transition, or, on the
+        // paths above, never did it at all.
+        closeQuietly(audioStreamConnection);
+        closeQuietly(streamConnection);
+        audioStreamConnection = null;
+        streamConnection = null;
+
         // Only now is it safe to free the upcall stubs and the registry entries.
-        disposed = true;
         finishDispose();
     }
 
-    /**
-     * Frees the stubs and runs the registered actions, whatever any single step does.
-     * {@code Arena.close()} on the shared arena throws {@link IllegalStateException} while a native
-     * thread has not unwound from one of its stubs, and again when a second dispose races this one.
-     * Letting that escape would abort the rest of the teardown and leave
-     * {@code NativeMediaPlayer.dispose()} before it sets {@code isDisposed}, i.e. a player that is
-     * neither alive nor disposed, with its listeners un-cleared and its registry entry leaked. The JNI
-     * implementation had no way to fail here at all, so throwing is the drift: the failure is logged.
-     */
-    private void finishDispose() {
-        RuntimeException failure = null;
-        try {
-            releaseCallbacks();
-        } catch (RuntimeException e) {
-            failure = e;
-        }
-        for (Runnable action : afterDispose) {
-            try {
-                action.run();
-            } catch (RuntimeException e) {
-                if (failure == null) {
-                    failure = e;
-                } else {
-                    failure.addSuppressed(e);
-                }
-            }
-        }
-        afterDispose.clear();
-        if (failure != null) {
-            StringBuilder message = new StringBuilder("GSTMedia: dispose did not complete: ").append(failure);
-            for (Throwable suppressed : failure.getSuppressed()) {
-                message.append("; ").append(suppressed);
-            }
-            Logger.logMsg(Logger.ERROR, message.toString());
-        }
-    }
-
-    private void releaseCallbacks() {
+    @Override
+    protected void releaseCallbacks() {
         if (streamCallbacks != null) {
             streamCallbacks.unregister();
             streamCallbacks = null;

@@ -305,9 +305,9 @@ gint CGstPipelineFactory::SourceReadBlock(GstElement *src, guint64 position, gui
     return ((CStreamCallbacks*)data)->ReadBlock(position, size);
 }
 
-void CGstPipelineFactory::SourceCopyBlock(GstElement *src, gpointer buffer, int size, gpointer data)
+gint CGstPipelineFactory::SourceCopyBlock(GstElement *src, gpointer buffer, int size, gpointer data)
 {
-    ((CStreamCallbacks*)data)->CopyBlock(buffer, size);
+    return ((CStreamCallbacks*)data)->CopyBlock(buffer, size);
 }
 
 gint64 CGstPipelineFactory::SourceSeekData(GstElement *src, guint64 offset, gpointer data)

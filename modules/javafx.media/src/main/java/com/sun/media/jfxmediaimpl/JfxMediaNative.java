@@ -85,8 +85,24 @@ public final class JfxMediaNative {
      * a breaking change here even though it takes nothing away: every handle is bound eagerly, so a
      * library built before them fails on symbol resolution and reports "missing native symbol" instead
      * of the version mismatch {@link #checkAbiVersion()} exists to produce.
+     * <p>
+     * Revision 3 gave {@code JfxmStreamCallbacks::copy_block} an {@code int32_t} return (contract
+     * section 9) and made {@code jfxm_log_init} report success when logging is compiled out (section
+     * 6). Neither touches a symbol name or {@code sizeof(JfxmStreamCallbacks)}, so symbol resolution
+     * and all three layout checks still pass against a revision-2 library: this constant is the only
+     * thing that separates the two, and a mismatched pair would have C read a return value Java never
+     * wrote and fail every block on a garbage byte count.
      */
-    public static final int JFXM_ABI_VERSION = 2;
+    public static final int JFXM_ABI_VERSION = 3;
+
+    /** The library {@link #loadNativeLibraries()} loads and {@link #LOOKUP} resolves against. */
+    private static final String JFXMEDIA_LIBRARY = "jfxmedia";
+
+    /**
+     * The ABI guard symbol. It is bound first of all (see {@link #JFXM_ABI_VERSION_MH}) and it is also
+     * what {@link #resolveLookup()} probes with, because every usable {@code jfxmedia} exports it.
+     */
+    private static final String ABI_VERSION_SYMBOL = "jfxm_abi_version";
 
     /** Backend selector of {@code jfxm_media_create}: the GStreamer pipeline. */
     public static final int JFXM_BACKEND_GST = 0;
@@ -129,7 +145,8 @@ public final class JfxMediaNative {
     private static final FunctionDescriptor INT_OF_USER_FD = FunctionDescriptor.of(JAVA_INT, ADDRESS);
     private static final FunctionDescriptor READ_BLOCK_FD =
             FunctionDescriptor.of(JAVA_INT, ADDRESS, JAVA_LONG, JAVA_INT);
-    private static final FunctionDescriptor COPY_BLOCK_FD = FunctionDescriptor.ofVoid(ADDRESS, ADDRESS, JAVA_INT);
+    private static final FunctionDescriptor COPY_BLOCK_FD =
+            FunctionDescriptor.of(JAVA_INT, ADDRESS, ADDRESS, JAVA_INT);
     private static final FunctionDescriptor SEEK_FD = FunctionDescriptor.of(JAVA_LONG, ADDRESS, JAVA_LONG);
     private static final FunctionDescriptor PROPERTY_FD =
             FunctionDescriptor.of(JAVA_INT, ADDRESS, JAVA_INT, JAVA_INT);
@@ -266,7 +283,7 @@ public final class JfxMediaNative {
         MemorySegment releaseSink = MemorySegment.NULL;
         try {
             loadNativeLibraries();
-            lookup = SymbolLookup.loaderLookup();
+            lookup = resolveLookup();
             // The two stubs are built inside the guard, not after it: a library that failed to load has
             // nothing to call them, and the degradation path must not trip over building them. Doing it
             // here also settles the restricted-method question before the first bind() below, because
@@ -291,7 +308,7 @@ public final class JfxMediaNative {
     }
 
     /* Binding order matters: the ABI guard runs before any other symbol is bound. */
-    private static final MethodHandle JFXM_ABI_VERSION_MH = bind("jfxm_abi_version",
+    private static final MethodHandle JFXM_ABI_VERSION_MH = bind(ABI_VERSION_SYMBOL,
             FunctionDescriptor.of(JAVA_INT));
 
     static {
@@ -484,8 +501,67 @@ public final class JfxMediaNative {
             dependencies.add("fxplugins");
             dependencies.add("glib-lite");
         }
-        NativeLibLoader.loadLibrary("jfxmedia", dependencies);
+        NativeLibLoader.loadLibrary(JFXMEDIA_LIBRARY, dependencies);
         librariesLoaded = true;
+    }
+
+    /**
+     * The lookup every {@code jfxm_*} symbol is bound through, once {@link #loadNativeLibraries()} has
+     * run.
+     * <p>
+     * {@link SymbolLookup#loaderLookup()} answers with the libraries loaded by classes of <em>this</em>
+     * class's loader, but the class that calls {@code System.load} is {@code NativeLibLoader}, which
+     * lives in {@code javafx.graphics}. Every standard launch - class path, module path, jlink image -
+     * gives the two modules the same defining loader, so the loader lookup is both correct and the
+     * cheapest answer there, and it stays the first thing tried. It is not correct where the two modules
+     * have different loaders (a hand-built {@link ModuleLayer}, an OSGi or plugin container, a launcher
+     * that isolates the modules): there every {@code find} comes back empty and the stack reports itself
+     * unavailable although {@code jfxmedia} loaded perfectly well. JNI had no such coupling - the JVM
+     * resolved {@code Java_*} entry points from a process-wide table - so the coupling would be a
+     * regression of the migration, not of the deployment.
+     * <p>
+     * The fallback asks the OS loader for the library by its mapped file name, which is the same name
+     * {@code NativeLibLoader} mapped, and it builds no path: guessing a directory is the surest way to
+     * load a second, different {@code jfxmedia} beside the first. How much that buys differs by platform,
+     * and the difference is worth stating rather than glossing.
+     * <ul>
+     * <li>On Windows the call ends in {@code LoadLibrary("jfxmedia.dll")}, which matches a bare name
+     * against the base names of the modules already in the process before it searches anywhere, so it
+     * hands back the library {@code NativeLibLoader} loaded.
+     * <li>On Linux and macOS it ends in {@code dlopen("libjfxmedia.so")} / {@code dlopen} of the
+     * {@code .dylib}. A bare name is matched against the loaded objects' {@code DT_SONAME} (install name
+     * on macOS) first, but {@code NativeLibLoader} loads by absolute path, so that match holds only where
+     * the library actually carries a matching {@code SONAME}. Where it does not, the name falls through
+     * to the ordinary search - {@code DT_RUNPATH}/{@code DT_RPATH}, {@code LD_LIBRARY_PATH},
+     * {@code ld.so.cache}, the default directories - and anything found there is loaded as a second,
+     * independently initialised {@code jfxmedia} with its own statics beside the first.
+     * </ul>
+     * That is the residual risk of this fallback and it is not designed away here: the fallback runs only
+     * after the loader lookup has already come back empty, i.e. only in the split-loader deployments
+     * described above, where the alternative is no media at all. When even the fallback fails - iOS,
+     * where the library is linked statically, or a loader that will not match by leaf name - the loader
+     * lookup is returned unchanged and the caller sees exactly the "missing native symbol" degradation it
+     * saw before.
+     */
+    @SuppressWarnings("restricted")
+    private static SymbolLookup resolveLookup() {
+        SymbolLookup loaderLookup = SymbolLookup.loaderLookup();
+        if (loaderLookup.find(ABI_VERSION_SYMBOL).isPresent()) {
+            return loaderLookup;
+        }
+        try {
+            // Arena.global(): the library is loaded for the life of the process, as System.load leaves
+            // it. An arena that could be closed would dlclose a library the pipeline is still running in.
+            SymbolLookup libraryLookup = SymbolLookup.libraryLookup(
+                    System.mapLibraryName(JFXMEDIA_LIBRARY), Arena.global());
+            if (libraryLookup.find(ABI_VERSION_SYMBOL).isPresent()) {
+                return libraryLookup;
+            }
+        } catch (IllegalArgumentException e) {
+            // The OS loader has nothing of that name to hand back. Fall through to the loader lookup,
+            // whose failure is the one bind() already knows how to report.
+        }
+        return loaderLookup;
     }
 
     /**
@@ -616,6 +692,62 @@ public final class JfxMediaNative {
         return MemorySegment.ofAddress(address);
     }
 
+    /**
+     * Per-thread scratch for the out-parameter wrappers, sized and aligned for the largest of them,
+     * {@link #FRAME_INFO}.
+     * <p>
+     * The JNI peers handed the native method a Java array and let JNI stage it; FFM needs an off-heap
+     * cell instead, and a fresh {@link Arena#ofConfined()} per call is an allocate/free pair and a
+     * memory session for eight bytes of scratch. {@code NativeMediaPlayer}'s pulse task reads
+     * {@code jfxm_player_get_presentation_time} at the pulse rate for every live player, and the
+     * property bindings poll volume, balance and duration, so that pair would run hundreds of times a
+     * second on an ordinary scene. One cell per thread removes all of it.
+     * <p>
+     * The arena is {@link Arena#ofAuto()} deliberately. A {@code ThreadLocal} holding a closeable arena
+     * leaks: nothing closes it when the thread dies, and these calls arrive on GStreamer streaming
+     * threads that come and go - on a virtual thread the leak would be unbounded. An automatic arena has
+     * no close at all, so the cell cannot be freed while it is still reachable and is collected once the
+     * thread's map entry is gone: no leak and no use-after-free either way. It is never shared: each
+     * thread allocates and uses its own cell, which is what makes reuse safe under concurrent calls.
+     * <p>
+     * One cell per thread is enough only under a rule that every out-parameter entry point has to keep,
+     * and the rule is <em>not</em> that no out-parameter downcall calls back into Java. Nested upcalls on
+     * the caller's thread do happen. {@link #playerGetDuration} enters {@code jfxm_player_get_duration},
+     * which asks the pipeline through {@code gst_element_query_duration} - a synchronous query, served on
+     * the calling thread - and on an HLS source that query reaches {@code java_source_query}, which emits
+     * {@code HLS_PROP_GET_DURATION} and arrives back here as the {@code property} upcall. That is Java
+     * running inside the outer downcall, on this thread, with this cell live.
+     * <p>
+     * What makes the reuse safe is write ordering, not the absence of that nesting, and it is two rules
+     * that both have to hold:
+     * <ul>
+     * <li>every {@code jfxm_*} out-parameter entry point writes {@code *out} as its <em>last</em> action,
+     * after any upcall it makes, so whatever a nested call left in the cell is overwritten before the
+     * wrapper reads it; and
+     * <li>no upcall target calls an out-parameter wrapper, so a nested call never claims the cell to
+     * begin with - the {@code property} target above reaches {@code HLSConnectionHolder.property}, which
+     * calls nothing in this class.
+     * </ul>
+     * A ninth out-parameter wrapper has to keep both. A native that fills {@code *out} before it upcalls,
+     * or an upcall target that can reach any wrapper on this list, writes through the outer call's out
+     * pointer, and the corruption is silent: the wrapper still sees {@code ERROR_NONE} and still hands
+     * back a plausible number. Neither rule is checkable by the compiler; a wrapper that cannot keep them
+     * must take its own cell from an {@link Arena#ofConfined()} rather than share this one.
+     * {@code JfxMediaNativeTest} pins the second rule for the stream callbacks.
+     * <p>
+     * Carrying the previous call's bytes changes nothing observable: every wrapper reads the cell only
+     * after {@code ERROR_NONE}, the natives write the out-parameter only when they return it, and
+     * {@code jfxm_frame_get_info} {@code memset}s the struct before filling it - it makes no upcall, so
+     * the order of its own writes cannot matter.
+     */
+    private static final ThreadLocal<MemorySegment> SCRATCH = ThreadLocal.withInitial(
+            () -> Arena.ofAuto().allocate(FRAME_INFO.byteSize(), FRAME_INFO.byteAlignment()));
+
+    /** The calling thread's scratch cell. */
+    private static MemorySegment scratch() {
+        return SCRATCH.get();
+    }
+
     // ---------------------------------------------------------------------------------------------
     // Test hooks
     // ---------------------------------------------------------------------------------------------
@@ -646,7 +778,7 @@ public final class JfxMediaNative {
      * Test hook: whether the loaded library exports {@code name}.
      *
      * @param name a symbol name
-     * @return true if the symbol resolves through the loader lookup
+     * @return true if the symbol resolves through the lookup the facade bound its handles with
      */
     public static boolean resolvesSymbol(String name) {
         return LOOKUP != null && LOOKUP.find(name).isPresent();
@@ -659,6 +791,19 @@ public final class JfxMediaNative {
      */
     public static int registrySize() {
         return REGISTRY.size();
+    }
+
+    /**
+     * Test hook: the calling thread's out-parameter scratch cell, the one every out-parameter wrapper on
+     * this thread shares. It exists so that a test can stand in for the native side of such a call - seed
+     * the cell the way a native wrote {@code *out}, run the upcalls C runs nested inside it, read the
+     * cell back - and so pin the write-ordering invariant documented on {@code SCRATCH}, which neither
+     * the compiler nor the ABI can check.
+     *
+     * @return the cell, sized and aligned for {@link #FRAME_INFO}
+     */
+    public static MemorySegment scratchCell() {
+        return scratch();
     }
 
     /** Receives every message the native log sink delivers; a test hook. */
@@ -1111,26 +1256,58 @@ public final class JfxMediaNative {
     }
 
     /**
-     * Copies the staged bytes into {@code dst}. The holder's <em>current</em> buffer is read on every
-     * call, as the JNI {@code GetObjectField} did: {@code FileConnectionHolder.readBlock} replaces it and
-     * {@code MemoryConnectionHolder} slices it. The copy starts at the buffer's base address regardless
-     * of its position, as {@code GetDirectBufferAddress} + {@code memcpy} did.
+     * Copies the staged bytes into {@code dst} and reports how many of them arrived. The holder's
+     * <em>current</em> buffer is read on every call, as the JNI {@code GetObjectField} did:
+     * {@code FileConnectionHolder.readBlock} replaces it and {@code MemoryConnectionHolder} slices it.
+     * The copy starts at the buffer's base address regardless of its position, as
+     * {@code GetDirectBufferAddress} + {@code memcpy} did.
+     * <p>
+     * {@code size} is always the count the holder's own {@code read_next_block} / {@code read_block}
+     * just reported, so the staged buffer holds at least that many bytes and the return equals
+     * {@code size}. A shorter buffer is a holder bug or a race with a concurrent read, and the JNI slot
+     * could not tell C about it: it returned {@code void}, the target had already consumed the staged
+     * buffer, C had already handed out a window it had just {@code gst_buffer_new_allocate}'d - whose
+     * bytes are uninitialised process memory - and the demuxer parsed whatever was in it as media data.
+     * ABI revision 3 gave the slot an {@code int32_t} return (contract section 9), so the shortfall is
+     * now visible to C: {@code javasource}'s push path unrefs the buffer, sets {@code GST_FLOW_ERROR}
+     * and stops the task without ever pushing it, its pull path unmaps, unrefs and returns
+     * {@code GST_FLOW_ERROR}, and {@code AVFMediaPlayer}'s resource-loader delegate breaks out of its
+     * fill loop before {@code respondWithData:}, exactly as a failed {@code read_block} does.
+     * <p>
+     * The window is still written in full - the bytes the holder does have, then zeros, which is what
+     * the AVFoundation caller already sees, its {@code NSMutableData dataWithLength:} being zero filled
+     * - because the JNI target's alternative was to {@code memcpy} {@code size} bytes from the direct
+     * buffer's base and read past its end, and that overread is no better. The shortfall is logged as
+     * well as returned, because a short copy is corrupt media whichever way the window is filled.
+     *
+     * @return the number of bytes copied from the staged buffer: {@code size} on the normal path, and
+     *         {@code 0} for an empty window, a {@code NULL} {@code dst}, a target the registry no
+     *         longer has, a holder with nothing staged, or a target that threw
      */
     @SuppressWarnings("restricted")
-    private static void onCopyBlock(MemorySegment user, MemorySegment dst, int size) {
+    private static int onCopyBlock(MemorySegment user, MemorySegment dst, int size) {
         try {
+            if (size <= 0 || dst.address() == 0L) {
+                return 0;
+            }
             ConnectionHolder holder = holder(user);
-            if (holder == null || size <= 0 || dst.address() == 0L) {
-                return;
+            ByteBuffer buffer = holder == null ? null : holder.getBuffer();
+            MemorySegment source = buffer == null
+                    ? MemorySegment.NULL : MemorySegment.ofBuffer(buffer.duplicate().clear());
+            MemorySegment target = dst.reinterpret(size);
+            long staged = Math.min(source.byteSize(), size);
+            if (staged > 0L) {
+                MemorySegment.copy(source, 0L, target, 0L, staged);
             }
-            ByteBuffer buffer = holder.getBuffer();
-            if (buffer == null) {
-                return;
+            if (staged < size) {
+                target.asSlice(staged).fill((byte) 0);
+                Logger.logMsg(Logger.ERROR, "JfxMediaNative", "copy_block",
+                        "staged " + staged + " of " + size + " bytes; the rest was zero filled");
             }
-            MemorySegment source = MemorySegment.ofBuffer(buffer.duplicate().clear());
-            MemorySegment.copy(source, 0L, dst.reinterpret(size), 0L, size);
+            return (int) staged;
         } catch (Throwable t) {
             logUpcallFailure("copy_block", t);
+            return 0;
         }
     }
 
@@ -1373,8 +1550,16 @@ public final class JfxMediaNative {
 
     /**
      * {@code jfxm_log_init}: installs the process-wide log sink that forwards to {@link Logger}.
+     * <p>
+     * ABI revision 3 narrowed what the answer means (contract section 6, and the comment on
+     * {@code jfxm_log_init} in {@code jfxmedia_api.h}). True says the call did everything that was asked
+     * of it, and that includes a build with logging compiled out ({@code ENABLE_LOGGING == 0}), where
+     * there is no sink to install at all - the JNI {@code nativeInit} returned {@code JNI_TRUE} on that
+     * branch too. False now means only that the sink could not be installed, which the library reports
+     * for one thing: a native allocation failure while creating the logger singleton.
      *
-     * @return true when logging is compiled into the library
+     * @return true when the sink was installed, or when the library has logging compiled out; false only
+     *         when installing it failed
      */
     public static boolean logInit() {
         try {
@@ -1492,8 +1677,8 @@ public final class JfxMediaNative {
      * @return a {@link MediaError} code
      */
     public static int playerGetAudioSyncDelay(long media, long[] out) {
-        try (Arena arena = Arena.ofConfined()) {
-            MemorySegment value = arena.allocate(JAVA_LONG);
+        try {
+            MemorySegment value = scratch();
             int rc = (int) JFXM_PLAYER_GET_AUDIO_SYNC_DELAY.invokeExact(handle(media), value);
             if (rc == ERROR_NONE) {
                 out[0] = value.get(JAVA_LONG, 0L);
@@ -1583,8 +1768,8 @@ public final class JfxMediaNative {
      * @return a {@link MediaError} code
      */
     public static int playerGetRate(long media, float[] out) {
-        try (Arena arena = Arena.ofConfined()) {
-            MemorySegment value = arena.allocate(JAVA_FLOAT);
+        try {
+            MemorySegment value = scratch();
             int rc = (int) JFXM_PLAYER_GET_RATE.invokeExact(handle(media), value);
             if (rc == ERROR_NONE) {
                 out[0] = value.get(JAVA_FLOAT, 0L);
@@ -1618,8 +1803,8 @@ public final class JfxMediaNative {
      * @return a {@link MediaError} code
      */
     public static int playerGetPresentationTime(long media, double[] out) {
-        try (Arena arena = Arena.ofConfined()) {
-            MemorySegment value = arena.allocate(JAVA_DOUBLE);
+        try {
+            MemorySegment value = scratch();
             int rc = (int) JFXM_PLAYER_GET_PRESENTATION_TIME.invokeExact(handle(media), value);
             if (rc == ERROR_NONE) {
                 out[0] = value.get(JAVA_DOUBLE, 0L);
@@ -1638,8 +1823,8 @@ public final class JfxMediaNative {
      * @return a {@link MediaError} code
      */
     public static int playerGetVolume(long media, float[] out) {
-        try (Arena arena = Arena.ofConfined()) {
-            MemorySegment value = arena.allocate(JAVA_FLOAT);
+        try {
+            MemorySegment value = scratch();
             int rc = (int) JFXM_PLAYER_GET_VOLUME.invokeExact(handle(media), value);
             if (rc == ERROR_NONE) {
                 out[0] = value.get(JAVA_FLOAT, 0L);
@@ -1673,8 +1858,8 @@ public final class JfxMediaNative {
      * @return a {@link MediaError} code
      */
     public static int playerGetBalance(long media, float[] out) {
-        try (Arena arena = Arena.ofConfined()) {
-            MemorySegment value = arena.allocate(JAVA_FLOAT);
+        try {
+            MemorySegment value = scratch();
             int rc = (int) JFXM_PLAYER_GET_BALANCE.invokeExact(handle(media), value);
             if (rc == ERROR_NONE) {
                 out[0] = value.get(JAVA_FLOAT, 0L);
@@ -1709,8 +1894,8 @@ public final class JfxMediaNative {
      * @return a {@link MediaError} code
      */
     public static int playerGetDuration(long media, double[] out) {
-        try (Arena arena = Arena.ofConfined()) {
-            MemorySegment value = arena.allocate(JAVA_DOUBLE);
+        try {
+            MemorySegment value = scratch();
             int rc = (int) JFXM_PLAYER_GET_DURATION.invokeExact(handle(media), value);
             if (rc == ERROR_NONE) {
                 out[0] = value.get(JAVA_DOUBLE, 0L);
@@ -1744,8 +1929,8 @@ public final class JfxMediaNative {
      * @return a {@link MediaError} code
      */
     public static int playerGetMute(long media, boolean[] out) {
-        try (Arena arena = Arena.ofConfined()) {
-            MemorySegment value = arena.allocate(JAVA_INT);
+        try {
+            MemorySegment value = scratch();
             int rc = (int) JFXM_PLAYER_GET_MUTE.invokeExact(handle(media), value);
             if (rc == ERROR_NONE) {
                 out[0] = value.get(JAVA_INT, 0L) != 0;
@@ -1809,8 +1994,8 @@ public final class JfxMediaNative {
      * @return the frame's info, or {@link FrameInfo#NONE} if the call failed
      */
     public static FrameInfo frameGetInfo(long frame) {
-        try (Arena arena = Arena.ofConfined()) {
-            MemorySegment info = arena.allocate(FRAME_INFO);
+        try {
+            MemorySegment info = scratch();
             int rc = (int) JFXM_FRAME_GET_INFO.invokeExact(handle(frame), info);
             if (rc != ERROR_NONE) {
                 return FrameInfo.NONE;

@@ -35,8 +35,8 @@ the first media test tree (`FFM-TEST-PLAN.md`).
 1. **One flat C ABI, one Java facade.** `jfxmedia_api.h` (at
    `src/main/native/jfxmedia/jfxmedia_api.h`) declares every exported `jfxm_*` function and every
    callback table. `com.sun.media.jfxmediaimpl.JfxMediaNative` is the only class in the module that
-   uses restricted `java.lang.foreign` methods (`nativeLinker`, `loaderLookup`, `downcallHandle`,
-   `upcallStub`, `reinterpret`). Callers (`GSTMediaPlayer`, `GSTMedia`, `GSTPlatform`,
+   uses restricted `java.lang.foreign` methods (`nativeLinker`, `loaderLookup`, `libraryLookup`,
+   `downcallHandle`, `upcallStub`, `reinterpret`). Callers (`GSTMediaPlayer`, `GSTMedia`, `GSTPlatform`,
    `OSXMediaPlayer`, `OSXMedia`, `OSXPlatform`, `NativeVideoBuffer`, `NativeAudioEqualizer`,
    `NativeEqualizerBand`, `NativeAudioSpectrum`, `Logger`) call static methods on the facade and
    keep their public behaviour unchanged.
@@ -81,7 +81,7 @@ the first media test tree (`FFM-TEST-PLAN.md`).
 | `JNIEnv*`, `jclass`, `jobject` receiver | dropped | - |
 | `jstring` into C | `const char*` UTF-8, NUL-terminated; `NULL` = Java `null` | `ADDRESS` (`arena.allocateFrom(String)`) |
 | string out of C (callback payload) | `const char*` UTF-8, NUL-terminated, valid **only for the duration of the call** | `ADDRESS`; facade copies with `getString(0)` on a `reinterpret`ed segment before returning |
-| `T[] out` one-element out-param | `T* out` | `ADDRESS` to a confined-arena scalar (pattern P4) |
+| `T[] out` one-element out-param | `T* out` | `ADDRESS` to the calling thread's shared scratch cell (see below) |
 | `jobject` returned by C (`NativeEqualizerBand`) | never; C returns the `void*` handle and Java constructs the object | `ADDRESS` |
 | `java.nio.ByteBuffer` returned by C (`NewDirectByteBuffer`) | pointer + size in a struct (`JfxmFrameInfo`) | `MemorySegment.ofAddress(p).reinterpret(size).asByteBuffer()` in the facade |
 | `float[]` written by C (`SetFloatArrayRegion`) | `float*` into memory **allocated by Java** in a shared arena | `ADDRESS` |
@@ -92,6 +92,19 @@ message; none can carry an embedded NUL and non-BMP characters were already mang
 path, so standard UTF-8 is a benign change. `JfxMediaNative` never introduces modified UTF-8.
 
 Booleans returned by C are `int32_t`; Java compares `!= 0`. Never declare a `JAVA_BOOLEAN` layout.
+
+Out-parameters, and who owns the memory they point at: the eight entry points that take one
+(`jfxm_player_get_audio_sync_delay`, `_get_rate`, `_get_presentation_time`, `_get_volume`,
+`_get_balance`, `_get_duration`, `_get_mute`, and `jfxm_frame_get_info`) are called through wrappers
+that pass **one per-thread scratch segment, allocated once per thread out of a shared
+`Arena.ofAuto()` and never freed** (`JfxMediaNative.SCRATCH` / `scratch()`), sized and aligned for
+the largest of them, `JfxmFrameInfo`. That is no longer the confined-arena-per-call shape of pattern
+P4. Ownership is Java's for the life of the thread; C may write the cell only for the duration of
+the call, must not retain the pointer, and **must write `*out` after any upcall it makes** - the
+requirement stated in section 4, which is exactly what makes one cell per thread safe under the
+re-entrancy `jfxm_player_get_duration` really has. `jfxm_media_create` keeps an `Arena.ofConfined()`
+per call and is right to: it allocates variable-length strings from the same arena, and it genuinely
+upcalls on the caller's thread (`need_buffer`, `is_seekable`, `is_random_access`, `property(2,3)`).
 
 ## 3. Handles, ownership, registry
 
@@ -147,11 +160,40 @@ stream callbacks, which are allowed to block on Java I/O):
 | `audio_track`, `video_track`, `subtitle_track` | decoder/parser streaming threads (subtitle: never) | KVO thread |
 | `duration_update`, `buffer_progress`, `marker` | MainLoop thread (marker: never) | KVO thread (buffer/marker: never) |
 | `audio_spectrum` | MainLoop thread | **MTAudioProcessingTap real-time audio thread**, band lock held: the Java target only enqueues |
-| `JfxmStreamCallbacks.need_buffer`, `is_seekable`, `is_random_access`, `property(2,3,6)` | Java caller thread inside `jfxm_media_create` | Java caller thread inside `jfxm_player_init` |
-| `read_next_block`, `read_block`, `copy_block`, `seek`, `property(1,4,5)` | `javasource` task thread (push) or the pulling element's streaming thread; **may block** | `playerLoaderQueue` serial dispatch queue under the player lock; **may block** |
+| `JfxmStreamCallbacks.need_buffer`, `is_seekable`, `is_random_access` | Java caller thread inside `jfxm_media_create` | Java caller thread inside `jfxm_player_init` |
+| `read_next_block`, `read_block`, `copy_block`, `seek` | `javasource` task thread (push) or the pulling element's streaming thread; **may block** | `playerLoaderQueue` serial dispatch queue under the player lock; **may block** |
+| `property` | `property(2,3)`: Java caller thread inside `jfxm_media_create` (`GstPipelineFactory.cpp:91,93,111`). `property(4,5)`: `javasource` task thread (`java_source_loop`, `javasource.c:571,574`). **`property(1)`: whichever thread runs a `GST_QUERY_DURATION` - including the Java thread that called `jfxm_player_get_duration`, nested inside that downcall** (note below). **May block** | never invoked: the only callers of `CStreamCallbacks::Property` are `GstPipelineFactory` and the `javasource` `property` signal, both GStreamer-only. (`property(6)` is not an upcall on either backend: Java asks the holder itself before `jfxm_media_create`, section 7.) |
 | `close_connection` | thread driving READY->NULL, **under the element lock**; C deletes the adapter right after | dispose caller, under the player lock |
 | `JfxmLogFn` | any of the above | any of the above |
 | `JfxmReleaseFn` (band pair) | the thread that dropped the holder's last reference: MainLoop / spectrum thread, or the app thread inside `jfxm_spectrum_set_bands` / dispose | the app thread inside `jfxm_spectrum_set_bands` / dispose, or the thread that tears the audio tap down. **Not** the audio tap itself: `AVFAudioSpectrumUnit::UpdateBands` takes the band lock rather than a reference, so it can never drop the last one, and `SetBands` releases outside that lock |
+
+`property(1)` (`HLS_PROP_GET_DURATION == 1`, `HLSConnectionHolder.java:77`) is the one slot in this
+table that can run **on a thread that is inside a downcall of this ABI**, nested in it. Traced in
+the source: `jfxm_player_get_duration` -> `GstPlayerGetDuration` (`ffi/jfxmedia_api.cpp:626`) ->
+`CGstAudioPlaybackPipeline::GetDuration` (`GstAudioPlaybackPipeline.cpp:698`) ->
+`gst_element_query_duration(m_Elements[PIPELINE], ...)`, a synchronous query answered on the calling
+thread -> the `javasource` src pad's query function `java_source_query` (`javasource.c:738`,
+installed by `gst_pad_set_query_function` at `javasource.c:298`) -> for `MODE_HLS`
+`g_signal_emit(..., signals[SIGNAL_PROPERTY], 0, HLS_PROP_GET_DURATION, 0, &duration)`
+(`javasource.c:762`) -> `CGstPipelineFactory::SourceProperty` (`GstPipelineFactory.cpp:318`) ->
+`CFfiStreamCallbacks::Property` (`FfiStreamCallbacks.cpp:122`) -> the Java `property` target. Any
+other thread that queries duration - a demuxer's streaming thread, the MainLoop handling a
+`duration-changed` message - reaches the same slot the same way; the caller's thread is simply one
+more of them.
+
+**Requirement on this ABI: an out-param entry point must write `*out` after any upcall it makes.**
+The trace above means "an out-param entry point never upcalls on the caller's thread" is *false*
+here, and nothing may be built on it. What the Java side does rely on is the write ordering: the
+out-param wrappers hand C one scratch cell per thread (section 2), which is safe precisely because
+any upcall - and anything it does, including another out-param wrapper re-entered on the same
+thread and reusing the same cell - has finished before `*out` is stored, and Java reads the cell
+immediately after the downcall returns. Every out-param entry point satisfies this today: the seven
+`jfxm_player_get_*` forwarders that have an out-parameter read the value first and store it into
+`*out` as their last action (`ffi/jfxmedia_api.cpp`, and `platform/osx/OSXMediaPlayer.mm` for the
+AVF ops), and
+`jfxm_frame_get_info` fills the struct from `CVideoFrame` accessors and makes no upcall at all. A
+new `jfxm_*` out-param entry point that upcalls *after* storing `*out` would break the Java side and
+is forbidden by this contract.
 
 Never use `Linker.Option.critical` for any function in this ABI: every downcall takes pipeline or
 ObjC locks, and `gst_element_set_state` can block on preroll.
@@ -159,7 +201,7 @@ ObjC locks, and `gst_element_set_state` can block on preroll.
 ## 5. ABI version guard and layout checks
 
 ```c
-#define JFXM_ABI_VERSION 2u
+#define JFXM_ABI_VERSION 3u
 JFXM_EXPORT uint32_t jfxm_abi_version(void);
 JFXM_EXPORT int32_t  jfxm_sizeof_player_callbacks(void);
 JFXM_EXPORT int32_t  jfxm_sizeof_stream_callbacks(void);
@@ -180,6 +222,37 @@ Adding a symbol bumps the version even though it takes nothing away, because `Jf
 every handle eagerly - a library built before those two fails on symbol resolution and reports a
 missing symbol instead of the version mismatch this guard exists to produce.
 
+3 changed `JfxmStreamCallbacks::copy_block` from `void` to `int32_t` (section 9) and made
+`jfxm_log_init` report success when logging is compiled out (section 6). Neither touches a symbol
+name, an exported signature or `sizeof(JfxmStreamCallbacks)`, so symbol resolution and all three
+layout checks still pass against a version-2 library - the *only* thing that separates the two is
+`jfxm_abi_version`. A mismatched pair either has Java return a value C discards, or has C read a
+return value Java never wrote and fail every block on a garbage byte count; the guard exists
+precisely for a drift a size check cannot see.
+
+**`fxplugins` is version-locked to `jfxmedia`.** The version-3 `copy-block` contract spans two
+shared libraries and `jfxm_abi_version` guards only one of them: the signal's `G_TYPE_INT` return
+type and its `source_marshal_INT__POINTER_INT` marshaller live in **fxplugins**
+(`gstreamer/plugins/javasource/javasource.c:256`, `marshal.c:171`, `marshal.in`), while the handler
+`CGstPipelineFactory::SourceCopyBlock` and `jfxm_abi_version` itself live in **jfxmedia**. A
+mismatched pair passes every check in this section and then fails badly:
+
+* fresh `fxplugins` + stale `jfxmedia`: the `INT__POINTER_INT` marshaller calls a `void`-returning
+  `SourceCopyBlock` through a `gint (*)(gpointer, gpointer, gint, gpointer)` pointer and reads the
+  return register as garbage, so `copied != size` on effectively every block -> `GST_FLOW_ERROR`
+  from both `javasource` paths (section 9) -> no playback at all.
+* stale `fxplugins` + fresh `jfxmedia`: the version-2 `VOID__POINTER_INT` marshaller discards the
+  count, so the stack silently reverts to version-2 semantics - short copies unreported - with no
+  diagnostic anywhere.
+
+`modules/javafx.media/native/{win,linux,mac}.cmake` always build the two together, so this is a
+mispackaging or library-shadowing hazard rather than a build hazard - and shadowing is a documented
+real occurrence: `fxplugins` is loaded by name as a declared dependency of `jfxmedia`
+(`JfxMediaNative.loadNativeLibraries`), `../caches/sdk/{bin,lib}` is still on `java.library.path`
+through the root pom's `${jfx.native.librarypath}`, and `WEBKIT-MEDIA-STUBS.md` tells you to delete
+stale `jfxmedia*`, `gstreamer-lite*`, `glib-lite*` and `fxplugins*` from there for exactly that
+reason. Ship, cache, copy and delete the media libraries as one set; never mix builds.
+
 The three drift guards exist because the generated JNI headers that used to keep the C copies of
 `NativeMediaPlayer.eventPlayer*`, `AudioTrack.*` and `Logger.*` in step with Java are gone. Each
 returns the library's own named constant, so the binding test fails if either side is renumbered.
@@ -191,9 +264,24 @@ returns the library's own named constant, so the binding test fails if either si
 `jfxmedia_avf`. That sequence moves into `JfxMediaNative.loadLibraries()` (idempotent,
 `NativeLibLoader` is synchronized and remembers loaded libraries) which both `NativeMediaManager`
 and the facade's own static initializer call, so a binding test can touch the facade without
-constructing the manager. The facade binds symbols with `SymbolLookup.loaderLookup()` and throws
-`UnsatisfiedLinkError("missing native symbol: <name>")` for a missing one, at class-init time,
-like JNI's lazy link failure but earlier and with a name.
+constructing the manager. The facade binds symbols through `SymbolLookup.loaderLookup()` when that
+lookup can see the library, and falls back to
+`SymbolLookup.libraryLookup(System.mapLibraryName("jfxmedia"), Arena.global())` when it cannot
+(`JfxMediaNative.resolveLookup`, which probes `jfxm_abi_version` to decide); either way a missing
+symbol throws `UnsatisfiedLinkError("missing native symbol: <name>")` at class-init time, like JNI's
+lazy link failure but earlier and with a name. The fallback exists because the class that calls
+`System.load` is `NativeLibLoader` in `javafx.graphics`, while `loaderLookup` answers only with
+libraries loaded by classes of `JfxMediaNative`'s own defining loader: the same loader on every
+standard launch (class path, module path, jlink image), but not necessarily in a hand-built
+`ModuleLayer`, an OSGi bundle or a plugin container, where every `find` would come back empty
+although `jfxmedia` had loaded perfectly well. The POSIX caveat, stated rather than hidden: a
+bare-name `libraryLookup` ends in `dlopen("libjfxmedia.so")`, and although a loader answers a
+directory-free name from its already-loaded list first (`LoadLibrary` by module base name, `dlopen`
+by `DT_SONAME`), a name matching no loaded `DT_SONAME` sends `dlopen` on to `DT_RPATH`/`DT_RUNPATH`,
+`LD_LIBRARY_PATH` and `ld.so.cache`, where it could in principle map a *second* copy of the library
+beside the one already in the process. That is why `loaderLookup` stays the first thing tried, why
+no directory is ever guessed here, and why the fallback is reached only once the loader lookup has
+failed to find `jfxm_abi_version`.
 
 ```c
 /* Replaces JNI_OnLoad + Java_..._GSTPlatform_gstInitPlatform. Idempotent because the media manager
@@ -210,7 +298,9 @@ JFXM_EXPORT int32_t jfxm_osx_platform_init(void);
 /* Replaces Java_..._logging_Logger_nativeInit / nativeSetNativeLevel. The single log sink is
  * installed once; a second call replaces the pointer (tests). level uses the Java Logger constants
  * (ERROR 4, WARNING 3, INFO 2, DEBUG 1, OFF Integer.MAX_VALUE). The message pointer is valid only
- * during the call. Returns 1 when logging is compiled in (ENABLE_LOGGING), else 0. */
+ * during the call. Returns 1 on success and 0 only on a genuine failure (native allocation); a
+ * build with ENABLE_LOGGING == 0 has no sink to install and so also returns 1, exactly as the JNI
+ * nativeInit returned JNI_TRUE for that branch. */
 typedef void (*JfxmLogFn)(void* user, int32_t level, const char* message);
 JFXM_EXPORT int32_t jfxm_log_init(JfxmLogFn fn, void* user);
 JFXM_EXPORT void    jfxm_log_set_level(int32_t level);
@@ -332,7 +422,7 @@ typedef struct JfxmStreamCallbacks {
     int32_t (*is_random_access)(void* user);                           /* 1 => pull mode, read_block used */
     int32_t (*read_next_block)(void* user);                            /* >0 bytes staged; -1 EOS; -2 error */
     int32_t (*read_block)(void* user, int64_t position, int32_t size); /* size <= 65536 (GST), <= 1 MiB (AVF) */
-    void    (*copy_block)(void* user, void* dst, int32_t size);        /* copy the staged bytes into dst[0..size) */
+    int32_t (*copy_block)(void* user, void* dst, int32_t size);        /* copy into dst[0..size); -> bytes copied */
     int64_t (*seek)(void* user, int64_t position);                     /* new position or -1; HLS: seconds*1000 */
     int32_t (*property)(void* user, int32_t prop, int32_t value);      /* HLSConnectionHolder.HLS_PROP_* 1..6 */
     void    (*close_connection)(void* user);                           /* last call; C deletes its adapter right after */
@@ -344,8 +434,32 @@ typedef struct JfxmStreamCallbacks {
 field on every call, as the JNI `GetObjectField` did) with `MemorySegment.copy` into
 `dst.reinterpret(size)`. The C side is a ~70-line `CFfiStreamCallbacks : CStreamCallbacks` that
 stores the table copy and `user`, tolerates `NULL` slots (returning the defaults above), and is
-created by `jfxm_media_create` where `CJavaInputStreamCallbacks` was. `GstPipelineFactory`'s
-`Source*` trampolines and `CLocatorStream` are untouched.
+created by `jfxm_media_create` where `CJavaInputStreamCallbacks` was. `CLocatorStream` is untouched;
+`GstPipelineFactory::SourceCopyBlock` now forwards the count instead of discarding it.
+
+`copy_block` returns the number of bytes it copied because the JNI `void` slot could not tell a
+short copy from a good one: the Java target had already consumed the staged buffer, C had already
+handed out a freshly allocated (uninitialised) GStreamer buffer, and the demuxer went on to parse
+whatever was in it as media data. The Java target still fills the whole window - it copies what is
+staged, zero-fills the remainder and logs ERROR on a shortfall - so the uninitialised-memory hazard
+is closed on the Java side; the return value is what makes the failure *visible* to C. On the
+success path the return equals `size` and nothing else changes.
+
+What each native consumer does with a short return (`copied != size`), in every case the idiom the
+surrounding code already uses for a failure it cannot recover from:
+
+| Consumer | On a short return |
+|---|---|
+| `CFfiStreamCallbacks::CopyBlock` | returns the count up (0 for a NULL slot or a closed adapter, as before) |
+| `CGstPipelineFactory::SourceCopyBlock` | returns the count as the `copy-block` signal's value |
+| `javasource.c` push path (`java_source_loop`, `GST_EVENT_UNKNOWN`) | unrefs the buffer, sets `GST_FLOW_ERROR`, stops the task - the buffer is never pushed |
+| `javasource.c` pull path (`java_source_getrange`) | unmaps and unrefs the buffer and returns `GST_FLOW_ERROR`, so the pulling element reports the failure instead of receiving short data |
+| `AVFMediaPlayer.mm` resource-loader delegate | `break`s out of the fill loop without `respondWithData:`, exactly as a failed `ReadBlock`/`ReadNextBlock` (`blockSize <= 0`) does |
+
+The GStreamer `copy-block` signal is registered with `G_TYPE_INT` and an `INT__POINTER_INT`
+marshaller (`gstreamer/plugins/javasource/marshal.{in,c,h}`, regenerated by hand in
+glib-genmarshal's own output shape); `read-next-block`, `read-block`, `seek-data` and `property`
+already returned values through the same mechanism and are unchanged.
 
 ## 10. Player callbacks (replaces `CJavaPlayerEventDispatcher`)
 
@@ -417,7 +531,11 @@ typedef void (*JfxmReleaseFn)(void* user);
  * after a newer set_bands call has returned. `release` is the only signal that the pair is dead:
  * it runs exactly once per set_bands call (also when spectrum is NULL, and if the call fails),
  * with release_user, on the thread that dropped the last reference. `release` may be NULL, in
- * which case the memory must outlive the media. */
+ * which case the memory must outlive the media.
+ *
+ * set_bands validates count > 0 and both buffers non-NULL, as every other entry point validates its
+ * handle; a call that fails the check installs nothing, retires nothing and still runs `release`
+ * once. No upper bound is checked: a positive count is the caller's promise about the buffers. */
 JFXM_EXPORT int32_t jfxm_spectrum_get_enabled(void* spectrum);
 JFXM_EXPORT void    jfxm_spectrum_set_enabled(void* spectrum, int32_t enabled);
 JFXM_EXPORT void    jfxm_spectrum_set_bands(void* spectrum, int32_t count,
@@ -513,12 +631,35 @@ Nothing is committed by the automation; the user commits.
 * `jfxm_media_create` never calls `property(HLS_PROP_HAS_AUDIO_EXT_STREAM)` itself: it creates the
   audio-stream adapter iff `audio_cb != NULL`. The decision is Java's (section 7), made on the same
   thread and at the same point as the JNI code made it.
-* `jfxm_log_init` returns 0 when `ENABLE_LOGGING` is compiled out (the JNI `nativeInit` returned
-  true unconditionally); `ENABLE_LOGGING` is 1 in `Common/ProductFlags.h`, so this is unobservable.
+* The AVF backend reads through the `Locator` iff `has_stream` is set, and tests nothing else.
+  `OSXMedia.initNativeMedia` makes the `jar:`/`jrt:` decision on `locator.getURI().getScheme()` and
+  installs a stream table only then; `jfxm_media_create` records that in `JfxmMedia.has_stream`, and
+  `jfxm_avf_player_init` builds the `CFfiStreamCallbacks` + `CLocatorStream` pair - and so installs
+  the `AVAssetResourceLoader` delegate, which `AVFMediaPlayer initWithURL:` keys off the stream
+  being non-NULL - exactly when it is set. It does **not** re-derive the scheme from `[mediaURL
+  scheme]`: the same decision taken twice, on `java.net.URI` and on `NSURL`, could only disagree.
+  A disagreement used to end `jfxm_player_init` with `ERROR_MEMORY_ALLOCATION`, which Java reports
+  as `MediaException("unable to create player")`, for what was a URL-parsing difference and not a
+  failed allocation.
+* `jfxm_log_init` returns 1 when `ENABLE_LOGGING` is compiled out, as the JNI `nativeInit` did.
+  It briefly returned 0 there, which made a healthy logging-free build report a logger-init failure;
+  `ENABLE_LOGGING` is 1 in `Common/ProductFlags.h`, so no shipped build ever saw it. The two paths
+  that return 0 are now one: `CLogger::initSink` failing, which happens only when the logger
+  singleton cannot be allocated.
 * Every `jfxm_player_*` forwarder, including `get/set_mute`, returns `ERROR_MEDIA_NULL` (257) for a
   NULL handle before any backend check; on the GST backend `get/set_mute` then return
   `ERROR_NOT_IMPLEMENTED` (2561). A handle whose AVF player was never created returns
   `ERROR_PIPELINE_NULL` (769) from the forwarders.
+* Those twenty forwarders take the backend decision exactly once, in the `PlayerOps` lookup of
+  `jfxmedia_api.cpp`: each backend fills one `JfxmPlayerOps` table of function pointers
+  (`GST_PLAYER_OPS`, and `AVF_PLAYER_OPS` on Apple) and the exported function resolves the handle to
+  a table and calls through it. A NULL handle resolves to no table, which is where the uniform
+  `ERROR_MEDIA_NULL` (`NULL` for the two handle getters) comes from. Every slot is a constructor
+  parameter without a default, so a new player entry point cannot be added without every backend
+  filling its slot - the compile fails instead of the new function silently falling through to
+  GStreamer, which is what a forgotten per-function `#ifdef __APPLE__` preamble used to do.
+  `jfxm_media_create` and `jfxm_media_dispose` are deliberately not slots: they build and tear down
+  the handle itself rather than forwarding to a player.
 * AVF error codes (the six former `ThrowJavaException` sites): missing location / callbacks /
   content type -> `ERROR_MEMORY_ALLOCATION` (2562); unparsable URI -> `ERROR_FACTORY_INVALID_URI`
   (1027); no player class -> `ERROR_MEDIA_CREATION` (258); `jfxm_player_init` on a handle that

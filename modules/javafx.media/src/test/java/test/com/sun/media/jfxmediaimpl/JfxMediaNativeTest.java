@@ -44,12 +44,15 @@ import java.io.PrintStream;
 import java.lang.foreign.Arena;
 import java.lang.foreign.MemoryLayout.PathElement;
 import java.lang.foreign.MemorySegment;
+import java.net.URI;
 import java.net.URISyntaxException;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
+import java.nio.channels.ClosedChannelException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
 import java.util.concurrent.CopyOnWriteArrayList;
@@ -61,7 +64,10 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.TestMethodOrder;
 import org.junit.jupiter.api.io.TempDir;
 
+import static java.lang.foreign.ValueLayout.JAVA_BYTE;
+import static java.lang.foreign.ValueLayout.JAVA_DOUBLE;
 import static java.lang.foreign.ValueLayout.JAVA_FLOAT;
+import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
@@ -105,6 +111,12 @@ public class JfxMediaNativeTest {
 
     private static final int ERROR_NONE = MediaError.ERROR_NONE.code();
     private static final int ERROR_MEDIA_NULL = MediaError.ERROR_MEDIA_NULL.code();
+
+    /**
+     * {@code HLSConnectionHolder.HLS_PROP_GET_DURATION}, the property id {@code java_source_query} emits
+     * while it is serving a duration query. Copied rather than referenced: the holder is package private.
+     */
+    private static final int HLS_PROP_GET_DURATION = 1;
 
     /**
      * How long a failed player creation gets to explain itself. The GStreamer error that explains it is
@@ -191,7 +203,7 @@ public class JfxMediaNativeTest {
 
     @Test
     void abiVersionMatches() {
-        assertEquals(2, JfxMediaNative.JFXM_ABI_VERSION);
+        assertEquals(3, JfxMediaNative.JFXM_ABI_VERSION);
         assertEquals(JfxMediaNative.JFXM_ABI_VERSION, JfxMediaNative.abiVersion());
     }
 
@@ -443,6 +455,127 @@ public class JfxMediaNativeTest {
         }
     }
 
+    /**
+     * ABI revision 3 gave {@code copy_block} an {@code int32_t} return, because the {@code void} slot it
+     * replaced could not tell a short copy from a good one and C pushed the window on to the demuxer as
+     * media data either way (contract section 9). Three answers matter: the normal path returns
+     * {@code size} and the window holds the staged bytes; a window wider than anything the holder has
+     * staged comes back short, zero filled past the shortfall and logged as an ERROR; and a target the
+     * registry no longer has returns 0, which is also what a {@code copy-block} emission with no
+     * connected handler yields - correctly so, since that case used to leave the window wholly
+     * uninitialised.
+     */
+    @Test
+    void copyBlockReportsHowManyBytesItCopied(@TempDir Path dir) throws Exception {
+        ConnectionHolder holder = connectionHolder(dir);
+        ByteArrayOutputStream log = new ByteArrayOutputStream();
+        PrintStream err = System.err;
+        int level = loggerLevel();
+        try (Arena arena = Arena.ofConfined()) {
+            JfxMediaNative.CallbackTable callbacks = JfxMediaNative.installStreamCallbacks(arena, holder);
+            try {
+                assertEquals(TinyWav.SIZE, JfxMediaNative.invokeSlot(callbacks, "read_next_block"));
+
+                MemorySegment window = arena.allocate(TinyWav.SIZE);
+                assertEquals(TinyWav.SIZE,
+                        JfxMediaNative.invokeSlot(callbacks, "copy_block", window, TinyWav.SIZE),
+                        "the whole window was staged, so the whole window was copied");
+                assertArrayEquals(TinyWav.bytes(), window.toArray(JAVA_BYTE), "the staged bytes");
+
+                int staged = holder.getBuffer().capacity();
+                int tail = 16;
+                MemorySegment wide = arena.allocate(staged + (long) tail);
+                wide.fill((byte) 0x5a);
+                System.setErr(new PrintStream(log, true, StandardCharsets.UTF_8));
+                Logger.setLevel(Logger.ERROR);
+                assertEquals(staged,
+                        JfxMediaNative.invokeSlot(callbacks, "copy_block", wide, staged + tail),
+                        "a window wider than the staged buffer comes back short");
+                for (int i = 0; i < tail; i++) {
+                    assertEquals((byte) 0, wide.get(JAVA_BYTE, staged + i), "byte " + i + " past the shortfall");
+                }
+
+                callbacks.unregister();
+                assertEquals(0, JfxMediaNative.invokeSlot(callbacks, "copy_block", window, TinyWav.SIZE),
+                        "a late copy_block found a target");
+            } finally {
+                Logger.setLevel(level);
+                System.setErr(err);
+                callbacks.unregister();
+            }
+        } finally {
+            holder.closeConnection();
+        }
+
+        String logged = log.toString(StandardCharsets.UTF_8);
+        assertTrue(logged.contains("copy_block"), logged);
+        assertTrue(logged.contains("zero filled"), logged);
+    }
+
+    /**
+     * The scratch cell's real invariant, pinned where neither the compiler nor the ABI can check it.
+     * <p>
+     * {@code JfxMediaNative} gives each thread one out-parameter cell and hands it to all eight
+     * out-parameter wrappers, and upcalls genuinely do run nested inside those wrappers on the caller's
+     * thread: {@code jfxm_player_get_duration} asks the pipeline through
+     * {@code gst_element_query_duration}, which is served synchronously on the calling thread, and on an
+     * HLS source that query reaches {@code java_source_query}, which emits {@code HLS_PROP_GET_DURATION}
+     * and arrives back in the facade as the {@code property} upcall. What keeps the outer call's out
+     * value intact is therefore write ordering, not the absence of the nesting: the natives write
+     * {@code *out} last, and no upcall target calls an out-parameter wrapper.
+     * <p>
+     * This test pins the second of those. It seeds the cell the way a native that had already written
+     * {@code *out} would leave it - the pessimistic ordering, so that any claim of the cell shows - runs
+     * every stream slot through its real function pointer, which is the same upcall stub and the same
+     * thread a nested query uses, and requires the cell back byte for byte with its out value unchanged.
+     * It fails the day an upcall target reaches an out-parameter wrapper, which is exactly the edit the
+     * {@code SCRATCH} javadoc forbids. Nothing here needs a player, a pipeline or an audio device.
+     */
+    @Test
+    @Order(12)
+    void anUpcallNestedInAnOutParameterDowncallLeavesTheScratchCellAlone(@TempDir Path dir) throws Exception {
+        ConnectionHolder holder = connectionHolder(dir);
+        try (Arena arena = Arena.ofConfined()) {
+            JfxMediaNative.CallbackTable callbacks = JfxMediaNative.installStreamCallbacks(arena, holder);
+            try {
+                MemorySegment cell = JfxMediaNative.scratchCell();
+                assertSame(cell, JfxMediaNative.scratchCell(),
+                        "one cell per thread: a nested wrapper would write through the outer call's out pointer");
+                assertEquals(JfxMediaNative.FRAME_INFO.byteSize(), cell.byteSize(), "the cell is sized for the widest");
+
+                byte[] outParameter = new byte[(int) cell.byteSize()];
+                for (int i = 0; i < outParameter.length; i++) {
+                    outParameter[i] = (byte) (0xA5 ^ i);
+                }
+                MemorySegment.copy(outParameter, 0, cell, JAVA_BYTE, 0L, outParameter.length);
+                double outValue = cell.get(JAVA_DOUBLE, 0L);
+
+                // Every slot C can call while an out-parameter downcall of ours is on the stack, called
+                // the way C calls it. close_connection goes last because it ends the connection.
+                assertEquals(0, JfxMediaNative.invokeSlot(callbacks, "need_buffer"));
+                assertEquals(1, JfxMediaNative.invokeSlot(callbacks, "is_seekable"));
+                assertEquals(1, JfxMediaNative.invokeSlot(callbacks, "is_random_access"));
+                assertEquals(0, JfxMediaNative.invokeSlot(callbacks, "property",
+                        HLS_PROP_GET_DURATION, 0), "the duration property, the upcall of the nested path");
+                assertEquals(0L, JfxMediaNative.invokeSlot(callbacks, "seek", 0L));
+                assertEquals(TinyWav.SIZE, JfxMediaNative.invokeSlot(callbacks, "read_next_block"));
+                MemorySegment window = arena.allocate(TinyWav.SIZE);
+                assertEquals(TinyWav.SIZE, JfxMediaNative.invokeSlot(callbacks, "copy_block", window, TinyWav.SIZE));
+                assertEquals(TinyWav.SIZE, JfxMediaNative.invokeSlot(callbacks, "read_block", 0L, TinyWav.SIZE));
+                assertNull(JfxMediaNative.invokeSlot(callbacks, "close_connection"), "a void slot");
+
+                assertSame(cell, JfxMediaNative.scratchCell(), "the cell is per thread and never replaced");
+                assertArrayEquals(outParameter, cell.toArray(JAVA_BYTE),
+                        "an upcall target claimed the scratch cell of the downcall it was nested in");
+                assertEquals(outValue, cell.get(JAVA_DOUBLE, 0L), "the outer call's out value was corrupted");
+            } finally {
+                callbacks.unregister();
+            }
+        } finally {
+            holder.closeConnection();
+        }
+    }
+
     /** A real, open {@code FileConnectionHolder} over the tiny WAV file; needs nothing native. */
     private static ConnectionHolder connectionHolder(Path dir) throws IOException, URISyntaxException {
         Locator locator = new Locator(TinyWav.writeTo(dir.resolve("silence.wav")).toUri());
@@ -606,6 +739,40 @@ public class JfxMediaNativeTest {
         }
     }
 
+    /**
+     * The other half of what a dispose owes a media that never played, and the half the registry cannot
+     * see: the connection itself. {@code close_connection} reaches the holder from
+     * {@code CGstPipelineFactory::SourceCloseConnection}, i.e. from the pipeline's
+     * {@code READY -> NULL} transition, so a pipeline that never left {@code GST_STATE_NULL} - the media
+     * of {@link #mediaOverATinyWavFileDisposesWithoutLeaks}, and any media a player never came up for -
+     * never fires it. Unregistering the stream callbacks drops the id that upcall would have arrived
+     * through, which is what keeps the registry balanced either way; the {@code FileChannel} or
+     * {@code URLConnection} behind it stays open for the life of the JVM unless {@code dispose()} closes
+     * the holder itself.
+     */
+    @Test
+    @Order(11)
+    void disposingAMediaClosesTheConnectionTheStreamCallbacksNeverClosed() throws IOException {
+        Path file = tinyWavFile();
+        try {
+            RecordingLocator locator = recordingTinyWavLocator(file);
+
+            Media created = GSTPlatform.getPlatformInstance().createMedia(locator);
+            assertNotNull(created, "GSTPlatform.createMedia returned null");
+            NativeMedia media = assertInstanceOf(NativeMedia.class, created);
+            assertEquals(1, locator.holders.size(), "the media takes exactly one connection holder");
+            ConnectionHolder holder = locator.holders.get(0);
+            assertTrue(holder.readNextBlock() > 0, "the holder has to be open while the media lives");
+
+            media.dispose();
+
+            assertThrows(ClosedChannelException.class, holder::readNextBlock,
+                    "dispose left the connection holder open");
+        } finally {
+            deleteWhenPossible(file);
+        }
+    }
+
     /** What {@link #createPlayer} saw: the player, {@code null} when none was built, and the log. */
     private record PlayerAttempt(MediaPlayer player, String log) {
     }
@@ -702,9 +869,10 @@ public class JfxMediaNativeTest {
      * The tiny WAV file, in the system temp directory rather than in a {@code @TempDir}: a pipeline that
      * never left {@code GST_STATE_NULL} - the media of the hardware-free test, and a player whose
      * {@code jfxm_player_init} failed - never makes the {@code READY -> NULL} transition on which
-     * {@code javasource} emits {@code close-connection}, so its connection holder keeps the file open
-     * until it is collected. Windows will not delete an open file, and a {@code @TempDir} that cannot be
-     * cleaned up fails the test it belongs to, which would turn "no audio device" back into a failure.
+     * {@code javasource} emits {@code close-connection}, so nothing but {@code GSTMedia.dispose()} ever
+     * closes its connection holder and a test that aborts before it reaches one leaves the file open.
+     * Windows will not delete an open file, and a {@code @TempDir} that cannot be cleaned up fails the
+     * test it belongs to, which would turn "no audio device" back into a failure.
      */
     private static Path tinyWavFile() throws IOException {
         Path file = TinyWav.writeTo(Files.createTempFile("jfx-media-silence", ".wav"));
@@ -733,5 +901,37 @@ public class JfxMediaNativeTest {
         }
         assertEquals("audio/x-wav", locator.getContentType());
         return locator;
+    }
+
+    /** The same, as a {@link RecordingLocator}. */
+    private static RecordingLocator recordingTinyWavLocator(Path file) {
+        RecordingLocator locator;
+        try {
+            locator = new RecordingLocator(file.toUri());
+            locator.init();
+        } catch (Exception e) {
+            return abort("the platform cannot play audio/x-wav here: " + e);
+        }
+        assertEquals("audio/x-wav", locator.getContentType());
+        return locator;
+    }
+
+    /**
+     * A {@link Locator} that keeps every connection holder it hands out. The media never exposes the
+     * holder it created, so this is how a test asks the holder itself whether it was closed.
+     */
+    private static final class RecordingLocator extends Locator {
+        private final List<ConnectionHolder> holders = new ArrayList<>();
+
+        RecordingLocator(URI uri) throws URISyntaxException {
+            super(uri);
+        }
+
+        @Override
+        public ConnectionHolder createConnectionHolder() throws IOException {
+            ConnectionHolder holder = super.createConnectionHolder();
+            holders.add(holder);
+            return holder;
+        }
     }
 }

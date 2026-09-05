@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2010, 2020, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2010, 2026, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -29,7 +29,6 @@ import com.sun.media.jfxmedia.effects.AudioEqualizer;
 import com.sun.media.jfxmedia.events.PlayerStateListener;
 import com.sun.media.jfxmedia.events.VideoTrackSizeListener;
 import com.sun.media.jfxmedia.control.VideoRenderControl;
-import com.sun.media.jfxmedia.control.MediaPlayerOverlay;
 import com.sun.media.jfxmedia.effects.AudioSpectrum;
 import com.sun.media.jfxmedia.events.AudioSpectrumListener;
 import com.sun.media.jfxmedia.events.MarkerListener;
@@ -178,13 +177,6 @@ public interface MediaPlayer {
      * @return A <code>VideoRenderControl</code> instance.
      */
     public VideoRenderControl getVideoRenderControl();
-
-    /**
-     * Returns the media player overlay support interface.
-     *
-     * @return A <code>MediaPlayerOverlay</code> instance.
-     */
-    public MediaPlayerOverlay getMediaPlayerOverlay();
 
     /**
      * Gets a Media object.

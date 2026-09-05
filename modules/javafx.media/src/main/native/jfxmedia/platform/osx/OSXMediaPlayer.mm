@@ -285,15 +285,17 @@ int32_t jfxm_avf_player_init(JfxmMedia *media, const JfxmPlayerCallbacks *cb, vo
         return ERROR_FACTORY_INVALID_URI;
     }
 
-    // Check if we need to use Locator to read data. For FILE/HTTP/HTTPS
-    // AVFoundation will read data directly. For JAR/JRT we will use Locator to
-    // read data; Java passed a stream table exactly for those schemes.
-    NSString *scheme = [mediaURL scheme];
-    if ([scheme caseInsensitiveCompare:@"jar"] == NSOrderedSame ||
-        [scheme caseInsensitiveCompare:@"jrt"] == NSOrderedSame) {
-        if (media->has_stream) {
-            callbacks = new (nothrow) CFfiStreamCallbacks(&media->stream, media->stream_user);
-        }
+    // Check if we need to use Locator to read data. For FILE/HTTP/HTTPS AVFoundation will read data
+    // directly; for JAR/JRT we read it through the Locator. That test is Java's: OSXMedia
+    // .initNativeMedia makes it on locator.getURI().getScheme() and installs a stream table for
+    // jar: and jrt: locations and for nothing else, and jfxm_media_create records the answer in
+    // has_stream. Repeating it here on [mediaURL scheme] asked a second URL parser the same
+    // question, and the two could only disagree, never usefully agree: a URL that java.net.URI and
+    // NSURL split differently either failed the call with ERROR_MEMORY_ALLOCATION - "unable to
+    // create player" for what was a scheme-parsing disagreement, not a failed allocation - or built
+    // a player with no resource loader for a URL AVFoundation cannot open itself.
+    if (media->has_stream) {
+        callbacks = new (nothrow) CFfiStreamCallbacks(&media->stream, media->stream_user);
         if (callbacks == NULL) {
             [mediaURL release];
             delete eventHandler;

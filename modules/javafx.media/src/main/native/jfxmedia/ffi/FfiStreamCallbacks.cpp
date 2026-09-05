@@ -75,12 +75,12 @@ int CFfiStreamCallbacks::ReadBlock(int64_t position, int size)
     return (int)m_Callbacks.read_block(m_pUser, position, (int32_t)size);
 }
 
-void CFfiStreamCallbacks::CopyBlock(void* destination, int size)
+int CFfiStreamCallbacks::CopyBlock(void* destination, int size)
 {
     if (m_bClosed || NULL == m_Callbacks.copy_block) {
-        return;
+        return 0;
     }
-    m_Callbacks.copy_block(m_pUser, destination, (int32_t)size);
+    return (int)m_Callbacks.copy_block(m_pUser, destination, (int32_t)size);
 }
 
 bool CFfiStreamCallbacks::IsSeekable()

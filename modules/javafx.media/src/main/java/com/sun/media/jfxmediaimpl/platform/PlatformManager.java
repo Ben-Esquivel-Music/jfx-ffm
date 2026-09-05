@@ -87,9 +87,11 @@ public final class PlatformManager {
             }
         }
 
-        // The !isIOS() half of this test paired with an IOSPlatform registration that this fork does
-        // not have; on its own all it could do is leave iOS with JavaPlatform, i.e. ID3 metadata and no
-        // playback at all.
+        // GSTPlatform is registered unconditionally. Upstream guarded this test with !isIOS() to pair it
+        // with an IOSPlatform registration that this fork does not have: FFM-ABI-CONTRACT.md decision 3
+        // deletes the iOS platform rather than migrating it, and PlatformUtil.isIOS() is false on every JDK
+        // this fork supports. Kept on its own the guard could only leave iOS with JavaPlatform, i.e. ID3
+        // metadata and no playback at all.
         if (isPlatformEnabled("GSTPlatform")) {
             platty = getPlatformInstance(
                     "com.sun.media.jfxmediaimpl.platform.gstreamer.GSTPlatform");

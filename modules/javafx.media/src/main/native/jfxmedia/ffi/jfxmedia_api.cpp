@@ -172,9 +172,12 @@ int32_t jfxm_log_init(JfxmLogFn fn, void* user)
 #if ENABLE_LOGGING
     return CLogger::initSink(fn, user) ? 1 : 0;
 #else
+    /* Nothing to install, so the call succeeded: a build with logging compiled out is healthy and
+     * must not report a logger-init failure. Java_..._Logger_nativeInit returned JNI_TRUE here
+     * too. A 0 return therefore means only a genuine failure (native allocation). */
     (void)fn;
     (void)user;
-    return 0;
+    return 1;
 #endif // ENABLE_LOGGING
 }
 
@@ -395,16 +398,9 @@ void jfxm_media_dispose(void* media)
     delete pHandle;
 }
 
-static inline bool IsAvfHandle(void* media)
-{
-    JfxmMedia* pHandle = (JfxmMedia*)media;
-    return NULL != pHandle && JFXM_BACKEND_AVF == pHandle->backend;
-}
-
 // The NULL checks of every GstMediaPlayer.cpp export, in their order.
-static int32_t GetGstPipeline(void* media, CPipeline** ppPipeline)
+static int32_t GetGstPipeline(JfxmMedia* pHandle, CPipeline** ppPipeline)
 {
-    JfxmMedia* pHandle = (JfxmMedia*)media;
     CMedia* pMedia = (NULL != pHandle) ? pHandle->gst : NULL;
     if (NULL == pMedia)
         return ERROR_MEDIA_NULL;
@@ -417,13 +413,12 @@ static int32_t GetGstPipeline(void* media, CPipeline** ppPipeline)
     return ERROR_NONE;
 }
 
-int32_t jfxm_player_init(void* media, const JfxmPlayerCallbacks* cb, void* user)
-{
-#ifdef __APPLE__
-    if (IsAvfHandle(media))
-        return jfxm_avf_player_init((JfxmMedia*)media, cb, user);
-#endif
+//*************************************************************************************************
+//********** GStreamer backend: the bodies of the former GstMediaPlayer.cpp exports
+//*************************************************************************************************
 
+static int32_t GstPlayerInit(JfxmMedia* media, const JfxmPlayerCallbacks* cb, void* user)
+{
     CPipeline* pPipeline = NULL;
     int32_t iRet = GetGstPipeline(media, &pPipeline);
     if (ERROR_NONE != iRet)
@@ -438,15 +433,9 @@ int32_t jfxm_player_init(void* media, const JfxmPlayerCallbacks* cb, void* user)
     return (int32_t)pPipeline->Init();
 }
 
-void* jfxm_player_get_audio_equalizer(void* media)
+static void* GstPlayerGetAudioEqualizer(JfxmMedia* media)
 {
-#ifdef __APPLE__
-    if (IsAvfHandle(media))
-        return jfxm_avf_player_get_audio_equalizer((JfxmMedia*)media);
-#endif
-
-    JfxmMedia* pHandle = (JfxmMedia*)media;
-    CMedia* pMedia = (NULL != pHandle) ? pHandle->gst : NULL;
+    CMedia* pMedia = (NULL != media) ? media->gst : NULL;
     if (NULL == pMedia) {
         return NULL;
     }
@@ -457,15 +446,9 @@ void* jfxm_player_get_audio_equalizer(void* media)
     return (void*)pPipeline->GetAudioEqualizer();
 }
 
-void* jfxm_player_get_audio_spectrum(void* media)
+static void* GstPlayerGetAudioSpectrum(JfxmMedia* media)
 {
-#ifdef __APPLE__
-    if (IsAvfHandle(media))
-        return jfxm_avf_player_get_audio_spectrum((JfxmMedia*)media);
-#endif
-
-    JfxmMedia* pHandle = (JfxmMedia*)media;
-    CMedia* pMedia = (NULL != pHandle) ? pHandle->gst : NULL;
+    CMedia* pMedia = (NULL != media) ? media->gst : NULL;
     if (NULL == pMedia) {
         return NULL;
     }
@@ -476,13 +459,8 @@ void* jfxm_player_get_audio_spectrum(void* media)
     return (void*)pPipeline->GetAudioSpectrum();
 }
 
-int32_t jfxm_player_get_audio_sync_delay(void* media, int64_t* out_millis)
+static int32_t GstPlayerGetAudioSyncDelay(JfxmMedia* media, int64_t* out_millis)
 {
-#ifdef __APPLE__
-    if (IsAvfHandle(media))
-        return jfxm_avf_player_get_audio_sync_delay((JfxmMedia*)media, out_millis);
-#endif
-
     CPipeline* pPipeline = NULL;
     int32_t iRet = GetGstPipeline(media, &pPipeline);
     if (ERROR_NONE != iRet)
@@ -498,13 +476,8 @@ int32_t jfxm_player_get_audio_sync_delay(void* media, int64_t* out_millis)
     return ERROR_NONE;
 }
 
-int32_t jfxm_player_set_audio_sync_delay(void* media, int64_t millis)
+static int32_t GstPlayerSetAudioSyncDelay(JfxmMedia* media, int64_t millis)
 {
-#ifdef __APPLE__
-    if (IsAvfHandle(media))
-        return jfxm_avf_player_set_audio_sync_delay((JfxmMedia*)media, millis);
-#endif
-
     CPipeline* pPipeline = NULL;
     int32_t iRet = GetGstPipeline(media, &pPipeline);
     if (ERROR_NONE != iRet)
@@ -514,13 +487,8 @@ int32_t jfxm_player_set_audio_sync_delay(void* media, int64_t millis)
     return (int32_t)pPipeline->SetAudioSyncDelay((long)millis);
 }
 
-int32_t jfxm_player_play(void* media)
+static int32_t GstPlayerPlay(JfxmMedia* media)
 {
-#ifdef __APPLE__
-    if (IsAvfHandle(media))
-        return jfxm_avf_player_play((JfxmMedia*)media);
-#endif
-
     CPipeline* pPipeline = NULL;
     int32_t iRet = GetGstPipeline(media, &pPipeline);
     if (ERROR_NONE != iRet)
@@ -529,13 +497,8 @@ int32_t jfxm_player_play(void* media)
     return (int32_t)pPipeline->Play();
 }
 
-int32_t jfxm_player_pause(void* media)
+static int32_t GstPlayerPause(JfxmMedia* media)
 {
-#ifdef __APPLE__
-    if (IsAvfHandle(media))
-        return jfxm_avf_player_pause((JfxmMedia*)media);
-#endif
-
     CPipeline* pPipeline = NULL;
     int32_t iRet = GetGstPipeline(media, &pPipeline);
     if (ERROR_NONE != iRet)
@@ -544,13 +507,8 @@ int32_t jfxm_player_pause(void* media)
     return (int32_t)pPipeline->Pause();
 }
 
-int32_t jfxm_player_stop(void* media)
+static int32_t GstPlayerStop(JfxmMedia* media)
 {
-#ifdef __APPLE__
-    if (IsAvfHandle(media))
-        return jfxm_avf_player_stop((JfxmMedia*)media);
-#endif
-
     CPipeline* pPipeline = NULL;
     int32_t iRet = GetGstPipeline(media, &pPipeline);
     if (ERROR_NONE != iRet)
@@ -559,13 +517,8 @@ int32_t jfxm_player_stop(void* media)
     return (int32_t)pPipeline->Stop();
 }
 
-int32_t jfxm_player_finish(void* media)
+static int32_t GstPlayerFinish(JfxmMedia* media)
 {
-#ifdef __APPLE__
-    if (IsAvfHandle(media))
-        return jfxm_avf_player_finish((JfxmMedia*)media);
-#endif
-
     CPipeline* pPipeline = NULL;
     int32_t iRet = GetGstPipeline(media, &pPipeline);
     if (ERROR_NONE != iRet)
@@ -574,13 +527,8 @@ int32_t jfxm_player_finish(void* media)
     return (int32_t)pPipeline->Finish();
 }
 
-int32_t jfxm_player_get_rate(void* media, float* out_rate)
+static int32_t GstPlayerGetRate(JfxmMedia* media, float* out_rate)
 {
-#ifdef __APPLE__
-    if (IsAvfHandle(media))
-        return jfxm_avf_player_get_rate((JfxmMedia*)media, out_rate);
-#endif
-
     CPipeline* pPipeline = NULL;
     int32_t iRet = GetGstPipeline(media, &pPipeline);
     if (ERROR_NONE != iRet)
@@ -596,13 +544,8 @@ int32_t jfxm_player_get_rate(void* media, float* out_rate)
     return ERROR_NONE;
 }
 
-int32_t jfxm_player_set_rate(void* media, float rate)
+static int32_t GstPlayerSetRate(JfxmMedia* media, float rate)
 {
-#ifdef __APPLE__
-    if (IsAvfHandle(media))
-        return jfxm_avf_player_set_rate((JfxmMedia*)media, rate);
-#endif
-
     CPipeline* pPipeline = NULL;
     int32_t iRet = GetGstPipeline(media, &pPipeline);
     if (ERROR_NONE != iRet)
@@ -611,13 +554,8 @@ int32_t jfxm_player_set_rate(void* media, float rate)
     return (int32_t)pPipeline->SetRate(rate);
 }
 
-int32_t jfxm_player_get_presentation_time(void* media, double* out_seconds)
+static int32_t GstPlayerGetPresentationTime(JfxmMedia* media, double* out_seconds)
 {
-#ifdef __APPLE__
-    if (IsAvfHandle(media))
-        return jfxm_avf_player_get_presentation_time((JfxmMedia*)media, out_seconds);
-#endif
-
     CPipeline* pPipeline = NULL;
     int32_t iRet = GetGstPipeline(media, &pPipeline);
     if (ERROR_NONE != iRet)
@@ -633,13 +571,8 @@ int32_t jfxm_player_get_presentation_time(void* media, double* out_seconds)
     return ERROR_NONE;
 }
 
-int32_t jfxm_player_get_volume(void* media, float* out_volume)
+static int32_t GstPlayerGetVolume(JfxmMedia* media, float* out_volume)
 {
-#ifdef __APPLE__
-    if (IsAvfHandle(media))
-        return jfxm_avf_player_get_volume((JfxmMedia*)media, out_volume);
-#endif
-
     CPipeline* pPipeline = NULL;
     int32_t iRet = GetGstPipeline(media, &pPipeline);
     if (ERROR_NONE != iRet)
@@ -655,13 +588,8 @@ int32_t jfxm_player_get_volume(void* media, float* out_volume)
     return ERROR_NONE;
 }
 
-int32_t jfxm_player_set_volume(void* media, float volume)
+static int32_t GstPlayerSetVolume(JfxmMedia* media, float volume)
 {
-#ifdef __APPLE__
-    if (IsAvfHandle(media))
-        return jfxm_avf_player_set_volume((JfxmMedia*)media, volume);
-#endif
-
     CPipeline* pPipeline = NULL;
     int32_t iRet = GetGstPipeline(media, &pPipeline);
     if (ERROR_NONE != iRet)
@@ -670,13 +598,8 @@ int32_t jfxm_player_set_volume(void* media, float volume)
     return (int32_t)pPipeline->SetVolume(volume);
 }
 
-int32_t jfxm_player_get_balance(void* media, float* out_balance)
+static int32_t GstPlayerGetBalance(JfxmMedia* media, float* out_balance)
 {
-#ifdef __APPLE__
-    if (IsAvfHandle(media))
-        return jfxm_avf_player_get_balance((JfxmMedia*)media, out_balance);
-#endif
-
     CPipeline* pPipeline = NULL;
     int32_t iRet = GetGstPipeline(media, &pPipeline);
     if (ERROR_NONE != iRet)
@@ -692,13 +615,8 @@ int32_t jfxm_player_get_balance(void* media, float* out_balance)
     return ERROR_NONE;
 }
 
-int32_t jfxm_player_set_balance(void* media, float balance)
+static int32_t GstPlayerSetBalance(JfxmMedia* media, float balance)
 {
-#ifdef __APPLE__
-    if (IsAvfHandle(media))
-        return jfxm_avf_player_set_balance((JfxmMedia*)media, balance);
-#endif
-
     CPipeline* pPipeline = NULL;
     int32_t iRet = GetGstPipeline(media, &pPipeline);
     if (ERROR_NONE != iRet)
@@ -707,13 +625,8 @@ int32_t jfxm_player_set_balance(void* media, float balance)
     return (int32_t)pPipeline->SetBalance(balance);
 }
 
-int32_t jfxm_player_get_duration(void* media, double* out_seconds)
+static int32_t GstPlayerGetDuration(JfxmMedia* media, double* out_seconds)
 {
-#ifdef __APPLE__
-    if (IsAvfHandle(media))
-        return jfxm_avf_player_get_duration((JfxmMedia*)media, out_seconds);
-#endif
-
     CPipeline* pPipeline = NULL;
     int32_t iRet = GetGstPipeline(media, &pPipeline);
     if (ERROR_NONE != iRet)
@@ -729,13 +642,8 @@ int32_t jfxm_player_get_duration(void* media, double* out_seconds)
     return ERROR_NONE;
 }
 
-int32_t jfxm_player_seek(void* media, double seconds)
+static int32_t GstPlayerSeek(JfxmMedia* media, double seconds)
 {
-#ifdef __APPLE__
-    if (IsAvfHandle(media))
-        return jfxm_avf_player_seek((JfxmMedia*)media, seconds);
-#endif
-
     CPipeline* pPipeline = NULL;
     int32_t iRet = GetGstPipeline(media, &pPipeline);
     if (ERROR_NONE != iRet)
@@ -744,31 +652,316 @@ int32_t jfxm_player_seek(void* media, double seconds)
     return (int32_t)pPipeline->Seek(seconds);
 }
 
-int32_t jfxm_player_get_mute(void* media, int32_t* out_mute)
+// Mute is implemented in GSTMediaPlayer.java, so the pipeline is never consulted here: a handle
+// without a pipeline still answers ERROR_NOT_IMPLEMENTED, exactly as before the dispatch table.
+static int32_t GstPlayerGetMute(JfxmMedia* media, int32_t* out_mute)
 {
-    if (NULL == media)
-        return ERROR_MEDIA_NULL;
-#ifdef __APPLE__
-    if (IsAvfHandle(media))
-        return jfxm_avf_player_get_mute((JfxmMedia*)media, out_mute);
-#endif
+    (void)media;
     (void)out_mute;
-    // GStreamer backend: mute is implemented in GSTMediaPlayer.java.
     return ERROR_NOT_IMPLEMENTED;
 }
 
-int32_t jfxm_player_set_mute(void* media, int32_t mute)
+static int32_t GstPlayerSetMute(JfxmMedia* media, int32_t mute)
 {
-    if (NULL == media)
-        return ERROR_MEDIA_NULL;
-#ifdef __APPLE__
-    if (IsAvfHandle(media))
-        return jfxm_avf_player_set_mute((JfxmMedia*)media, mute);
-#endif
+    (void)media;
     (void)mute;
     return ERROR_NOT_IMPLEMENTED;
 }
 
+//*************************************************************************************************
+//********** Backend dispatch
+//*************************************************************************************************
+
+typedef int32_t (*JfxmPlayerInitFn)(JfxmMedia* media, const JfxmPlayerCallbacks* cb, void* user);
+typedef void*   (*JfxmPlayerGetHandleFn)(JfxmMedia* media);
+typedef int32_t (*JfxmPlayerActionFn)(JfxmMedia* media);
+typedef int32_t (*JfxmPlayerGetInt64Fn)(JfxmMedia* media, int64_t* out_value);
+typedef int32_t (*JfxmPlayerSetInt64Fn)(JfxmMedia* media, int64_t value);
+typedef int32_t (*JfxmPlayerGetFloatFn)(JfxmMedia* media, float* out_value);
+typedef int32_t (*JfxmPlayerSetFloatFn)(JfxmMedia* media, float value);
+typedef int32_t (*JfxmPlayerGetDoubleFn)(JfxmMedia* media, double* out_value);
+typedef int32_t (*JfxmPlayerSetDoubleFn)(JfxmMedia* media, double value);
+typedef int32_t (*JfxmPlayerGetInt32Fn)(JfxmMedia* media, int32_t* out_value);
+typedef int32_t (*JfxmPlayerSetInt32Fn)(JfxmMedia* media, int32_t value);
+
+/*
+ * The backend half of every jfxm_player_* entry point, filled in once per backend instead of once
+ * per call. The exported functions below resolve the handle to one of these tables and call through
+ * it, so the backend test lives in exactly one place (PlayerOps) rather than in a per-function
+ * "#ifdef __APPLE__ / IsAvfHandle(media)" preamble that a new entry point can forget. Every slot is
+ * a constructor parameter without a default, so a backend that does not implement a newly added
+ * operation fails to compile instead of leaving a NULL slot or falling through to GStreamer.
+ */
+struct JfxmPlayerOps
+{
+    const JfxmPlayerInitFn      init;
+    const JfxmPlayerGetHandleFn get_audio_equalizer;
+    const JfxmPlayerGetHandleFn get_audio_spectrum;
+    const JfxmPlayerGetInt64Fn  get_audio_sync_delay;
+    const JfxmPlayerSetInt64Fn  set_audio_sync_delay;
+    const JfxmPlayerActionFn    play;
+    const JfxmPlayerActionFn    pause;
+    const JfxmPlayerActionFn    stop;
+    const JfxmPlayerActionFn    finish;
+    const JfxmPlayerGetFloatFn  get_rate;
+    const JfxmPlayerSetFloatFn  set_rate;
+    const JfxmPlayerGetDoubleFn get_presentation_time;
+    const JfxmPlayerGetFloatFn  get_volume;
+    const JfxmPlayerSetFloatFn  set_volume;
+    const JfxmPlayerGetFloatFn  get_balance;
+    const JfxmPlayerSetFloatFn  set_balance;
+    const JfxmPlayerGetDoubleFn get_duration;
+    const JfxmPlayerSetDoubleFn seek;
+    const JfxmPlayerGetInt32Fn  get_mute;
+    const JfxmPlayerSetInt32Fn  set_mute;
+
+    JfxmPlayerOps(JfxmPlayerInitFn initFn,
+                  JfxmPlayerGetHandleFn getAudioEqualizerFn,
+                  JfxmPlayerGetHandleFn getAudioSpectrumFn,
+                  JfxmPlayerGetInt64Fn getAudioSyncDelayFn,
+                  JfxmPlayerSetInt64Fn setAudioSyncDelayFn,
+                  JfxmPlayerActionFn playFn,
+                  JfxmPlayerActionFn pauseFn,
+                  JfxmPlayerActionFn stopFn,
+                  JfxmPlayerActionFn finishFn,
+                  JfxmPlayerGetFloatFn getRateFn,
+                  JfxmPlayerSetFloatFn setRateFn,
+                  JfxmPlayerGetDoubleFn getPresentationTimeFn,
+                  JfxmPlayerGetFloatFn getVolumeFn,
+                  JfxmPlayerSetFloatFn setVolumeFn,
+                  JfxmPlayerGetFloatFn getBalanceFn,
+                  JfxmPlayerSetFloatFn setBalanceFn,
+                  JfxmPlayerGetDoubleFn getDurationFn,
+                  JfxmPlayerSetDoubleFn seekFn,
+                  JfxmPlayerGetInt32Fn getMuteFn,
+                  JfxmPlayerSetInt32Fn setMuteFn)
+      : init(initFn),
+        get_audio_equalizer(getAudioEqualizerFn),
+        get_audio_spectrum(getAudioSpectrumFn),
+        get_audio_sync_delay(getAudioSyncDelayFn),
+        set_audio_sync_delay(setAudioSyncDelayFn),
+        play(playFn),
+        pause(pauseFn),
+        stop(stopFn),
+        finish(finishFn),
+        get_rate(getRateFn),
+        set_rate(setRateFn),
+        get_presentation_time(getPresentationTimeFn),
+        get_volume(getVolumeFn),
+        set_volume(setVolumeFn),
+        get_balance(getBalanceFn),
+        set_balance(setBalanceFn),
+        get_duration(getDurationFn),
+        seek(seekFn),
+        get_mute(getMuteFn),
+        set_mute(setMuteFn)
+    {
+    }
+};
+
+static const JfxmPlayerOps GST_PLAYER_OPS(GstPlayerInit,
+                                          GstPlayerGetAudioEqualizer,
+                                          GstPlayerGetAudioSpectrum,
+                                          GstPlayerGetAudioSyncDelay,
+                                          GstPlayerSetAudioSyncDelay,
+                                          GstPlayerPlay,
+                                          GstPlayerPause,
+                                          GstPlayerStop,
+                                          GstPlayerFinish,
+                                          GstPlayerGetRate,
+                                          GstPlayerSetRate,
+                                          GstPlayerGetPresentationTime,
+                                          GstPlayerGetVolume,
+                                          GstPlayerSetVolume,
+                                          GstPlayerGetBalance,
+                                          GstPlayerSetBalance,
+                                          GstPlayerGetDuration,
+                                          GstPlayerSeek,
+                                          GstPlayerGetMute,
+                                          GstPlayerSetMute);
+
+#ifdef __APPLE__
+static const JfxmPlayerOps AVF_PLAYER_OPS(jfxm_avf_player_init,
+                                          jfxm_avf_player_get_audio_equalizer,
+                                          jfxm_avf_player_get_audio_spectrum,
+                                          jfxm_avf_player_get_audio_sync_delay,
+                                          jfxm_avf_player_set_audio_sync_delay,
+                                          jfxm_avf_player_play,
+                                          jfxm_avf_player_pause,
+                                          jfxm_avf_player_stop,
+                                          jfxm_avf_player_finish,
+                                          jfxm_avf_player_get_rate,
+                                          jfxm_avf_player_set_rate,
+                                          jfxm_avf_player_get_presentation_time,
+                                          jfxm_avf_player_get_volume,
+                                          jfxm_avf_player_set_volume,
+                                          jfxm_avf_player_get_balance,
+                                          jfxm_avf_player_set_balance,
+                                          jfxm_avf_player_get_duration,
+                                          jfxm_avf_player_seek,
+                                          jfxm_avf_player_get_mute,
+                                          jfxm_avf_player_set_mute);
+#endif
+
+// The one backend test. NULL means "no handle": every forwarder then answers ERROR_MEDIA_NULL (and
+// the two handle getters NULL), which is what GetGstPipeline used to answer on their behalf and
+// what get/set_mute already checked for themselves. A handle carrying any backend value other than
+// JFXM_BACKEND_AVF - impossible from jfxm_media_create, and JFXM_BACKEND_AVF cannot be created in a
+// non-Apple build - gets the GStreamer table, whose NULL CMedia yields ERROR_MEDIA_NULL as before.
+static const JfxmPlayerOps* PlayerOps(JfxmMedia* pHandle)
+{
+    if (NULL == pHandle)
+        return NULL;
+#ifdef __APPLE__
+    if (JFXM_BACKEND_AVF == pHandle->backend)
+        return &AVF_PLAYER_OPS;
+#endif
+    return &GST_PLAYER_OPS;
+}
+
+//*************************************************************************************************
+//********** The exported player entry points (backend agnostic)
+//*************************************************************************************************
+
+int32_t jfxm_player_init(void* media, const JfxmPlayerCallbacks* cb, void* user)
+{
+    JfxmMedia* pHandle = (JfxmMedia*)media;
+    const JfxmPlayerOps* pOps = PlayerOps(pHandle);
+    return (NULL != pOps) ? pOps->init(pHandle, cb, user) : ERROR_MEDIA_NULL;
+}
+
+void* jfxm_player_get_audio_equalizer(void* media)
+{
+    JfxmMedia* pHandle = (JfxmMedia*)media;
+    const JfxmPlayerOps* pOps = PlayerOps(pHandle);
+    return (NULL != pOps) ? pOps->get_audio_equalizer(pHandle) : NULL;
+}
+
+void* jfxm_player_get_audio_spectrum(void* media)
+{
+    JfxmMedia* pHandle = (JfxmMedia*)media;
+    const JfxmPlayerOps* pOps = PlayerOps(pHandle);
+    return (NULL != pOps) ? pOps->get_audio_spectrum(pHandle) : NULL;
+}
+
+int32_t jfxm_player_get_audio_sync_delay(void* media, int64_t* out_millis)
+{
+    JfxmMedia* pHandle = (JfxmMedia*)media;
+    const JfxmPlayerOps* pOps = PlayerOps(pHandle);
+    return (NULL != pOps) ? pOps->get_audio_sync_delay(pHandle, out_millis) : ERROR_MEDIA_NULL;
+}
+
+int32_t jfxm_player_set_audio_sync_delay(void* media, int64_t millis)
+{
+    JfxmMedia* pHandle = (JfxmMedia*)media;
+    const JfxmPlayerOps* pOps = PlayerOps(pHandle);
+    return (NULL != pOps) ? pOps->set_audio_sync_delay(pHandle, millis) : ERROR_MEDIA_NULL;
+}
+
+int32_t jfxm_player_play(void* media)
+{
+    JfxmMedia* pHandle = (JfxmMedia*)media;
+    const JfxmPlayerOps* pOps = PlayerOps(pHandle);
+    return (NULL != pOps) ? pOps->play(pHandle) : ERROR_MEDIA_NULL;
+}
+
+int32_t jfxm_player_pause(void* media)
+{
+    JfxmMedia* pHandle = (JfxmMedia*)media;
+    const JfxmPlayerOps* pOps = PlayerOps(pHandle);
+    return (NULL != pOps) ? pOps->pause(pHandle) : ERROR_MEDIA_NULL;
+}
+
+int32_t jfxm_player_stop(void* media)
+{
+    JfxmMedia* pHandle = (JfxmMedia*)media;
+    const JfxmPlayerOps* pOps = PlayerOps(pHandle);
+    return (NULL != pOps) ? pOps->stop(pHandle) : ERROR_MEDIA_NULL;
+}
+
+int32_t jfxm_player_finish(void* media)
+{
+    JfxmMedia* pHandle = (JfxmMedia*)media;
+    const JfxmPlayerOps* pOps = PlayerOps(pHandle);
+    return (NULL != pOps) ? pOps->finish(pHandle) : ERROR_MEDIA_NULL;
+}
+
+int32_t jfxm_player_get_rate(void* media, float* out_rate)
+{
+    JfxmMedia* pHandle = (JfxmMedia*)media;
+    const JfxmPlayerOps* pOps = PlayerOps(pHandle);
+    return (NULL != pOps) ? pOps->get_rate(pHandle, out_rate) : ERROR_MEDIA_NULL;
+}
+
+int32_t jfxm_player_set_rate(void* media, float rate)
+{
+    JfxmMedia* pHandle = (JfxmMedia*)media;
+    const JfxmPlayerOps* pOps = PlayerOps(pHandle);
+    return (NULL != pOps) ? pOps->set_rate(pHandle, rate) : ERROR_MEDIA_NULL;
+}
+
+int32_t jfxm_player_get_presentation_time(void* media, double* out_seconds)
+{
+    JfxmMedia* pHandle = (JfxmMedia*)media;
+    const JfxmPlayerOps* pOps = PlayerOps(pHandle);
+    return (NULL != pOps) ? pOps->get_presentation_time(pHandle, out_seconds) : ERROR_MEDIA_NULL;
+}
+
+int32_t jfxm_player_get_volume(void* media, float* out_volume)
+{
+    JfxmMedia* pHandle = (JfxmMedia*)media;
+    const JfxmPlayerOps* pOps = PlayerOps(pHandle);
+    return (NULL != pOps) ? pOps->get_volume(pHandle, out_volume) : ERROR_MEDIA_NULL;
+}
+
+int32_t jfxm_player_set_volume(void* media, float volume)
+{
+    JfxmMedia* pHandle = (JfxmMedia*)media;
+    const JfxmPlayerOps* pOps = PlayerOps(pHandle);
+    return (NULL != pOps) ? pOps->set_volume(pHandle, volume) : ERROR_MEDIA_NULL;
+}
+
+int32_t jfxm_player_get_balance(void* media, float* out_balance)
+{
+    JfxmMedia* pHandle = (JfxmMedia*)media;
+    const JfxmPlayerOps* pOps = PlayerOps(pHandle);
+    return (NULL != pOps) ? pOps->get_balance(pHandle, out_balance) : ERROR_MEDIA_NULL;
+}
+
+int32_t jfxm_player_set_balance(void* media, float balance)
+{
+    JfxmMedia* pHandle = (JfxmMedia*)media;
+    const JfxmPlayerOps* pOps = PlayerOps(pHandle);
+    return (NULL != pOps) ? pOps->set_balance(pHandle, balance) : ERROR_MEDIA_NULL;
+}
+
+int32_t jfxm_player_get_duration(void* media, double* out_seconds)
+{
+    JfxmMedia* pHandle = (JfxmMedia*)media;
+    const JfxmPlayerOps* pOps = PlayerOps(pHandle);
+    return (NULL != pOps) ? pOps->get_duration(pHandle, out_seconds) : ERROR_MEDIA_NULL;
+}
+
+int32_t jfxm_player_seek(void* media, double seconds)
+{
+    JfxmMedia* pHandle = (JfxmMedia*)media;
+    const JfxmPlayerOps* pOps = PlayerOps(pHandle);
+    return (NULL != pOps) ? pOps->seek(pHandle, seconds) : ERROR_MEDIA_NULL;
+}
+
+int32_t jfxm_player_get_mute(void* media, int32_t* out_mute)
+{
+    JfxmMedia* pHandle = (JfxmMedia*)media;
+    const JfxmPlayerOps* pOps = PlayerOps(pHandle);
+    return (NULL != pOps) ? pOps->get_mute(pHandle, out_mute) : ERROR_MEDIA_NULL;
+}
+
+int32_t jfxm_player_set_mute(void* media, int32_t mute)
+{
+    JfxmMedia* pHandle = (JfxmMedia*)media;
+    const JfxmPlayerOps* pOps = PlayerOps(pHandle);
+    return (NULL != pOps) ? pOps->set_mute(pHandle, mute) : ERROR_MEDIA_NULL;
+}
 //*************************************************************************************************
 //********** Video frames (jni/NativeVideoBuffer.cpp)
 //*************************************************************************************************
@@ -926,6 +1119,28 @@ void jfxm_spectrum_set_bands(void* spectrum, int32_t count, float* magnitudes, f
                              JfxmReleaseFn release, void* release_user)
 {
     CAudioSpectrum* pSpectrum = (CAudioSpectrum*)spectrum;
+
+    // The band count and the two buffers are as much a precondition as the handle every other
+    // entry point checks, and nothing in the ABI obliges a caller to pre-screen them: a pair of
+    // `count` floats each is what the header promises, so a NULL buffer or a count that cannot
+    // describe one is not a pair at all. Left unchecked, a NULL buffer built a holder whose
+    // UpdateBands can never copy (CFfiBandsHolder::UpdateBands writes only when both sides are
+    // non-NULL) yet still owed a release, and a negative count reached
+    // g_object_set(m_pSpectrum, "bands", count, NULL) on the gstspectrum element, whose property is
+    // unsigned. Rejecting them is the void-returning form of the ERROR_FUNCTION_PARAM_NULL the
+    // int32_t entry points return: the call becomes the no-op a NULL spectrum already is. The pair
+    // is still handed straight back, because `release` runs exactly once per call on every path
+    // (jfxmedia_api.h), and a rejected call retires nothing - the holder installed by an earlier
+    // call keeps its pair, exactly as NativeAudioSpectrum.setBandCount requires.
+    // No upper bound is imposed: any positive count is a promise by the caller that the two buffers
+    // hold that many floats, which C cannot check and must not second-guess.
+    if (count <= 0 || NULL == magnitudes || NULL == phases) {
+        LOGGER_LOGMSG(LOGGER_WARNING, "jfxm_spectrum_set_bands: invalid band count or buffer");
+        if (NULL != release) {
+            release(release_user);
+        }
+        return;
+    }
 
     CFfiBandsHolder* pHolder = new (nothrow) CFfiBandsHolder((int)count, magnitudes, phases,
                                                              release, release_user);

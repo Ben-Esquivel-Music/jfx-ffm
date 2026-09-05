@@ -33,7 +33,7 @@
  * CStreamCallbacks over a JfxmStreamCallbacks table (FFM-ABI-CONTRACT.md section 9). Replaces
  * CJavaInputStreamCallbacks with the same return conventions: a NULL slot behaves like a Java
  * target that threw (need_buffer/is_seekable/is_random_access/property 0, read_* -2, seek -1,
- * copy_block/close_connection no-op), and after CloseConnection the adapter answers like the JNI
+ * copy_block 0, close_connection no-op), and after CloseConnection the adapter answers like the JNI
  * one did once its global reference was gone (reads -1, the rest 0/false/no-op). Created by
  * jfxm_media_create; deleted by the pipeline factory right after CloseConnection (GST) or by the
  * AVF player on dispose, exactly where CJavaInputStreamCallbacks was.
@@ -47,7 +47,7 @@ public:
     bool    NeedBuffer();
     int     ReadNextBlock();
     int     ReadBlock(int64_t position, int size);
-    void    CopyBlock(void* destination, int size);
+    int     CopyBlock(void* destination, int size);
     bool    IsSeekable();
     bool    IsRandomAccess();
     int64_t Seek(int64_t position);

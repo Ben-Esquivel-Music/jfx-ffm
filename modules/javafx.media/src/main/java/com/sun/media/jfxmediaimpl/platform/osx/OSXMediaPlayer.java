@@ -30,7 +30,6 @@ import com.sun.media.jfxmedia.MediaException;
 import com.sun.media.jfxmedia.effects.AudioEqualizer;
 import com.sun.media.jfxmedia.effects.AudioSpectrum;
 import com.sun.media.jfxmedia.locator.Locator;
-import com.sun.media.jfxmedia.control.MediaPlayerOverlay;
 import com.sun.media.jfxmediaimpl.JfxMediaNative;
 import com.sun.media.jfxmediaimpl.NativeMediaPlayer;
 import java.lang.foreign.Arena;
@@ -55,11 +54,40 @@ final class OSXMediaPlayer extends NativeMediaPlayer {
             // The 13 upcall stubs and the registry entry must outlive jfxm_media_dispose, which runs
             // in OSXMedia.dispose(), i.e. after playerDispose() (contract sections 4 and 7).
             Arena playerArena = Arena.ofShared();
-            JfxMediaNative.CallbackTable callbacks = JfxMediaNative.installPlayerCallbacks(playerArena, this);
-            sourceMedia.runAfterDispose(() -> {
-                callbacks.unregister();
-                playerArena.close();
-            });
+            JfxMediaNative.CallbackTable callbacks;
+            try {
+                callbacks = JfxMediaNative.installPlayerCallbacks(playerArena, this);
+                // Registering the close action is the last statement of the block, so anything that
+                // throws above it leaves the arena with no owner at all: nothing else references it, and
+                // a shared arena frees neither its segment nor the stubs it has already allocated until
+                // it is closed. installPlayerCallbacks reaches two restricted methods per stub, so this
+                // is not theoretical: it throws IllegalCallerException when --enable-native-access does
+                // not name javafx.media, and it can run out of memory part-way through the 13
+                // trampolines. Closing here cannot hit the case where Arena.close() throws because a
+                // native thread has not unwound from a stub: the table is handed to C by
+                // jfxm_player_init below, and until that call returns no native code has ever seen any
+                // of these stubs.
+                sourceMedia.runAfterDispose(() -> {
+                    callbacks.unregister();
+                    playerArena.close();
+                });
+            } catch (Throwable t) {
+                try {
+                    playerArena.close();
+                } catch (Throwable closeFailure) {
+                    t.addSuppressed(closeFailure);
+                }
+                // The media is this player's now, and nothing downstream would ever release it:
+                // initNativeMedia() above has already created the native media and
+                // OSXPlatform.createMediaPlayer only logs the exception and returns null. Same
+                // teardown as the rc != 0 path below, and dispose() is idempotent.
+                try {
+                    dispose();
+                } catch (Throwable disposeFailure) {
+                    t.addSuppressed(disposeFailure);
+                }
+                throw t;
+            }
             rc = JfxMediaNative.playerInit(sourceMedia.getNativeMediaRef(), callbacks);
         }
         if (rc != MediaError.ERROR_NONE.code()) {
@@ -93,11 +121,6 @@ final class OSXMediaPlayer extends NativeMediaPlayer {
     @Override
     public AudioSpectrum getAudioSpectrum() {
         return audioSpectrum;
-    }
-
-    @Override
-    public MediaPlayerOverlay getMediaPlayerOverlay() {
-        return null; // Not needed
     }
 
     /*

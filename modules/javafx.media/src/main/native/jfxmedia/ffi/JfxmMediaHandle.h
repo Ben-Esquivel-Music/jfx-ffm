@@ -49,7 +49,10 @@ struct JfxmMedia
     std::string         content_type;
     std::string         location;
     int64_t             size_hint;
-    int32_t             has_stream;     // 1 when a JfxmStreamCallbacks table was given (jar:/jrt:)
+    // 1 when a JfxmStreamCallbacks table was given, which Java does for jar:/jrt: locations and
+    // for nothing else. It is the only thing jfxm_avf_player_init tests to decide whether the media
+    // is read through the Locator: the scheme is not parsed again on the C side.
+    int32_t             has_stream;
     JfxmStreamCallbacks stream;
     void*               stream_user;
 
