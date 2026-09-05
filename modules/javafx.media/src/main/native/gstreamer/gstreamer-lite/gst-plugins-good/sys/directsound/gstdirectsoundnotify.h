@@ -49,6 +49,10 @@ public:
 
   bool Init(GSTDSNotfierCallback pCallback, void *pData);
   void Dispose();
+  // False if Init() never registered this object, and false once Dispose() has
+  // unregistered it. True after Dispose() means the unregister failed and MMDevAPI may
+  // still hold a pointer to this object, so it must not be deleted.
+  bool IsRegistered() const { return m_bRegistered; }
 
   // IUnknown
   IFACEMETHODIMP_(ULONG) AddRef();
@@ -62,18 +66,29 @@ private:
   IFACEMETHODIMP OnDefaultDeviceChanged(EDataFlow flow, ERole role, LPCWSTR pwstrDefaultDeviceId);
   IFACEMETHODIMP OnPropertyValueChanged(LPCWSTR pwstrDeviceId, const PROPERTYKEY key) { return S_OK; }
 
-  // Releases the CoInitialize() reference taken by Init(), if this thread owns it.
-  void ReleaseApartment();
+  // The apartment thread, created by Init() and joined by Dispose(). It owns the whole
+  // COM lifetime of m_pEnumerator: CoInitializeEx(), CoCreateInstance(),
+  // RegisterEndpointNotificationCallback(), UnregisterEndpointNotificationCallback(),
+  // Release() and CoUninitialize() all run on it, in that order. The enumerator pointer
+  // therefore never leaves the apartment it was created in and needs no marshaling,
+  // whichever threads happen to call Init() and Dispose().
+  static unsigned __stdcall ApartmentThreadProc(void *pParam);
+  void RunApartment();
 
   long m_cRef;
   IMMDeviceEnumerator* m_pEnumerator;
   GSTDSNotfierCallback m_pCallback;
   void *m_pData;
-  // The CoInitialize() reference owned by this object. It has to outlive m_pEnumerator:
-  // CoUninitialize() may unload MMDevAPI.dll and leave the enumerator's vtable unmapped.
-  bool m_bCoUninitialize;
-  // CoUninitialize() only balances a CoInitialize() made on the same thread.
-  DWORD m_dwApartmentThreadId;
+  // The apartment thread and its handshake. m_hReady is signalled once the thread has
+  // finished trying to register; m_hQuit asks it to tear down and exit.
+  HANDLE m_hThread;
+  HANDLE m_hReady;
+  HANDLE m_hQuit;
+  // Set by the apartment thread before it signals m_hReady and cleared by it again once
+  // it has unregistered; read by Init() after its m_hReady wait and by
+  // ReleaseNotificator() after Dispose() has joined the thread. Both reads follow a
+  // Win32 wait, which is the barrier.
+  bool m_bRegistered;
 
   // IUnknown
   IFACEMETHODIMP QueryInterface(const IID& iid, void** ppUnk);

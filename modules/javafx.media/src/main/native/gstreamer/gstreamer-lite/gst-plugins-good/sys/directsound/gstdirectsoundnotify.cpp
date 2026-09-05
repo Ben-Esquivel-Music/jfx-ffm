@@ -27,6 +27,9 @@
 
 #include "gstdirectsoundnotify.h"
 
+#include <assert.h>
+#include <process.h>
+
 void* InitNotificator(GSTDSNotfierCallback pCallback, void *pData) {
   GSTDirectSoundNotify *pNotify = new GSTDirectSoundNotify();
   if (pNotify != NULL) {
@@ -44,63 +47,149 @@ void ReleaseNotificator(void *pObject) {
   GSTDirectSoundNotify *pNotify = (GSTDirectSoundNotify*)pObject;
   if (pNotify) {
     pNotify->Dispose();
-    pNotify->Release();
+    // Deliberate leak, do not "fix" it: if the unregister in Dispose() failed, MMDevAPI
+    // still holds a pointer to this object and would call a freed vtable on the next
+    // device change. Dispose() has made the object inert, so leaking it is the same
+    // trade 8267819 made for the apartment reference - a few dozen bytes rather than a
+    // use after free.
+    if (!pNotify->IsRegistered()) {
+      pNotify->Release();
+    }
   }
 }
 
 bool GSTDirectSoundNotify::Init(GSTDSNotfierCallback pCallback, void *pData) {
   m_pCallback = pCallback;
   m_pData = pData;
-  bool bResult = false;
 
-  if (SUCCEEDED(CoInitialize(NULL))) {
-    m_bCoUninitialize = true;
-    m_dwApartmentThreadId = GetCurrentThreadId();
-  }
-
-  HRESULT hr = CoCreateInstance(__uuidof(MMDeviceEnumerator),
-                                NULL,
-                                CLSCTX_INPROC_SERVER,
-                                IID_PPV_ARGS(&m_pEnumerator));
-  if (SUCCEEDED(hr)) {
-    hr = m_pEnumerator->RegisterEndpointNotificationCallback(this);
-    if (SUCCEEDED(hr)) {
-      bResult = true;
-    } else {
-      m_pEnumerator->Release();
-      m_pEnumerator = NULL;
+  // Manual reset events: m_hReady is signalled once and read by Init() only, and
+  // Dispose() may signal m_hQuit before the apartment thread reaches its wait.
+  m_hReady = CreateEvent(NULL, TRUE, FALSE, NULL);
+  m_hQuit = CreateEvent(NULL, TRUE, FALSE, NULL);
+  if (m_hReady != NULL && m_hQuit != NULL) {
+    // _beginthreadex() rather than CreateThread(): this is a DLL, and the thread runs
+    // CRT code (assert() in RunApartment()), so it needs the per thread CRT state that
+    // _beginthreadex() creates and gives back when the thread returns. glib does the
+    // same in this tree (3rd_party/glib/glib/gthread-win32.c).
+    m_hThread = (HANDLE)_beginthreadex(NULL, 0, ApartmentThreadProc, this, 0, NULL);
+    if (m_hThread != NULL) {
+      // m_pEnumerator may only be touched by the apartment thread, so wait here until
+      // it has finished trying to register and Init() can keep its bool contract.
+      WaitForSingleObject(m_hReady, INFINITE);
     }
   }
 
-  // On success m_pEnumerator outlives this call, so the apartment reference has to as
-  // well and is given back by Dispose(). Nothing is retained on failure, release it now.
-  if (!bResult) {
-    ReleaseApartment();
+  // InitNotificator() calls Release() without Dispose() when this returns false, so
+  // nothing may be left behind here: stop the thread, if it started, and give the
+  // handles back now. On success Dispose() does it.
+  if (!m_bRegistered) {
+    Dispose();
   }
 
-  return bResult;
+  return m_bRegistered;
 }
 
 void GSTDirectSoundNotify::Dispose() {
-  if (m_pEnumerator) {
-    m_pEnumerator->UnregisterEndpointNotificationCallback(this);
+  // Safe to call after a failed Init() and safe to call twice: every handle is closed
+  // and NULLed here, and the apartment thread is joined exactly once.
+  if (m_hThread != NULL) {
+    // Joining is what withdraws the registration: when the apartment thread has exited
+    // it has attempted the unregister, and IsRegistered() says whether that took, so
+    // ReleaseNotificator() knows whether this object may be deleted. It does not join
+    // MMDevAPI's own notification thread - UnregisterEndpointNotificationCallback has
+    // no documented in-flight drain - so a callback already dispatched may still be
+    // running; the apartment thread has made this object inert for exactly that case.
+    // The wait is bounded only by MMDevAPI returning promptly from the unregister,
+    // which is the same exposure as before this thread existed, when those two calls
+    // ran inline on the disposing thread.
+    // Neither this wait nor the one in Init() may ever be made under the loader lock:
+    // this one waits for the apartment thread's DLL_THREAD_DETACH, Init()'s waits for
+    // its DLL_THREAD_ATTACH. No such path exists today - gstreamer-lite builds no
+    // DllMain under GSTREAMER_LITE, and ReleaseNotificator() is reached from a GObject
+    // finalize - and it has to stay that way.
+    SetEvent(m_hQuit);
+    WaitForSingleObject(m_hThread, INFINITE);
+    CloseHandle(m_hThread);
+    m_hThread = NULL;
+  }
+
+  if (m_hReady != NULL) {
+    CloseHandle(m_hReady);
+    m_hReady = NULL;
+  }
+
+  if (m_hQuit != NULL) {
+    CloseHandle(m_hQuit);
+    m_hQuit = NULL;
+  }
+}
+
+unsigned __stdcall GSTDirectSoundNotify::ApartmentThreadProc(void *pParam) {
+  ((GSTDirectSoundNotify*)pParam)->RunApartment();
+  return 0;
+}
+
+void GSTDirectSoundNotify::RunApartment() {
+  // We created this thread, so it is not in an apartment yet and CoInitializeEx()
+  // cannot fail with RPC_E_CHANGED_MODE. Join the MTA and not an STA: MMDeviceEnumerator
+  // is registered ThreadingModel="Both", so it is at home here, and an MTA has no
+  // message pump obligation. This thread has no window queue and so could not service
+  // an STA, which would silently stop notification delivery if MMDevAPI ever marshalled
+  // calls into the registering apartment.
+  bool bCoUninitialize = false;
+
+  if (SUCCEEDED(CoInitializeEx(NULL, COINIT_MULTITHREADED))) {
+    bCoUninitialize = true;
+
+    HRESULT hr = CoCreateInstance(__uuidof(MMDeviceEnumerator),
+                                  NULL,
+                                  CLSCTX_INPROC_SERVER,
+                                  IID_PPV_ARGS(&m_pEnumerator));
+    if (SUCCEEDED(hr)) {
+      hr = m_pEnumerator->RegisterEndpointNotificationCallback(this);
+      if (SUCCEEDED(hr)) {
+        m_bRegistered = true;
+      } else {
+        m_pEnumerator->Release();
+        m_pEnumerator = NULL;
+      }
+    }
+  }
+
+  // Init() is blocked until here and reads m_bRegistered once this returns. The Win32
+  // wait it does is a full memory barrier, so the flag needs no atomics.
+  SetEvent(m_hReady);
+
+  if (m_bRegistered) {
+    WaitForSingleObject(m_hQuit, INFINITE);
+
+    // Unregister before releasing: MMDevAPI holds this object without a reference of
+    // its own, and it is the unregister, not the Release() below, that stops the
+    // callbacks. The HRESULT decides whether this object may be deleted at all, so it
+    // is kept rather than discarded; the assert is a developer aid only, since it is
+    // compiled out under NDEBUG and this library has no logging to report to either
+    // (GST_DISABLE_GST_DEBUG is defined for it).
+    HRESULT hr = m_pEnumerator->UnregisterEndpointNotificationCallback(this);
+    if (SUCCEEDED(hr)) {
+      m_bRegistered = false;
+    }
+    assert(SUCCEEDED(hr));
+
+    // The sink that m_pData points at is being finalized, so the callback must not
+    // reach it again. If the unregister above failed, MMDevAPI still holds this
+    // object and will call it: what is left behind has to be inert, not freed.
+    m_pCallback = NULL;
+    m_pData = NULL;
+
     m_pEnumerator->Release();
     m_pEnumerator = NULL;
   }
 
-  ReleaseApartment();
-}
-
-void GSTDirectSoundNotify::ReleaseApartment() {
-  // CoUninitialize() is per thread, so it may only be called on the thread that called
-  // CoInitialize(). If we are disposed on another thread we leak the apartment reference
-  // on purpose: leaking it is better than unloading MMDevAPI.dll under a live pointer.
-  if (m_bCoUninitialize && GetCurrentThreadId() == m_dwApartmentThreadId) {
+  // CoUninitialize() comes last, after the Release() above: it may unload MMDevAPI.dll
+  // and leave the enumerator's vtable unmapped. Do not reorder these.
+  if (bCoUninitialize) {
     CoUninitialize();
   }
-
-  m_bCoUninitialize = false;
-  m_dwApartmentThreadId = 0;
 }
 
 GSTDirectSoundNotify::GSTDirectSoundNotify() {
@@ -108,8 +197,10 @@ GSTDirectSoundNotify::GSTDirectSoundNotify() {
   m_pEnumerator = NULL;
   m_pCallback = NULL;
   m_pData = NULL;
-  m_bCoUninitialize = false;
-  m_dwApartmentThreadId = 0;
+  m_hThread = NULL;
+  m_hReady = NULL;
+  m_hQuit = NULL;
+  m_bRegistered = false;
 }
 
 HRESULT GSTDirectSoundNotify::OnDefaultDeviceChanged(EDataFlow flow,
