@@ -79,7 +79,6 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.junit.jupiter.api.Assertions.fail;
 import static org.junit.jupiter.api.Assumptions.abort;
-import static org.junit.jupiter.api.Assumptions.assumeTrue;
 
 /**
  * Binding tests for {@link JfxMediaNative}, the {@code jfxm_*} facade that replaced the module's JNI
@@ -88,8 +87,9 @@ import static org.junit.jupiter.api.Assumptions.assumeTrue;
  * only created and linked, never started. The exception is
  * {@link #playerOverATinyWavFileDisposesWithoutLeaks}: {@code jfxm_player_init} takes the pipeline to
  * {@code PAUSED}, which does open the platform's audio sink, so that one test - and only that one - is
- * skipped where no audio output exists. The class as a whole is skipped when {@code jfxmedia} cannot be
- * loaded, so a build without the media natives stays green.
+ * skipped where no audio output exists. The library itself is not optional: this module builds it, so
+ * {@link MediaNatives#require} fails the class when a reachable {@code jfxmedia} cannot be used and
+ * skips only when this build produced none at all.
  * <p>
  * The tests are ordered because two of them depend on being the first caller of
  * {@code jfxm_platform_init} in the JVM: it logs exactly once (the log-sink round trip) and it
@@ -136,13 +136,33 @@ public class JfxMediaNativeTest {
     private static final List<String> NO_AUDIO_OUTPUT_MARKERS =
             List.of("audiosink", "alsasink", "directsoundsink", "could not open audio device");
 
+    /**
+     * What a captured log says when the reason for a null player is the build and not the machine.
+     * Any of these forces a failure, and is checked before {@link #NO_AUDIO_OUTPUT_MARKERS}, because
+     * every one of them can also put a sink element's name in the log and so satisfy that list on its
+     * own: the first five are the facade failing to bind at all, and the rest are pipeline construction
+     * failures - an element factory {@code gstreamer-lite} or {@code fxplugins} never registered, a bin
+     * that would not take an element, a link that would not hold. No absent sound card can cause any of
+     * them; a {@code fxplugins} that did not build causes the sixth and seventh, which is how this list
+     * was arrived at.
+     */
+    private static final List<String> BROKEN_BUILD_MARKERS = List.of(
+            "unsatisfiedlinkerror",
+            "missing native symbol",
+            "was not granted native access",
+            "noclassdeffounderror",
+            "exceptionininitializererror",
+            "no such element factory",
+            "error_gstreamer_element_create",
+            "error_gstreamer_audio_sink_create",
+            "error_gstreamer_video_sink_create",
+            "error_gstreamer_bin_add_element",
+            "error_gstreamer_element_link",
+            "error_manager_engineinit_fail");
+
     @BeforeAll
     static void loadLibrary() {
-        try {
-            JfxMediaNative.loadLibraries();
-        } catch (UnsatisfiedLinkError | RuntimeException e) {
-            assumeTrue(false, "jfxmedia is not available: " + e);
-        }
+        MediaNatives.require();
     }
 
     @Test
@@ -522,14 +542,22 @@ public class JfxMediaNativeTest {
      * HLS source that query reaches {@code java_source_query}, which emits {@code HLS_PROP_GET_DURATION}
      * and arrives back in the facade as the {@code property} upcall. What keeps the outer call's out
      * value intact is therefore write ordering, not the absence of the nesting: the natives write
-     * {@code *out} last, and no upcall target calls an out-parameter wrapper.
+     * {@code *out} last, and an upcall target may reach an out-parameter wrapper only on a thread that
+     * never issues one itself. That second rule is narrower than a blanket ban on upcall targets
+     * reaching wrappers, because one target does reach one: {@code onNewFrame} reaches
+     * {@code frameGetInfo} through {@code NativeVideoBuffer}, and it is safe only because
+     * {@code new_frame} is delivered on the appsink streaming thread or the AVF display-link thread,
+     * neither of which ever runs a wrapper.
      * <p>
-     * This test pins the second of those. It seeds the cell the way a native that had already written
-     * {@code *out} would leave it - the pessimistic ordering, so that any claim of the cell shows - runs
-     * every stream slot through its real function pointer, which is the same upcall stub and the same
-     * thread a nested query uses, and requires the cell back byte for byte with its out value unchanged.
-     * It fails the day an upcall target reaches an out-parameter wrapper, which is exactly the edit the
-     * {@code SCRATCH} javadoc forbids. Nothing here needs a player, a pipeline or an audio device.
+     * This test pins the second of those for the stream callbacks - the targets that do arrive on a
+     * thread issuing out-parameter downcalls. It seeds the cell the way a native that had already
+     * written {@code *out} would leave it - the pessimistic ordering, so that any claim of the cell
+     * shows - runs every stream slot through its real function pointer, which is the same upcall stub
+     * and the same thread a nested query uses, and requires the cell back byte for byte with its out
+     * value unchanged. It fails the day one of those targets reaches an out-parameter wrapper, which on
+     * this thread is exactly the edit the {@code SCRATCH} javadoc forbids. It says nothing about
+     * {@code onNewFrame}, which the rule permits and no assertion here covers. Nothing here needs a
+     * player, a pipeline or an audio device.
      */
     @Test
     @Order(12)
@@ -627,7 +655,7 @@ public class JfxMediaNativeTest {
      */
     @Test
     @Order(9)
-    void mediaOverATinyWavFileDisposesWithoutLeaks() throws IOException {
+    void mediaOverATinyWavFileDisposesWithoutLeaks() throws IOException, URISyntaxException {
         Path file = tinyWavFile();
         try {
             Locator locator = tinyWavLocator(file);
@@ -673,7 +701,7 @@ public class JfxMediaNativeTest {
      */
     @Test
     @Order(10)
-    void playerOverATinyWavFileDisposesWithoutLeaks() throws IOException {
+    void playerOverATinyWavFileDisposesWithoutLeaks() throws IOException, URISyntaxException {
         Path file = tinyWavFile();
         try {
             Locator locator = tinyWavLocator(file);
@@ -752,7 +780,8 @@ public class JfxMediaNativeTest {
      */
     @Test
     @Order(11)
-    void disposingAMediaClosesTheConnectionTheStreamCallbacksNeverClosed() throws IOException {
+    void disposingAMediaClosesTheConnectionTheStreamCallbacksNeverClosed()
+            throws IOException, URISyntaxException {
         Path file = tinyWavFile();
         try {
             RecordingLocator locator = recordingTinyWavLocator(file);
@@ -817,12 +846,14 @@ public class JfxMediaNativeTest {
     /**
      * Waits, for at most {@link #LOG_GRACE_MILLIS}, for the bus thread to log the error that explains a
      * null player. Returning early when it never comes is fine: the caller reports the log it has, and
-     * an unexplained null player is a failure.
+     * an unexplained null player is a failure. It returns early for a broken build too, so that one
+     * fails at once rather than after the whole grace period.
      */
     private static void awaitNativeError(ByteArrayOutputStream captured) {
         long deadline = System.currentTimeMillis() + LOG_GRACE_MILLIS;
         while (System.currentTimeMillis() < deadline) {
-            if (reportsNoAudioOutput(captured.toString(StandardCharsets.UTF_8))) {
+            String log = captured.toString(StandardCharsets.UTF_8);
+            if (reportsNoAudioOutput(log) || brokenBuildMarker(log) != null) {
                 return;
             }
             try {
@@ -835,12 +866,18 @@ public class JfxMediaNativeTest {
     }
 
     /**
-     * Never returns: aborts the test when the captured log shows the platform could not open its audio
-     * output, and fails it otherwise. Both carry the whole log, because a skip that cannot be explained
-     * is as bad as a failure that cannot be.
+     * Never returns: fails when the captured log names a broken build, aborts when it shows the platform
+     * could not open its audio output, and fails otherwise. The broken-build test comes first, so that
+     * no build failure can leave here as a skip. All three carry the whole log, because a skip that
+     * cannot be explained is as bad as a failure that cannot be.
      */
     private static void reportNoPlayer(String log) {
         String detail = "GSTPlatform.createMediaPlayer returned null; the captured media log was:\n" + log;
+        String broken = brokenBuildMarker(log);
+        if (broken != null) {
+            fail("the media natives are broken, not this machine: the log names \"" + broken + "\", "
+                    + "which no missing audio device can cause. " + detail);
+        }
         if (reportsNoAudioOutput(log)) {
             abort("this machine has no audio output, so GStreamer could not build a playback pipeline; "
                     + "jfxm_media_create is still covered by mediaOverATinyWavFileDisposesWithoutLeaks. "
@@ -863,6 +900,15 @@ public class JfxMediaNativeTest {
             return false;
         }
         return NO_AUDIO_OUTPUT_MARKERS.stream().anyMatch(lower::contains);
+    }
+
+    /**
+     * The first {@link #BROKEN_BUILD_MARKERS} entry the log carries, or {@code null} when it carries
+     * none.
+     */
+    private static String brokenBuildMarker(String log) {
+        String lower = log.toLowerCase(Locale.ROOT);
+        return BROKEN_BUILD_MARKERS.stream().filter(lower::contains).findFirst().orElse(null);
     }
 
     /**
@@ -890,28 +936,24 @@ public class JfxMediaNativeTest {
         }
     }
 
-    /** {@code file} as an initialised {@link Locator}; the platform has to recognise it as WAV. */
-    private static Locator tinyWavLocator(Path file) {
-        Locator locator;
-        try {
-            locator = new Locator(file.toUri());
-            locator.init();
-        } catch (Exception e) {
-            return abort("the platform cannot play audio/x-wav here: " + e);
-        }
+    /**
+     * {@code file} as an initialised {@link Locator}; the platform has to recognise it as WAV. Nothing
+     * here may be skipped: {@code audio/x-wav} is in both of {@code GSTPlatform}'s content type lists
+     * unconditionally, and {@code NativeMediaManager.canPlayContentType} answers from those lists and
+     * not from the native layer, so there is no machine on which this legitimately fails.
+     */
+    private static Locator tinyWavLocator(Path file) throws IOException, URISyntaxException {
+        Locator locator = new Locator(file.toUri());
+        locator.init();
         assertEquals("audio/x-wav", locator.getContentType());
         return locator;
     }
 
     /** The same, as a {@link RecordingLocator}. */
-    private static RecordingLocator recordingTinyWavLocator(Path file) {
-        RecordingLocator locator;
-        try {
-            locator = new RecordingLocator(file.toUri());
-            locator.init();
-        } catch (Exception e) {
-            return abort("the platform cannot play audio/x-wav here: " + e);
-        }
+    private static RecordingLocator recordingTinyWavLocator(Path file)
+            throws IOException, URISyntaxException {
+        RecordingLocator locator = new RecordingLocator(file.toUri());
+        locator.init();
         assertEquals("audio/x-wav", locator.getContentType());
         return locator;
     }

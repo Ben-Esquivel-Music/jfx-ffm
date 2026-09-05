@@ -91,7 +91,11 @@
                          the upgrade module path) while the tests run on the classpath, so the
                          internals they touch are opened by src/test/addExports. The freshly built
                          media natives come first on java.library.path, ahead of the prebuilt
-                         caches in ${jfx.native.librarypath}. -->
+                         caches in ${jfx.native.librarypath}. jfx.media.nativeBinDir names the
+                         directory this module's own CMake build writes into, which is how
+                         test.com.sun.media.jfxmediaimpl.MediaNatives tells "this build produced
+                         no natives" (a skip) from "a jfxmedia is reachable and does not work"
+                         (a broken build, and a failure). -->
                     <argLine>
                         --upgrade-module-path "${jfx.shims.base}${path.separator}${jfx.shims.graphics}${path.separator}${jfx.classes.media}"
                         --add-modules javafx.base,javafx.graphics,javafx.media
@@ -99,6 +103,7 @@
                         @${jfx.root}/buildtools/addExports
                         --enable-native-access=javafx.graphics,javafx.media
                         "-Djava.library.path=${project.build.directory}/native/bin${path.separator}${jfx.native.librarypath}"
+                        "-Djfx.media.nativeBinDir=${project.build.directory}/native/bin"
                         ${jfx.headless.args}
                     </argLine>
                 </configuration>

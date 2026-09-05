@@ -724,16 +724,19 @@ public final class JfxMediaNative {
      * <li>every {@code jfxm_*} out-parameter entry point writes {@code *out} as its <em>last</em> action,
      * after any upcall it makes, so whatever a nested call left in the cell is overwritten before the
      * wrapper reads it; and
-     * <li>no upcall target calls an out-parameter wrapper, so a nested call never claims the cell to
-     * begin with - the {@code property} target above reaches {@code HLSConnectionHolder.property}, which
+     * <li>an upcall target may reach an out-parameter wrapper only on a thread that never issues
+     * one itself - {@code onNewFrame} reaches {@link #frameGetInfo} through
+     * {@code NativeVideoBuffer}, and {@code new_frame} is delivered only on the appsink streaming
+     * thread or the AVF display-link thread, neither of which ever runs a wrapper; every other
+     * target, such as the {@code property} target reaching {@code HLSConnectionHolder.property},
      * calls nothing in this class.
      * </ul>
      * A ninth out-parameter wrapper has to keep both. A native that fills {@code *out} before it upcalls,
-     * or an upcall target that can reach any wrapper on this list, writes through the outer call's out
-     * pointer, and the corruption is silent: the wrapper still sees {@code ERROR_NONE} and still hands
-     * back a plausible number. Neither rule is checkable by the compiler; a wrapper that cannot keep them
-     * must take its own cell from an {@link Arena#ofConfined()} rather than share this one.
-     * {@code JfxMediaNativeTest} pins the second rule for the stream callbacks.
+     * or an upcall target that reaches a wrapper on a thread that issues one itself, writes through the
+     * outer call's out pointer, and the corruption is silent: the wrapper still sees {@code ERROR_NONE}
+     * and still hands back a plausible number. Neither rule is checkable by the compiler; a wrapper that
+     * cannot keep them must take its own cell from an {@link Arena#ofConfined()} rather than share this
+     * one. {@code JfxMediaNativeTest} pins the second rule for the stream callbacks.
      * <p>
      * Carrying the previous call's bytes changes nothing observable: every wrapper reads the cell only
      * after {@code ERROR_NONE}, the natives write the out-parameter only when they return it, and

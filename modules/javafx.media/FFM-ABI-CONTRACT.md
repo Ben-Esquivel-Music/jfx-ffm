@@ -114,7 +114,7 @@ upcalls on the caller's thread (`need_buffer`, `is_seekable`, `is_random_access`
 | equalizer | `CAudioEqualizer*` (pipeline-owned) | `jfxm_player_get_audio_equalizer` | the media; valid until `jfxm_media_dispose` |
 | spectrum | `CAudioSpectrum*` (pipeline-owned) | `jfxm_player_get_audio_spectrum` | the media; valid until `jfxm_media_dispose` |
 | band | `CEqualizerBand*` | `jfxm_eq_add_band` | the equalizer (`jfxm_eq_remove_band` or media dispose) |
-| frame | `CVideoFrame*` (`CGstVideoFrame` / `CVVideoFrame`) | delivered through `new_frame`, or returned by `jfxm_frame_convert` | Java, exactly as today: `NativeVideoBuffer.releaseFrame()` -> `jfxm_frame_dispose` when the hold count reaches 0 |
+| frame | `CVideoFrame*` (`CGstVideoFrame` / `CVVideoFrame`) | delivered through `new_frame`, or returned by `jfxm_frame_convert` | Java, exactly as today: `NativeVideoBuffer.releaseFrame()` -> `jfxm_frame_dispose` when the hold count reaches 0. One exception: a **NULL `new_frame` slot** transfers nothing, so the dispatcher disposes the frame itself (section 10) |
 
 Java-side registry (`JfxMediaNative`): `ConcurrentHashMap<Long, Object>` with ids from an
 `AtomicLong` starting at 1. `0` is never a valid id. `register(Object)` returns the id;
@@ -466,7 +466,11 @@ already returned values through the same mechanism and are unchanged.
 ```c
 /* One table per player, copied by value in jfxm_player_init. Every slot may be NULL (treated as
  * "delivered"). Return 1 = delivered, 0 = the Java target threw (the C keeps the same false-return
- * handling it had for a JNI exception). Strings are UTF-8 and valid only during the call. */
+ * handling it had for a JNI exception). Strings are UTF-8 and valid only during the call.
+ * A NULL new_frame slot is the one exception to "NULL is treated as delivered": with no target to
+ * take ownership, the dispatcher disposes the frame itself, so it is freed exactly once either
+ * way. A slot that returns 0 is not that case and does not free the frame: C cannot tell whether
+ * the target had already taken it, already disposed of it, or never touched it. */
 typedef struct JfxmPlayerCallbacks {
     int32_t (*media_error)(void* user, int32_t error_code);
     int32_t (*halt)(void* user, const char* message, double time);
@@ -692,6 +696,11 @@ Everything above is behaviour-neutral. These few points are not, and each one is
 * Leaks the C side fixes relative to the JNI code (a change in the safe direction, so the
   migration is not strictly neutral):
   * `CFfiStreamCallbacks` adapter built for a NULL callback table is destroyed instead of leaked;
+  * a NULL `new_frame` slot deletes the frame instead of leaking it (section 10);
+    `CJavaPlayerEventDispatcher::SendNewFrameEvent` had no table, and its equivalent no-target
+    paths - a NULL `pEnv` from a detached VM, a cleared `m_PlayerInstance` global ref - returned
+    false and leaked `pVideoFrame`. `JfxMediaNative` fills all 13 player slots, so this is a
+    guarantee for a future or third-party filler of the table, not a live leak that stopped;
   * the AVF `!player` path releases `eventHandler`, `locatorStream`, `callbacks` and `mediaURL`,
     which `osxCreatePlayer` leaked;
   * `jfxm_spectrum_set_bands` with a NULL spectrum drops the last reference to the holder (and so

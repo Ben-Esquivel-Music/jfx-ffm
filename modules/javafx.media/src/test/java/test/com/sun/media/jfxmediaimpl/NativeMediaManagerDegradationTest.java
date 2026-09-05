@@ -25,7 +25,6 @@
 
 package test.com.sun.media.jfxmediaimpl;
 
-import com.sun.media.jfxmediaimpl.JfxMediaNative;
 import com.sun.media.jfxmediaimpl.NativeMediaManager;
 import java.io.File;
 import java.io.IOException;
@@ -69,6 +68,16 @@ public class NativeMediaManagerDegradationTest {
     /** How long the child gets before it is treated as hung. */
     private static final int TIMEOUT_SECONDS = 120;
 
+    /**
+     * JDK libraries that are certain to load and equally certain not to export a {@code jfxm_*} symbol.
+     * Several are listed so that a stripped or jlinked image missing any one of them cannot turn this
+     * regression test into a skip; the skip stays only for the image that has none of them at all. Every
+     * JDK ships all three, so the JDK's own {@code java} library is deliberately not among them: the child
+     * {@code System.load}s the copy it is given, and loading a second copy of that one into a live JVM is
+     * not obviously safe.
+     */
+    private static final List<String> DONOR_LIBRARIES = List.of("zip", "net", "nio");
+
     @Test
     void mediaDegradesWhenTheLibraryIsMissing(@TempDir Path dir) throws Exception {
         Path libraries = Files.createDirectory(dir.resolve("no-libraries"));
@@ -90,7 +99,8 @@ public class NativeMediaManagerDegradationTest {
     @Test
     void mediaDegradesWhenTheLibraryHasNoJfxmSymbols(@TempDir Path dir) throws Exception {
         Path donor = donorLibrary();
-        assumeTrue(Files.isReadable(donor), "no stand-in library at " + donor);
+        assumeTrue(donor != null, () -> "this JDK image carries none of " + DONOR_LIBRARIES + " under "
+                + System.getProperty("java.home"));
 
         Path libraries = Files.createDirectory(dir.resolve("stale-libraries"));
         for (String name : List.of("jfxmedia", "glib-lite", "gstreamer-lite", "fxplugins")) {
@@ -123,7 +133,9 @@ public class NativeMediaManagerDegradationTest {
      */
     @Test
     void mediaDegradesWhenNativeAccessIsDenied(@TempDir Path dir) throws Exception {
-        assumeTrue(mediaLibraryIsUsable(), "jfxmedia does not load in this JVM");
+        // The grant has to be the only thing missing, so this JVM's own jfxmedia must work first.
+        // A reachable library that does not is a broken build and fails here rather than skipping.
+        MediaNatives.require();
 
         String output = runProbe(System.getProperty("java.library.path", ""),
                 dir.resolve("denied-output.txt"), "--illegal-native-access=deny");
@@ -131,20 +143,6 @@ public class NativeMediaManagerDegradationTest {
         assertDegradedGracefully(output);
         assertTrue(output.contains("was not granted native access"),
                 () -> "the failure should name the missing grant, not just the symptom:\n" + output);
-    }
-
-    /**
-     * Whether this JVM's own {@code java.library.path} - the one the child is handed - carries a
-     * {@code jfxmedia} that loads. The denied-access case needs the grant to be the only thing missing,
-     * so a build without the media natives skips it rather than failing on the wrong cause.
-     */
-    private static boolean mediaLibraryIsUsable() {
-        try {
-            JfxMediaNative.loadLibraries();
-            return true;
-        } catch (UnsatisfiedLinkError | RuntimeException e) {
-            return false;
-        }
     }
 
     /**
@@ -254,13 +252,21 @@ public class NativeMediaManagerDegradationTest {
 
     /**
      * A library that is certain to exist and to load, and equally certain not to export a {@code jfxm_*}
-     * symbol: the JDK's own {@code zip}.
+     * symbol: the first of {@link #DONOR_LIBRARIES} this JDK image actually ships.
+     *
+     * @return the donor, or {@code null} when the image ships none of them
      */
     private static Path donorLibrary() {
         Path home = Path.of(System.getProperty("java.home"));
         Path directory = Files.isDirectory(home.resolve("bin")) && isWindows()
                 ? home.resolve("bin") : home.resolve("lib");
-        return directory.resolve(System.mapLibraryName("zip"));
+        for (String name : DONOR_LIBRARIES) {
+            Path candidate = directory.resolve(System.mapLibraryName(name));
+            if (Files.isReadable(candidate)) {
+                return candidate;
+            }
+        }
+        return null;
     }
 
     private static boolean isWindows() {

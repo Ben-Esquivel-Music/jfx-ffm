@@ -196,19 +196,18 @@ final class GSTMedia extends NativeMedia {
         // failed, or one that MediaManager.getMedia() created and nothing ever played - never closes
         // them at all, and the connection would stay open for the life of the JVM.
         //
-        // Where the transition did happen, close_connection already ran inside mediaDispose and this is
-        // a second close. The base holder and its File and URI subclasses are written to be idempotent
-        // and make it a genuine no-op. HLSConnectionHolder is not: a second call releases its live
-        // semaphore again, queues a second STATE_EXIT into a queue nobody is draining any more, and
-        // calls currentPlaylist.close() unguarded. It happens to be harmless today - the worst of it
-        // lands in closeQuietly's catch (RuntimeException) and is logged at WARNING - but that is an
-        // accident of the current code, not a contract, so nothing here may come to depend on it.
+        // Where the transition did happen, close_connection has already closed them and these calls are
+        // no-ops: the base holder and its File, URI and Memory subclasses close idempotently, and
+        // HLSConnectionHolder returns on the closed flag it sets with a compare-and-set, which is what
+        // this path needs since the callback may have arrived on a GStreamer thread. Nothing here tracks
+        // which of the two closed a given holder, because neither caller can see the other's: the
+        // callback reaches the holder through the registry, not through this media.
         //
-        // Note also that closing a holder does I/O - a FileChannel, a URLConnection, or for HLS a
-        // socket and a playlist loader - and dispose() runs it on the calling thread, usually the FX
-        // thread, while holding this object's monitor. That is a new blocking site: the JNI version
-        // left the close to whichever thread ran the pipeline's READY -> NULL transition, or, on the
-        // paths above, never did it at all.
+        // Closing does I/O, on the calling thread and under this monitor - as it did in the JNI build,
+        // where gstDispose drove the same transition from inside the same synchronized dispose() and
+        // close_connection ran the same close on that thread. The only close that is new here is the one
+        // for a pipeline that never reached READY, and there the holder has nothing but the connection
+        // the Locator opened.
         closeQuietly(audioStreamConnection);
         closeQuietly(streamConnection);
         audioStreamConnection = null;

@@ -144,6 +144,15 @@ bool CFfiPlayerEventDispatcher::SendPlayerStateEvent(int newState, double presen
 bool CFfiPlayerEventDispatcher::SendNewFrameEvent(CVideoFrame* pVideoFrame)
 {
     if (NULL == m_Callbacks.new_frame) {
+        // Ownership has to transfer exactly once. With no target to transfer it to, this
+        // dispatcher is the last owner: the pipeline does not delete a frame it has sent
+        // (GstAVPlaybackPipeline.cpp), and neither does AVFMediaPlayer. This is the missing
+        // callback case only. A callback that returns 0 is a different case and must still not
+        // delete anything: 0 only reports that the Java target threw, and from here there is no
+        // way to tell whether it had already taken the frame, already disposed of it, or never
+        // touched it at all. Deleting on that path risks a double free, which is worse than the
+        // leak it would avoid.
+        delete pVideoFrame;
         return true;
     }
     // The Java target creates the NativeVideoBuffer wrapper and owns the frame from here on.

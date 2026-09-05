@@ -226,7 +226,9 @@ typedef struct JfxmStreamCallbacks {
  *       band lock held - the Java target only enqueues.
  * The table and user must stay valid until jfxm_media_dispose has returned; after that no slot
  * fires again. The frame handed to new_frame is owned by Java from that point on and must be
- * released with jfxm_frame_dispose (NativeVideoBuffer's hold count decides when).
+ * released with jfxm_frame_dispose (NativeVideoBuffer's hold count decides when). A NULL
+ * new_frame slot is the one exception to "NULL is treated as delivered": with no target to take
+ * ownership, the dispatcher disposes the frame itself, so it is freed exactly once either way.
  */
 typedef struct JfxmPlayerCallbacks {
     int32_t (*media_error)(void* user, int32_t error_code);
