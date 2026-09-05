@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2010, 2016, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2010, 2026, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -25,6 +25,7 @@
 
 package com.sun.media.jfxmedia.logging;
 
+import com.sun.media.jfxmediaimpl.JfxMediaNative;
 import java.lang.annotation.Native;
 
 /**
@@ -93,6 +94,13 @@ public class Logger {
      */
     @Native public static final int DEBUG = 1; // Maps to java.util.logging.Level.FINE
     private static int currentLevel = OFF;
+    /**
+     * Set by {@link #initNative()} once the native log sink is installed. Until then {@link
+     * #setLevel(int)} keeps the level Java-side only, exactly as it did while {@code nativeSetNativeLevel}
+     * still threw {@code UnsatisfiedLinkError}: this class is initialized long before {@code jfxmedia}
+     * is loaded and must not pull the library in.
+     */
+    private static volatile boolean nativeInitialized = false;
     private static long startTime = 0;
     private static final Object lock = new Object();
 
@@ -137,17 +145,31 @@ public class Logger {
     /**
      * Initializes logger.
      * This function should be called once before using any other logger functions.
+     * <p>
+     * Installing the sink is the first {@code jfxmedia} call the media stack makes, so it is also where
+     * a library that cannot be loaded, is missing a {@code jfxm_*} symbol or reports the wrong ABI
+     * version shows up, as an {@link UnsatisfiedLinkError}. That error must not escape: the caller is
+     * {@code NativeMediaManager}'s constructor, which runs inside the singleton's class initializer, and
+     * anything thrown there turns every later {@code getDefaultInstance()} into a
+     * {@code NoClassDefFoundError}. An unusable library is reported as "not initialized" instead, and
+     * the logger stays Java-side only.
+     *
+     * @return true when the native log sink was installed, false when logging is compiled out of the
+     *         library or the library is unusable
      */
     public static boolean initNative() {
-        if (nativeInit()) {
-            nativeSetNativeLevel(currentLevel); // Propagate level to native layer, so it will not make unnecessary JNI calls.
-            return true;
-        } else {
-            return false;
+        try {
+            if (JfxMediaNative.logInit()) {
+                nativeInitialized = true;
+                // Propagate level to native layer, so it will not log below it.
+                JfxMediaNative.logSetLevel(currentLevel);
+                return true;
+            }
+        } catch (UnsatisfiedLinkError e) {
+            // jfxmedia is missing, incomplete or of the wrong ABI version; there is no sink to install.
         }
+        return false;
     }
-
-    private static native boolean nativeInit();
 
     /**
      * Sets logger level.
@@ -159,12 +181,13 @@ public class Logger {
     public static void setLevel(int level) {
         currentLevel = level;
 
-        try {
-            nativeSetNativeLevel(level); // Propagate level to native layer, so it will not make unnecessary JNI calls.
-        } catch(UnsatisfiedLinkError e) {}
+        if (nativeInitialized) {
+            try {
+                // Propagate level to native layer, so it will not log below it.
+                JfxMediaNative.logSetLevel(level);
+            } catch (UnsatisfiedLinkError e) {}
+        }
     }
-
-    private static native void nativeSetNativeLevel(int level);
 
     /**
      * Checks if message at specific level can be logged.

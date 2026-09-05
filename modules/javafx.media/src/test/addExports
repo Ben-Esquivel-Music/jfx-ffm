@@ -1,0 +1,18 @@
+#
+# --add-exports / --add-opens for the javafx.media unit tests. The tests run on the classpath, in
+# the unnamed module, while javafx.media itself is loaded as a module from target/classes (see the
+# surefire <argLine> in modules/javafx.media/pom.xml), so every internal package a test touches has
+# to be exported to ALL-UNNAMED here.
+#
+--add-exports javafx.media/com.sun.media.jfxmedia=ALL-UNNAMED
+--add-exports javafx.media/com.sun.media.jfxmedia.locator=ALL-UNNAMED
+--add-exports javafx.media/com.sun.media.jfxmedia.logging=ALL-UNNAMED
+--add-exports javafx.media/com.sun.media.jfxmedia.track=ALL-UNNAMED
+--add-exports javafx.media/com.sun.media.jfxmediaimpl=ALL-UNNAMED
+--add-exports javafx.media/com.sun.media.jfxmediaimpl.platform=ALL-UNNAMED
+--add-exports javafx.media/com.sun.media.jfxmediaimpl.platform.gstreamer=ALL-UNNAMED
+--add-exports javafx.media/com.sun.media.jfxmedia.effects=ALL-UNNAMED
+
+# --add-opens for the tests that reach private state. HLSConnectionHolderTest reads the HLS holder's
+# playlist loader and that loader's state queue to prove a second closeConnection() runs no body.
+--add-opens javafx.media/com.sun.media.jfxmedia.locator=ALL-UNNAMED

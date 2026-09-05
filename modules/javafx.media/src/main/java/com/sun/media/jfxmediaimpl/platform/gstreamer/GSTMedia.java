@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2010, 2014, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2010, 2026, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -27,10 +27,16 @@ package com.sun.media.jfxmediaimpl.platform.gstreamer;
 
 import com.sun.media.jfxmedia.Media;
 import com.sun.media.jfxmedia.MediaError;
+import com.sun.media.jfxmedia.locator.ConnectionHolder;
+import com.sun.media.jfxmedia.locator.ConnectionHolderBridge;
 import com.sun.media.jfxmedia.locator.Locator;
+import com.sun.media.jfxmedia.logging.Logger;
+import com.sun.media.jfxmediaimpl.JfxMediaNative;
 import com.sun.media.jfxmediaimpl.MediaUtils;
 import com.sun.media.jfxmediaimpl.NativeMedia;
 import com.sun.media.jfxmediaimpl.platform.Platform;
+import java.io.IOException;
+import java.lang.foreign.Arena;
 
 /**
  * GStreamer implementation of Media
@@ -46,6 +52,24 @@ final class GSTMedia extends NativeMedia {
      */
     protected long refNativeMedia;
 
+    /**
+     * Owner of the upcall stubs of the stream callback tables. The native pipeline calls them from
+     * its streaming threads until {@code jfxm_media_dispose} has returned, so the arena is closed
+     * and the registry entries are removed only after that call (contract section 4).
+     */
+    private Arena streamArena;
+    private JfxMediaNative.CallbackTable streamCallbacks;
+    private JfxMediaNative.CallbackTable audioStreamCallbacks;
+
+    /**
+     * The connections those callbacks read through, held for the lifetime of the media because nothing
+     * else closes them on every path: {@code close_connection} is emitted by {@code javasource} on the
+     * pipeline's {@code READY -> NULL} transition, which a pipeline that never left
+     * {@code GST_STATE_NULL} never makes.
+     */
+    private ConnectionHolder streamConnection;
+    private ConnectionHolder audioStreamConnection;
+
     GSTMedia(Locator locator) {
         super(locator);
 
@@ -60,15 +84,97 @@ final class GSTMedia extends NativeMedia {
     private void init() {
         //***** Initialize the native media components
         long[] nativeMediaHandle = new long[1];
-        MediaError ret;
-        Locator loc = getLocator();
-        ret = MediaError.getFromCode(gstInitNativeMedia(loc,
-                loc.getContentType(), loc.getContentLength(),
-                nativeMediaHandle));
+        MediaError ret = MediaError.getFromCode(createNativeMedia(nativeMediaHandle));
         if (ret != MediaError.ERROR_NONE && ret != MediaError.ERROR_PLATFORM_UNSUPPORTED) {
             MediaUtils.nativeError(this, ret);
         }
         this.refNativeMedia = nativeMediaHandle[0];
+    }
+
+    /**
+     * Resolves the {@link Locator} and creates the native media, in the order {@code GstMedia.cpp}
+     * resolved it in from C (contract section 7): the string location, the connection holder, and,
+     * when the holder reports an external audio stream, the audio connection holder. Every failure
+     * the JNI code reported as {@code ERROR_MEMORY_ALLOCATION} - a null string, a null holder or an
+     * exception thrown by the locator - is reported the same way here.
+     * <p>
+     * One deliberate departure (contract section 14.1, a change in the safe direction): every failing
+     * return closes the connection holders it created. On the success path C closes them for us when
+     * the pipeline teardown fires {@code close_connection}, but a failing {@code jfxm_media_create}
+     * never received the tables, so nothing else ever would - the JNI code left the connection open
+     * until the holder was collected.
+     *
+     * @param nativeMediaHandle receives the media handle in element 0
+     * @return a {@link MediaError} code
+     */
+    private int createNativeMedia(long[] nativeMediaHandle) {
+        Locator locator = getLocator();
+        String contentType = locator.getContentType();
+        long sizeHint = locator.getContentLength();
+        String location = locator.getStringLocation();
+        if (contentType == null || location == null) {
+            return MediaError.ERROR_MEMORY_ALLOCATION.code();
+        }
+
+        ConnectionHolder holder = null;
+        ConnectionHolder audioHolder = null;
+        int rc = MediaError.ERROR_MEMORY_ALLOCATION.code();
+        try {
+            holder = locator.createConnectionHolder();
+            if (holder == null) {
+                return rc;
+            }
+
+            // Load any additional streams if needed. HLS_PROP_HAS_AUDIO_EXT_STREAM was asked through
+            // the stream callbacks by GstMedia.cpp, on this thread and at this point - and the adapter
+            // that answered it, CJavaInputStreamCallbacks::Property, ran CallIntMethod followed by
+            // clearException(). A throw from property() therefore became 0 and InitMedia went on to
+            // create the media with no external audio stream; letting it reach the enclosing catch and
+            // fail media creation is the drift, so the swallow is kept. ConnectionHolder.property
+            // declares no checked exception, so unchecked is all there is to catch.
+            int hasAudioExtStream;
+            try {
+                hasAudioExtStream = ConnectionHolderBridge.property(holder,
+                        ConnectionHolderBridge.HLS_PROP_HAS_AUDIO_EXT_STREAM, 0);
+            } catch (RuntimeException e) {
+                Logger.logMsg(Logger.WARNING, "GSTMedia: the external audio stream probe failed,"
+                        + " continuing without one: " + e);
+                hasAudioExtStream = 0;
+            }
+            if (hasAudioExtStream != 0) {
+                audioHolder = locator.getAudioStreamConnectionHolder(holder);
+                if (audioHolder == null) {
+                    return rc;
+                }
+            }
+
+            streamArena = Arena.ofShared();
+            streamConnection = holder;
+            streamCallbacks = JfxMediaNative.installStreamCallbacks(streamArena, holder);
+            if (audioHolder != null) {
+                audioStreamConnection = audioHolder;
+                audioStreamCallbacks = JfxMediaNative.installStreamCallbacks(streamArena, audioHolder);
+            }
+
+            rc = JfxMediaNative.mediaCreate(JfxMediaNative.JFXM_BACKEND_GST, contentType, location,
+                    sizeHint, streamCallbacks, audioStreamCallbacks, nativeMediaHandle);
+            return rc;
+        } catch (IOException | RuntimeException e) {
+            // CLocator::CreateConnectionHolder reported the exception and returned NULL.
+            Logger.logMsg(Logger.ERROR, "GSTMedia: cannot create the connection holder: " + e);
+            return rc;
+        } finally {
+            if (rc != MediaError.ERROR_NONE.code()) {
+                // The native side retained nothing of the tables, so close_connection will never
+                // fire: the holders are closed here instead of being left open until they are
+                // collected, which is what the JNI code did.
+                releaseCallbacks();
+                closeQuietly(audioHolder);
+                closeQuietly(holder);
+                audioStreamConnection = null;
+                streamConnection = null;
+            }
+        }
     }
 
     long getNativeMediaRef() {
@@ -78,20 +184,52 @@ final class GSTMedia extends NativeMedia {
     @Override
     public synchronized void dispose() {
         if (0 != refNativeMedia) {
-            gstDispose(refNativeMedia);
+            JfxMediaNative.mediaDispose(refNativeMedia);
             refNativeMedia = 0L;
         }
+
+        // Now that jfxm_media_dispose has returned, no callback of any table can fire again (contract
+        // section 7). That is what makes freeing the stubs below safe, and it is what makes this the one
+        // point where the connection holders can be closed on every path: close_connection reaches them
+        // from CGstPipelineFactory::SourceCloseConnection, i.e. from the pipeline's READY -> NULL
+        // transition, so a pipeline that never left GST_STATE_NULL - a media whose jfxm_player_init
+        // failed, or one that MediaManager.getMedia() created and nothing ever played - never closes
+        // them at all, and the connection would stay open for the life of the JVM.
+        //
+        // Where the transition did happen, close_connection has already closed them and these calls are
+        // no-ops: the base holder and its File, URI and Memory subclasses close idempotently, and
+        // HLSConnectionHolder returns on the closed flag it sets with a compare-and-set, which is what
+        // this path needs since the callback may have arrived on a GStreamer thread. Nothing here tracks
+        // which of the two closed a given holder, because neither caller can see the other's: the
+        // callback reaches the holder through the registry, not through this media.
+        //
+        // Closing does I/O, on the calling thread and under this monitor - as it did in the JNI build,
+        // where gstDispose drove the same transition from inside the same synchronized dispose() and
+        // close_connection ran the same close on that thread. The only close that is new here is the one
+        // for a pipeline that never reached READY, and there the holder has nothing but the connection
+        // the Locator opened.
+        closeQuietly(audioStreamConnection);
+        closeQuietly(streamConnection);
+        audioStreamConnection = null;
+        streamConnection = null;
+
+        // Only now is it safe to free the upcall stubs and the registry entries.
+        finishDispose();
     }
 
-    /**
-     * Initialize the native peer of this {@link Media}.
-     *
-     * @param locator Media location as a Locator object.
-     * @return A handle to the native peer of the media.
-     */
-    private native int gstInitNativeMedia(Locator locator,
-                                               String contentType,
-                                               long sizeHint,
-                                               long[] nativeMediaHandle);
-    private native void gstDispose(long refNativeMedia);
+    @Override
+    protected void releaseCallbacks() {
+        if (streamCallbacks != null) {
+            streamCallbacks.unregister();
+            streamCallbacks = null;
+        }
+        if (audioStreamCallbacks != null) {
+            audioStreamCallbacks.unregister();
+            audioStreamCallbacks = null;
+        }
+        if (streamArena != null) {
+            streamArena.close();
+            streamArena = null;
+        }
+    }
 }

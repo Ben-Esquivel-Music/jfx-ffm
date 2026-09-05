@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2010, 2022, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2010, 2026, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -259,8 +259,8 @@ static void java_source_class_init (JavaSourceClass *klass)
         0,
         NULL, /* accumulator */
         NULL, /* accu_data */
-        source_marshal_VOID__POINTER_INT,
-        G_TYPE_NONE, /* return_type */
+        source_marshal_INT__POINTER_INT,
+        G_TYPE_INT, /* return_type: bytes actually copied; less than the requested size is an error */
         2,     /* n_params */
         G_TYPE_POINTER, G_TYPE_INT);
 
@@ -423,7 +423,10 @@ static gboolean java_source_perform_seek(JavaSource *element, GstPad *pad, GstEv
     GstFormat    seek_format;
     GstSeekFlags flags;
     GstSeekType  start_type, stop_type;
-    gint64       start, stop, position, new_position;
+    // new_position is an out-parameter of the seek-data emission below. -1 is exactly what the
+    // handler returns when it cannot seek, so an emission that returns without writing it leaves
+    // result FALSE rather than reporting a seek to a stack residue as a successful one.
+    gint64       start, stop, position, new_position = -1;
     guint32      seqnum;
 
     gst_event_parse_seek(event, &rate, &seek_format, &flags,
@@ -625,7 +628,13 @@ next_event:
 
         case GST_EVENT_UNKNOWN: // Pushing buffers
             {
-                gint     size;
+                // g_signal_emit writes 0 into an out-parameter on every path that reaches the
+                // emission, even with no handler connected: gsignal.c initialises the return GValue
+                // and G_VALUE_LCOPYs it regardless. This initialiser covers only its g_return_if_fail
+                // and g_critical early returns, which leave the location untouched. The same rule
+                // initialises size in java_source_getrange and new_position in java_source_perform_seek.
+                gint     size = 0;
+                gint     copied;
                 GstMapInfo info;
                 g_signal_emit(element, JAVA_SOURCE_GET_CLASS(element)->signals[SIGNAL_READ_NEXT_BLOCK], 0, &size);
                 if (size > 0)
@@ -637,13 +646,25 @@ next_event:
 
                         if (!gst_buffer_map(buffer, &info, GST_MAP_WRITE))
                         {
+                            gst_buffer_unref(buffer);
                             result = GST_FLOW_ERROR;
                             break;
                         }
 
-                        g_signal_emit(element, JAVA_SOURCE_GET_CLASS(element)->signals[SIGNAL_COPY_BLOCK], 0, info.data, size);
+                        copied = 0;
+                        g_signal_emit(element, JAVA_SOURCE_GET_CLASS(element)->signals[SIGNAL_COPY_BLOCK], 0, info.data, size, &copied);
 
                         gst_buffer_unmap(buffer, &info);
+
+                        // A short copy means the handler could not stage the bytes read-next-block
+                        // promised, so the buffer holds no usable media data. Fail the block the
+                        // same way the other unrecoverable errors of this function do.
+                        if (copied != size)
+                        {
+                            gst_buffer_unref(buffer);
+                            result = GST_FLOW_ERROR;
+                            break;
+                        }
 
                         if (element->discont)
                         {
@@ -687,6 +708,17 @@ next_event:
                             goto next_event;
                         }
                     }
+                    else
+                    {
+                        // The bytes read-next-block staged are lost together with the buffer we failed
+                        // to allocate, and the next iteration reads the block after them, so carrying
+                        // on would splice a hole into the stream with no DISCONT flag on it. Stop
+                        // instead. Like the gst_buffer_map and short-copy exits above this only
+                        // records srcresult and pauses the task: java_source_loop posts no bus
+                        // message, so the application sees the source stop, not a reported error.
+                        result = GST_FLOW_ERROR;
+                        break;
+                    }
                 }
                 else if ((element->mode & MODE_DEFAULT) == MODE_DEFAULT && size == EOS_CODE) // EOS
                 {
@@ -700,6 +732,10 @@ next_event:
                 }
                 else if (size == OTHER_ERROR_CODE) // Other error
                     result = GST_FLOW_FLUSHING;
+                // A zero size is deliberately left unhandled: read-next-block is specified to return
+                // "possibly zero" bytes without having reached the end of the stream, so mapping it
+                // to EOS here would truncate the media. Unlike java_source_getrange this cannot wedge
+                // the element: the task returns and re-enters, so flushes and state changes are seen.
                 break;
             }
 
@@ -811,6 +847,7 @@ static GstFlowReturn java_source_getrange(GstPad *pad, GstObject *parent, guint6
 {
     JavaSource *element = JAVA_SOURCE (parent);
     gint     size = 0;
+    gint     copied = 0;
     guint    read = 0;
     guint    toRead = 0;
     GstMapInfo info;
@@ -835,10 +872,23 @@ static GstFlowReturn java_source_getrange(GstPad *pad, GstObject *parent, guint6
         else
             toRead = (length - read);
 
+        // Reset per iteration for the reason given on the push path: only g_signal_emit's early
+        // returns leave an out-parameter untouched, and on iterations after the first that would
+        // leave the previous read's count in place and copy the same block twice.
+        size = 0;
         g_signal_emit(element, JAVA_SOURCE_GET_CLASS(element)->signals[SIGNAL_READ_BLOCK], 0, offset + read, toRead, &size);
         if (size > 0 && size <= toRead)
         {
-            g_signal_emit(element, JAVA_SOURCE_GET_CLASS(element)->signals[SIGNAL_COPY_BLOCK], 0, info.data + read, size);
+            copied = 0;
+            g_signal_emit(element, JAVA_SOURCE_GET_CLASS(element)->signals[SIGNAL_COPY_BLOCK], 0, info.data + read, size, &copied);
+            if (copied != size)
+            {
+                // A short copy means the handler could not stage the bytes read-block promised, so
+                // the buffer holds no usable media data. Fail as the other errors here do.
+                gst_buffer_unmap(buf, &info);
+                gst_buffer_unref(buf);
+                return GST_FLOW_ERROR;
+            }
             read += size;
 
             if (size < toRead)
@@ -860,6 +910,27 @@ static GstFlowReturn java_source_getrange(GstPad *pad, GstObject *parent, guint6
             return GST_FLOW_EOS; // EOS, if we return error qtdemux will signal
             // critical error and with AudioClip we can get 0, when we trying to
             // read at the end of file.
+        }
+        else if (size == OTHER_ERROR_CODE)
+        {
+            // The push path returns GST_FLOW_FLUSHING for this same code and the two paths of one
+            // element must not disagree on it. OTHER_ERROR_CODE never means "this media is bad":
+            // the handler produces it only when the read threw or the connection is already gone,
+            // which is teardown, so the quiet return is the one that does not turn an ordinary
+            // dispose into a MediaException.
+            gst_buffer_unmap(buf, &info);
+            gst_buffer_unref(buf);
+            return GST_FLOW_FLUSHING;
+        }
+        else
+        {
+            // Any other negative value, and a count larger than the one we asked for, mean the
+            // handler broke its contract; nothing here can advance "read". Leaving them unhandled
+            // would re-issue the identical read for ever and wedge the pulling thread while it
+            // holds the stream lock, so fail as the other errors here do.
+            gst_buffer_unmap(buf, &info);
+            gst_buffer_unref(buf);
+            return GST_FLOW_ERROR;
         }
     }
 

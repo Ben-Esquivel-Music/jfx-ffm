@@ -30,6 +30,9 @@
 #import <jni/Logger.h>
 #import <PipelineManagement/NullAudioEqualizer.h>
 #import <PipelineManagement/NullAudioSpectrum.h>
+// ERROR_LOCATOR_CONNECTION_LOST, the code the resource loader delegate reports to AVFoundation when
+// a read fails. The header is generated from MediaError.java into HEADERS_DIR by the headergen tool.
+#import <jfxmedia_errors.h>
 
 #import "AVFAudioProcessor.h"
 
@@ -105,6 +108,16 @@ static void append_log(NSMutableString *s, NSString *fmt, ...) {
 // Max number of bytes we will provide per request
 #define MAX_READ_SIZE (1024 * 1024)
 
+// CStreamCallbacks::ReadBlock and ::ReadNextBlock return the number of bytes they staged, or -1 at
+// end of stream and -2 when the read itself failed (Locator/LocatorStream.h); the javasource
+// element spells the same two codes EOS_CODE and OTHER_ERROR_CODE.
+#define READ_EOS_CODE (-1)
+
+// AVFoundation accepts a failed load only as an NSError, and the error vocabulary of this stack is
+// jfxmedia's own, so the NSErrors created here carry a jfxmedia error code in a jfxmedia domain
+// rather than a borrowed Cocoa one.
+static NSString * const AVFMediaErrorDomain = @"com.sun.media.jfxmedia";
+
 @implementation AVFMediaPlayer
 
 static void SpectrumCallbackProc(void *context, double duration, double timestamp);
@@ -123,7 +136,7 @@ static CVReturn displayLinkCallback(CVDisplayLinkRef displayLink,
     return (klass != nil);
 }
 
-- (id) initWithURL:(NSURL *)source eventHandler:(CJavaPlayerEventDispatcher*)hdlr locatorStream:(CLocatorStream*)ls {
+- (id) initWithURL:(NSURL *)source eventHandler:(CPlayerEventDispatcher*)hdlr locatorStream:(CLocatorStream*)ls {
     if ((self = [super init]) != nil) {
         previousWidth = -1;
         previousHeight = -1;
@@ -810,30 +823,120 @@ static CVReturn displayLinkCallback(CVDisplayLinkRef displayLink,
                 }
             }
 
+            // Why the fill loop stopped. The two ways out are reported to AVFoundation
+            // differently: the end of the resource means everything it can ever have for this
+            // range has been handed over, while a failed read or a short copy means the range was
+            // never answered and must not be presented as if it had been.
+            BOOL readFailed = NO;
+
             while (requestedLength > 0) {
-                unsigned int blockSize = -1;
+                // Keep the count signed. It used to be read into an unsigned int, where both
+                // negative codes became values close to UINT_MAX, so neither the end of stream nor
+                // a read error was ever caught by the test below and both fell through into a copy
+                // of data the stream had never staged.
+                int blockSize = READ_EOS_CODE;
                 if (isRandomAccess) {
                     blockSize = locatorStream->GetCallbacks()->ReadBlock(position, requestedLength);
                 } else {
                     blockSize = locatorStream->GetCallbacks()->ReadNextBlock();
                 }
-                if (blockSize <= 0) {
+                if (blockSize < 0) {
+                    // -1 is a clean end of stream; -2, and by exclusion anything else negative, is
+                    // a read that failed and staged nothing.
+                    readFailed = (blockSize != READ_EOS_CODE);
+                    break;
+                }
+                if (blockSize == 0) {
+                    // Zero bytes ends the loop, and the request is then finished as complete
+                    // below. That is right for the ReadBlock branch, where javasource's pull path
+                    // makes the same call because a read at the very end of a file legitimately
+                    // returns zero. It is not what the ReadNextBlock contract says:
+                    // ConnectionHolder.readNextBlock returns "possibly zero" bytes without having
+                    // reached the end of the stream, which is why javasource's push path refuses
+                    // to equate the two, and equating them here would present a truncated prefix
+                    // as the whole range. No holder in this tree can produce it on that branch:
+                    // each of them fills a non-empty buffer - 4096 bytes by default - from a
+                    // blocking channel, a FileChannel or a Channels.newChannel over an
+                    // InputStream or the memory holder's own channel, and those return a positive
+                    // count or -1, never 0. Looping instead of breaking is not the safer choice,
+                    // because this loop holds @synchronized(self) on the resource loader queue, so
+                    // a source that kept returning zero would spin there and block -dispose.
                     break;
                 }
 
-                unsigned int readSize =
-                        (blockSize > (unsigned int)dataRequest.requestedLength) ?
-                        (unsigned int)dataRequest.requestedLength : blockSize;
+                // Clamp against what is left of this range, not against dataRequest.requestedLength:
+                // that field is the raw 64-bit request length the code above already declares
+                // invalid when requestsAllDataToEndOfResource is YES, and truncating it to
+                // unsigned int both over-delivers and can come out zero. requestedLength is the
+                // remaining count this loop decrements; it is > 0 here and MAX_READ_SIZE at most,
+                // so readSize lands in 1..MAX_READ_SIZE and every iteration makes progress.
+                // ReadNextBlock stages a whole buffer rather than just the remainder, so on that
+                // branch the clamp can be shorter than blockSize; the staged tail is dropped and
+                // read again, because every data request positions the stream at its own
+                // requestedOffset first - ReadBlock takes the position, the other branch seeks.
+                unsigned int readSize = ((long)blockSize > requestedLength) ?
+                        (unsigned int)requestedLength : (unsigned int)blockSize;
                 readData = [NSMutableData dataWithLength:readSize];
 
-                locatorStream->GetCallbacks()->CopyBlock((void*)[readData bytes], readSize);
+                int copied = locatorStream->GetCallbacks()->CopyBlock((void*)[readData bytes],
+                                                                     readSize);
+                if (copied != (int)readSize) {
+                    // A short copy means the stream could not stage the bytes ReadBlock /
+                    // ReadNextBlock promised, so readData holds no usable media data. That is a
+                    // failed read rather than the end of the resource, so the request is failed
+                    // below instead of being answered with the bytes delivered so far.
+                    readFailed = YES;
+                    break;
+                }
                 [loadingRequest.dataRequest respondWithData:readData];
 
                 requestedLength -= readSize;
                 position += readSize;
             }
 
-            [loadingRequest finishLoading];
+            if (readFailed) {
+                // The request has not been satisfied: whatever respondWithData: already took is a
+                // prefix of the range asked for, and when the very first read failed it is nothing
+                // at all. Finishing without an error would present that prefix as the whole
+                // answer and leave AVFoundation to demux truncated media as if it were complete,
+                // so fail the request instead.
+                //
+                // What failing it does to the player depends on when it happens, and only the
+                // initial-load case is expected to reach HALTED. While the asset is still being
+                // loaded, AVFoundation is expected to put the error on the AVPlayerItem and fail
+                // its status, and -observeValueForKeyPath: above does observe
+                // self.player.currentItem.status and map the failed status to kPlayerState_HALTED,
+                // which is how every other unrecoverable failure of this player already surfaces.
+                // Only that second half is this file's own code; the first is AVFoundation
+                // behaviour that this call assumes rather than enforces. Once the item has reached
+                // AVPlayerItemStatusReadyToPlay even the expectation goes: AVFoundation commonly
+                // reports a mid-playback resource failure through
+                // AVPlayerItemFailedToPlayToEndTimeNotification, which nothing here observes, or
+                // simply stalls at the current position without moving status back to failed.
+                // Failing the request is still the right answer in that case, because it keeps a
+                // truncated range out of the demuxer, but the player may then neither halt nor
+                // recover. What that leaves missing is a player-visible event, not a trace:
+                // logNSError below writes at DEBUG, which Logger drops unless
+                // -Djfxmedia.loglevel=debug is set, while the read or copy behind the failure has
+                // usually already been reported at Logger.ERROR by JfxMediaNative's
+                // read_next_block, read_block and copy_block targets - the exception being a -2
+                // returned for a user id the registry no longer holds, which is silent. Reporting
+                // the failure through eventHandler would give the Java layer the event it is
+                // missing, but no failure path in this file uses that route today.
+                NSDictionary *errorInfo =
+                        @{NSLocalizedDescriptionKey: @"The media stream did not deliver the requested bytes"};
+                NSError *readError = [NSError errorWithDomain:AVFMediaErrorDomain
+                                                         code:ERROR_LOCATOR_CONNECTION_LOST
+                                                     userInfo:errorInfo];
+                [self logNSError:@"AVAssetResourceLoader" error:readError];
+                [loadingRequest finishLoadingWithError:readError];
+            } else {
+                // Either the whole range was delivered or the resource ended, and in both cases
+                // the stream has given up everything it has for this range, so the request is
+                // complete. A resource that ends early is a shorter resource, not an error, and
+                // AVFoundation can see how much of the range arrived.
+                [loadingRequest finishLoading];
+            }
 
             return YES;
         }

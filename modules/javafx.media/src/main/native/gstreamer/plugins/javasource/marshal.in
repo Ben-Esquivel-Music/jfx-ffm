@@ -8,7 +8,7 @@ INT:VOID
 INT:UINT64,UINT
 
 # copy-block
-VOID:POINTER,INT
+INT:POINTER,INT
 
 # get-property
 INT:INT,INT

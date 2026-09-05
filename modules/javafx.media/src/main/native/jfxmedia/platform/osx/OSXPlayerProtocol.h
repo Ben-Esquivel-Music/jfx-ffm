@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2010, 2022, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2010, 2026, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -24,7 +24,9 @@
  */
 
 #import <Foundation/Foundation.h>
-#import <jni/JavaPlayerEventDispatcher.h>
+#import <PipelineManagement/AudioEqualizer.h>
+#import <PipelineManagement/AudioSpectrum.h>
+#import <PipelineManagement/PlayerEventDispatcher.h>
 #import <Locator/LocatorStream.h>
 
 // PlayerState.{UNKNOWN, READY, PLAYING, PAUSED, STOPPED, STALLED, FINISHED, HALTED}
@@ -58,7 +60,8 @@
 @property (nonatomic,readonly) CAudioEqualizer *audioEqualizer;
 @property (nonatomic,readonly) CAudioSpectrum *audioSpectrum;
 
-- (id) initWithURL:(NSURL *)source eventHandler:(CJavaPlayerEventDispatcher*)hdlr locatorStream:(CLocatorStream*)ls;
+// hdlr is the base dispatcher type; the player only calls Send*/Warning on it.
+- (id) initWithURL:(NSURL *)source eventHandler:(CPlayerEventDispatcher*)hdlr locatorStream:(CLocatorStream*)ls;
 
 - (void) play;
 - (void) pause;

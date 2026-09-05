@@ -75,7 +75,17 @@ jobs:
           set -x
           sudo apt-get update
           sudo apt-get -y install libgl1-mesa-dev libx11-dev libxxf86vm-dev libxt-dev \
-            pkg-config libgtk-3-dev libxtst-dev libfreetype-dev libpango1.0-dev
+            pkg-config libgtk-3-dev libxtst-dev libfreetype-dev libpango1.0-dev libasound2-dev
+
+      - name: Provide a null ALSA device
+        run: |
+          set -x
+          # The javafx.media unit tests build a real GStreamer playback pipeline, whose Linux
+          # audio sink is alsasink; it opens the default PCM as soon as the pipeline goes to
+          # READY. A GitHub-hosted runner has no sound card, so that open fails, the pipeline
+          # state change fails and GSTPlatform.createMediaPlayer hands back null. A null PCM
+          # accepts the audio and discards it, which is all these tests need: nothing is played.
+          printf 'pcm.!default { type null }\nctl.!default { type null }\n' > "${HOME}/.asoundrc"
 
       - name: Download boot JDK
         run: |
@@ -127,7 +137,17 @@ jobs:
           set -x
           sudo apt-get update
           sudo apt-get -y install libgl1-mesa-dev libx11-dev libxxf86vm-dev libxt-dev \
-            pkg-config libgtk-3-dev libxtst-dev libfreetype-dev libpango1.0-dev
+            pkg-config libgtk-3-dev libxtst-dev libfreetype-dev libpango1.0-dev libasound2-dev
+
+      - name: Provide a null ALSA device
+        run: |
+          set -x
+          # The javafx.media unit tests build a real GStreamer playback pipeline, whose Linux
+          # audio sink is alsasink; it opens the default PCM as soon as the pipeline goes to
+          # READY. A GitHub-hosted runner has no sound card, so that open fails, the pipeline
+          # state change fails and GSTPlatform.createMediaPlayer hands back null. A null PCM
+          # accepts the audio and discards it, which is all these tests need: nothing is played.
+          printf 'pcm.!default { type null }\nctl.!default { type null }\n' > "${HOME}/.asoundrc"
 
       - name: Download boot JDK
         run: |

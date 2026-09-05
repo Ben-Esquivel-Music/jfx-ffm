@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2010, 2024, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2010, 2026, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -116,11 +116,6 @@ public class Locator {
     private CountDownLatch readySignal = new CountDownLatch(1);
 
     /**
-     * iOS only: determines if the given URL points to the iPod library
-     */
-    private boolean isIpod;
-
-    /**
      * Holds connection and response code returned from getConnection()
      */
     private static class LocatorConnection {
@@ -228,12 +223,8 @@ public class Locator {
             protocol = scheme; // scheme is already lower case.
         }
 
-        if (PlatformUtil.isIOS() && protocol.equals("ipod-library")) {
-            isIpod = true;
-        }
-
         // Verify the protocol is supported.
-        if (!isIpod && !MediaManager.canPlayProtocol(protocol)) {
+        if (!MediaManager.canPlayProtocol(protocol)) {
             throw new UnsupportedOperationException("Unsupported protocol \"" + protocol + "\"");
         }
 
@@ -385,87 +376,81 @@ public class Locator {
             boolean isConnected = false;
             boolean isMediaUnAvailable = false;
             boolean isMediaSupported = true;
-            if (!isIpod) {
-                for (int numConnectionAttempts = 0; numConnectionAttempts < MAX_CONNECTION_ATTEMPTS; numConnectionAttempts++) {
-                    try {
-                        // Verify existence.
-                        if (scheme.equals("http") || scheme.equals("https")) {
-                            // Check ability to connect, trying HEAD before GET.
-                            LocatorConnection locatorConnection = getConnection(uri, "HEAD");
-                            if (locatorConnection == null || locatorConnection.connection == null) {
-                                locatorConnection = getConnection(uri, "GET");
-                            }
-
-                            if (locatorConnection != null && locatorConnection.connection != null) {
-                                isConnected = true;
-
-                                // Get content type.
-                                contentType = locatorConnection.connection.getContentType();
-                                contentLength = getContentLengthLong(locatorConnection.connection);
-
-                                // Disconnect.
-                                closeConnection(locatorConnection.connection);
-                                locatorConnection.connection = null;
-                            } else if (locatorConnection != null) {
-                                if (locatorConnection.responseCode == HttpURLConnection.HTTP_NOT_FOUND) {
-                                    isMediaUnAvailable = true;
-                                }
-                            }
-
-                            // FIXME: get cache settings from server, honor them
-                        } else if (scheme.equals("file") || scheme.equals("jar") || scheme.equals("jrt") || (scheme.equals("resource")) ) {
-                            InputStream stream = getInputStream(uri);
-                            stream.close();
-                            isConnected = true;
-                            // Try to get the content type based on extension
-                            contentType = MediaUtils.filenameToContentType(uri);
+            for (int numConnectionAttempts = 0; numConnectionAttempts < MAX_CONNECTION_ATTEMPTS; numConnectionAttempts++) {
+                try {
+                    // Verify existence.
+                    if (scheme.equals("http") || scheme.equals("https")) {
+                        // Check ability to connect, trying HEAD before GET.
+                        LocatorConnection locatorConnection = getConnection(uri, "HEAD");
+                        if (locatorConnection == null || locatorConnection.connection == null) {
+                            locatorConnection = getConnection(uri, "GET");
                         }
 
-                        if (isConnected) {
-                            // Check whether content may be played.
-                            // For WAV use file signature, since it can detect audio format
-                            // and we can fail sooner, then doing it at runtime.
-                            // This is important for AudioClip.
-                            if (MediaUtils.CONTENT_TYPE_WAV.equals(contentType)) {
-                                contentType = getContentTypeFromFileSignature(uri);
+                        if (locatorConnection != null && locatorConnection.connection != null) {
+                            isConnected = true;
+
+                            // Get content type.
+                            contentType = locatorConnection.connection.getContentType();
+                            contentLength = getContentLengthLong(locatorConnection.connection);
+
+                            // Disconnect.
+                            closeConnection(locatorConnection.connection);
+                            locatorConnection.connection = null;
+                        } else if (locatorConnection != null) {
+                            if (locatorConnection.responseCode == HttpURLConnection.HTTP_NOT_FOUND) {
+                                isMediaUnAvailable = true;
+                            }
+                        }
+
+                        // FIXME: get cache settings from server, honor them
+                    } else if (scheme.equals("file") || scheme.equals("jar") || scheme.equals("jrt") || (scheme.equals("resource")) ) {
+                        InputStream stream = getInputStream(uri);
+                        stream.close();
+                        isConnected = true;
+                        // Try to get the content type based on extension
+                        contentType = MediaUtils.filenameToContentType(uri);
+                    }
+
+                    if (isConnected) {
+                        // Check whether content may be played.
+                        // For WAV use file signature, since it can detect audio format
+                        // and we can fail sooner, then doing it at runtime.
+                        // This is important for AudioClip.
+                        if (MediaUtils.CONTENT_TYPE_WAV.equals(contentType)) {
+                            contentType = getContentTypeFromFileSignature(uri);
+                            if (!MediaManager.canPlayContentType(contentType)) {
+                                isMediaSupported = false;
+                            }
+                        } else {
+                            if (contentType == null || !MediaManager.canPlayContentType(contentType)) {
+                                // Try content based on file name.
+                                contentType = MediaUtils.filenameToContentType(uri);
+
+                                if (Locator.DEFAULT_CONTENT_TYPE.equals(contentType)) {
+                                    // Try content based on file signature.
+                                    contentType = getContentTypeFromFileSignature(uri);
+                                }
+
                                 if (!MediaManager.canPlayContentType(contentType)) {
                                     isMediaSupported = false;
                                 }
-                            } else {
-                                if (contentType == null || !MediaManager.canPlayContentType(contentType)) {
-                                    // Try content based on file name.
-                                    contentType = MediaUtils.filenameToContentType(uri);
-
-                                    if (Locator.DEFAULT_CONTENT_TYPE.equals(contentType)) {
-                                        // Try content based on file signature.
-                                        contentType = getContentTypeFromFileSignature(uri);
-                                    }
-
-                                    if (!MediaManager.canPlayContentType(contentType)) {
-                                        isMediaSupported = false;
-                                    }
-                                }
                             }
+                        }
 
-                            // Break as connection has been made and media type checked.
-                            break;
-                        }
-                    } catch (IOException ioe) {
-                        if (numConnectionAttempts + 1 >= MAX_CONNECTION_ATTEMPTS) {
-                            throw ioe;
-                        }
+                        // Break as connection has been made and media type checked.
+                        break;
                     }
-
-                    try {
-                        Thread.sleep(CONNECTION_RETRY_INTERVAL);
-                    } catch (InterruptedException ie) {
-                        // Ignore it.
+                } catch (IOException ioe) {
+                    if (numConnectionAttempts + 1 >= MAX_CONNECTION_ATTEMPTS) {
+                        throw ioe;
                     }
                 }
-            }
-            else {
-                // in case of iPod files we can be sure all files are supported
-                contentType = MediaUtils.filenameToContentType(uri);
+
+                try {
+                    Thread.sleep(CONNECTION_RETRY_INTERVAL);
+                } catch (InterruptedException ie) {
+                    // Ignore it.
+                }
             }
 
             if (Logger.canLog(Logger.WARNING)) {
@@ -479,7 +464,7 @@ public class Locator {
             }
 
             // Check URI validity.
-            if (!isIpod && !isConnected) {
+            if (!isConnected) {
                 if (isMediaUnAvailable) {
                     throw new FileNotFoundException("media is unavailable (" + uri.toString() + ")");
                 } else {

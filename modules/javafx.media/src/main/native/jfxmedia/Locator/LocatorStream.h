@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2010, 2024, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2010, 2026, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -53,8 +53,12 @@ public:
      */
     virtual int  ReadBlock(int64_t position, int size) = 0;
 
-    /* CopyBlock copies the data from whatever internal buffer to the destination.*/
-    virtual void CopyBlock(void* destination, int size) = 0;
+    /* CopyBlock copies the data from whatever internal buffer to the destination and returns
+     * the number of bytes it actually copied. A return of size means success; a smaller value
+     * is a short copy, i.e. destination[copied..size) carries no meaningful data and the caller
+     * must treat the block as a read error rather than as media data. Implementations still
+     * fill the whole window, so nothing downstream ever sees uninitialised memory. */
+    virtual int  CopyBlock(void* destination, int size) = 0;
 
     /* Detects whether the source is seekable.*/
     virtual bool IsSeekable() = 0;

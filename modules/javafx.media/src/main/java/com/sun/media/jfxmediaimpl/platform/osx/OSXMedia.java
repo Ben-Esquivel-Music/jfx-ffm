@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2010, 2013, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2010, 2026, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -25,11 +25,38 @@
 
 package com.sun.media.jfxmediaimpl.platform.osx;
 
+import com.sun.media.jfxmedia.MediaError;
+import com.sun.media.jfxmedia.locator.ConnectionHolder;
 import com.sun.media.jfxmedia.locator.Locator;
+import com.sun.media.jfxmedia.logging.Logger;
+import com.sun.media.jfxmediaimpl.JfxMediaNative;
 import com.sun.media.jfxmediaimpl.NativeMedia;
 import com.sun.media.jfxmediaimpl.platform.Platform;
+import java.io.IOException;
+import java.lang.foreign.Arena;
 
 final class OSXMedia extends NativeMedia {
+
+    /**
+     * Handle to the native AVFoundation media, created by {@link OSXMediaPlayer} and torn down here:
+     * {@code NativeMediaPlayer.dispose()} runs {@code playerDispose()} before {@code media.dispose()},
+     * and the callback tables may only be freed once the native player is gone (contract section 7).
+     */
+    private long refNativeMedia;
+
+    /**
+     * Owner of the stream callback stubs, used for {@code jar:} and {@code jrt:} locations only; every
+     * other scheme is read by AVFoundation itself.
+     */
+    private Arena streamArena;
+    private JfxMediaNative.CallbackTable streamCallbacks;
+
+    /**
+     * The connection those callbacks read through, held for the lifetime of the media because nothing
+     * else closes it on every path: {@code close_connection} is fired by {@code AVFMediaPlayer}'s own
+     * dispose, which never runs when the native player failed to come up.
+     */
+    private ConnectionHolder streamConnection;
 
     OSXMedia(Locator source) {
         super(source);
@@ -40,7 +67,102 @@ final class OSXMedia extends NativeMedia {
         return OSXPlatform.getPlatformInstance();
     }
 
+    /**
+     * Creates the native media handle, i.e. the media half of {@code osxCreatePlayer}: the location
+     * and, for {@code jar:} and {@code jrt:} locations, a connection holder to read it through. The
+     * failures the ObjC code reported by throwing a {@code MediaException} are returned as the error
+     * codes recorded in contract section 14.
+     * <p>
+     * As in {@code GSTMedia}, a failing return closes the connection holder it created: C never
+     * received the table, so its {@code close_connection} will never fire (contract section 14.1). On
+     * a successful return the holder belongs to this media, which closes it in {@link #dispose()}.
+     *
+     * @return a {@link MediaError} code
+     */
+    synchronized int initNativeMedia() {
+        Locator locator = getLocator();
+        String contentType = locator.getContentType();
+        long sizeHint = locator.getContentLength();
+        String location = locator.getStringLocation();
+        if (location == null) {
+            // "OSXMediaPlayer: Unable to create sourceURIString"
+            return MediaError.ERROR_MEMORY_ALLOCATION.code();
+        }
+
+        // For file/http/https AVFoundation reads the data itself; jar/jrt are read through the
+        // Locator, so those are the only schemes that get a stream callback table.
+        ConnectionHolder holder = null;
+        int rc = MediaError.ERROR_MEMORY_ALLOCATION.code();
+        try {
+            String scheme = locator.getURI().getScheme();
+            if ("jar".equalsIgnoreCase(scheme) || "jrt".equalsIgnoreCase(scheme)) {
+                if (contentType == null) {
+                    // "OSXMediaPlayer: memory allocation failed"
+                    return rc;
+                }
+                holder = locator.createConnectionHolder();
+                if (holder == null) {
+                    return rc;
+                }
+                streamConnection = holder;
+                streamArena = Arena.ofShared();
+                streamCallbacks = JfxMediaNative.installStreamCallbacks(streamArena, holder);
+            }
+
+            long[] nativeMediaHandle = new long[1];
+            rc = JfxMediaNative.mediaCreate(JfxMediaNative.JFXM_BACKEND_AVF, contentType, location,
+                    sizeHint, streamCallbacks, null, nativeMediaHandle);
+            if (rc == MediaError.ERROR_NONE.code()) {
+                refNativeMedia = nativeMediaHandle[0];
+            }
+            return rc;
+        } catch (IOException | RuntimeException e) {
+            Logger.logMsg(Logger.ERROR, "OSXMedia: cannot create the connection holder: " + e);
+            return rc;
+        } finally {
+            if (rc != MediaError.ERROR_NONE.code()) {
+                // The native side retained nothing of the table, so close_connection will never
+                // fire: the holder is closed here rather than left open until it is collected.
+                releaseCallbacks();
+                closeQuietly(holder);
+                streamConnection = null;
+            }
+        }
+    }
+
+    long getNativeMediaRef() {
+        return refNativeMedia;
+    }
+
     @Override
-    public void dispose() {
+    public synchronized void dispose() {
+        if (0 != refNativeMedia) {
+            JfxMediaNative.mediaDispose(refNativeMedia);
+            refNativeMedia = 0L;
+        }
+
+        // Now that jfxm_media_dispose has returned, no callback of any table can fire again (contract
+        // section 7). That is what makes freeing the stubs below safe, and it is what makes this the
+        // one point where the connection holder can be closed on every path: where playerInit failed,
+        // the AVFMediaPlayer whose dispose fires close_connection was never built, so nothing else
+        // ever closes it. Where it was built, close_connection already ran during mediaDispose and
+        // ConnectionHolder.closeConnection is idempotent, so closing again is a no-op.
+        closeQuietly(streamConnection);
+        streamConnection = null;
+
+        // Only now is it safe to free the upcall stubs and the registry entries.
+        finishDispose();
+    }
+
+    @Override
+    protected void releaseCallbacks() {
+        if (streamCallbacks != null) {
+            streamCallbacks.unregister();
+            streamCallbacks = null;
+        }
+        if (streamArena != null) {
+            streamArena.close();
+            streamArena = null;
+        }
     }
 }

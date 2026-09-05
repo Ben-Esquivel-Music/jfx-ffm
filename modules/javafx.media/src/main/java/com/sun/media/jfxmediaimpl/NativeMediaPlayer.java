@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2010, 2025, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2010, 2026, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -25,7 +25,6 @@
 
 package com.sun.media.jfxmediaimpl;
 
-import java.lang.annotation.Native;
 import com.sun.media.jfxmedia.Media;
 import com.sun.media.jfxmedia.MediaError;
 import com.sun.media.jfxmedia.MediaException;
@@ -69,20 +68,22 @@ import java.util.concurrent.locks.ReentrantLock;
  * <code>MediaPlayer</code>.
  */
 public abstract class NativeMediaPlayer implements MediaPlayer, MarkerStateListener {
-    //***** Event IDs for PlayerStateEvent.  IDs sent from native JNI layer.
+    //***** Event IDs for PlayerStateEvent. The C dispatcher carries its own copy of these values
+    //***** (jfxmedia_api.h); jfxm_event_player_state() exports the mapping so a test can prove the
+    //***** two sides still agree.
 
-    @Native public final static int eventPlayerUnknown = 100;
-    @Native public final static int eventPlayerReady = 101;
-    @Native public final static int eventPlayerPlaying = 102;
-    @Native public final static int eventPlayerPaused = 103;
-    @Native public final static int eventPlayerStopped = 104;
-    @Native public final static int eventPlayerStalled = 105;
-    @Native public final static int eventPlayerFinished = 106;
-    @Native public final static int eventPlayerError = 107;
+    public final static int eventPlayerUnknown = 100;
+    public final static int eventPlayerReady = 101;
+    public final static int eventPlayerPlaying = 102;
+    public final static int eventPlayerPaused = 103;
+    public final static int eventPlayerStopped = 104;
+    public final static int eventPlayerStalled = 105;
+    public final static int eventPlayerFinished = 106;
+    public final static int eventPlayerError = 107;
     // Nominal video frames per second.
-    @Native private static final int NOMINAL_VIDEO_FPS = 30;
+    private static final int NOMINAL_VIDEO_FPS = 30;
     // Nanoseconds per second.
-    @Native public static final long ONE_SECOND = 1000000000L;
+    public static final long ONE_SECOND = 1000000000L;
 
     /**
      * The

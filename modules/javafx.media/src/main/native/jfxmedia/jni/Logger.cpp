@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2010, 2023, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2010, 2026, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -24,17 +24,72 @@
  */
 
 #include "Logger.h"
-#include "JniUtils.h"
 
 #include <Common/VSMemory.h>
+#include <Utils/JfxCriticalSection.h>
 
 #if ENABLE_LOGGING
 
 CLogger::LSingleton CLogger::s_Singleton;
 
+/*
+ * jfxm_log_init and jfxm_log_set_level write the sink and the level from the Java caller thread
+ * while any native thread - the GLib main loop, a GStreamer streaming thread, an AVFoundation
+ * queue - is inside logMsg reading them. Without this lock logMsg tested m_sinkFn and then loaded
+ * it a second time to call it, so a jfxm_log_init(NULL, NULL) landing in between dereferenced
+ * NULL, and a sink swap could pair one sink's function pointer with the other's user value.
+ *
+ * One process-wide lock rather than a member, because Singleton<CLogger>::GetInstance is itself
+ * unsynchronised: a member lock would be reached through the very pointer whose publication is
+ * racy. It is created during the dynamic initialisation of this translation unit, which the
+ * dynamic loader runs before any exported function of the library can be called. Until then, and
+ * if the allocation fails, it stays NULL and access is simply unsynchronised - the behaviour this
+ * code had before - rather than a crash.
+ */
+static CJfxCriticalSection *s_pLoggerLock = CJfxCriticalSection::Create();
+
+static inline void EnterLoggerLock()
+{
+    if (NULL != s_pLoggerLock) {
+        s_pLoggerLock->Enter();
+    }
+}
+
+static inline void ExitLoggerLock()
+{
+    if (NULL != s_pLoggerLock) {
+        s_pLoggerLock->Exit();
+    }
+}
+
+bool CLogger::copySink(int level, JfxmLogFn *pFn, void **ppUser)
+{
+    JfxmLogFn sinkFn = NULL;
+    void     *sinkUser = NULL;
+    bool      bEnabled;
+
+    EnterLoggerLock();
+    bEnabled = (level >= m_currentLevel);
+    if (bEnabled) {
+        sinkFn = m_sinkFn;
+        sinkUser = m_sinkUser;
+    }
+    ExitLoggerLock();
+
+    *pFn = sinkFn;
+    *ppUser = sinkUser;
+    return bEnabled && NULL != sinkFn;
+}
+
 bool CLogger::canLog(int level)
 {
-    if (level < m_currentLevel)
+    int currentLevel;
+
+    EnterLoggerLock();
+    currentLevel = m_currentLevel;
+    ExitLoggerLock();
+
+    if (level < currentLevel)
     {
         return false;
     }
@@ -46,113 +101,67 @@ bool CLogger::canLog(int level)
 
 void CLogger::logMsg(int level, const char *msg)
 {
-    CJavaEnvironment javaEnv(m_jvm);
-    JNIEnv *env = javaEnv.getEnvironment(); // env could be NULL
+    JfxmLogFn sinkFn = NULL;
+    void     *sinkUser = NULL;
 
-    if (!env || level < m_currentLevel || !m_areJMethodIDsInitialized) {
+    // The sink installed by jfxm_log_init; without one there is nowhere to log to. It is called
+    // through the copy, outside the lock, so it may log re-entrantly and may block.
+    if (!copySink(level, &sinkFn, &sinkUser)) {
         return;
     }
 
-    jstring jmsg = env->NewStringUTF(msg);
-    if (javaEnv.clearException() && jmsg != NULL) {
-        return;
+    if (NULL != msg) {
+        sinkFn(sinkUser, (int32_t)level, msg);
     }
-
-    env->CallStaticVoidMethod(m_cls, m_logMsg1Method, (jint)level, jmsg);
-    env->DeleteLocalRef(jmsg);
-    javaEnv.clearException();
 }
 
 void CLogger::logMsg(int level, const char *sourceClass, const char *sourceMethod, const char *msg)
 {
-    CJavaEnvironment javaEnv(m_jvm);
-    JNIEnv *env = javaEnv.getEnvironment();
+    JfxmLogFn sinkFn = NULL;
+    void     *sinkUser = NULL;
 
-    if (!env || level < m_currentLevel || !m_areJMethodIDsInitialized) {
+    if (!copySink(level, &sinkFn, &sinkUser)) {
         return;
     }
 
-    jstring jsourceClass = NULL;
-    jstring jsourceMethod = NULL;
-    jstring jmsg = NULL;
-    jsourceClass = env->NewStringUTF(sourceClass);
-    bool hasException = (javaEnv.clearException() || (jsourceClass == NULL));
-    if (!hasException) {
-        jsourceMethod = env->NewStringUTF(sourceMethod);
-        hasException = (javaEnv.clearException() || (jsourceMethod == NULL));
+    // The sink has a single message slot, so fold the source into the text. No caller uses this
+    // overload today.
+    string formatted;
+    if (NULL != sourceClass) {
+        formatted += sourceClass;
     }
-
-    if (!hasException) {
-        jmsg = env->NewStringUTF(msg);
-        hasException = (javaEnv.clearException() || (jmsg == NULL));
+    if (NULL != sourceMethod) {
+        formatted += ".";
+        formatted += sourceMethod;
     }
-
-    if (!hasException) {
-        env->CallStaticVoidMethod(m_cls, m_logMsg2Method, (jint)level, jsourceClass, jsourceMethod, jmsg);
-        javaEnv.clearException();
+    if (NULL != msg) {
+        formatted += ": ";
+        formatted += msg;
     }
-
-    if (jsourceClass) {
-        env->DeleteLocalRef(jsourceClass);
-    }
-
-    if (jsourceMethod) {
-        env->DeleteLocalRef(jsourceMethod);
-    }
-
-    if (jmsg) {
-        env->DeleteLocalRef(jmsg);
-    }
-}
-
-// Do NOT use this function. Instead use init() from Java layer.
-bool CLogger::init(JNIEnv *pEnv, jclass cls)
-{
-    if (!pEnv || !cls) {
-        return false;
-    }
-
-    CJavaEnvironment javaEnv(pEnv);
-
-    pEnv->GetJavaVM(&m_jvm);
-    if (javaEnv.clearException()) {
-        return false;
-    }
-
-    if (!m_areJMethodIDsInitialized) {
-        jclass local_cls = pEnv->FindClass("com/sun/media/jfxmedia/logging/Logger");
-        if (javaEnv.clearException() || NULL == local_cls) {
-            return false;
-        }
-
-        // Get global reference
-        m_cls = (jclass)pEnv->NewWeakGlobalRef(local_cls);
-        pEnv->DeleteLocalRef(local_cls);
-
-        if (NULL != m_cls) {
-            m_logMsg1Method = pEnv->GetStaticMethodID(m_cls, "logMsg", "(ILjava/lang/String;)V");
-            if (javaEnv.clearException()) {
-                return false;
-            }
-
-            m_logMsg2Method = pEnv->GetStaticMethodID(m_cls, "logMsg", "(ILjava/lang/String;Ljava/lang/String;Ljava/lang/String;)V");
-            if (javaEnv.clearException()) {
-                return false;
-            }
-
-            if (NULL != m_logMsg1Method && NULL != m_logMsg2Method) {
-                m_areJMethodIDsInitialized = true;
-            }
-        }
-    }
-
-    return m_areJMethodIDsInitialized;
+    sinkFn(sinkUser, (int32_t)level, formatted.c_str());
 }
 
 // Do NOT use this function. Instead use setLevel() from Java layer.
 void CLogger::setLevel(int level)
 {
+    EnterLoggerLock();
     m_currentLevel = level;
+    ExitLoggerLock();
+}
+
+bool CLogger::initSink(JfxmLogFn fn, void* user)
+{
+    CLogger *pLogger = NULL;
+    s_Singleton.GetInstance(&pLogger);
+    if (NULL == pLogger) {
+        return false;
+    }
+
+    EnterLoggerLock();
+    pLogger->m_sinkFn = fn;
+    pLogger->m_sinkUser = user;
+    ExitLoggerLock();
+    return true;
 }
 
 uint32_t CLogger::CreateInstance(CLogger **ppLogger)

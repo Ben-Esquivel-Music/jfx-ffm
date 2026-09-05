@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2016, 2022, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2016, 2026, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -66,12 +66,6 @@ public class MediaViewHelper extends NodeHelper {
     }
 
     @Override
-    protected void transformsChangedImpl(Node node) {
-        super.transformsChangedImpl(node);
-        mediaViewAccessor.doTransformsChanged(node);
-    }
-
-    @Override
     protected BaseBounds computeGeomBoundsImpl(Node node, BaseBounds bounds,
             BaseTransform tx) {
         return mediaViewAccessor.doComputeGeomBounds(node, bounds, tx);
@@ -93,7 +87,6 @@ public class MediaViewHelper extends NodeHelper {
     public interface MediaViewAccessor {
         NGNode doCreatePeer(Node node);
         void doUpdatePeer(Node node);
-        void doTransformsChanged(Node node);
         boolean doComputeContains(Node node, double localX, double localY);
         BaseBounds doComputeGeomBounds(Node node, BaseBounds bounds, BaseTransform tx);
     }

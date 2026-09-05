@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2010, 2014, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2010, 2026, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -24,24 +24,17 @@
  */
 
 #import <Foundation/Foundation.h>
-#import <Utils/MTObjectProxy.h>
 #import "OSXPlayerProtocol.h"
-#import <jni.h>
 
-#import "JavaPlayerEventDispatcher.h"
-
-// Wrapper for the actual media player implementation, meant to glue JNI code with ObjC code
+// Wrapper for the actual media player implementation, meant to glue the C ABI to ObjC code
 @interface OSXMediaPlayer : NSObject<OSXPlayerProtocol>
 {
     NSURL *movieURL;
-    // We'll need this to route events
-    jobject javaPlayer;
-    JavaVM *javaPlayerVM;
-    CJavaPlayerEventDispatcher *eventHandler;
+    CPlayerEventDispatcher *eventHandler; // owned; CFfiPlayerEventDispatcher
     id<OSXPlayerProtocol> player; // actual player implementation
 }
 
-// Called from OSXPlatform.osxPlatformInit() (java)
+// Called from jfxm_avf_platform_init() (OSXPlatform.mm)
 + (BOOL) initPlayerPlatform;
 
 @property (nonatomic,readonly) id<OSXPlayerProtocol> player;

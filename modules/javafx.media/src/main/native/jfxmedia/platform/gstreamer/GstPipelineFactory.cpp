@@ -34,7 +34,6 @@
 #include <Locator/LocatorStream.h>
 #include <jfxmedia_errors.h>
 #include <gst/gstelement.h>
-#include <Utils/LowLevelPerf.h>
 #include <algorithm>
 #if ENABLE_VIDEOCONVERT
 #include <gst/app/gstappsink.h>
@@ -65,8 +64,6 @@ CGstPipelineFactory::~CGstPipelineFactory()
 
 uint32_t CGstPipelineFactory::CreatePlayerPipeline(CLocator* locator, CPipelineOptions *pOptions, CPipeline** ppPipeline)
 {
-    LOWLEVELPERF_EXECTIMESTART("CGstPipelineFactory::CreatePlayerPipeline()");
-
     uint32_t uRetCode = ERROR_NONE;
 
     GstElementContainer Elements;
@@ -136,8 +133,6 @@ uint32_t CGstPipelineFactory::CreatePlayerPipeline(CLocator* locator, CPipelineO
     if (NULL == *ppPipeline)
         return ERROR_PIPELINE_CREATION;
 
-    LOWLEVELPERF_EXECTIMESTOP("CGstPipelineFactory::CreatePlayerPipeline()");
-
     return uRetCode;
 }
 
@@ -145,8 +140,6 @@ uint32_t CGstPipelineFactory::CreatePlayerPipeline(CLocator* locator, CPipelineO
 // Basically calls Create*Pipeline() based on options.
 uint32_t CGstPipelineFactory::CreatePipeline(CPipelineOptions *pOptions, GstElementContainer* pElements, CPipeline** ppPipeline)
 {
-    LOWLEVELPERF_EXECTIMESTART("CGstPipelineFactory::CreatePipeline()");
-
     uint32_t uRetCode = ERROR_NONE;
 
     if (NULL == pOptions)
@@ -212,8 +205,6 @@ uint32_t CGstPipelineFactory::CreatePipeline(CPipelineOptions *pOptions, GstElem
 
     if (NULL == *ppPipeline)
         uRetCode = ERROR_PIPELINE_CREATION;
-
-    LOWLEVELPERF_EXECTIMESTOP("CGstPipelineFactory::CreatePipeline()");
 
     return uRetCode;
 }
@@ -314,9 +305,9 @@ gint CGstPipelineFactory::SourceReadBlock(GstElement *src, guint64 position, gui
     return ((CStreamCallbacks*)data)->ReadBlock(position, size);
 }
 
-void CGstPipelineFactory::SourceCopyBlock(GstElement *src, gpointer buffer, int size, gpointer data)
+gint CGstPipelineFactory::SourceCopyBlock(GstElement *src, gpointer buffer, int size, gpointer data)
 {
-    ((CStreamCallbacks*)data)->CopyBlock(buffer, size);
+    return ((CStreamCallbacks*)data)->CopyBlock(buffer, size);
 }
 
 gint64 CGstPipelineFactory::SourceSeekData(GstElement *src, guint64 offset, gpointer data)

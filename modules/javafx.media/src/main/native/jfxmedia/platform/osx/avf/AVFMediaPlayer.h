@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2014, 2022, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2014, 2026, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -30,7 +30,11 @@
 #import <CoreVideo/CoreVideo.h>
 
 #import "OSXPlayerProtocol.h"
-#import "jni/JavaPlayerEventDispatcher.h"
+// Track types used by the -createTrack* methods. They used to arrive transitively through
+// jni/JavaPlayerEventDispatcher.h, which this file no longer includes.
+#import <PipelineManagement/AudioTrack.h>
+#import <PipelineManagement/VideoTrack.h>
+#import <PipelineManagement/SubtitleTrack.h>
 #import "AVFAudioSpectrumUnit.h"
 #import "AVFAudioEqualizer.h"
 
@@ -46,7 +50,7 @@
     dispatch_queue_t playerQueue;
     dispatch_queue_t playerLoaderQueue;
 
-    CJavaPlayerEventDispatcher *eventHandler;
+    CPlayerEventDispatcher *eventHandler;
     CLocatorStream *locatorStream;
 
     int requestedState; // 0 - stop, 1 - play, 2 - pause
@@ -87,7 +91,7 @@
 @property (nonatomic,readonly) CAudioEqualizer *audioEqualizer;
 @property (nonatomic,readonly) CAudioSpectrum *audioSpectrum;
 
-- (id) initWithURL:(NSURL *)source eventHandler:(CJavaPlayerEventDispatcher*)hdlr locatorStream:(CLocatorStream*)ls;
+- (id) initWithURL:(NSURL *)source eventHandler:(CPlayerEventDispatcher*)hdlr locatorStream:(CLocatorStream*)ls;
 - (void) setPlayerState:(int)newState;
 - (void) hlsBugReset;
 

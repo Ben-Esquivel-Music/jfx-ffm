@@ -46,6 +46,7 @@ import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.Semaphore;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.stream.Stream;
 
 final class HLSConnectionHolder extends ConnectionHolder {
@@ -73,6 +74,17 @@ final class HLSConnectionHolder extends ConnectionHolder {
     // Seek will set this value and HLS_PROP_SEGMENT_START_TIME
     // should return it if set.
     private int segmentStartTimeAfterSeek = -1;
+    /**
+     * Whether {@link #closeConnection()} has run. The base holder and its File, URI and Memory subclasses
+     * close idempotently; this one does not, so the two callers a media's holder has are kept from running
+     * the body twice. They are the {@code close_connection} callback, emitted by {@code javasource} on the
+     * pipeline's {@code READY -> NULL} transition and delivered on whichever thread drove it, and
+     * {@code GSTMedia.dispose()}, which closes the holders that transition never reached - a pipeline that
+     * never left {@code GST_STATE_NULL} never emits it at all. They are different threads, so this is a
+     * compare-and-set rather than a check and a write, and it is set on entry rather than on success: a
+     * body that throws part way must not be run again either.
+     */
+    private final AtomicBoolean closed = new AtomicBoolean();
     static final long HLS_VALUE_FLOAT_MULTIPLIER = 1000;
     static final int HLS_PROP_GET_DURATION = 1;
     static final int HLS_PROP_GET_HLS_MODE = 2;
@@ -193,10 +205,22 @@ final class HLSConnectionHolder extends ConnectionHolder {
 
     @Override
     public void closeConnection() {
-        currentPlaylist.close();
+        if (!closed.compareAndSet(false, true)) {
+            return;
+        }
+
+        // Null when the holder never reached isReady(), the only place a playlist is adopted: a media
+        // whose .m3u8 never loaded is still closed, by GSTMedia.dispose(), with nothing to close here.
+        if (currentPlaylist != null) {
+            currentPlaylist.close();
+        }
         super.closeConnection();
         resetConnection();
-        playlistLoader.putState(PlaylistLoader.STATE_EXIT);
+        // Null for the EXT-X-MEDIA audio holder: it has no loader of its own, the video stream's loader
+        // reloads its playlist too (setReloadAudioExtPlaylist), so there is nothing here to stop.
+        if (playlistLoader != null) {
+            playlistLoader.putState(PlaylistLoader.STATE_EXIT);
+        }
     }
 
     @Override

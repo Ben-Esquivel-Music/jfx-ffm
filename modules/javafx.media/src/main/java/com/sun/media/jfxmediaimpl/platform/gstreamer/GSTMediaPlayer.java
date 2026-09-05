@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2010, 2016, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2010, 2026, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -30,8 +30,9 @@ import com.sun.media.jfxmedia.MediaException;
 import com.sun.media.jfxmedia.effects.AudioEqualizer;
 import com.sun.media.jfxmedia.effects.AudioSpectrum;
 import com.sun.media.jfxmedia.locator.Locator;
-import com.sun.media.jfxmedia.control.MediaPlayerOverlay;
+import com.sun.media.jfxmediaimpl.JfxMediaNative;
 import com.sun.media.jfxmediaimpl.NativeMediaPlayer;
+import java.lang.foreign.Arena;
 
 /**
  * GStreamer implementation of a MediaPlayer.
@@ -48,15 +49,53 @@ final class GSTMediaPlayer extends NativeMediaPlayer {
         init();
         gstMedia = sourceMedia;
 
-        int rc = gstInitPlayer(gstMedia.getNativeMediaRef());
+        // The 13 upcall stubs the native dispatcher calls back through, and the registry entry that
+        // names this player, must stay alive until jfxm_media_dispose has returned - which happens
+        // in GSTMedia.dispose(), after playerDispose() (contract section 4).
+        Arena playerArena = Arena.ofShared();
+        JfxMediaNative.CallbackTable callbacks;
+        try {
+            callbacks = JfxMediaNative.installPlayerCallbacks(playerArena, this);
+            // Registering the close action is the last statement of the block, so anything that throws
+            // above it leaves the arena with no owner at all: nothing else references it, and a shared
+            // arena frees neither its segment nor the stubs it has already allocated until it is closed.
+            // installPlayerCallbacks reaches two restricted methods per stub, so this is not
+            // theoretical: it throws IllegalCallerException when --enable-native-access does not name
+            // javafx.media, and it can run out of memory part-way through the 13 trampolines. Closing
+            // here cannot hit the case where Arena.close() throws because a native thread has not
+            // unwound from a stub: the table is handed to C by jfxm_player_init below, and until that
+            // call returns no native code has ever seen any of these stubs.
+            sourceMedia.runAfterDispose(() -> {
+                callbacks.unregister();
+                playerArena.close();
+            });
+        } catch (Throwable t) {
+            try {
+                playerArena.close();
+            } catch (Throwable closeFailure) {
+                t.addSuppressed(closeFailure);
+            }
+            // The media is this player's now, and nothing downstream would ever release it: the
+            // GSTMedia constructor has already created the native media, its stream arena and its
+            // connection holders, and GSTPlatform.createMediaPlayer only logs the exception and
+            // returns null. Same teardown as the rc != 0 path below, and dispose() is idempotent.
+            try {
+                dispose();
+            } catch (Throwable disposeFailure) {
+                t.addSuppressed(disposeFailure);
+            }
+            throw t;
+        }
+
+        int rc = JfxMediaNative.playerInit(sourceMedia.getNativeMediaRef(), callbacks);
         if (0 != rc) {
             dispose();
             throwMediaErrorException(rc, null);
         }
 
         long mediaRef = gstMedia.getNativeMediaRef();
-        audioSpectrum = createNativeAudioSpectrum(gstGetAudioSpectrum(mediaRef));
-        audioEqualizer = createNativeAudioEqualizer(gstGetAudioEqualizer(mediaRef));
+        audioSpectrum = createNativeAudioSpectrum(JfxMediaNative.playerGetAudioSpectrum(mediaRef));
+        audioEqualizer = createNativeAudioEqualizer(JfxMediaNative.playerGetAudioEqualizer(mediaRef));
     }
 
     GSTMediaPlayer(Locator source) {
@@ -73,11 +112,6 @@ final class GSTMediaPlayer extends NativeMediaPlayer {
         return audioSpectrum;
     }
 
-    @Override
-    public MediaPlayerOverlay getMediaPlayerOverlay() {
-        return null; // Not needed
-    }
-
     // FIXME: this should be pushed down to native instead of returning an int value
     private void throwMediaErrorException(int code, String message)
             throws MediaException
@@ -89,7 +123,7 @@ final class GSTMediaPlayer extends NativeMediaPlayer {
     @Override
     protected long playerGetAudioSyncDelay() throws MediaException {
         long[] audioSyncDelay = new long[1];
-        int rc = gstGetAudioSyncDelay(gstMedia.getNativeMediaRef(), audioSyncDelay);
+        int rc = JfxMediaNative.playerGetAudioSyncDelay(gstMedia.getNativeMediaRef(), audioSyncDelay);
         if (0 != rc) {
             throwMediaErrorException(rc, null);
         }
@@ -98,7 +132,7 @@ final class GSTMediaPlayer extends NativeMediaPlayer {
 
     @Override
     protected void playerSetAudioSyncDelay(long delay) throws MediaException {
-        int rc = gstSetAudioSyncDelay(gstMedia.getNativeMediaRef(), delay);
+        int rc = JfxMediaNative.playerSetAudioSyncDelay(gstMedia.getNativeMediaRef(), delay);
         if (0 != rc) {
             throwMediaErrorException(rc, null);
         }
@@ -106,7 +140,7 @@ final class GSTMediaPlayer extends NativeMediaPlayer {
 
     @Override
     protected void playerPlay() throws MediaException {
-        int rc = gstPlay(gstMedia.getNativeMediaRef());
+        int rc = JfxMediaNative.playerPlay(gstMedia.getNativeMediaRef());
         if (0 != rc) {
             throwMediaErrorException(rc, null);
         }
@@ -114,7 +148,7 @@ final class GSTMediaPlayer extends NativeMediaPlayer {
 
     @Override
     protected void playerStop() throws MediaException {
-        int rc = gstStop(gstMedia.getNativeMediaRef());
+        int rc = JfxMediaNative.playerStop(gstMedia.getNativeMediaRef());
         if (0 != rc) {
             throwMediaErrorException(rc, null);
         }
@@ -122,7 +156,7 @@ final class GSTMediaPlayer extends NativeMediaPlayer {
 
     @Override
     protected void playerPause() throws MediaException {
-        int rc = gstPause(gstMedia.getNativeMediaRef());
+        int rc = JfxMediaNative.playerPause(gstMedia.getNativeMediaRef());
         if (0 != rc) {
             throwMediaErrorException(rc, null);
         }
@@ -130,7 +164,7 @@ final class GSTMediaPlayer extends NativeMediaPlayer {
 
     @Override
     protected void playerFinish() throws MediaException {
-        int rc = gstFinish(gstMedia.getNativeMediaRef());
+        int rc = JfxMediaNative.playerFinish(gstMedia.getNativeMediaRef());
         if (0 != rc) {
             throwMediaErrorException(rc, null);
         }
@@ -139,7 +173,7 @@ final class GSTMediaPlayer extends NativeMediaPlayer {
     @Override
     protected float playerGetRate() throws MediaException {
         float[] rate = new float[1];
-        int rc = gstGetRate(gstMedia.getNativeMediaRef(), rate);
+        int rc = JfxMediaNative.playerGetRate(gstMedia.getNativeMediaRef(), rate);
         if (0 != rc) {
             throwMediaErrorException(rc, null);
         }
@@ -148,7 +182,7 @@ final class GSTMediaPlayer extends NativeMediaPlayer {
 
     @Override
     protected void playerSetRate(float rate) throws MediaException {
-        int rc = gstSetRate(gstMedia.getNativeMediaRef(), rate);
+        int rc = JfxMediaNative.playerSetRate(gstMedia.getNativeMediaRef(), rate);
         if (0 != rc) {
             throwMediaErrorException(rc, null);
         }
@@ -157,7 +191,7 @@ final class GSTMediaPlayer extends NativeMediaPlayer {
     @Override
     protected double playerGetPresentationTime() throws MediaException {
         double[] presentationTime = new double[1];
-        int rc = gstGetPresentationTime(gstMedia.getNativeMediaRef(), presentationTime);
+        int rc = JfxMediaNative.playerGetPresentationTime(gstMedia.getNativeMediaRef(), presentationTime);
         if (0 != rc) {
             throwMediaErrorException(rc, null);
         }
@@ -206,7 +240,7 @@ final class GSTMediaPlayer extends NativeMediaPlayer {
                 return mutedVolume;
         }
         float[] volume = new float[1];
-        int rc = gstGetVolume(gstMedia.getNativeMediaRef(), volume);
+        int rc = JfxMediaNative.playerGetVolume(gstMedia.getNativeMediaRef(), volume);
         if (0 != rc) {
             throwMediaErrorException(rc, null);
         }
@@ -216,7 +250,7 @@ final class GSTMediaPlayer extends NativeMediaPlayer {
     @Override
     protected synchronized void playerSetVolume(float volume) throws MediaException {
         if (!muteEnabled) {
-            int rc = gstSetVolume(gstMedia.getNativeMediaRef(), volume);
+            int rc = JfxMediaNative.playerSetVolume(gstMedia.getNativeMediaRef(), volume);
             if (0 != rc) {
                 throwMediaErrorException(rc, null);
             } else {
@@ -230,7 +264,7 @@ final class GSTMediaPlayer extends NativeMediaPlayer {
     @Override
     protected float playerGetBalance() throws MediaException {
         float[] balance = new float[1];
-        int rc = gstGetBalance(gstMedia.getNativeMediaRef(), balance);
+        int rc = JfxMediaNative.playerGetBalance(gstMedia.getNativeMediaRef(), balance);
         if (0 != rc) {
             throwMediaErrorException(rc, null);
         }
@@ -239,7 +273,7 @@ final class GSTMediaPlayer extends NativeMediaPlayer {
 
     @Override
     protected void playerSetBalance(float balance) throws MediaException {
-        int rc = gstSetBalance(gstMedia.getNativeMediaRef(), balance);
+        int rc = JfxMediaNative.playerSetBalance(gstMedia.getNativeMediaRef(), balance);
         if (0 != rc) {
             throwMediaErrorException(rc, null);
         }
@@ -248,7 +282,7 @@ final class GSTMediaPlayer extends NativeMediaPlayer {
     @Override
     protected double playerGetDuration() throws MediaException {
         double[] duration = new double[1];
-        int rc = gstGetDuration(gstMedia.getNativeMediaRef(), duration);
+        int rc = JfxMediaNative.playerGetDuration(gstMedia.getNativeMediaRef(), duration);
         if (0 != rc) {
             throwMediaErrorException(rc, null);
         }
@@ -261,7 +295,7 @@ final class GSTMediaPlayer extends NativeMediaPlayer {
 
     @Override
     protected void playerSeek(double streamTime) throws MediaException {
-        int rc = gstSeek(gstMedia.getNativeMediaRef(), streamTime);
+        int rc = JfxMediaNative.playerSeek(gstMedia.getNativeMediaRef(), streamTime);
         if (0 != rc) {
             throwMediaErrorException(rc, null);
         }
@@ -277,24 +311,4 @@ final class GSTMediaPlayer extends NativeMediaPlayer {
         audioSpectrum = null;
         gstMedia = null;
     }
-
-    // Native methods
-    private native int gstInitPlayer(long refNativeMedia);
-    private native long gstGetAudioEqualizer(long refNativeMedia);
-    private native long gstGetAudioSpectrum(long refNativeMedia);
-    private native int gstGetAudioSyncDelay(long refNativeMedia, long[] syncDelay);
-    private native int gstSetAudioSyncDelay(long refNativeMedia, long delay);
-    private native int gstPlay(long refNativeMedia);
-    private native int gstPause(long refNativeMedia);
-    private native int gstStop(long refNativeMedia);
-    private native int gstFinish(long refNativeMedia);
-    private native int gstGetRate(long refNativeMedia, float[] rate);
-    private native int gstSetRate(long refNativeMedia, float rate);
-    private native int gstGetPresentationTime(long refNativeMedia, double[] time);
-    private native int gstGetVolume(long refNativeMedia, float[] volume);
-    private native int gstSetVolume(long refNativeMedia, float volume);
-    private native int gstGetBalance(long refNativeMedia, float[] balance);
-    private native int gstSetBalance(long refNativeMedia, float balance);
-    private native int gstGetDuration(long refNativeMedia, double[] duration);
-    private native int gstSeek(long refNativeMedia, double streamTime);
 }
