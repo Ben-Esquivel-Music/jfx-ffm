@@ -71,6 +71,15 @@ public final class OSXPlatform extends Platform {
             // Do this early so we can report the correct content types
             boolean isLoaded = false;
             try {
+                // This is the load that maps libjfxmedia_avf, so that the objc_getClass("AVFMediaPlayer")
+                // lookup reached through jfxm_osx_platform_init finds the class; the dylib exports no
+                // jfxm_* symbol of its own, so this is the only thing it has to be loaded for. It must
+                // run before loadPlatform(), and class initialization order guarantees it does: only
+                // getPlatformInstance(), which runs this initializer, can hand out the instance that
+                // loadPlatform() is then called on. libjfxmedia is loaded before any of this, which the
+                // avf dylib needs since it links -ljfxmedia: NativeMediaManager's constructor calls
+                // JfxMediaNative.loadLibraries() before anything reaches initNativeLayer() and
+                // PlatformManager, which is what runs this initializer.
                 NativeLibLoader.loadLibrary("jfxmedia_avf");
                 isLoaded = true;
             } catch (UnsatisfiedLinkError ule) { }

@@ -442,9 +442,10 @@ public final class JfxMediaNative {
 
     /**
      * Loads {@code glib-lite} (Windows, macOS), {@code gstreamer-lite} (non-Linux) and {@code jfxmedia}
-     * with its platform dependency list, in that order, through {@link NativeLibLoader}, exactly as
-     * {@code NativeMediaManager} used to. Idempotent. Both {@code NativeMediaManager} and this class's
-     * own initializer call it, so a binding test can touch the facade without constructing the manager.
+     * in that order, through {@link NativeLibLoader}, exactly as {@code NativeMediaManager} used to. The
+     * platform dependency list passed with {@code jfxmedia} is unpacked beside it rather than loaded.
+     * Idempotent. Both {@code NativeMediaManager} and this class's own initializer call it, so a binding
+     * test can touch the facade without constructing the manager.
      *
      * @throws UnsatisfiedLinkError if a library cannot be loaded, a {@code jfxm_*} symbol the facade
      *         binds is missing, the module was left out of {@code --enable-native-access}, or the
@@ -495,6 +496,12 @@ public final class JfxMediaNative {
         if (PlatformUtil.isMac()) {
             dependencies.add("fxplugins");
             dependencies.add("glib-lite");
+            // The dependency list is extracted, not loaded: NativeLibLoader unpacks each entry from the
+            // jar beside jfxmedia so the OS loader can find it on disk, and skips System.load for it. So
+            // jfxmedia_avf is not loaded here - OSXPlatform's initializer does that later, before the
+            // platform is asked to load itself. Nothing this facade binds needs it either way, since
+            // jfxmedia_avf exports no jfxm_* symbol; it contributes the ObjC AVFMediaPlayer class that
+            // jfxmedia looks up at runtime with objc_getClass.
             dependencies.add("jfxmedia_avf");
         }
         if (PlatformUtil.isWindows()) {
