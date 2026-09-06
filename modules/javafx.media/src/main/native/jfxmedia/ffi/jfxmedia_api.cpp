@@ -283,14 +283,28 @@ static int32_t InitGstMedia(const char* content_type, const char* location, int6
         if (NULL != pMedia)
             delete pMedia;
 
-        // Ownership of the adapters passes to the pipeline inside
-        // CGstPipelineFactory::CreateSourceElement, which hands each one to the javasource element
-        // as the user data of its "close-connection" signal; CGstPipelineFactory::SourceCloseConnection
-        // is what deletes it, and javasource only emits that signal on a READY->NULL state change.
-        // Nothing reached from CreatePlayer takes an element above GST_STATE_NULL - the first state
-        // change is in CGst*Pipeline::Init(), which jfxm_player_init calls much later - so on every
-        // failing exit the adapters are still ours and deleting them here cannot double free.
-        // Skipping this would leave them holding upcall-stub addresses that
+        // The adapters are shared with the pipeline from the moment CGstPipelineFactory::
+        // CreateSourceElement hands each one to a javasource element, but only GStreamer frees
+        // them: the "close-connection" connection carries a GClosureNotify
+        // (CGstPipelineFactory::SourceCallbacksDestroyed) and the adapter dies with that closure.
+        // Nothing on this path ever finalizes it, so the two deletes below are still the only free,
+        // and they cannot double free:
+        //   - no failing exit at or below CreateSourceElement unrefs the javasource element. Its
+        //     own three returns after the connects abandon javaSource or the floating bin holding
+        //     it; CreatePlayerPipeline returns with a stack GstElementContainer whose destructor
+        //     only clears its map; no error return in CreatePipeline, CreateAudioPipeline,
+        //     CreateAVPipeline, CreateAudioBin, CreateVideoBin or AttachToSource unrefs the
+        //     pipeline or the source bin; and CMediaManager::CreatePlayer's delete of the pipeline
+        //     object runs ~CPipeline, whose Dispose() call resolves to the empty CPipeline::Dispose
+        //     because virtual dispatch during base destruction uses the base vtable.
+        //   - the delete of pMedia above cannot have freed them either. It is unreachable today,
+        //     since CreatePlayerPipeline returns ERROR_PIPELINE_CREATION for a NULL pipeline and so
+        //     CMedia::IsValid cannot fail; and were it reachable, the only way in is IsValid
+        //     answering false, which means m_pPipeline is NULL, and ~CMedia then disposes nothing
+        //     and unrefs nothing.
+        // Anyone who adds a gst_object_unref to one of those failure paths must delete these two
+        // lines in the same commit, because that unref would finalize the closure and free the
+        // adapters here. Skipping them would leave the adapters holding upcall-stub addresses that
         // GSTMedia.createNativeMedia frees in its finally block, and would make the "nothing is
         // retained by C" promise of jfxmedia_api.h false. close_connection is deliberately not
         // invoked: the Java side closes the connection holders itself on this path.
@@ -313,16 +327,28 @@ int32_t jfxm_media_create(int32_t backend,
 
     if (JFXM_BACKEND_GST == backend)
     {
+        // The handle is allocated before the pipeline, and never after it. Once InitGstMedia has
+        // returned ERROR_NONE the CFfiStreamCallbacks adapters belong to the javasource elements as
+        // the user data of their "close-connection" signal, and they are freed with that signal's
+        // closure, through the GClosureNotify CGstPipelineFactory::CreateSourceElement installs:
+        // either when CGstPipelineFactory::SourceCloseConnection disconnects it after javasource
+        // emitted the signal on a READY -> NULL state change, or, for a pipeline that never left
+        // GST_STATE_NULL, when CGstAudioPlaybackPipeline::Dispose (via CGstAVPlaybackPipeline::
+        // Dispose for AV) unrefs the pipeline. Doing the one allocation that can still fail first
+        // leaves no exit that has to destroy a live pipeline.
+        JfxmMedia* pHandle = new (nothrow) JfxmMedia(JFXM_BACKEND_GST);
+        if (NULL == pHandle)
+            return ERROR_MEMORY_ALLOCATION;
+
         CMedia* pMedia = NULL;
         int32_t iRet = InitGstMedia(content_type, location, size_hint, cb, user, audio_cb, audio_user, &pMedia);
         if (ERROR_NONE != iRet)
-            return iRet;
-
-        JfxmMedia* pHandle = new (nothrow) JfxmMedia(JFXM_BACKEND_GST);
-        if (NULL == pHandle)
         {
-            delete pMedia;
-            return ERROR_MEMORY_ALLOCATION;
+            // InitGstMedia deleted the media and both adapters on every failing exit of its own (see
+            // the ownership comment there), so the empty handle is all that is left. With gst still
+            // NULL this is exactly what jfxm_media_dispose would do.
+            delete pHandle;
+            return iRet;
         }
 
         pHandle->gst = pMedia;
@@ -381,7 +407,18 @@ void jfxm_media_dispose(void* media)
 
     if (JFXM_BACKEND_GST == pHandle->backend)
     {
-        // gstDispose: ~CMedia deletes the pipeline, which deletes the dispatcher.
+        // gstDispose: ~CMedia deletes the pipeline, which deletes the dispatcher - and, through
+        // CGstAudioPlaybackPipeline::Dispose (via CGstAVPlaybackPipeline::Dispose for AV), takes the
+        // elements to GST_STATE_NULL and then unrefs the pipeline. That is also the whole of the
+        // "deletes ... the stream adapters" half of this function's contract in jfxmedia_api.h: each
+        // javasource element frees the adapter it holds when its "close-connection" closure dies,
+        // either from the disconnect in CGstPipelineFactory::SourceCloseConnection on the
+        // READY -> NULL transition, or from g_signal_handlers_destroy when the unref finalizes an
+        // element that never made it - except a javasource that was created but never added to any
+        // pipeline, whose adapter is then never freed either, because the element itself is never
+        // finalized; believed unreachable today (GstPipelineFactory.cpp CreateAudioPipeline/
+        // CreateHLSPipeline). Nothing else is left here to free, and nothing here calls back into
+        // Java.
         if (NULL != pHandle->gst)
         {
             delete pHandle->gst;

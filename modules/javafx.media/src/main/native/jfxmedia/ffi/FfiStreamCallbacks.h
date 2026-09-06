@@ -35,11 +35,14 @@
  * target that threw (need_buffer/is_seekable/is_random_access/property 0, read_* -2, seek -1,
  * copy_block 0, close_connection no-op), and after CloseConnection the adapter answers like the JNI
  * one did once its global reference was gone (reads -1, the rest 0/false/no-op). Created by
- * jfxm_media_create (GST) or jfxm_avf_player_init (AVF). The GST adapter is deleted by the
- * pipeline factory right after CloseConnection, which is exactly where CJavaInputStreamCallbacks
- * was deleted. The AVF adapter has no such predecessor: the JNI player closed the connection and
- * dropped the pointer without deleting anything, leaking the adapter and its CLocatorStream with
- * every jar:/jrt: player. It is deleted by AVFMediaPlayer's -dispose, by the two paths of
+ * jfxm_media_create (GST) or jfxm_avf_player_init (AVF). The GST adapter is deleted by
+ * CGstPipelineFactory::SourceCallbacksDestroyed, the GClosureNotify of the "close-connection"
+ * signal: either from the disconnect at the end of SourceCloseConnection, after a real
+ * READY->NULL transition, or from g_signal_handlers_destroy when g_object_unref finalizes an
+ * element that never left GST_STATE_NULL (a media created and never played). The AVF adapter has
+ * no such predecessor: the JNI player closed the connection and dropped the pointer without
+ * deleting anything, leaking the adapter and its CLocatorStream with every jar:/jrt: player. It is
+ * deleted by AVFMediaPlayer's -dispose, by the two paths of
  * -[AVFMediaPlayer initWithURL:eventHandler:locatorStream:] that return nil, and by the !player
  * branch of jfxm_avf_player_init - each of which deletes the CLocatorStream too, since
  * CLocatorStream stores the adapter pointer without owning it.

@@ -236,7 +236,24 @@ uint32_t CGstPipelineFactory::CreateSourceElement(CLocator *locator, CStreamCall
     g_signal_connect(javaSource, "read-next-block", G_CALLBACK(SourceReadNextBlock), callbacks);
     g_signal_connect(javaSource, "copy-block", G_CALLBACK(SourceCopyBlock), callbacks);
     g_signal_connect(javaSource, "seek-data", G_CALLBACK(SourceSeekData), callbacks);
-    g_signal_connect(javaSource, "close-connection", G_CALLBACK(SourceCloseConnection), callbacks);
+    // This connection, and only this one, carries a GClosureNotify: from here on the javasource
+    // element owns the adapter and GStreamer is what frees it, when the closure dies. A closure is
+    // finalized exactly once, and a disconnected handler is no longer in the element's handler list
+    // (g_signal_handlers_destroy skips handlers whose sequential_number the disconnect zeroed), so
+    // the two ways the closure can die are mutually exclusive:
+    //   - the disconnect at the end of SourceCloseConnection, i.e. after javasource emitted
+    //     "close-connection" on its READY -> NULL transition (javasource.c, java_source_change_state);
+    //   - g_signal_handlers_destroy() from g_object_unref, when the pipeline holding the element is
+    //     unreffed in CGstAudioPlaybackPipeline::Dispose() (via CGstAVPlaybackPipeline::Dispose for
+    //     AV pipelines).
+    // The second is what the first cannot cover: javasource emits the signal on that one transition
+    // and nowhere else - java_source_finalize does not emit it - so a pipeline that never left
+    // GST_STATE_NULL, because its media was created and never played or because CGst*Pipeline::Init()
+    // failed before its set_state(PAUSED), used to drop the adapter without ever freeing it, together
+    // with the nine upcall-stub addresses it holds. The other five connections deliberately carry no
+    // notify: one owner, one free.
+    g_signal_connect_data(javaSource, "close-connection", G_CALLBACK(SourceCloseConnection),
+                          callbacks, SourceCallbacksDestroyed, (GConnectFlags)0);
     g_signal_connect(javaSource, "property", G_CALLBACK(SourceProperty), callbacks);
 
     if (isRandomAccess)
@@ -264,6 +281,11 @@ uint32_t CGstPipelineFactory::CreateSourceElement(CLocator *locator, CStreamCall
     bool needBuffer = callbacks->NeedBuffer();
     pOptions->SetBufferingEnabled(needBuffer);
 
+    // The three failure returns below abandon javaSource - or the floating bin that has taken it -
+    // without unreffing it. That pre-existing GstElement leak is what keeps the adapter's closure
+    // alive and unfinalized on this path, which is why InitGstMedia in ffi/jfxmedia_api.cpp still
+    // deletes the adapters itself when jfxm_media_create fails. Adding the cleanup unref here means
+    // deleting those two lines in the same commit, or they become a double free.
     if (needBuffer)
     {
         g_object_set(javaSource, "stop-on-pause", FALSE, NULL);
@@ -328,9 +350,39 @@ void CGstPipelineFactory::SourceCloseConnection(GstElement *src, gpointer data)
     g_signal_handlers_disconnect_by_func (src, (void*)G_CALLBACK (SourceReadBlock), callbacks);
     g_signal_handlers_disconnect_by_func (src, (void*)G_CALLBACK (SourceCopyBlock), callbacks);
     g_signal_handlers_disconnect_by_func (src, (void*)G_CALLBACK (SourceSeekData), callbacks);
-    g_signal_handlers_disconnect_by_func (src, (void*)G_CALLBACK (SourceCloseConnection), callbacks);
     g_signal_handlers_disconnect_by_func (src, (void*)G_CALLBACK (SourceProperty), callbacks);
-    delete callbacks;
+    // Deliberately last, and deliberately not followed by a delete: this is the connection that owns
+    // the adapter, so disconnecting it drops the handler list's reference to the closure and
+    // SourceCallbacksDestroyed frees the adapter once that closure is finalized. The emission holds a
+    // reference of its own on the handler across this call (gsignal.c takes handler_ref before
+    // invoking the closure and the handler_unref_R that reaches g_closure_unref runs only after
+    // g_closure_invoke returned), so the free lands after this function returns rather than inside
+    // it - but ordering the disconnect last means nothing here names the adapter afterwards either
+    // way, so no line below depends on that.
+    //
+    // Do not "simplify" the five disconnects above away in favour of the adapter's own closed latch:
+    // with the handlers still attached, read-next-block would answer -1 after the close instead of
+    // finding no handler and answering 0; in MODE_DEFAULT javasource turns that -1 into an EOS
+    // event, and in MODE_HLS the same size == EOS_CODE instead becomes a GST_EVENT_SEGMENT asking
+    // for more data - the warning holds either way.
+    g_signal_handlers_disconnect_by_func (src, (void*)G_CALLBACK (SourceCloseConnection), callbacks);
+}
+
+// GClosureNotify of the "close-connection" closure, i.e. the single point at which the adapter shared
+// by the six javasource handlers is freed. It runs on whichever thread dropped the closure's last
+// reference and never under GLib's signal lock (handler_unref_R releases SIGNAL_LOCK before
+// g_closure_unref), and every such thread is safe:
+//   - on the READY -> NULL transition javasource's source task has already been joined, because the
+//     parent change_state deactivates the pads for that transition too, which runs
+//     java_source_activatemode's inactive branch and its gst_pad_stop_task, and it does so before
+//     javasource emits "close-connection";
+//   - at element finalize the reference count is zero, so nothing holds the element to call into.
+// It is also safe with respect to Java: ~CFfiStreamCallbacks only clears its own copy of the table,
+// so this makes no upcall and does not care whether the caller's arena is still open.
+void CGstPipelineFactory::SourceCallbacksDestroyed(gpointer data, GClosure *closure)
+{
+    (void)closure;
+    delete (CStreamCallbacks*)data;
 }
 
 /**

@@ -29,8 +29,14 @@
  * This is the only surface com.sun.media.jfxmediaimpl.JfxMediaNative binds. It knows nothing
  * about the JVM: every function takes and returns <stdint.h> scalars, opaque void* handles or
  * NUL-terminated UTF-8 strings, and every former Java callback is a slot in a table of function
- * pointers that receives the opaque void* user Java handed in. Error codes are the MediaError
- * values generated into jfxmedia_errors.h; no exception crosses the boundary in either direction.
+ * pointers that receives the opaque void* user Java handed in. Errors are reported as MediaError
+ * return codes generated into jfxmedia_errors.h, and no exception is thrown across the boundary by
+ * design. One gap remains under memory exhaustion: new (nothrow) covers the allocation itself but
+ * not a throwing constructor or a throwing assignment, so std::bad_alloc can still escape
+ * extern "C" - at the two CLocatorStream constructions in ffi/jfxmedia_api.cpp and
+ * platform/osx/OSXMediaPlayer.mm, at the location/content_type std::string assignments in
+ * jfxm_media_create's AVF branch, and at the unchecked plain new CLogger in jni/Logger.cpp. That is
+ * inherited from the pre-FFM code, not introduced by this ABI.
  *
  * The design contract is modules/javafx.media/FFM-ABI-CONTRACT.md; the symbol set is identical on
  * every platform (functions that only make sense on one backend return ERROR_NOT_IMPLEMENTED
@@ -178,7 +184,12 @@ JFXM_EXPORT void    jfxm_log_set_level(int32_t level);
  *       (push mode) or the pulling element's streaming thread (GST); the playerLoaderQueue serial
  *       dispatch queue under the player lock (AVF). These MAY block on Java I/O.
  *   close_connection: the thread driving READY->NULL, under the element lock (GST); the dispose
- *       caller under the player lock (AVF). It is the last call; C deletes its adapter right after.
+ *       caller under the player lock (AVF). It is the last call the adapter itself answers, but not
+ *       the last thing that touches it: on GST the adapter is freed by
+ *       CGstPipelineFactory::SourceCallbacksDestroyed, the GClosureNotify of the "close-connection"
+ *       signal, which runs either from the disconnect at the end of SourceCloseConnection after a
+ *       real READY->NULL transition, or from g_signal_handlers_destroy when g_object_unref finalizes
+ *       an element that never left GST_STATE_NULL (a media created but never played).
  * The table and user must stay valid until close_connection has run AND jfxm_media_dispose has
  * returned. The one exception is a failed jfxm_media_create: close_connection never runs there, C
  * destroys the adapter before returning, and the table may be released as soon as it does. Never
@@ -198,7 +209,7 @@ typedef struct JfxmStreamCallbacks {
     int32_t (*copy_block)(void* user, void* dst, int32_t size);
     int64_t (*seek)(void* user, int64_t position);                     /* new position or -1; HLS: seconds*1000 */
     int32_t (*property)(void* user, int32_t prop, int32_t value);      /* HLSConnectionHolder.HLS_PROP_* 1..6 */
-    void    (*close_connection)(void* user);                           /* last call; C deletes its adapter after it */
+    void    (*close_connection)(void* user);   /* last call; GST frees it via SourceCallbacksDestroyed */
 } JfxmStreamCallbacks;
 
 /* ------------------------------------------------------------------------------------------------
@@ -292,8 +303,17 @@ JFXM_EXPORT void    jfxm_media_dispose(void* media);
  * backend event dispatcher over a by-value copy of *cb and initialises the pipeline / AVPlayer.
  * Return = MediaError code (AVF: the six former ThrowJavaException sites map to their codes, plus
  * the added CLocatorStream check - see section 14.1 of FFM-ABI-CONTRACT.md).
- * On failure the media handle stays alive and C retains nothing of the callback table; the Java
- * caller disposes it. Called on the Java thread constructing the player.
+ * On failure the media handle stays alive and the Java caller disposes it. On AVF no callback of
+ * the table fires after a failed init: jfxm_avf_player_init deletes the dispatcher on every failure
+ * path. On GST that is NOT true: CGstAudioPlaybackPipeline::Init attaches the bus watch and starts
+ * the main loop before the gst_element_set_state(PIPELINE, GST_STATE_PAUSED) call that can fail, so
+ * a sink error there - the ordinary "audio device cannot be opened" case on a headless machine - is
+ * still delivered by BusCallback to a warning/error slot of that same table, on the media-manager
+ * main-loop thread, after this call has already returned failure. That is exactly why the function
+ * pointers and user values must stay valid until jfxm_media_dispose has returned - the same lifetime
+ * rule jfxm_media_create states for the stream tables. Call at most once per media handle: AVF
+ * returns ERROR_MEDIA_CREATION on a second call, while the GST backend does not detect one and would
+ * replace the dispatcher. Called on the Java thread constructing the player.
  */
 JFXM_EXPORT int32_t jfxm_player_init(void* media, const JfxmPlayerCallbacks* cb, void* user);
 

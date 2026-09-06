@@ -64,7 +64,13 @@ the first media test tree (`FFM-TEST-PLAN.md`).
    native.
 5. **Error codes, not exceptions, cross the boundary** — exactly as today. `jfxmedia_errors.h`
    keeps being generated from `MediaError.java` by `src/tools/java/headergen/HeaderGen.java`, now
-   run by Maven (see `FFM-BUILD-PLAN.md`), so the two sides cannot drift.
+   run by Maven (see `FFM-BUILD-PLAN.md`), so the two sides cannot drift. No exception is thrown
+   across the boundary by design, with one gap under memory exhaustion: `new (nothrow)` covers the
+   allocation itself but not a throwing constructor or a throwing assignment, so `std::bad_alloc`
+   can still escape `extern "C"` — at the two `CLocatorStream` constructions in `ffi/jfxmedia_api.cpp`
+   and `platform/osx/OSXMediaPlayer.mm`, at the `location`/`content_type` `std::string` assignments
+   in `jfxm_media_create`'s AVF branch, and at the unchecked plain `new CLogger` in `jni/Logger.cpp`.
+   That is inherited from the pre-FFM code, not introduced by this ABI.
 6. **Native code never holds a Java reference.** Every former `jobject` global ref becomes a
    Java-assigned `int64_t` registry id passed as `void* user`; every former `jmethodID` becomes a
    slot in a callback table of function pointers.
@@ -163,7 +169,7 @@ stream callbacks, which are allowed to block on Java I/O):
 | `JfxmStreamCallbacks.need_buffer`, `is_seekable`, `is_random_access` | Java caller thread inside `jfxm_media_create` | Java caller thread inside `jfxm_player_init` |
 | `read_next_block`, `read_block`, `copy_block`, `seek` | `javasource` task thread (push) or the pulling element's streaming thread; **may block** | `playerLoaderQueue` serial dispatch queue under the player lock; **may block** |
 | `property` | `property(2,3)`: Java caller thread inside `jfxm_media_create` (`GstPipelineFactory.cpp:91,93,111`). `property(4,5)`: `javasource` task thread (`java_source_loop`, `javasource.c:571,574`). **`property(1)`: whichever thread runs a `GST_QUERY_DURATION` - including the Java thread that called `jfxm_player_get_duration`, nested inside that downcall** (note below). **May block** | never invoked: the only callers of `CStreamCallbacks::Property` are `GstPipelineFactory` and the `javasource` `property` signal, both GStreamer-only. (`property(6)` is not an upcall on either backend: Java asks the holder itself before `jfxm_media_create`, section 7.) |
-| `close_connection` | thread driving READY->NULL, **under the element lock**; C deletes the adapter right after | dispose caller, under the player lock |
+| `close_connection` | thread driving READY->NULL, **under the element lock**; the adapter is freed by `CGstPipelineFactory::SourceCallbacksDestroyed`, either from the disconnect at the end of `SourceCloseConnection` after a real transition or from `g_signal_handlers_destroy` when `g_object_unref` finalizes an element that never left `GST_STATE_NULL` | dispose caller, under the player lock |
 | `JfxmLogFn` | any of the above | any of the above |
 | `JfxmReleaseFn` (band pair) | the thread that dropped the holder's last reference: MainLoop / spectrum thread, or the app thread inside `jfxm_spectrum_set_bands` / dispose | the app thread inside `jfxm_spectrum_set_bands` / dispose, or the thread that tears the audio tap down. **Not** the audio tap itself: `AVFAudioSpectrumUnit::UpdateBands` takes the band lock rather than a reference, so it can never drop the last one, and `SetBands` releases outside that lock |
 
@@ -370,7 +376,7 @@ JFXM_EXPORT int32_t jfxm_player_get_mute(void* media, int32_t* out_mute);
 JFXM_EXPORT int32_t jfxm_player_set_mute(void* media, int32_t mute);
 ```
 
-Failure of `jfxm_player_init` leaves the media handle alive (C retains nothing of the callback table): the Java caller must call `jfxm_media_dispose` itself before propagating the error when it created the media in the same constructor (`OSXMediaPlayer`); `GSTMediaPlayer` leaves that to `GSTMedia.dispose()` exactly as today. `NativeMediaPlayer.dispose()` already calls `playerDispose()` and then `media.dispose()` under one lock, so `OSXMedia.dispose()` is where the AVF teardown now happens (previously `osxDispose` in `playerDispose()`); the only difference is that the Java-side field clearing of `playerDispose()` runs a few lines earlier.
+Failure of `jfxm_player_init` leaves the media handle alive: the Java caller must call `jfxm_media_dispose` itself before propagating the error when it created the media in the same constructor (`OSXMediaPlayer`); `GSTMediaPlayer` leaves that to `GSTMedia.dispose()` exactly as today. On AVF no callback of the table fires after a failed init — `jfxm_avf_player_init` deletes the dispatcher on every failure path. On GST that is not true: the GST backend has by then installed a by-value copy of the table on the pipeline, and `CGstAudioPlaybackPipeline::Init` attaches the bus watch and starts the main loop before the `gst_element_set_state(PIPELINE, GST_STATE_PAUSED)` call that can fail, so a sink error there — the ordinary "audio device cannot be opened" case on a headless machine — still reaches `SendPlayerMediaErrorEvent` through `BusCallback` on the media-manager main-loop thread, a slot of that same table, after `jfxm_player_init` has already returned failure. That is exactly why the function pointers and user values must stay valid until `jfxm_media_dispose` has returned — the same lifetime rule `jfxm_media_create` states for the stream tables. `jfxm_player_init` may be called at most once per media handle: AVF returns `ERROR_MEDIA_CREATION` on a second call, while the GST backend does not detect one and would replace the dispatcher. `NativeMediaPlayer.dispose()` already calls `playerDispose()` and then `media.dispose()` under one lock, so `OSXMedia.dispose()` is where the AVF teardown now happens (previously `osxDispose` in `playerDispose()`); the only difference is that the Java-side field clearing of `playerDispose()` runs a few lines earlier.
 
 `GSTMediaPlayer` keeps `throwMediaErrorException` on non-zero returns; `OSXMediaPlayer` keeps
 today's convention (throw only on create/init, ignore return codes of the other calls, return the

@@ -88,6 +88,11 @@ private:
     static gint64   SourceSeekData(GstElement *src, guint64 offset, gpointer data);
     static void     SourceCloseConnection(GstElement *src, gpointer data);
     static int      SourceProperty(GstElement *src, int prop, int value, gpointer data);
+
+    // GClosureNotify of the "close-connection" closure, and the only place the CStreamCallbacks
+    // shared by the six handlers above is freed. CreateSourceElement explains why that closure owns
+    // it; SourceCloseConnection therefore does not delete it.
+    static void     SourceCallbacksDestroyed(gpointer data, GClosure *closure);
 };
 
 #endif  //_GST_PIPELINE_FACTORY_H_
