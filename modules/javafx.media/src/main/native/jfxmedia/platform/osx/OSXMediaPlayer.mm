@@ -324,11 +324,28 @@ int32_t jfxm_avf_player_init(JfxmMedia *media, const JfxmPlayerCallbacks *cb, vo
                                                     eventHandler:eventHandler
                                                    locatorStream:locatorStream];
     if (!player) {
+        // Reached only when -[OSXMediaPlayer initWithURL:eventHandler:locatorStream:] returned nil,
+        // which it does only from checks that run before it allocates the AVFMediaPlayer - so the
+        // locator/adapter pair is still ours here. Once that allocation happens the pair belongs to
+        // -[AVFMediaPlayer initWithURL:eventHandler:locatorStream:], which frees it in -dispose or
+        // on its own nil-returning paths. The two cleanups are therefore mutually exclusive: the
+        // pair is freed exactly once, never twice and never not at all.
+        //
+        // The half that is worth stating, because it looks like a double free otherwise: when the
+        // inner AVFMediaPlayer is the thing that fails to initialize, -[OSXMediaPlayer
+        // initWithURL:...] still returns a non-nil OSXMediaPlayer - one whose player ivar is nil -
+        // so this branch is not taken at all and only the AVF initializer's own cleanup runs. That
+        // is also why this function still returns ERROR_NONE there, as it did before.
+        //
+        // Adapter first, then locator, the order AVFMediaPlayer's teardown uses; CLocatorStream
+        // stores the adapter pointer without owning it, so deleting the locator alone leaks it.
+        // CloseConnection is deliberately not called, as on the jfxm_media_create failure path:
+        // the Java side closes its own connection holder when player creation fails.
         LOGGER_WARNMSG("OSXMediaPlayer: Unable to create player\n");
         [mediaURL release];
         delete eventHandler;
-        delete locatorStream;
         delete callbacks;
+        delete locatorStream;
         [pool drain];
         return ERROR_MEDIA_CREATION;
     }

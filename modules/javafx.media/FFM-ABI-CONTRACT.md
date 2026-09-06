@@ -703,6 +703,14 @@ Everything above is behaviour-neutral. These few points are not, and each one is
     guarantee for a future or third-party filler of the table, not a live leak that stopped;
   * the AVF `!player` path releases `eventHandler`, `locatorStream`, `callbacks` and `mediaURL`,
     which `osxCreatePlayer` leaked;
+  * `AVFMediaPlayer -dispose` deletes the `CFfiStreamCallbacks` adapter after `CloseConnection` and
+    then the `CLocatorStream` that holds it, and `-[AVFMediaPlayer initWithURL:...]` deletes the
+    same pair on the two paths where it returns nil. The JNI code closed the connection and dropped
+    the pointer, so every `jar:`/`jrt:` AVF player leaked both allocations for the life of the JVM.
+    Ownership passes to that initializer the moment it is entered, and `jfxm_avf_player_init`'s own
+    cleanup runs only when no `AVFMediaPlayer` was allocated at all, so the pair is freed exactly
+    once. The delete cannot race an `AVAssetResourceLoader` callback, because the resource-loader
+    delegate body and `-dispose` are both wholly inside `@synchronized(self)`;
   * `jfxm_spectrum_set_bands` with a NULL spectrum drops the last reference to the holder (and so
     runs `release`); `nativeSetBands` leaked it;
   * `AVFAudioSpectrumUnit` releases the band holder it is still keeping when it is destroyed, and

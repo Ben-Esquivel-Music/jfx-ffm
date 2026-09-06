@@ -95,10 +95,11 @@ public class Logger {
     @Native public static final int DEBUG = 1; // Maps to java.util.logging.Level.FINE
     private static int currentLevel = OFF;
     /**
-     * Set by {@link #initNative()} once the native log sink is installed. Until then {@link
-     * #setLevel(int)} keeps the level Java-side only, exactly as it did while {@code nativeSetNativeLevel}
-     * still threw {@code UnsatisfiedLinkError}: this class is initialized long before {@code jfxmedia}
-     * is loaded and must not pull the library in.
+     * Set by {@link #initNative()} once {@link JfxMediaNative#logInit()} reports success: the native log
+     * sink was installed, or the library has logging compiled out and has no sink to install. Until then
+     * {@link #setLevel(int)} keeps the level Java-side only, exactly as it did while
+     * {@code nativeSetNativeLevel} still threw {@code UnsatisfiedLinkError}: this class is initialized
+     * long before {@code jfxmedia} is loaded and must not pull the library in.
      */
     private static volatile boolean nativeInitialized = false;
     private static long startTime = 0;
@@ -153,9 +154,16 @@ public class Logger {
      * anything thrown there turns every later {@code getDefaultInstance()} into a
      * {@code NoClassDefFoundError}. An unusable library is reported as "not initialized" instead, and
      * the logger stays Java-side only.
+     * <p>
+     * A build with logging compiled out of {@code jfxmedia} ({@code ENABLE_LOGGING == 0}) is not such a
+     * library. It has no sink to install, so {@code jfxm_log_init} reports success for it - exactly as
+     * the JNI {@code nativeInit} this replaced returned {@code JNI_TRUE} on that branch - and the native
+     * level call that follows is a no-op in C. That case is a successful initialization here too.
      *
-     * @return true when the native log sink was installed, false when logging is compiled out of the
-     *         library or the library is unusable
+     * @return true when the call succeeded: the native log sink was installed, or the library has
+     *         logging compiled out and the ABI reports having nothing to install as success. False only
+     *         when installing the sink genuinely failed (a native allocation failure), or when the
+     *         library is missing, incomplete or of the wrong ABI version
      */
     public static boolean initNative() {
         try {

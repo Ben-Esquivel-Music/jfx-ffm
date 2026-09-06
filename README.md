@@ -44,9 +44,13 @@ and runs the headless unit test suite. Useful flags:
 when `-DUSE_ROBOT=true` is passed. Setting it to `false` requires an ABI-compatible `jfxwebkit`
 rebuilt for the current source tree.
 
-The media native libraries (`jfxmedia`, `gstreamer-lite`, `glib-lite`,
-`fxplugins`, and `jfxmedia_avf` on macOS) are compiled from source along with
-the javafx.graphics ones. The WebKit library is not; see
+The media native libraries are compiled from source along with the
+javafx.graphics ones: `jfxmedia`, `gstreamer-lite` and `fxplugins` on every
+platform, plus `glib-lite` on Windows and macOS (Linux links the system GLib
+through pkg-config instead) and `jfxmedia_avf` on macOS. Linux also builds
+`avplugin`, but only when the system ffmpeg development packages
+(`libavcodec`, `libavformat`) are installed; otherwise it is skipped. The
+WebKit library is not compiled from source; see
 [WEBKIT-MEDIA-STUBS.md](WEBKIT-MEDIA-STUBS.md) for how to supply a prebuilt
 `jfxwebkit`, and why a `jfxmedia` from an OpenJFX SDK cannot be used in its
 place any more. The assembled SDK lands in `sdk/target/sdk/`; it holds the

@@ -37,8 +37,11 @@
     <name>javafx-media</name>
     <description>JavaFX media module (javafx.media)</description>
 
-    <!-- The native media stack (jfxmedia, gstreamer-lite, fxplugins, glib-lite, and
-         on macOS jfxmedia_avf) is built by the native/CMakeLists.txt project in the
+    <!-- The native media stack (jfxmedia, gstreamer-lite and fxplugins everywhere,
+         glib-lite on Windows and macOS, where the bundled GLib subset is used instead
+         of the system GLib that Linux links via pkg-config, jfxmedia_avf on macOS, and
+         optionally avplugin on Linux when the system libavcodec/libavformat development
+         packages are found) is built by the native/CMakeLists.txt project in the
          native-win / native-linux / native-mac profiles below, exactly like the
          javafx.graphics natives. Pass -DskipNative=true to skip only that CMake build:
          the module then runs against jfxm_* libraries built earlier from this tree and
@@ -348,7 +351,7 @@
                 </plugins>
             </build>
         </profile>
-        <!-- Native macOS media libraries (jfxmedia and jfxmedia_avf) via CMake + clang. Skip with -DskipNative=true -->
+        <!-- Native macOS media libraries via CMake + clang. Skip with -DskipNative=true -->
         <profile>
             <id>native-mac</id>
             <activation>

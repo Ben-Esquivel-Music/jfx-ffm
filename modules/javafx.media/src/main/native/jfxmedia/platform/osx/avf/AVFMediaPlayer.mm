@@ -118,6 +118,34 @@ static void append_log(NSMutableString *s, NSString *fmt, ...) {
 // rather than a borrowed Cocoa one.
 static NSString * const AVFMediaErrorDomain = @"com.sun.media.jfxmedia";
 
+// Destroys the CLocatorStream and the CStreamCallbacks adapter behind it - the pair that
+// -initWithURL:eventHandler:locatorStream: takes ownership of. CLocatorStream has no destructor and
+// only stores the adapter pointers (Locator/LocatorStream.cpp), so deleting the locator does not
+// delete the adapter; the pair has to come apart the way CGstPipelineFactory::SourceCloseConnection
+// takes the GStreamer one apart - close the adapter, then delete it - with the locator deleted
+// last. CStreamCallbacks declares a virtual destructor, so deleting through the CStreamCallbacks*
+// GetCallbacks() returns runs ~CFfiStreamCallbacks. GetAudioCallbacks() is deliberately not
+// touched: SetAudioCallbacks is called only from jfxm_media_create's GStreamer path, so the locator
+// jfxm_avf_player_init builds leaves it NULL for the life of the player.
+//
+// closeConnection is YES only from -dispose. The initializer's failure paths pass NO, matching the
+// player-creation failure path of jfxm_avf_player_init and the jfxm_media_create failure path
+// before it: there the Java side closes its own connection holder.
+static void AVFDestroyLocatorStream(CLocatorStream *ls, BOOL closeConnection) {
+    if (ls == NULL) {
+        return;
+    }
+
+    CStreamCallbacks *callbacks = ls->GetCallbacks();
+    if (callbacks != NULL) {
+        if (closeConnection) {
+            callbacks->CloseConnection();
+        }
+        delete callbacks;
+    }
+    delete ls;
+}
+
 @implementation AVFMediaPlayer
 
 static void SpectrumCallbackProc(void *context, double duration, double timestamp);
@@ -136,6 +164,16 @@ static CVReturn displayLinkCallback(CVDisplayLinkRef displayLink,
     return (klass != nil);
 }
 
+// Takes ownership of ls and of the CStreamCallbacks adapter behind it: from the moment this
+// initializer is entered that pair is freed here - by -dispose on the ordinary path, or by the two
+// paths below that return nil. jfxm_avf_player_init's own cleanup covers only the case where this
+// object was never created, and the two can never overlap: -[OSXMediaPlayer
+// initWithURL:eventHandler:locatorStream:] returns nil only from checks that run before it
+// allocates an AVFMediaPlayer. The pair is therefore freed exactly once - given that the third
+// exit from this method never happens. That exit is [super init] returning nil, which skips the
+// whole body: nothing here would free the pair and jfxm_avf_player_init's !player branch would not
+// either, because -[OSXMediaPlayer initWithURL:...] would have returned non-nil. It is unreachable
+// rather than handled: [super init] here is -[NSObject init], which never returns nil.
 - (id) initWithURL:(NSURL *)source eventHandler:(CPlayerEventDispatcher*)hdlr locatorStream:(CLocatorStream*)ls {
     if ((self = [super init]) != nil) {
         previousWidth = -1;
@@ -154,6 +192,7 @@ static CVReturn displayLinkCallback(CVDisplayLinkRef displayLink,
         // Create the player
         _player = [AVPlayer playerWithURL:source];
         if (!_player) {
+            AVFDestroyLocatorStream(ls, NO);
             return nil;
         }
 
@@ -169,9 +208,17 @@ static CVReturn displayLinkCallback(CVDisplayLinkRef displayLink,
                 AVAssetResourceLoader *resourceLoader = avUrlAsset.resourceLoader;
                 [resourceLoader setDelegate:self queue:playerLoaderQueue];
             } else {
+                AVFDestroyLocatorStream(ls, NO);
                 return nil;
             }
 
+            // Published after the delegate was installed, where master had it. A loading request
+            // arriving in the window between the two reads NULL and returns NO, failing that
+            // resource load. The window is pre-existing and left alone: closing it changes
+            // behaviour on a path this change is not about, and whether AVFoundation retries such a
+            // request is unverified here. It does not weaken the teardown in -dispose, which is
+            // what the monitor is relied on for: the window can only make a read see NULL, never a
+            // pointer that is being freed.
             self->locatorStream = ls;
         }
 
@@ -526,8 +573,35 @@ static CVReturn displayLinkCallback(CVDisplayLinkRef displayLink,
             }
 
             if (locatorStream != NULL) {
-                locatorStream->GetCallbacks()->CloseConnection();
+                // The locator and its CStreamCallbacks adapter are this player's to free (see
+                // -initWithURL:), and the locator does not own the adapter, so both go here.
+                //
+                // Why no resource-loading request can be dereferencing them: every read of
+                // locatorStream lives in
+                // -resourceLoader:shouldWaitForLoadingOfRequestedResource:, whose entire body is
+                // held inside @synchronized(self) - the same monitor -dispose holds from its first
+                // line to its last. A delegate call already inside that body therefore ran to
+                // completion before -dispose could enter, and one that arrives afterwards blocks on
+                // the monitor, then reads the NULL written below and returns NO before
+                // dereferencing anything. The monitor covers every read and this teardown, not the
+                // initial store in -initWithURL: - see the note there - but that store races only
+                // against reading NULL, never against a pointer being freed.
+                //
+                // @synchronized is recursive per thread, so none of that would hold for a -dispose
+                // nested inside a delegate call on the loader queue; no such path exists, as the
+                // delegate methods only touch the loading request and the stream adapter, whose
+                // upcalls read the Java connection holder and never dispose the player.
+                //
+                // Draining playerLoaderQueue with a synchronous dispatch instead would not just be
+                // redundant, it can deadlock: whenever a delegate call is already in flight,
+                // -dispose would block on that serial queue while holding the monitor that same
+                // call is blocked acquiring. An idle queue returns, so the hang would be
+                // intermittent rather than absent. -[AVAssetResourceLoader setDelegate:nil
+                // queue:nil] has the same shape of hazard from inside the monitor and buys nothing
+                // the monitor does not give.
+                CLocatorStream *ls = locatorStream;
                 locatorStream = NULL;
+                AVFDestroyLocatorStream(ls, YES);
             }
 
             isDisposed = YES;

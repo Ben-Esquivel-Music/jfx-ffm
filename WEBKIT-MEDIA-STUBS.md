@@ -37,8 +37,10 @@ The build takes hours per platform, so run it only when the WebKit native
 sources or the FFM ABI change. `ccache` is enabled and cached between runs.
 
 Media needs no such workflow. `mvn install` builds `jfxmedia`,
-`gstreamer-lite`, `glib-lite`, `fxplugins` and (on macOS) `jfxmedia_avf`
-through CMake into `modules/javafx.media/target/native/bin`, and
+`gstreamer-lite` and `fxplugins` through CMake into
+`modules/javafx.media/target/native/bin`, together with `glib-lite` on Windows
+and macOS (Linux links the system GLib instead), `jfxmedia_avf` on macOS, and
+`avplugin` on Linux when the system ffmpeg development packages are installed.
 `-DskipNative=true` skips that build rather than selecting libraries from
 anywhere else. None of the options below apply to Media.
 
@@ -48,18 +50,19 @@ anywhere else. None of the options below apply to Media.
 > **The Media libraries are now built from source, and a prebuilt `jfxmedia`
 > from an older OpenJFX SDK no longer works.** On the `ffm/media` branch
 > `javafx.media` calls a plain C ABI (`jfxm_*`) instead of JNI, and
-> `modules/javafx.media/pom.xml` builds `jfxmedia`, `gstreamer-lite`,
-> `glib-lite` and `fxplugins` through CMake like the graphics natives (see
-> `modules/javafx.media/FFM-BUILD-PLAN.md`); `-DskipNative=true` skips that.
-> A JNI-era `jfxmedia` exports `Java_*` entry points but none of the `jfxm_*`
-> symbols, so loading one fails with
+> `modules/javafx.media/pom.xml` builds `jfxmedia`, `gstreamer-lite` and
+> `fxplugins` — plus `glib-lite` on Windows and macOS, where the bundled GLib
+> subset is used instead of the system one — through CMake like the graphics
+> natives (see `modules/javafx.media/FFM-BUILD-PLAN.md`); `-DskipNative=true`
+> skips that. A JNI-era `jfxmedia` exports `Java_*` entry points but none of
+> the `jfxm_*` symbols, so loading one fails with
 > `UnsatisfiedLinkError: missing native symbol: jfxm_abi_version` and the media
 > stack reports itself unavailable. Delete any stale `jfxmedia*`,
-> `gstreamer-lite*`, `glib-lite*` and `fxplugins*` from `../caches/sdk/{bin,lib}`
-> rather than letting them shadow the freshly built ones — the root pom puts
-> `modules/javafx.media/target/native/bin` first on `java.library.path`, but the
-> cache directories are still on it. This note does not apply to `jfxwebkit`,
-> which is still supplied prebuilt.
+> `gstreamer-lite*`, `glib-lite*`, `fxplugins*` and `avplugin*` from
+> `../caches/sdk/{bin,lib}` rather than letting them shadow the freshly built
+> ones — the root pom puts `modules/javafx.media/target/native/bin` first on
+> `java.library.path`, but the cache directories are still on it. This note
+> does not apply to `jfxwebkit`, which is still supplied prebuilt.
 
 You can manually place the WebKit shared library (`jfxwebkit.dll`,
 `libjfxwebkit.so` or `libjfxwebkit.dylib`) in the directory the build already
@@ -77,9 +80,10 @@ The SDK assembly also copies every shared library found there into
 assembled SDK as well.
 
 The web module loads `jfxwebkit`; the media module loads `jfxmedia` together
-with its platform dependencies (`glib-lite`, `gstreamer-lite`, `fxplugins`,
-and `jfxmedia_avf` on macOS), which its own native build has already written
-to `modules/javafx.media/target/native/bin`.
+with its platform dependencies — `gstreamer-lite` and `fxplugins` on every
+platform, `glib-lite` on Windows and macOS, `jfxmedia_avf` on macOS, and
+`avplugin` on Linux when it was built — which its own native build has already
+written to `modules/javafx.media/target/native/bin`.
 
 The Maven build also puts `../caches/sdk/bin` and `../caches/sdk/lib`
 (relative to the repository root) on `java.library.path` for the `javafx.web`

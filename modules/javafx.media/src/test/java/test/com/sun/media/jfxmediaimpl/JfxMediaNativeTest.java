@@ -171,7 +171,7 @@ public class JfxMediaNativeTest {
         List<String> messages = new CopyOnWriteArrayList<>();
         JfxMediaNative.setLogObserver((level, message) -> messages.add(level + ": " + message));
         try {
-            assertTrue(JfxMediaNative.logInit(), "jfxm_log_init: logging is compiled into jfxmedia");
+            assertTrue(JfxMediaNative.logInit(), "jfxm_log_init: the native log sink could not be installed");
             JfxMediaNative.logSetLevel(Logger.DEBUG);
 
             // The first jfxm_platform_init of the process logs "Initializing GSTPlatform" at DEBUG.
