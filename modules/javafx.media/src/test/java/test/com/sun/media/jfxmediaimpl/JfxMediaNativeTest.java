@@ -46,6 +46,7 @@ import java.io.PrintStream;
 import java.lang.foreign.Arena;
 import java.lang.foreign.MemoryLayout.PathElement;
 import java.lang.foreign.MemorySegment;
+import java.lang.foreign.StructLayout;
 import java.net.URI;
 import java.net.URISyntaxException;
 import java.nio.ByteBuffer;
@@ -56,11 +57,11 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Locale;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.function.IntUnaryOperator;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.MethodOrderer;
 import org.junit.jupiter.api.Order;
@@ -81,8 +82,6 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
-import static org.junit.jupiter.api.Assertions.fail;
-import static org.junit.jupiter.api.Assumptions.abort;
 
 /**
  * Binding tests for {@link JfxMediaNative}, the {@code jfxm_*} facade that replaced the module's JNI
@@ -91,9 +90,16 @@ import static org.junit.jupiter.api.Assumptions.abort;
  * only created and linked, never started. The exception is
  * {@link #playerOverATinyWavFileDisposesWithoutLeaks}: {@code jfxm_player_init} takes the pipeline to
  * {@code PAUSED}, which does open the platform's audio sink, so that one test - and only that one - is
- * skipped where no audio output exists. The library itself is not optional: this module builds it, so
- * {@link MediaNatives#require} fails the class when a reachable {@code jfxmedia} cannot be used and
- * skips only when this build produced none at all.
+ * skipped where no audio output exists - and even then it asserts the no-device path before it skips.
+ * The library itself is not optional: this module builds it, so {@link MediaNatives#require} fails the
+ * class when a reachable {@code jfxmedia} cannot be used and skips only when this build produced none at
+ * all.
+ * <p>
+ * Nothing here plays anything. {@link MediaPlaybackTest} is the class that does, and it is the only place
+ * the {@code audio_track} and {@code audio_spectrum} slots and the Playing and Finished halves of the
+ * {@code state} slot are exercised at all; what this class contributes to those is
+ * {@link #callbackTableSlotOffsetsMatchTheCompiledStructs}, which pins every slot's offset against the C
+ * compiler but, as its own javadoc says, cannot reach the slot names.
  * <p>
  * The tests are ordered because two of them depend on being the first caller of
  * {@code jfxm_platform_init} in the JVM: it logs exactly once (the log-sink round trip) and it
@@ -111,7 +117,7 @@ public class JfxMediaNativeTest {
     private static final int[] FRAME_INFO_OFFSETS = { 0, 8, 12, 16, 20, 24, 28, 32, 36, 40, 56, 88 };
 
     /** Every function {@code jfxmedia_api.h} exports, all of which the facade binds. */
-    private static final int BOUND_SYMBOL_COUNT = 56;
+    private static final int BOUND_SYMBOL_COUNT = 58;
 
     private static final int ERROR_NONE = MediaError.ERROR_NONE.code();
     private static final int ERROR_MEDIA_NULL = MediaError.ERROR_MEDIA_NULL.code();
@@ -123,13 +129,6 @@ public class JfxMediaNativeTest {
     private static final int HLS_PROP_GET_DURATION = 1;
 
     /**
-     * How long a failed player creation gets to explain itself. The GStreamer error that explains it is
-     * posted on the pipeline's bus and logged from the bus thread, so it can arrive just after
-     * {@code createMediaPlayer} has returned null.
-     */
-    private static final long LOG_GRACE_MILLIS = 5_000L;
-
-    /**
      * How long a player gets to preroll before {@link #playerOverATinyWavFileDisposesWithoutLeaks} gives
      * up on it. Measured on an idle machine the Ready arrives within a fraction of a millisecond of the
      * player being handed over; this is a bound, not an expectation, and generous enough that a loaded
@@ -137,40 +136,8 @@ public class JfxMediaNativeTest {
      */
     private static final long PREROLL_TIMEOUT_SECONDS = 10L;
 
-    /**
-     * What a captured media log looks like when the platform could not open its audio output. GStreamer
-     * reports that as an ERROR message carrying the sink's own text, followed by a DEBUG message naming
-     * the element that failed, so both the wording and the element name are worth looking for: the
-     * wording differs per platform (ALSA says "Could not open audio device for playback",
-     * {@code directsoundsink} reports whatever {@code DirectSoundCreate} returned) while the element
-     * name is always in the debug line.
-     */
-    private static final List<String> NO_AUDIO_OUTPUT_MARKERS =
-            List.of("audiosink", "alsasink", "directsoundsink", "could not open audio device");
-
-    /**
-     * What a captured log says when the reason for a null player is the build and not the machine.
-     * Any of these forces a failure, and is checked before {@link #NO_AUDIO_OUTPUT_MARKERS}, because
-     * every one of them can also put a sink element's name in the log and so satisfy that list on its
-     * own: the first five are the facade failing to bind at all, and the rest are pipeline construction
-     * failures - an element factory {@code gstreamer-lite} or {@code fxplugins} never registered, a bin
-     * that would not take an element, a link that would not hold. No absent sound card can cause any of
-     * them; a {@code fxplugins} that did not build causes the sixth and seventh, which is how this list
-     * was arrived at.
-     */
-    private static final List<String> BROKEN_BUILD_MARKERS = List.of(
-            "unsatisfiedlinkerror",
-            "missing native symbol",
-            "was not granted native access",
-            "noclassdeffounderror",
-            "exceptionininitializererror",
-            "no such element factory",
-            "error_gstreamer_element_create",
-            "error_gstreamer_audio_sink_create",
-            "error_gstreamer_video_sink_create",
-            "error_gstreamer_bin_add_element",
-            "error_gstreamer_element_link",
-            "error_manager_engineinit_fail");
+    /** How long a disposed player's event queue thread gets to end before it is called a leak. */
+    private static final long TEARDOWN_TIMEOUT_MILLIS = 15_000L;
 
     @BeforeAll
     static void loadLibrary() {
@@ -235,7 +202,7 @@ public class JfxMediaNativeTest {
 
     @Test
     void abiVersionMatches() {
-        assertEquals(3, JfxMediaNative.JFXM_ABI_VERSION);
+        assertEquals(4, JfxMediaNative.JFXM_ABI_VERSION);
         assertEquals(JfxMediaNative.JFXM_ABI_VERSION, JfxMediaNative.abiVersion());
     }
 
@@ -265,6 +232,50 @@ public class JfxMediaNativeTest {
         }
         assertEquals(-1, JfxMediaNative.offsetofFrameInfo(fields.size()));
         assertEquals(-1, JfxMediaNative.offsetofFrameInfo(-1));
+    }
+
+    /**
+     * The same guard for the two callback tables, and the one check {@code sizeof} cannot stand in for.
+     * Every slot of {@code JfxmPlayerCallbacks} and {@code JfxmStreamCallbacks} is a function pointer, so
+     * every permutation of either struct has the same {@code sizeof} and
+     * {@link #structLayoutsMatchTheCompiledStructs} goes on passing while the Java layout fills slot
+     * <i>n</i> with what C compiled at slot <i>m</i> - a new frame delivered to the warning handler, a
+     * {@code seek} answered by {@code copy_block}, and nothing failing anywhere.
+     * <p>
+     * What makes this more than arithmetic is where each side of the comparison comes from.
+     * {@code jfxm_offsetof_*_callbacks} switches on the field index, resolves it to a <em>named</em>
+     * struct member and returns the C compiler's {@code offsetof} of that member, so its answer follows
+     * the struct's declaration order. The Java side follows the slot list the layout was built from. Move
+     * a member within the C struct without renumbering the index enum beside it - the one edit that
+     * silently redirects every upcall - and the two stop agreeing here, index by index, with the slot
+     * named in the failure. Writing {@code i * 8} as the expectation instead would assert the Java layout
+     * against itself and see none of it.
+     * <p>
+     * What this cannot reach, and the reason it is a guard rather than a proof: the slot <em>names</em>
+     * never cross the boundary. C offers an index, not a name, so reordering
+     * {@code JfxMediaNative.PLAYER_SLOTS} on the Java side moves both sides of every comparison together
+     * and stays green. Closing that would need C to export the names. Until it does, the Java list order
+     * is what has to be read against {@code jfxmedia_api.h} by eye when a slot is added.
+     */
+    @Test
+    void callbackTableSlotOffsetsMatchTheCompiledStructs() {
+        assertSlotOffsets("JfxmPlayerCallbacks", JfxMediaNative.PLAYER_CALLBACKS_FIELDS,
+                JfxMediaNative.PLAYER_CALLBACKS, JfxMediaNative::offsetofPlayerCallbacks);
+        assertSlotOffsets("JfxmStreamCallbacks", JfxMediaNative.STREAM_CALLBACKS_FIELDS,
+                JfxMediaNative.STREAM_CALLBACKS, JfxMediaNative::offsetofStreamCallbacks);
+    }
+
+    private static void assertSlotOffsets(String struct, List<String> slots, StructLayout layout,
+                                          IntUnaryOperator offsetof) {
+        assertEquals(layout.memberLayouts().size(), slots.size(), struct + ": slot count");
+        for (int i = 0; i < slots.size(); i++) {
+            String slot = slots.get(i);
+            long layoutOffset = layout.byteOffset(PathElement.groupElement(slot));
+            assertEquals(offsetof.applyAsInt(i), layoutOffset,
+                    "offsetof(" + struct + ", " + slot + ") vs the Java layout");
+        }
+        assertEquals(-1, offsetof.applyAsInt(slots.size()), struct + ": index past the last slot");
+        assertEquals(-1, offsetof.applyAsInt(-1), struct + ": negative index");
     }
 
     /**
@@ -434,7 +445,7 @@ public class JfxMediaNativeTest {
 
         ByteArrayOutputStream log = new ByteArrayOutputStream();
         PrintStream err = System.err;
-        int level = loggerLevel();
+        int level = AudioOutput.loggerLevel();
         System.setErr(new PrintStream(log, true, StandardCharsets.UTF_8));
         Logger.setLevel(Logger.ERROR);
         try (Arena arena = Arena.ofConfined()) {
@@ -549,7 +560,7 @@ public class JfxMediaNativeTest {
         ConnectionHolder holder = connectionHolder(dir);
         ByteArrayOutputStream log = new ByteArrayOutputStream();
         PrintStream err = System.err;
-        int level = loggerLevel();
+        int level = AudioOutput.loggerLevel();
         try (Arena arena = Arena.ofConfined()) {
             JfxMediaNative.CallbackTable callbacks = JfxMediaNative.installStreamCallbacks(arena, holder);
             try {
@@ -705,16 +716,6 @@ public class JfxMediaNativeTest {
         return locator.createConnectionHolder();
     }
 
-    /** The level {@link Logger} is currently at, which it does not otherwise report. */
-    private static int loggerLevel() {
-        for (int level : new int[] { Logger.DEBUG, Logger.INFO, Logger.WARNING, Logger.ERROR }) {
-            if (Logger.canLog(level)) {
-                return level;
-            }
-        }
-        return Logger.OFF;
-    }
-
     @Test
     void registryRoundTripsAndLeavesNothingBehind() {
         int baseline = JfxMediaNative.registrySize();
@@ -783,13 +784,24 @@ public class JfxMediaNativeTest {
      * {@code MediaException}, and {@code GSTPlatform.createMediaPlayer} swallows it, logs it at DEBUG
      * and returns null - pre-existing upstream behaviour that this test is not the place to change.
      * <p>
-     * That null is the one this test tolerates, and only with the evidence for it: the media log is
-     * captured around the call, a null player is a skip when the log shows the platform could not open
-     * its audio output and a failure when it does not, and the whole captured log goes into either
-     * message so that neither outcome is a mystery. What still covers this path when it is skipped is
-     * {@link #mediaOverATinyWavFileDisposesWithoutLeaks}, which exercises the same registry, arena and
-     * stream-callback lifecycle without a sink, plus the Linux and macOS CI jobs, where a sink does open
-     * (the Linux workflow installs a null ALSA device for exactly that reason).
+     * That null is the one this test tolerates, and only with the evidence for it: {@link AudioOutput}
+     * captures the media log around the call, skips when the log shows the platform could not open its
+     * audio output, fails when it does not, and puts the whole captured log and the name of everything
+     * the skip leaves uncovered into either message, so that neither outcome is a mystery. What still
+     * covers this path when it is skipped is {@link #mediaOverATinyWavFileDisposesWithoutLeaks}, which
+     * exercises the same registry, arena and stream-callback lifecycle without a sink, plus both Linux
+     * CI jobs, where a sink does open (the workflow installs a null ALSA device for exactly that reason).
+     * <p>
+     * <b>What a dispose owes, and how much of it is measurable.</b> Three things are asserted after
+     * {@code dispose()}, and one is deliberately not. The registry has to be back where it started, which
+     * is what proves the arenas and their ids were released in the right order. The player's
+     * {@code EventQueueThread} has to have ended, which is the one thread a player owns that a JVM can
+     * see and count; a dispose that stopped reaching {@code terminateLoop} would leave one per player
+     * here and per {@code AudioClip.play()} in {@code MediaPlaybackTest}. And reaching either assertion
+     * is itself the proof that {@code dispose()} returned rather than blocking in a native join. What is
+     * <em>not</em> asserted is native memory: the leaks in this stack are tens of bytes against
+     * megabytes of pipeline allocation, and no measurement Java can make separates them.
+     * {@link MediaThreads} sets out that boundary in full.
      * <p>
      * Nothing the pipeline knows about the stream is knowable before it has prerolled.
      * {@code CGstAudioPlaybackPipeline::Init} ends by asking for {@code GST_STATE_PAUSED} and does not
@@ -803,8 +815,10 @@ public class JfxMediaNativeTest {
      * {@code jfxm_player_get_presentation_time} is the same shape, its {@code GetStreamTime} answering
      * {@code ERROR_GSTREAMER_PIPELINE_QUERY_POSITION} for as long as the pipeline is not up yet.
      * <p>
-     * The registry has to be back where it started afterwards, which is what proves the arenas and the
-     * ids were released in the right order.
+     * Nothing is played here. {@link MediaPlaybackTest} is where a file is decoded and run to its end,
+     * and where the {@code audio_track}, {@code audio_spectrum} and Playing and Finished halves of the
+     * {@code state} slot are covered; this test stops at {@code PAUSED} because everything below is about
+     * what a player that never played still has to give back.
      */
     @Test
     @Order(10)
@@ -813,15 +827,23 @@ public class JfxMediaNativeTest {
         try {
             Locator locator = tinyWavLocator(file);
             int baseline = JfxMediaNative.registrySize();
+            int baselineEventQueues = MediaThreads.count(MediaThreads.EVENT_QUEUE);
 
-            PlayerAttempt attempt = createPlayer(locator);
+            AudioOutput.Attempt attempt = AudioOutput.createPlayer(locator);
             if (attempt.player() == null) {
-                reportNoPlayer(attempt.log());      // never returns: aborts or fails
+                assertEquals(baseline, JfxMediaNative.registrySize(),
+                        "a player whose pipeline never started left its callback registry entry behind");
+                MediaThreads.awaitCountAtMost(MediaThreads.EVENT_QUEUE, baselineEventQueues,
+                        TEARDOWN_TIMEOUT_MILLIS,
+                        "a player whose pipeline never started left its event queue thread live");
+                AudioOutput.reportNoPlayer(attempt.log());      // never returns: aborts or fails
             }
             MediaPlayer player = attempt.player();
             try {
                 assertTrue(JfxMediaNative.registrySize() > baseline,
                         "the connection holder and the player must be registered while the player lives");
+                assertEquals(baselineEventQueues + 1, MediaThreads.count(MediaThreads.EVENT_QUEUE),
+                        "a live player owns exactly one event queue thread");
 
                 // The pipeline is still prerolling; see the javadoc. Registering after the fact is safe:
                 // NativeMediaPlayer caches state events until a first listener arrives and replays them
@@ -834,7 +856,8 @@ public class JfxMediaNativeTest {
 
                 // Downcalls through the pipeline the player just built.
                 assertEquals(0.0025, player.getDuration(), 1.0e-6, "20 bytes of 8 bit mono at 8 kHz");
-                assertNotNull(player.getState());
+                assertEquals(PlayerStateEvent.PlayerState.READY, player.getState(),
+                        "a prerolled player that was never played is READY and nothing else");
 
                 AudioEqualizer equalizer = player.getEqualizer();
                 assertNotNull(equalizer);
@@ -878,6 +901,8 @@ public class JfxMediaNativeTest {
                 player.dispose();
             }
             assertEquals(baseline, JfxMediaNative.registrySize(), "dispose left a registry entry behind");
+            MediaThreads.awaitCountAtMost(MediaThreads.EVENT_QUEUE, baselineEventQueues,
+                    TEARDOWN_TIMEOUT_MILLIS, "a disposed player kept its event queue thread");
         } finally {
             deleteWhenPossible(file);
         }
@@ -916,115 +941,6 @@ public class JfxMediaNativeTest {
         } finally {
             deleteWhenPossible(file);
         }
-    }
-
-    /** What {@link #createPlayer} saw: the player, {@code null} when none was built, and the log. */
-    private record PlayerAttempt(MediaPlayer player, String log) {
-    }
-
-    /**
-     * Creates the player with the media log turned up to DEBUG and captured, so that a null player can
-     * be told apart from a broken one.
-     * <p>
-     * Both streams are captured because {@link Logger} splits them: ERROR and WARNING go to
-     * {@code System.err} and INFO and DEBUG to {@code System.out}, and the explanation for a failed
-     * player arrives one part on each - the sink's own error message on {@code System.err}, and on
-     * {@code System.out} the GStreamer debug line naming the element that failed together with
-     * {@code GSTPlatform}'s note that it caught the exception.
-     * <p>
-     * The native level is set through the facade rather than through {@code Logger.setLevel}, which only
-     * reaches C once {@code Logger.initNative()} has run: these tests drive the facade directly and
-     * never build a {@code NativeMediaManager}. Both levels and both streams are restored afterwards.
-     */
-    private static PlayerAttempt createPlayer(Locator locator) {
-        ByteArrayOutputStream captured = new ByteArrayOutputStream();
-        PrintStream out = System.out;
-        PrintStream err = System.err;
-        int level = loggerLevel();
-        System.setOut(new PrintStream(captured, true, StandardCharsets.UTF_8));
-        System.setErr(new PrintStream(captured, true, StandardCharsets.UTF_8));
-        Logger.setLevel(Logger.DEBUG);
-        JfxMediaNative.logSetLevel(Logger.DEBUG);
-        try {
-            MediaPlayer player = GSTPlatform.getPlatformInstance().createMediaPlayer(locator);
-            if (player == null) {
-                awaitNativeError(captured);
-            }
-            return new PlayerAttempt(player, captured.toString(StandardCharsets.UTF_8));
-        } finally {
-            JfxMediaNative.logSetLevel(Logger.OFF);
-            Logger.setLevel(level);
-            System.setErr(err);
-            System.setOut(out);
-        }
-    }
-
-    /**
-     * Waits, for at most {@link #LOG_GRACE_MILLIS}, for the bus thread to log the error that explains a
-     * null player. Returning early when it never comes is fine: the caller reports the log it has, and
-     * an unexplained null player is a failure. It returns early for a broken build too, so that one
-     * fails at once rather than after the whole grace period.
-     */
-    private static void awaitNativeError(ByteArrayOutputStream captured) {
-        long deadline = System.currentTimeMillis() + LOG_GRACE_MILLIS;
-        while (System.currentTimeMillis() < deadline) {
-            String log = captured.toString(StandardCharsets.UTF_8);
-            if (reportsNoAudioOutput(log) || brokenBuildMarker(log) != null) {
-                return;
-            }
-            try {
-                Thread.sleep(50L);
-            } catch (InterruptedException e) {
-                Thread.currentThread().interrupt();
-                return;
-            }
-        }
-    }
-
-    /**
-     * Never returns: fails when the captured log names a broken build, aborts when it shows the platform
-     * could not open its audio output, and fails otherwise. The broken-build test comes first, so that
-     * no build failure can leave here as a skip. All three carry the whole log, because a skip that
-     * cannot be explained is as bad as a failure that cannot be.
-     */
-    private static void reportNoPlayer(String log) {
-        String detail = "GSTPlatform.createMediaPlayer returned null; the captured media log was:\n" + log;
-        String broken = brokenBuildMarker(log);
-        if (broken != null) {
-            fail("the media natives are broken, not this machine: the log names \"" + broken + "\", "
-                    + "which no missing audio device can cause. " + detail);
-        }
-        if (reportsNoAudioOutput(log)) {
-            abort("this machine has no audio output, so GStreamer could not build a playback pipeline; "
-                    + "jfxm_media_create is still covered by mediaOverATinyWavFileDisposesWithoutLeaks. "
-                    + detail);
-        }
-        fail(detail);
-    }
-
-    /**
-     * Whether the captured log says the platform could not open its audio output, which is the one
-     * reason for a null player that is not a regression. Both halves have to be there: the swallowed
-     * exception, so that this cannot match a log left over from something else, and one of the
-     * {@link #NO_AUDIO_OUTPUT_MARKERS}, so that a null player for any other reason - a failing
-     * {@code jfxm_media_create} above all, which reports a {@link MediaError} and no sink - is not
-     * quietly skipped.
-     */
-    private static boolean reportsNoAudioOutput(String log) {
-        String lower = log.toLowerCase(Locale.ROOT);
-        if (!lower.contains("caught exception while creating media player")) {
-            return false;
-        }
-        return NO_AUDIO_OUTPUT_MARKERS.stream().anyMatch(lower::contains);
-    }
-
-    /**
-     * The first {@link #BROKEN_BUILD_MARKERS} entry the log carries, or {@code null} when it carries
-     * none.
-     */
-    private static String brokenBuildMarker(String log) {
-        String lower = log.toLowerCase(Locale.ROOT);
-        return BROKEN_BUILD_MARKERS.stream().filter(lower::contains).findFirst().orElse(null);
     }
 
     /**

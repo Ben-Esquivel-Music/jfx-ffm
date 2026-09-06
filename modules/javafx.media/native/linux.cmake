@@ -39,8 +39,22 @@
 #     -static-libstdc++ in every makefile's LDFLAGS assumes.
 #   - avplugin is optional: the makefile builds it against either a bundled
 #     LIBAV_DIR or the system ffmpeg found by pkg-config. Only the system case
-#     is ported, and the target is skipped with a message when libavcodec and
-#     libavformat are absent (CI installs no ffmpeg development packages today).
+#     is ported, and the target is skipped with a message when the ffmpeg
+#     development packages are absent. Its dependency on ffmpeg is split, as it
+#     was in the makefile: libavcodec and libavformat are compiled AND linked
+#     against (pkg-config --cflags and --libs), while libswscale supplies only a
+#     header - videodecoder.h includes <libswscale/swscale.h>, but every sws_*
+#     entry point is reached through dlopen/dlsym at videodecoder.c:455-492, so
+#     the makefile passed libswscale to --cflags only and deliberately never
+#     linked it. Linking it would turn a recoverable capability check ("libswscale
+#     is required for H.265/HEVC 10/12-bit decoding") into a hard load failure.
+#   - avplugin also does NOT carry -Werror=deprecated-declarations. The other
+#     three makefiles set it; the avplugin makefile pointedly does not, because
+#     it compiles against whatever system ffmpeg is installed and every ffmpeg
+#     release deprecates something it uses (av_init_packet has been deprecated
+#     since libavcodec 59 and survives only to 62: FF_API_INIT_PACKET). Keeping
+#     it in the shared option list makes avplugin fail to build on any modern
+#     ffmpeg, so it is applied per library below.
 #   - Three include directories listed by the gstreamer-lite makefile do not
 #     exist in the tree (gstreamer/gst/parse, gst-plugins-good/gst-libs,
 #     gst-plugins-bad/gst-libs) and are omitted, as the Windows port omits the
@@ -53,6 +67,9 @@ pkg_check_modules(JFXM_GLIB REQUIRED IMPORTED_TARGET
     glib-2.0 gobject-2.0 gmodule-2.0 gthread-2.0)
 pkg_check_modules(JFXM_ALSA REQUIRED IMPORTED_TARGET alsa)
 pkg_check_modules(JFXM_LIBAV IMPORTED_TARGET libavcodec libavformat)
+# Header path only - deliberately NOT an IMPORTED_TARGET, so no -lswscale can
+# reach avplugin's link line. See the avplugin note above.
+pkg_check_modules(JFXM_SWSCALE libswscale)
 
 # ---------------------------------------------------------------------------
 # Global flags: the makefiles set every flag explicitly, so CMake's defaults
@@ -70,7 +87,7 @@ set(CMAKE_SHARED_LINKER_FLAGS_DEBUG "")
 # Warning and code-generation flags shared by every media makefile
 set(JFXM_COMMON_COMPILE_OPTIONS
     -fPIC -Wformat -Wextra -Wformat-security -fstack-protector
-    -Werror=trampolines -Werror=deprecated-declarations
+    -Werror=trampolines
     -ffunction-sections -fdata-sections
     "$<$<CONFIG:Release>:-Os>"
     "$<$<NOT:$<CONFIG:Release>>:-g;-Wall>")
@@ -78,6 +95,10 @@ set(JFXM_COMMON_COMPILE_OPTIONS
 # Carried only by the C-only libraries; the jfxmedia makefile does not set it
 set(JFXM_C_STRICT_OPTIONS
     "$<$<COMPILE_LANGUAGE:C>:-Werror=implicit-function-declaration>")
+
+# Carried by gstreamer-lite, fxplugins and jfxmedia; NOT by avplugin, whose
+# makefile omits it on purpose (see the header note)
+set(JFXM_DEPRECATION_STRICT_OPTIONS -Werror=deprecated-declarations)
 
 set(JFXM_COMMON_LINK_OPTIONS
     -static-libgcc -static-libstdc++
@@ -332,7 +353,7 @@ add_media_library(gstreamerLite
         _GNU_SOURCE GST_REMOVE_DEPRECATED GSTREAMER_LITE HAVE_CONFIG_H
         OUTSIDE_SPEEX LINUX GST_DISABLE_GST_DEBUG GST_DISABLE_LOADSAVE
         ${JFXM_GLIB_DEFINITIONS}
-    COMPILE_OPTIONS ${JFXM_C_STRICT_OPTIONS}
+    COMPILE_OPTIONS ${JFXM_C_STRICT_OPTIONS} ${JFXM_DEPRECATION_STRICT_OPTIONS}
     LINK_LIBS m PkgConfig::JFXM_ALSA PkgConfig::JFXM_GLIB)
 
 # ===========================================================================
@@ -358,13 +379,14 @@ add_media_library(fxplugins
         HAVE_STDINT_H LINUX ENABLE_PULL_MODE ENABLE_SOURCE_SEEKING
         __MEDIALIB_OLD_NAMES GST_DISABLE_LOADSAVE GST_DISABLE_GST_DEBUG
         GSTREAMER_LITE ${JFXM_GLIB_DEFINITIONS}
-    COMPILE_OPTIONS ${JFXM_C_STRICT_OPTIONS} -fbuiltin ${JFXM_SSE2_OPTIONS}
+    COMPILE_OPTIONS ${JFXM_C_STRICT_OPTIONS} ${JFXM_DEPRECATION_STRICT_OPTIONS}
+        -fbuiltin ${JFXM_SSE2_OPTIONS}
     LINK_LIBS gstreamerLite PkgConfig::JFXM_GLIB)
 
 # ===========================================================================
 # libavplugin.so  (gstreamer/projects/linux/avplugin/Makefile) - optional
 # ===========================================================================
-if(JFXM_LIBAV_FOUND)
+if(JFXM_LIBAV_FOUND AND JFXM_SWSCALE_FOUND)
     add_media_library(avplugin
         OUTPUT_NAME avplugin
         SOURCES
@@ -379,11 +401,15 @@ if(JFXM_LIBAV_FOUND)
             "${PLUGINS_SRC}/av"
             "${GST_SRC}/gstreamer"
             "${GST_SRC}/gstreamer/libs"
+            # <libswscale/swscale.h> only; the library itself is dlopen'd
+            ${JFXM_SWSCALE_INCLUDE_DIRS}
         COMPILE_DEFINITIONS
             HAVE_STDINT_H LINUX GST_DISABLE_LOADSAVE GSTREAMER_LITE
             ${JFXM_GLIB_DEFINITIONS}
         COMPILE_OPTIONS ${JFXM_C_STRICT_OPTIONS} -fbuiltin ${JFXM_SSE2_OPTIONS}
         LINK_LIBS gstreamerLite PkgConfig::JFXM_GLIB PkgConfig::JFXM_LIBAV)
+elseif(JFXM_LIBAV_FOUND)
+    message(STATUS "javafx.media: libswscale headers not found (libswscale-dev), skipping avplugin")
 else()
     message(STATUS "javafx.media: libavcodec/libavformat not found, skipping avplugin")
 endif()
@@ -434,6 +460,7 @@ add_media_library(jfxmedia
         GST_DISABLE_LOADSAVE GST_DISABLE_XML HAVE_CONFIG_H
         LINUX GSTREAMER_LITE ${JFXM_GLIB_DEFINITIONS}
     COMPILE_OPTIONS
+        ${JFXM_DEPRECATION_STRICT_OPTIONS}
         ${JFXM_SSE2_OPTIONS}
         "$<$<COMPILE_LANGUAGE:CXX>:-fno-rtti>"
     LINK_LIBS gstreamerLite PkgConfig::JFXM_GLIB

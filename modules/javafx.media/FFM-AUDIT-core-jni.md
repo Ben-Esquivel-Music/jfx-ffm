@@ -5,6 +5,51 @@ session usage limit before it could format a final report; the notes cover the b
 the Java side, threads and the §1.1 verdicts). Line numbers refer to the tree at the start of branch
 `ffm/media`. The design that follows from them is in `FFM-ABI-CONTRACT.md`.
 
+> **Status note (added after the migration landed).** These notes are kept as evidence, not as a
+> description of the current tree, and three things in them need flagging before you read them.
+>
+> **1. The build evidence cites a build system this branch deleted.** Section 1 below reads source
+> lists, `-D` defines, link libraries and include paths out of `jfxmedia/projects/{win,linux,mac}/
+> Makefile`. Those makefiles, and the `vs_project` / `xcode_project` trees, were replaced by CMake in
+> this same branch — `modules/javafx.media/native/CMakeLists.txt` plus `win.cmake`, `linux.cmake` and
+> `mac.cmake` (35 files and 6,853 lines out, 4 files and 2,063 lines in). The **evidence remains
+> directionally valid** — the CMake files were derived from those makefiles and the source sets
+> checked against them file by file — but the mechanics no longer exist. `FFM-BUILD-PLAN.md` is the
+> current map; the only survivor of the old inputs is `gstreamer/projects/win/gstreamer-lite.def`.
+> **The branch review named three audit documents as carrying stale build citations; all five do**
+> - this one and `ios` as well - which is why the same note appears in all five.
+>
+> **2. `MTObjectProxy` is classified wrongly below, and the deletion was right.** Section 5A lists
+> `Utils/MTObjectProxy.m` under **"OS-CALL (keep)"**, on the strength of its Foundation calls
+> (`NSInvocation`, `performSelectorOnMainThread:`). Calling Foundation is not what makes something
+> `OS-CALL` — being *reached* is. `objectProxyWithTarget:` has **zero call sites** anywhere in
+> `src/main`; the only reference to the file was an unused `#import` in `OSXMediaPlayer.h:27`. It is
+> dead code. `FFM-AUDIT-osx.md` has it right, in three places, as **PURE and dead, delete**
+> (`osx` §5 and §7), and `FFM-COVERAGE-MAP.md` independently re-derived the same. Its deletion in this
+> branch is correct; this note, not the deletion, is what was wrong.
+>
+> **3. The old JNI surface is smaller than the headline "180 `JNIEXPORT`" suggests, and two deletions
+> were never named.** The 180 figure — quoted in `FFM-STATUS.md`'s scoreboard, in the review, and in
+> the `jni-to-ffm-migration` skill — is a **grep-hit** count. 49 of those hits are re-declarations in
+> iOS `.h` files. `FFM-COVERAGE-MAP.md` §1.1 reconciles it two ways: **131 `JNIEXPORT` function
+> definitions** and **117 Java `native` declarations**, giving **123 distinct entry points**. So the
+> honest consolidation is **123 → 58 exports + 22 callback slots + 2 singleton callbacks**, not
+> "180 → 56"; the ratio as usually quoted overstates it. There were no `RegisterNatives` call sites
+> and no `_initIDs` methods anywhere in the module. Two legitimate deletions that no list in the
+> review named, both re-verified from primary evidence:
+>
+> * **`NativeAudioClip` (12 natives) + `AudioClipProvider`** — an iOS-only implementation. On every
+>   platform this fork builds, `AudioClipProvider`'s constructor always took its
+>   `catch (UnsatisfiedLinkError)` branch and forwarded to `NativeMediaAudioClip`, which is what the
+>   new code now does unconditionally. See `FFM-AUDIT-ios.md`.
+> * **The global media-warning listener** (`CJavaMediaWarningListener` + `CMediaWarningDispatcher`) —
+>   **doubly dead** on master, and section 5B below has the second half of the evidence:
+>   `CMediaWarningDispatcher::Warning` has **zero callers**, *and* the listener looked up
+>   `MediaUtils.nativeWarning` with the signature `(ILjava/lang/String;)V` while the Java method is
+>   `(Ljava/lang/Object;ILjava/lang/String;)V`, so the method-ID lookup could never succeed.
+>   `MediaUtils.nativeWarning` survives and is now unreferenced; it was unreachable on master too, so
+>   nothing regressed.
+
 == core-jni audit notes (slice: jfxmedia core JNI glue) - branch ffm/media ==
 NOTE: bash tool truncates commands over ~8KB; write notes in small chunks; avoid quotes.
 

@@ -37,11 +37,9 @@
 # archives exactly as link.exe did, so only the objects the .def exports and
 # the DLL's own code reference are pulled in.
 #
-# Deliberately not carried over: the SOURCE_DATE_EPOCH-conditional
-# /experimental:deterministic flag (the graphics port omits it too), the
-# -manifestfile: path (MSBuild embeds the manifest instead of writing it next
-# to the DLL) and -libpath:strmiids.lib, which the Debug lib.exe steps passed
-# but which has no effect on an archive.
+# Deliberately not carried over: the -manifestfile: path (MSBuild embeds the
+# manifest instead of writing it next to the DLL) and -libpath:strmiids.lib,
+# which the Debug lib.exe steps passed but which has no effect on an archive.
 
 enable_language(RC)
 
@@ -79,6 +77,25 @@ string(APPEND CMAKE_SHARED_LINKER_FLAGS " /subsystem:windows /dynamicbase /nxcom
 set(CMAKE_SHARED_LINKER_FLAGS_RELEASE "/opt:ref /opt:icf")
 set(CMAKE_SHARED_LINKER_FLAGS_DEBUG "/debug")
 
+# ---------------------------------------------------------------------------
+# Reproducible builds. Every retired makefile gated -experimental:deterministic
+# on SOURCE_DATE_EPOCH being set in the environment ("Enables reproducible
+# builds when defined"): the two sub-projects that compiled sources themselves
+# (jfxmedia/projects/win/Makefile, gstreamer/projects/win/fxplugins/Makefile)
+# added it to CFLAGS and LDFLAGS, and the two that only linked (glib-lite,
+# gstreamer-lite) added it to LDFLAGS alone - their compile steps lived in
+# Makefile.glib/.gobject/... , which never passed it. The flag is applied to
+# every target here, archives included, because an archive whose objects are
+# not deterministic defeats a deterministic link. It costs nothing when
+# SOURCE_DATE_EPOCH is unset, which is the default.
+# ---------------------------------------------------------------------------
+if(DEFINED ENV{SOURCE_DATE_EPOCH} AND NOT "$ENV{SOURCE_DATE_EPOCH}" STREQUAL "")
+    set(MEDIA_DETERMINISTIC_OPTIONS /experimental:deterministic)
+    message(STATUS "javafx.media: SOURCE_DATE_EPOCH is set, adding /experimental:deterministic")
+else()
+    set(MEDIA_DETERMINISTIC_OPTIONS)
+endif()
+
 # cl.exe flags common to every makefile (the /MD | /MDd runtime flag comes from
 # CMAKE_MSVC_RUNTIME_LIBRARY in CMakeLists.txt; the -Fd<pdb> of /Zi from CMake)
 set(MEDIA_COMMON_COMPILE_OPTIONS /nologo /W3 /WX- /EHsc /GS /fp:precise /Gm- /errorReport:queue)
@@ -114,7 +131,8 @@ function(add_media_archive name)
         PREFIX "")
     target_include_directories(${name} PRIVATE ${MEDIA_INCLUDE_DIRS})
     target_compile_definitions(${name} PRIVATE ${MEDIA_COMPILE_DEFINITIONS})
-    target_compile_options(${name} PRIVATE ${MEDIA_COMMON_COMPILE_OPTIONS} ${MEDIA_COMPILE_OPTIONS})
+    target_compile_options(${name} PRIVATE ${MEDIA_COMMON_COMPILE_OPTIONS} ${MEDIA_COMPILE_OPTIONS}
+        ${MEDIA_DETERMINISTIC_OPTIONS})
 endfunction()
 
 # ---------------------------------------------------------------------------
@@ -174,12 +192,13 @@ function(add_media_library name)
 
     target_include_directories(${name} PRIVATE ${MEDIA_INCLUDE_DIRS})
     target_compile_definitions(${name} PRIVATE ${MEDIA_COMPILE_DEFINITIONS})
-    target_compile_options(${name} PRIVATE ${MEDIA_COMMON_COMPILE_OPTIONS} ${MEDIA_COMPILE_OPTIONS})
+    target_compile_options(${name} PRIVATE ${MEDIA_COMMON_COMPILE_OPTIONS} ${MEDIA_COMPILE_OPTIONS}
+        ${MEDIA_DETERMINISTIC_OPTIONS})
 
     target_link_libraries(${name} PRIVATE ${MEDIA_LINK_LIBS})
     target_link_options(${name} PRIVATE
         "/map:$<TARGET_FILE_DIR:${name}>/${MEDIA_OUTPUT_NAME}.map"
-        ${MEDIA_LINK_OPTIONS})
+        ${MEDIA_LINK_OPTIONS} ${MEDIA_DETERMINISTIC_OPTIONS})
 endfunction()
 
 # ===========================================================================
@@ -663,6 +682,20 @@ add_media_library(gstreamerLite
     LINK_LIBS gstreamerLiteGst gstreamerLiteGstPlugins glibLite
         Ws2_32.lib kernel32.lib user32.lib shell32.lib advapi32.lib ole32.lib DSound.lib
     LINK_OPTIONS /tlbid:1)
+
+# The only DllMain in this DLL is the deliberate no-op in
+# gst-plugins-good/sys/directsound/gstdirectsoundnotify.cpp, which is there so
+# that a second one fails the link (LNK2005) and whoever adds it has to read why:
+# the DirectSound notificator waits on a thread, and nothing reachable from a
+# DllMain may do that under the loader lock. A toolchain that resolved a second
+# definition without erroring would drop that guard silently, so the linker map
+# is checked after every link of this target.
+add_custom_command(TARGET gstreamerLite POST_BUILD
+    COMMAND "${CMAKE_COMMAND}"
+        "-DMAP_FILE=$<TARGET_FILE_DIR:gstreamerLite>/gstreamer-lite.map"
+        -P "${CMAKE_CURRENT_LIST_DIR}/check-one-dllmain.cmake"
+    COMMENT "Checking gstreamer-lite.map for exactly one DllMain"
+    VERBATIM)
 
 # ===========================================================================
 # fxplugins.dll  (projects/win/fxplugins/Makefile + Makefile.BaseClasses; the

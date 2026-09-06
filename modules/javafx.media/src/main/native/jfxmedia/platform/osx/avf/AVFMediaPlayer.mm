@@ -332,6 +332,20 @@ static CVReturn displayLinkCallback(CVDisplayLinkRef displayLink,
 
 - (void) createVideoOutput {
     @synchronized(self) {
+        // -dispose has already removed the output and stopped the display link, so building new
+        // ones here would resurrect both on a player nobody will ever tear down again.
+        //
+        // This is the one place left where the monitor is held across AVFoundation calls -
+        // addOutput:, the display link - and that predates this fork rather than being introduced
+        // by the dispose fence. It survives the rule in -observeValueForKeyPath: because none of
+        // these reads an AVAssetTrack property, which is the call class with a documented
+        // synchronous load fallback; whatever loading addOutput: goes on to cause happens on
+        // AVFoundation's own threads and is not waited for here. Narrowing it anyway would be a
+        // reasonable follow-up, and it is the second place to look if a jar:/jrt: source hangs.
+        if (isDisposed) {
+            return;
+        }
+
         // Skip if already created
         if (!_playerOutput) {
 #if FORCE_VO_FORMAT
@@ -370,10 +384,30 @@ static CVReturn displayLinkCallback(CVDisplayLinkRef displayLink,
 }
 
 - (void) setPlayerState:(int)newState {
-    if (newState != previousPlayerState) {
-        // For now just send up to client
-        eventHandler->SendPlayerStateEvent(newState, 0.0);
-        previousPlayerState = newState;
+    // Every state event in this player funnels through here, from four different threads: the Java
+    // caller thread (play/pause/stop/finish), the KVO thread (READY, HALTED), the main queue (the
+    // end-of-media notification block), and the disposing thread. eventHandler is deleted by
+    // -[OSXMediaPlayer dispose] as soon as [player dispose] returns, and Java unmaps the upcall
+    // stubs behind it when it closes its shared arena, so the send has to be inside the monitor
+    // -dispose holds and behind an isDisposed test. The main-queue path is the one that had no
+    // other fence at all: -removeObserver: does not cancel a block already enqueued on the main
+    // queue, and blockSelf is only __weak, so it can still be non-nil while an autorelease pool
+    // holds the player.
+    //
+    // -dispose calls this itself, from inside the monitor and before it sets isDisposed, so the
+    // HALTED event it sends still goes out exactly as before - @synchronized is recursive per
+    // thread. The monitor is held only across the send, which enqueues and returns; the one cost is
+    // that a state change can now wait on a resource-loader read that holds the monitor, which is a
+    // local jar:/jrt: read and is already what -dispose waits on.
+    @synchronized(self) {
+        if (isDisposed) {
+            return;
+        }
+        if (newState != previousPlayerState) {
+            // For now just send up to client
+            eventHandler->SendPlayerStateEvent(newState, 0.0);
+            previousPlayerState = newState;
+        }
     }
 }
 
@@ -416,6 +450,49 @@ static CVReturn displayLinkCallback(CVDisplayLinkRef displayLink,
                        ofObject:(id)object
                          change:(NSDictionary *)change
                         context:(void *)context {
+    // This runs on an AVFoundation KVO thread and every branch of it ends in an eventHandler send.
+    // -[OSXMediaPlayer dispose] deletes that dispatcher as soon as [player dispose] returns, and
+    // OSXMediaPlayer.java then closes the Arena.ofShared() that owns all 13 upcall stubs, so a send
+    // that arrives afterwards calls through a freed vtable into an unmapped trampoline - a SIGSEGV
+    // with no Java frame. jfxmedia_api.h promises the opposite ("after jfxm_media_dispose returns no
+    // callback of any table fires again"), and -removeObserver:forKeyPath: in -dispose does not
+    // drain a notification already being delivered on another thread, so the promise needs the
+    // monitor to be true. Disposing a player that is still loading is the ordinary "user cancelled"
+    // case, and status, duration and tracks all fire repeatedly while it loads.
+    //
+    // The rule for where that monitor may be taken, which is what the shape below is about:
+    //
+    //     hold it across the eventHandler sends, and NEVER across an AVFoundation call.
+    //
+    // -resourceLoader:shouldWaitForLoadingOfRequestedResource: has its entire body inside this same
+    // monitor, on the serial playerLoaderQueue. So any AVFoundation call made while holding the
+    // monitor that can end up demanding bytes - and for a jar:/jrt: source the bytes come from that
+    // delegate - waits on a queue that is waiting on the monitor this thread holds. That is a hard
+    // deadlock with no timeout, and it takes MediaPlayer.dispose() down with it, since that blocks
+    // on the monitor too. AVAssetTrack property reads are exactly such a call: they have a
+    // documented synchronous fallback when the value is not already loaded. Hence the AVFoundation
+    // work below - the change dictionary, _player.error, the duration, the whole of
+    // -extractTrackInfo - stays outside, and only the sends go inside.
+    //
+    // The isDisposed test here is advisory: it saves doing the work at all for a player that is
+    // already gone. isDisposed is _Atomic, so reading it unlocked is well defined rather than a data
+    // race, but it is not the fence. The binding test is the one inside the monitor at each send -
+    // in -setPlayerState:, in the duration branch below, and in -extractTrackInfo.
+    //
+    // Deadlock, for the narrow windows that remain: -dispose holds the monitor from its first line
+    // to its last, so a send here can wait for it. Nothing -dispose waits for is this thread.
+    // -removeObserver: does not join an in-flight delivery (if it did, there would be no race to
+    // fence). SetBands(0, NULL) does wait on the real-time audio thread, because
+    // AVFAudioSpectrumUnit::UpdateBands holds the band lock across its callback - which is why
+    // -sendSpectrumEventDuration:timestamp: must never take this monitor and has been left alone.
+    // A send under the monitor is bounded: the Java target enqueues and returns. And a notification
+    // delivered synchronously on the disposing thread from inside -dispose re-enters the monitor
+    // instead of blocking - @synchronized is recursive per thread - and finds isDisposed still NO,
+    // because -dispose sets it last, so that path behaves exactly as it always did.
+    if (isDisposed) {
+        return;
+    }
+
     if (context == AVFMediaPlayerItemStatusContext) {
         // According to docs change[NSKeyValueChangeNewKey] can be NSNull when player.currentItem is nil
         if (![change[NSKeyValueChangeNewKey] isKindOfClass:[NSNull class]]) {
@@ -441,7 +518,11 @@ static CVReturn displayLinkCallback(CVDisplayLinkRef displayLink,
     } else if (context == AVFMediaPlayerItemDurationContext) {
         // send update duration event
         double duration = CMTimeGetSeconds(_player.currentItem.duration);
-        eventHandler->SendDurationUpdateEvent(duration);
+        @synchronized(self) {
+            if (!isDisposed) {
+                eventHandler->SendDurationUpdateEvent(duration);
+            }
+        }
     } else if (context == AVFMediaPlayerItemTracksContext) {
         [self extractTrackInfo];
     } else {
@@ -610,6 +691,18 @@ static CVReturn displayLinkCallback(CVDisplayLinkRef displayLink,
 }
 
 - (void) extractTrackInfo {
+    // Reached only from -observeValueForKeyPath: above, on the KVO thread, and fenced the same way:
+    // this advisory test to avoid building tracks for a player that is already gone, then the
+    // monitor taken around each Send*TrackEvent and nowhere else. Everything between them is
+    // AVFoundation - track.formatDescriptions, track.languageCode, track.naturalSize,
+    // -hasMediaCharacteristic:, the audio mixer wiring - and every one of those is a property read
+    // that AVFoundation may satisfy by loading, which for a jar:/jrt: source means a request to
+    // -resourceLoader:shouldWaitForLoadingOfRequestedResource:, which takes this monitor on the
+    // loader queue. Holding it across them would deadlock; see the rule in the caller.
+    if (isDisposed) {
+        return;
+    }
+
 #if DUMP_TRACK_INFO
     NSMutableString *trackLog = [[NSMutableString alloc] initWithFormat:
                                  @"Parsing tracks for player item %@:\n",
@@ -703,7 +796,11 @@ static CVReturn displayLinkCallback(CVDisplayLinkRef displayLink,
             TRACK_LOG(@"    height: %d", height);
             TRACK_LOG(@"    frame rate: %2.2f", frameRate);
 
-            eventHandler->SendVideoTrackEvent(outTrack);
+            @synchronized(self) {
+                if (!isDisposed) {
+                    eventHandler->SendVideoTrackEvent(outTrack);
+                }
+            }
             delete outTrack;
 
             // signal to create the video output when we're done
@@ -748,7 +845,11 @@ static CVReturn displayLinkCallback(CVDisplayLinkRef displayLink,
                                    (bool)track.enabled,
                                    [lang UTF8String],
                                    channels, channelMask, sampleRate);
-            eventHandler->SendAudioTrackEvent(audioTrack);
+            @synchronized(self) {
+                if (!isDisposed) {
+                    eventHandler->SendAudioTrackEvent(audioTrack);
+                }
+            }
             delete audioTrack;
         } else if ([type isEqualTo:AVMediaTypeClosedCaption]) {
             name = [NSString stringWithFormat:@"Subtitle Track %d", textIndex++];
@@ -758,7 +859,11 @@ static CVReturn displayLinkCallback(CVDisplayLinkRef displayLink,
                                                          encoding,
                                                          (bool)track.enabled,
                                                          [lang UTF8String]);
-            eventHandler->SendSubtitleTrackEvent(subTrack);
+            @synchronized(self) {
+                if (!isDisposed) {
+                    eventHandler->SendSubtitleTrackEvent(subTrack);
+                }
+            }
             delete subTrack;
         }
     }
@@ -784,6 +889,38 @@ static CVReturn displayLinkCallback(CVDisplayLinkRef displayLink,
 }
 
 - (void) sendPixelBuffer:(CVPixelBufferRef)buf frameTime:(double)frameTime hostTime:(int64_t)hostTime {
+    // An unlocked read, on purpose - and, said plainly: the dispose race is NOT closed on this
+    // path. What follows is why the obvious fixes are both wrong, and what would actually settle it.
+    //
+    // displayLinkCallback below is the only caller. It runs on the CVDisplayLink thread with an
+    // unretained (__bridge void*)self, and -dispose stops and releases the link while holding
+    // @synchronized(self). Apple does not document whether CVDisplayLinkStop waits for a callback
+    // that is already executing, and the two possible answers need opposite fixes:
+    //   - if it does wait, then -dispose has already drained this thread before it deletes
+    //     eventHandler, there is no race, and this test is dead code. Taking the monitor here would
+    //     then be actively harmful: -dispose would sit inside CVDisplayLinkStop waiting for this
+    //     thread while this thread waited for the monitor -dispose holds. A guaranteed hang of
+    //     whatever thread called MediaPlayer.dispose(), whenever a frame is in flight.
+    //   - if it does not wait, this test is not enough. The caller dereferences the unretained self
+    //     outside it - self.playerOutput before the call, self.hlsBugResetCount after it,
+    //     self.lastHostTime and self.player.rate on the other branch - and calls CVDisplayLinkStop
+    //     on a link -dispose has already released. Under ARC the [player release] in
+    //     -[OSXMediaPlayer dispose] runs -dealloc before the delete eventHandler that follows it, so
+    //     in that window self is freed memory and even reading isDisposed is a use-after-free.
+    // So this narrows the window - from the whole of -dispose to the span between this test and the
+    // sends below, which is not instructions but microseconds: constructing a CVVideoFrame, possibly
+    // CVPixelBufferGetPixelFormatType and -setFallbackVideoFormat, possibly a
+    // SendFrameSizeChangedEvent before the SendNewFrameEvent - and it makes the ordinary case cheap.
+    // It does not make the guarantee in jfxmedia_api.h true here.
+    //
+    // Settling it needs a Mac. If CVDisplayLinkStop joins, delete this and say so. If it does not,
+    // the fence has to be something -dispose can release before it calls CVDisplayLinkStop - this
+    // object's monitor cannot be it, because -dispose holds that across the whole teardown - plus a
+    // retain of self for the duration of the callback.
+    if (isDisposed) {
+        return;
+    }
+
     _lastHostTime = hostTime;
     CVVideoFrame *frame = NULL;
     try {

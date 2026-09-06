@@ -92,8 +92,22 @@ public final class JfxMediaNative {
      * and all three layout checks still pass against a revision-2 library: this constant is the only
      * thing that separates the two, and a mismatched pair would have C read a return value Java never
      * wrote and fail every block on a garbage byte count.
+     * <p>
+     * Revision 4 added {@code jfxm_offsetof_player_callbacks} and {@code jfxm_offsetof_stream_callbacks},
+     * which is what lets {@link #PLAYER_CALLBACKS} and {@link #STREAM_CALLBACKS} be checked against the C
+     * compiler's own {@code offsetof} rather than only against {@code sizeof} - and {@code sizeof} cannot
+     * see a reordering of those two structs, because every slot in them is a function pointer. It takes
+     * nothing away, so the bump is here for the same reason revision 2's was: every handle is bound
+     * eagerly, so an older library fails on symbol resolution with "missing native symbol:
+     * jfxm_offsetof_player_callbacks" instead of the version mismatch the guard exists to report.
+     * <p>
+     * The mixed pair that actually occurs is not two libraries from different builds - it is a Java side
+     * newer than the library it finds, through {@code -DskipNative=true} reusing what an earlier build
+     * left in {@code target/native/bin}, or a stale {@code jfxmedia} in {@code ../caches/sdk/bin}. Since
+     * {@link #checkAbiVersion()} runs in its own static block before any other symbol is bound, the bump
+     * turns that case into one sentence naming both versions.
      */
-    public static final int JFXM_ABI_VERSION = 3;
+    public static final int JFXM_ABI_VERSION = 4;
 
     /** The library {@link #loadNativeLibraries()} loads and {@link #LOOKUP} resolves against. */
     private static final String JFXMEDIA_LIBRARY = "jfxmedia";
@@ -194,6 +208,20 @@ public final class JfxMediaNative {
 
     /** {@code JfxmStreamCallbacks}: 9 function pointers. */
     public static final StructLayout STREAM_CALLBACKS = tableLayout(STREAM_SLOTS);
+
+    /**
+     * The {@link #PLAYER_CALLBACKS} slot names, indexed as {@code jfxm_offsetof_player_callbacks}
+     * expects. Derived from {@link #PLAYER_SLOTS} rather than written out again, so the list a test
+     * checks the layout with is the same order the layout was built from - what has to be proven is that
+     * both agree with the compiled struct, and a second hand-written copy could only hide a mismatch.
+     */
+    public static final List<String> PLAYER_CALLBACKS_FIELDS = slotNames(PLAYER_SLOTS);
+
+    /**
+     * The {@link #STREAM_CALLBACKS} slot names, indexed as {@code jfxm_offsetof_stream_callbacks}
+     * expects. Derived from {@link #STREAM_SLOTS}, for the reason given above.
+     */
+    public static final List<String> STREAM_CALLBACKS_FIELDS = slotNames(STREAM_SLOTS);
 
     /**
      * {@code JfxmFrameInfo} (contract section 8). {@link #FRAME_INFO_FIELDS} lists the field names in the
@@ -323,6 +351,10 @@ public final class JfxMediaNative {
             FunctionDescriptor.of(JAVA_INT));
     private static final MethodHandle JFXM_OFFSETOF_FRAME_INFO = bind("jfxm_offsetof_frame_info",
             FunctionDescriptor.of(JAVA_INT, JAVA_INT));
+    private static final MethodHandle JFXM_OFFSETOF_PLAYER_CALLBACKS =
+            bind("jfxm_offsetof_player_callbacks", FunctionDescriptor.of(JAVA_INT, JAVA_INT));
+    private static final MethodHandle JFXM_OFFSETOF_STREAM_CALLBACKS =
+            bind("jfxm_offsetof_stream_callbacks", FunctionDescriptor.of(JAVA_INT, JAVA_INT));
     private static final MethodHandle JFXM_EVENT_PLAYER_STATE = bind("jfxm_event_player_state",
             FunctionDescriptor.of(JAVA_INT, JAVA_INT));
     private static final MethodHandle JFXM_AUDIO_TRACK_CHANNEL = bind("jfxm_audio_track_channel",
@@ -674,6 +706,14 @@ public final class JfxMediaNative {
         return MemoryLayout.structLayout(fields);
     }
 
+    private static List<String> slotNames(Slot[] slots) {
+        List<String> names = new ArrayList<>(slots.length);
+        for (Slot slot : slots) {
+            names.add(slot.name());
+        }
+        return List.copyOf(names);
+    }
+
     private static long frameInfoOffset(String field) {
         return FRAME_INFO.byteOffset(PathElement.groupElement(field));
     }
@@ -686,6 +726,16 @@ public final class JfxMediaNative {
     /**
      * Reads a NUL-terminated UTF-8 string handed to an upcall. The pointer is valid only for the
      * duration of the call (contract section 2), so the copy is taken before the target returns.
+     * <p>
+     * This is the one place in the module where Java trusts C without a length: {@code reinterpret} is
+     * given {@code Long.MAX_VALUE} because the C side hands over a bare {@code const char*}, so the
+     * bound is the terminator, not the segment. {@code getString} stops at the first NUL, which is
+     * where {@code NewStringUTF} stopped too, and it decodes malformed UTF-8 to U+FFFD rather than
+     * throwing, so no upcall can escape through here. What the invariant buys is the read staying
+     * inside the string; a C caller that ever passed an unterminated buffer would have this walk off
+     * the end of the allocation instead of failing, and no bounds check on this side could catch it.
+     * Every caller in the ABI satisfies it today - {@code std::string::c_str()}, a GStreamer message
+     * string, or a logger format buffer - and a new one that does not has to pass a length instead.
      */
     @SuppressWarnings("restricted")
     private static String cString(MemorySegment s) {
@@ -1387,15 +1437,30 @@ public final class JfxMediaNative {
      * {@code JfxmReleaseFn}: C has dropped its last reference to memory Java handed over and will never
      * read or write it again. The registry entry both names the handover and keeps the memory reachable
      * until this call, so nothing can be collected while C still owns it.
+     * <p>
+     * The type is checked before the entry is removed, not after. The registry is one map for every kind
+     * of target, so an id that names a player or a connection holder is not this slot's to retire: an
+     * unconditional unregister would drop it, and every later upcall carrying that id would then find
+     * nothing and be dropped in turn - playback stopping without one line of diagnostic. Only C can
+     * produce such an id, and the monotonic id space means it can only do so by passing the wrong
+     * {@code user}, so the mismatch is logged rather than ignored.
      */
     private static void onRelease(MemorySegment user) {
         try {
-            Object handover = lookup(user.address());
-            unregister(user.address());
-            switch (handover) {
-                case BandHandover bands -> bands.onReleased().run();
-                case Runnable runnable -> runnable.run();
-                case null, default -> { }
+            switch (lookup(user.address())) {
+                case BandHandover bands -> {
+                    unregister(user.address());
+                    bands.onReleased().run();
+                }
+                case Runnable runnable -> {
+                    unregister(user.address());
+                    runnable.run();
+                }
+                case null -> {
+                    // Released twice, or after the handover was retired: harmless, as for every slot.
+                }
+                default -> Logger.logMsg(Logger.ERROR, "JfxMediaNative", "release",
+                        "id " + user.address() + " does not name a band handover; entry kept");
             }
         } catch (Throwable t) {
             logUpcallFailure("release", t);
@@ -1467,6 +1532,41 @@ public final class JfxMediaNative {
     public static int offsetofFrameInfo(int field) {
         try {
             return (int) JFXM_OFFSETOF_FRAME_INFO.invokeExact(field);
+        } catch (Throwable t) {
+            throw unexpected(t);
+        }
+    }
+
+    /**
+     * Returns {@code jfxm_offsetof_player_callbacks(field)}.
+     * <p>
+     * The counterpart of {@link #sizeofPlayerCallbacks()} that {@code sizeof} cannot be: every slot of
+     * {@code JfxmPlayerCallbacks} is a function pointer, so any permutation of them has the same
+     * {@code sizeof} and the size check would go on passing while {@link #PLAYER_CALLBACKS} filled the
+     * wrong slots - a new frame delivered to the warning handler, and nothing failing. Walking every
+     * index through this is what proves the Java layout against the compiled struct.
+     *
+     * @param field a slot index into {@link #PLAYER_CALLBACKS_FIELDS}
+     * @return the C {@code offsetof}, or -1 if the index is out of range
+     */
+    public static int offsetofPlayerCallbacks(int field) {
+        try {
+            return (int) JFXM_OFFSETOF_PLAYER_CALLBACKS.invokeExact(field);
+        } catch (Throwable t) {
+            throw unexpected(t);
+        }
+    }
+
+    /**
+     * Returns {@code jfxm_offsetof_stream_callbacks(field)}: the same guard as
+     * {@link #offsetofPlayerCallbacks(int)}, for {@code JfxmStreamCallbacks}.
+     *
+     * @param field a slot index into {@link #STREAM_CALLBACKS_FIELDS}
+     * @return the C {@code offsetof}, or -1 if the index is out of range
+     */
+    public static int offsetofStreamCallbacks(int field) {
+        try {
+            return (int) JFXM_OFFSETOF_STREAM_CALLBACKS.invokeExact(field);
         } catch (Throwable t) {
             throw unexpected(t);
         }

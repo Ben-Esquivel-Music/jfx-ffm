@@ -35,11 +35,27 @@ LANGUAGES C CXX)`, then the cache inputs and an `include()` of the platform file
 
 | CMake input | Supplied by Maven as | Meaning |
 |---|---|---|
-| `JDK_HOME` | `${java.home}` | JNI include dirs. **JNI-era only** — deleted when the module is JNI-free |
 | `GENSRC_DIR` | `${project.build.directory}/gensrc` | generated-source root |
-| `HEADERS_DIR` | `${project.build.directory}/gensrc/headers` | `javac -h` JNI headers **and** the generated `jfxmedia_errors.h` |
+| `HEADERS_DIR` | `${project.build.directory}/gensrc/headers` | the generated `jfxmedia_errors.h` |
 | `BIN_DIR` | `${project.build.directory}/native/bin` | output directory for the shared libraries |
 | `JFX_VER`, `JFX_FVER`, `JFX_BUILD_ID` | root-pom version properties | Windows version resources |
+| `CMAKE_BUILD_TYPE` | `${CONF}` | Release or Debug (non-Windows generators) |
+
+**There is no `JDK_HOME` input, and there are no JDK include directories anywhere in this build.**
+Earlier revisions of this plan listed `JDK_HOME` (supplied as `${java.home}`) as a CMake input for the
+JNI include dirs, described `HEADERS_DIR` as carrying `javac -h` JNI headers, and listed the removal
+of both as future work. All of it is done: `CMakeLists.txt` declares no such cache variable, no
+platform cmake file adds a JDK include directory to any target, and the media pom passes no `-h` to
+`javac`. `HEADERS_DIR` survives, but it now carries exactly one file, `jfxmedia_errors.h`, generated
+by the `headergen` tool from `MediaError.java`.
+
+That staleness is itself the evidence the migration worked, which is why it is worth a sentence
+rather than a silent deletion: **the JDK includes are gone because nothing in `javafx.media` needs
+`jni.h` any more.** `mac.cmake` keeps one line about it in a comment - Gradle folded the JDK include
+directories into `MAC.media.compiler`, so every media library used to see the JNI headers whether it
+wanted them or not - and the Linux build is the proof, because it compiles `libjfxmedia.so` with no
+JDK on the include path at all. The library is now JVM-agnostic in the literal sense: it could be
+built and linked on a machine with no JDK installed.
 
 Source roots defined once in `CMakeLists.txt` and used by every platform file: `MEDIA_SRC`,
 `JFXMEDIA_SRC`, `GST_SRC` (gstreamer-lite), `GLIB_SRC`, `LIBFFI_SRC`, `BASECLASSES_SRC`,
@@ -71,7 +87,6 @@ The new FFM sources (`jfxmedia/ffi/jfxmedia_api.cpp`, `FfiPlayerEventDispatcher.
 
 ```
 cmake -S modules/javafx.media/native -B modules/javafx.media/target/native/cmake -A x64 \
-      -DJDK_HOME="C:/Program Files/OpenJDK/jdk-26" \
       -DGENSRC_DIR=<abs>/target/gensrc -DHEADERS_DIR=<abs>/target/gensrc/headers \
       -DBIN_DIR=<abs>/target/native/bin \
       -DJFX_VER=28 -DJFX_FVER=28,0,0,0 -DJFX_BUILD_ID=28-ea+0
@@ -89,11 +104,35 @@ checked with `dumpbin`:
 | `glib-lite.dll` | 551 functions, 0 names — identical | identical |
 | `fxplugins.dll` | 1 export (`gst_plugin_desc`) — identical | identical |
 
-After the FFM ABI landed, `jfxmedia.dll` exports 108 names: the 53 `jfxm_*` functions plus the 54
-`Java_*` entry points and `JNI_OnLoad`, which is the side-by-side state the migration expects.
+That comparison was made **before** the JNI half was deleted, and a later revision of this section
+recorded the intermediate state as if it were the end state: *"`jfxmedia.dll` exports 108 names: the
+53 `jfxm_*` functions plus the 54 `Java_*` entry points and `JNI_OnLoad`."* That was true while both
+ABIs were compiled side by side on purpose (migration playbook §7 step 1) and is not true now. The
+built `jfxmedia.dll` exports **58 `jfxm_*`, zero `Java_*` and no `JNI_OnLoad`**; the authoritative
+count, checked three ways against the header, the implementation and `JfxMediaNative`, is in
+`FFM-STATUS.md` §3.
 
-Deliberately not carried over from the makefiles: the `SOURCE_DATE_EPOCH`-conditional
-`/experimental:deterministic` flag (the graphics port omits it too), the `-manifestfile:` path
+**Reproducible builds: the `/experimental:deterministic` flag is carried over, and slightly extended.**
+An earlier revision of this plan listed it under "deliberately not carried over"; it is now in
+`win.cmake`, gated on `SOURCE_DATE_EPOCH` being set and non-empty in the environment exactly as the
+makefiles gated it, and costing nothing in the default case where it is unset. How it is applied is
+one step past the literal old behaviour, deliberately, so do not "restore parity" by narrowing it:
+
+* The retired makefiles added it to **`CFLAGS` and `LDFLAGS`** for the two projects that compiled
+  sources themselves (`jfxmedia/projects/win/Makefile`, `gstreamer/projects/win/fxplugins/Makefile`)
+  and to **`LDFLAGS` alone** for the two that only linked (`glib-lite`, `gstreamer-lite`) — not as a
+  decision, but because those two compiled in sub-makefiles (`Makefile.glib`, `Makefile.gobject`,
+  `Makefile.ffi`, …) that were never passed the flag.
+* `win.cmake` applies it to **compile in both `add_media_archive` and `add_media_library`, and to
+  link in `add_media_library`**, so every target gets it including the static archives. An archive
+  full of non-deterministic objects defeats a deterministic link, which is the whole point of the
+  flag; reproducing the makefiles' accidental gap would leave `glib-lite` and `gstreamer-lite` no
+  more reproducible than before.
+* **Nothing was dropped on the graphics side**: `modules/javafx.graphics/native/` never carried this
+  flag at all, so there is no divergence there to explain.
+
+Still deliberately not carried over from the makefiles: the `-manifestfile:` path (MSBuild embeds the
+manifest) and a `-libpath:` on an archive step that had no effect.
 (MSBuild embeds the manifest), and a `-libpath:` on an archive step that had no effect.
 
 ## 5. Maven wiring
@@ -130,7 +169,7 @@ Built in WSL (Ubuntu 26.04, gcc, Ninja, JDK 25) out of the `/mnt/c` tree:
 
 ```
 cmake -S modules/javafx.media/native -B /tmp/jfxm-lin -G Ninja -DCMAKE_BUILD_TYPE=Release \
-      -DJDK_HOME=/usr/lib/jvm/java-25-openjdk-amd64 -DGENSRC_DIR=<abs>/target/gensrc \
+ -DGENSRC_DIR=<abs>/target/gensrc \
       -DHEADERS_DIR=<abs>/target/gensrc/headers -DBIN_DIR=/tmp/jfxm-lin/bin
 cmake --build /tmp/jfxm-lin --parallel
 ```
@@ -152,7 +191,7 @@ same three libraries, `libgstreamer-lite.so` now linking `libasound.so.2` for th
 ```
 wsl.exe -e bash -lc 'R=/mnt/c/SourceCode/jfx-ffm/modules/javafx.media; B=$HOME/jfxm-lin; \
   cmake -S $R/native -B $B -G Ninja -DCMAKE_BUILD_TYPE=Release \
-    -DJDK_HOME=/usr/lib/jvm/java-25-openjdk-amd64 -DGENSRC_DIR=$R/target/gensrc \
+ -DGENSRC_DIR=$R/target/gensrc \
     -DHEADERS_DIR=$R/target/gensrc/headers -DBIN_DIR=$B/bin && \
   cmake --build $B --parallel && nm -D --defined-only $B/bin/libjfxmedia.so | grep -c " T jfxm_"'
 ```
@@ -189,34 +228,45 @@ Three static checks, all green, since nothing here can be compiled on Windows:
   configures and generates with RC 0 for both `arm64` and `x86_64`, exercising the real
   `add_library`/`target_*` calls, the generator expressions and the POST_BUILD command.
 
-Deviations worth knowing: `jfxmediaAvf` also carries the JNI-era JDK include block (its
-`AVFMediaPlayer.h` pulls in `jni.h` through the dispatcher header, exactly as the makefile's
-`AVF_INCLUDES` did — both blocks disappear together); `-msse2` follows the real target architecture
+Deviations worth knowing: `-msse2` follows the real target architecture
 rather than the makefile's `ARCH` variable, which Gradle set inconsistently and which caused three
 libraries to be compiled with `-msse2` for arm64; `gst-plugins-base/gst-libs/gst/interfaces` is
 omitted because it does not exist in the tree.
 
 ## 6. What is left
 
-* **A macOS build.** `mac.cmake` has never been compiled. CI (or a Mac) must confirm: the five
-  dylibs link; the `.S` sources assemble; `otool -D`/`-L` show `@rpath` install names and the
-  `libgstreamer-lite`/`libglib-lite` references; the POST_BUILD QuickTime check passes; and
-  `nm -gU libjfxmedia.dylib` shows the `jfxm_*` ABI.
+* **A macOS build - DONE, in CI, and it is the one platform where a link proves something.**
+  `mac.cmake` has never been compiled *on a developer machine here*, but `macos_x64_build` and
+  `macos_aarch64_build` compile and link it on **every push**, with `Built target jfxmediaAvf` in the
+  logs. Because `add_media_library` uses `SHARED` with the default `-undefined error`, macOS is the
+  only platform where a dangling symbol is fatal at link, so a green macOS job is real symbol-level
+  evidence rather than a smoke test. CI also asserts `libjfxmedia_avf.dylib` exists and dumps
+  `otool -L` and `nm -gU` for it. Still worth eyeballing on a first Mac: that `otool -D`/`-L` show
+  `@rpath` install names and the `libgstreamer-lite`/`libglib-lite` references, and that the
+  POST_BUILD QuickTime check passes. **Compiling is not running:** no macOS playback has ever been
+  exercised, so nothing behavioural on that platform is verified.
 * **CI** — `.github/workflows/submit.yml` runs `mvn -B -ntp -fae install` on five platforms, so
   once the three platform files exist the media natives are built there automatically. Until
   `mac.cmake` lands, the two macOS jobs fail at the media CMake step, which is the intended loud
   failure rather than a silent skip. The two Linux jobs gained `libasound2-dev` in their
   `apt-get install` line — `gstreamer-lite` builds the ALSA sink and its `pkg_check_modules(... alsa
-  REQUIRED)` would otherwise fail the configure step. `libavcodec-dev`/`libavformat-dev` were
+  REQUIRED)` would otherwise fail the configure step. **The paragraph that follows is superseded:**
+  `libavcodec-dev`, `libavformat-dev` and `libswscale-dev` have since been added, `avplugin` is
+  built and verified in CI, and the reasoning below is kept only as the record of why it was
+  originally deferred. See `FFM-STATUS.md` sections 3 and 4 for what the plugin build establishes
+  and for the header-only `libswscale` rule that must not be broken. Originally:
+  `libavcodec-dev`/`libavformat-dev` were
   deliberately **not** added: `avplugin` then stays skipped in CI, which matches what the fork
   shipped before (the Gradle build compiled no media at all) and avoids pinning the `av` wrapper
   sources to whatever ffmpeg version the runner image carries. Windows and macOS need no new
   packages.
-* **Retiring the makefiles** — `jfxmedia/projects/**` and `gstreamer/projects/**` (except the
-  Windows `.def` files and `src/tools/native/def-*.pl`, which the CMake build still uses) are
-  deleted once all three platform files are verified, together with `src/main/native/vs_project`
-  and `src/main/native/xcode_project`.
-* **JNI-era removals** — when the module is JNI-free: drop `${JDK_HOME}/include*` from the
-  `jfxmedia` target (a block marked `JNI-era` in `win.cmake`), the `-h ${project.build.directory}/gensrc/headers`
-  compiler argument from the media pom, and the `JDK_HOME` input from `CMakeLists.txt`.
-  `HEADERS_DIR` stays: it still carries `jfxmedia_errors.h`.
+* **Retiring the makefiles — DONE.** `jfxmedia/projects/**` and `gstreamer/projects/**` (except the
+  Windows `.def` files and `src/tools/native/def-*.pl`, which the CMake build still uses) are gone,
+  together with `src/main/native/vs_project` and `src/main/native/xcode_project`: 35 files and 6,853
+  lines removed against 4 CMake files and 2,063 lines added.
+* **JNI-era removals — DONE.** `${JDK_HOME}/include*` is gone from the `jfxmedia` target (the block
+  `win.cmake` marked `JNI-era`), the `-h ${project.build.directory}/gensrc/headers` compiler argument
+  is gone from the media pom, and there is no `JDK_HOME` cache variable in `CMakeLists.txt` for
+  anything to supply. `HEADERS_DIR` stays and now carries exactly one file, `jfxmedia_errors.h`. See
+  the note under the CMake-input table in section 2 - and note that no platform cmake file adds a JDK
+  include directory to *any* target, not just to `jfxmedia`: the whole module is JVM-agnostic.

@@ -27,11 +27,18 @@
 
 #include <Common/VSMemory.h>
 
+// For g_atomic_int_get/g_atomic_int_set on m_bClosed. jfxmedia links glib on all three platforms
+// (glib-lite on Windows and macOS, the system GLib on Linux), so this adds no dependency; it is
+// included here rather than in the header to keep FfiStreamCallbacks.h free of glib for the
+// ObjC++ translation units that include it.
+#include <glib.h>
+
 #include <string.h>
 
 CFfiStreamCallbacks::CFfiStreamCallbacks(const JfxmStreamCallbacks* pCallbacks, void* pUser)
     : m_pUser(pUser),
-      m_bClosed(false)
+      m_bClosed(0),
+      m_ppOwnerSlot(NULL)
 {
     if (NULL != pCallbacks) {
         m_Callbacks = *pCallbacks;
@@ -42,12 +49,22 @@ CFfiStreamCallbacks::CFfiStreamCallbacks(const JfxmStreamCallbacks* pCallbacks, 
 
 CFfiStreamCallbacks::~CFfiStreamCallbacks()
 {
+    // Tell the creator, if it is still watching, that this object is gone. See SetOwnerSlot().
+    if (NULL != m_ppOwnerSlot && this == *m_ppOwnerSlot) {
+        *m_ppOwnerSlot = NULL;
+    }
+    m_ppOwnerSlot = NULL;
     memset(&m_Callbacks, 0, sizeof(m_Callbacks));
+}
+
+void CFfiStreamCallbacks::SetOwnerSlot(CFfiStreamCallbacks** ppSlot)
+{
+    m_ppOwnerSlot = ppSlot;
 }
 
 bool CFfiStreamCallbacks::NeedBuffer()
 {
-    if (m_bClosed || NULL == m_Callbacks.need_buffer) {
+    if (g_atomic_int_get(&m_bClosed) || NULL == m_Callbacks.need_buffer) {
         return false;
     }
     return m_Callbacks.need_buffer(m_pUser) != 0;
@@ -55,7 +72,7 @@ bool CFfiStreamCallbacks::NeedBuffer()
 
 int CFfiStreamCallbacks::ReadNextBlock()
 {
-    if (m_bClosed) {
+    if (g_atomic_int_get(&m_bClosed)) {
         return -1;
     }
     if (NULL == m_Callbacks.read_next_block) {
@@ -66,7 +83,7 @@ int CFfiStreamCallbacks::ReadNextBlock()
 
 int CFfiStreamCallbacks::ReadBlock(int64_t position, int size)
 {
-    if (m_bClosed) {
+    if (g_atomic_int_get(&m_bClosed)) {
         return -1;
     }
     if (NULL == m_Callbacks.read_block) {
@@ -77,7 +94,7 @@ int CFfiStreamCallbacks::ReadBlock(int64_t position, int size)
 
 int CFfiStreamCallbacks::CopyBlock(void* destination, int size)
 {
-    if (m_bClosed || NULL == m_Callbacks.copy_block) {
+    if (g_atomic_int_get(&m_bClosed) || NULL == m_Callbacks.copy_block) {
         return 0;
     }
     return (int)m_Callbacks.copy_block(m_pUser, destination, (int32_t)size);
@@ -85,7 +102,7 @@ int CFfiStreamCallbacks::CopyBlock(void* destination, int size)
 
 bool CFfiStreamCallbacks::IsSeekable()
 {
-    if (m_bClosed || NULL == m_Callbacks.is_seekable) {
+    if (g_atomic_int_get(&m_bClosed) || NULL == m_Callbacks.is_seekable) {
         return false;
     }
     return m_Callbacks.is_seekable(m_pUser) != 0;
@@ -93,7 +110,7 @@ bool CFfiStreamCallbacks::IsSeekable()
 
 bool CFfiStreamCallbacks::IsRandomAccess()
 {
-    if (m_bClosed || NULL == m_Callbacks.is_random_access) {
+    if (g_atomic_int_get(&m_bClosed) || NULL == m_Callbacks.is_random_access) {
         return false;
     }
     return m_Callbacks.is_random_access(m_pUser) != 0;
@@ -101,7 +118,7 @@ bool CFfiStreamCallbacks::IsRandomAccess()
 
 int64_t CFfiStreamCallbacks::Seek(int64_t position)
 {
-    if (m_bClosed || NULL == m_Callbacks.seek) {
+    if (g_atomic_int_get(&m_bClosed) || NULL == m_Callbacks.seek) {
         return -1;
     }
     return m_Callbacks.seek(m_pUser, position);
@@ -109,19 +126,19 @@ int64_t CFfiStreamCallbacks::Seek(int64_t position)
 
 void CFfiStreamCallbacks::CloseConnection()
 {
-    if (m_bClosed) {
+    if (g_atomic_int_get(&m_bClosed)) {
         return;
     }
     if (NULL != m_Callbacks.close_connection) {
         m_Callbacks.close_connection(m_pUser);
     }
     // The JNI adapter dropped its global reference here; every later call found no connection.
-    m_bClosed = true;
+    g_atomic_int_set(&m_bClosed, 1);
 }
 
 int CFfiStreamCallbacks::Property(int prop, int value)
 {
-    if (m_bClosed || NULL == m_Callbacks.property) {
+    if (g_atomic_int_get(&m_bClosed) || NULL == m_Callbacks.property) {
         return 0;
     }
     return (int)m_Callbacks.property(m_pUser, (int32_t)prop, (int32_t)value);

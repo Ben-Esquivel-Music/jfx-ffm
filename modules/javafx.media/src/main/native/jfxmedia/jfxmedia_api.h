@@ -71,8 +71,16 @@ extern "C" {
  * void, and jfxm_log_init reports success when logging is compiled out. Neither changes a symbol
  * name or sizeof(JfxmStreamCallbacks), so only the upcall's FunctionDescriptor tells the two
  * sides apart - which is exactly the drift jfxm_abi_version exists to catch.
+ * 4: added jfxm_offsetof_player_callbacks and jfxm_offsetof_stream_callbacks. Nothing existing
+ * changed, so the rule recorded for 2 is the whole reason for the bump: Java binds every symbol of
+ * this header eagerly, and it binds jfxm_abi_version first of all, so bumping turns "missing native
+ * symbol: jfxm_offsetof_player_callbacks" against an older library into the version mismatch the
+ * guard exists to report. Do not skip the bump on the grounds that the libraries always ship
+ * together - the Java side and the library do not: -DskipNative=true reuses whatever an earlier
+ * build left in target/native/bin, and a stale jfxmedia in ../caches/sdk/bin is the failure this
+ * fork has already hit once.
  */
-#define JFXM_ABI_VERSION 3u
+#define JFXM_ABI_VERSION 4u
 
 /* Field indices accepted by jfxm_offsetof_frame_info(); they follow JfxmFrameInfo's field order. */
 enum {
@@ -91,6 +99,55 @@ enum {
     JFXM_FRAME_INFO_FIELD_COUNT    = 12
 };
 
+/*
+ * Field indices accepted by jfxm_offsetof_player_callbacks() and jfxm_offsetof_stream_callbacks();
+ * they follow the slot order of JfxmPlayerCallbacks and JfxmStreamCallbacks below.
+ *
+ * These two enums are the named contract the Java table layouts bind against, and they exist
+ * because sizeof cannot police these particular structs: every slot is a function pointer, so any
+ * permutation of them has the same sizeof, and jfxm_sizeof_player_callbacks /
+ * jfxm_sizeof_stream_callbacks would go on agreeing with a Java layout whose slots had been
+ * reordered. The Java side derives both layouts from one array of slot names, so the two sides
+ * agree by construction rather than by check: insert a slot in the middle of a struct here and
+ * every existing test stays green while the calls land on the wrong function pointer at runtime -
+ * a new frame delivered to the warning handler, or a size_t read as a callback address. Comparing
+ * each Java slot offset with the C compiler's own offsetof is what closes that, exactly as
+ * jfxm_offsetof_frame_info already does for JfxmFrameInfo.
+ *
+ * Adding a slot therefore means: append it to the struct, append its enumerator before
+ * *_FIELD_COUNT, bump that count, and append it to the matching Java slot array. Reordering an
+ * existing slot is an ABI break like any other.
+ */
+enum {
+    JFXM_PLAYER_CALLBACKS_MEDIA_ERROR     = 0,
+    JFXM_PLAYER_CALLBACKS_HALT            = 1,
+    JFXM_PLAYER_CALLBACKS_STATE           = 2,
+    JFXM_PLAYER_CALLBACKS_NEW_FRAME       = 3,
+    JFXM_PLAYER_CALLBACKS_FRAME_SIZE      = 4,
+    JFXM_PLAYER_CALLBACKS_AUDIO_TRACK     = 5,
+    JFXM_PLAYER_CALLBACKS_VIDEO_TRACK     = 6,
+    JFXM_PLAYER_CALLBACKS_SUBTITLE_TRACK  = 7,
+    JFXM_PLAYER_CALLBACKS_MARKER          = 8,
+    JFXM_PLAYER_CALLBACKS_BUFFER_PROGRESS = 9,
+    JFXM_PLAYER_CALLBACKS_DURATION_UPDATE = 10,
+    JFXM_PLAYER_CALLBACKS_AUDIO_SPECTRUM  = 11,
+    JFXM_PLAYER_CALLBACKS_WARNING         = 12,
+    JFXM_PLAYER_CALLBACKS_FIELD_COUNT     = 13
+};
+
+enum {
+    JFXM_STREAM_CALLBACKS_NEED_BUFFER      = 0,
+    JFXM_STREAM_CALLBACKS_IS_SEEKABLE      = 1,
+    JFXM_STREAM_CALLBACKS_IS_RANDOM_ACCESS = 2,
+    JFXM_STREAM_CALLBACKS_READ_NEXT_BLOCK  = 3,
+    JFXM_STREAM_CALLBACKS_READ_BLOCK       = 4,
+    JFXM_STREAM_CALLBACKS_COPY_BLOCK       = 5,
+    JFXM_STREAM_CALLBACKS_SEEK             = 6,
+    JFXM_STREAM_CALLBACKS_PROPERTY         = 7,
+    JFXM_STREAM_CALLBACKS_CLOSE_CONNECTION = 8,
+    JFXM_STREAM_CALLBACKS_FIELD_COUNT      = 9
+};
+
 /* Returns JFXM_ABI_VERSION of the library that was loaded. Java refuses to bind any other value. */
 JFXM_EXPORT uint32_t jfxm_abi_version(void);
 /* sizeof(JfxmPlayerCallbacks) / sizeof(JfxmStreamCallbacks) / sizeof(JfxmFrameInfo) as compiled. */
@@ -99,6 +156,14 @@ JFXM_EXPORT int32_t  jfxm_sizeof_stream_callbacks(void);
 JFXM_EXPORT int32_t  jfxm_sizeof_frame_info(void);
 /* offsetof() of the JfxmFrameInfo field with the given index (enum above); -1 if out of range. */
 JFXM_EXPORT int32_t  jfxm_offsetof_frame_info(int32_t field);
+/*
+ * offsetof() of the JfxmPlayerCallbacks / JfxmStreamCallbacks slot with the given index (the two
+ * enums above); -1 if out of range. The sizeof functions above cannot see a reordering of these
+ * structs, so a Java table layout is only proven to match the compiled struct by walking every slot
+ * through these. Pure functions, any thread.
+ */
+JFXM_EXPORT int32_t  jfxm_offsetof_player_callbacks(int32_t field);
+JFXM_EXPORT int32_t  jfxm_offsetof_stream_callbacks(int32_t field);
 /*
  * Maps a CPipeline::PlayerState (0..7) to the NativeMediaPlayer.eventPlayer* constant that
  * JfxmPlayerCallbacks.state reports; returns -1 for an unknown state. It is the same mapping code
@@ -194,6 +259,8 @@ JFXM_EXPORT void    jfxm_log_set_level(int32_t level);
  * returned. The one exception is a failed jfxm_media_create: close_connection never runs there, C
  * destroys the adapter before returning, and the table may be released as soon as it does. Never
  * use Linker.Option.critical for anything that reaches these slots.
+ *
+ * Slot order is ABI: the field indices are the JFXM_STREAM_CALLBACKS_* enum above.
  */
 typedef struct JfxmStreamCallbacks {
     int32_t (*need_buffer)(void* user);                                /* 1 => wrap in (hls)progressbuffer */
@@ -240,6 +307,8 @@ typedef struct JfxmStreamCallbacks {
  * released with jfxm_frame_dispose (NativeVideoBuffer's hold count decides when). A NULL
  * new_frame slot is the one exception to "NULL is treated as delivered": with no target to take
  * ownership, the dispatcher disposes the frame itself, so it is freed exactly once either way.
+ *
+ * Slot order is ABI: the field indices are the JFXM_PLAYER_CALLBACKS_* enum above.
  */
 typedef struct JfxmPlayerCallbacks {
     int32_t (*media_error)(void* user, int32_t error_code);
@@ -311,9 +380,11 @@ JFXM_EXPORT void    jfxm_media_dispose(void* media);
  * still delivered by BusCallback to a warning/error slot of that same table, on the media-manager
  * main-loop thread, after this call has already returned failure. That is exactly why the function
  * pointers and user values must stay valid until jfxm_media_dispose has returned - the same lifetime
- * rule jfxm_media_create states for the stream tables. Call at most once per media handle: AVF
- * returns ERROR_MEDIA_CREATION on a second call, while the GST backend does not detect one and would
- * replace the dispatcher. Called on the Java thread constructing the player.
+ * rule jfxm_media_create states for the stream tables. Call at most once per media handle: both
+ * backends now return ERROR_MEDIA_CREATION on a second call and leave the first dispatcher in
+ * place, having freed the one the second call asked for. The GST backend used to replace the
+ * dispatcher and leak the old one - see CPipeline::SetEventDispatcher for why refusing is the only
+ * safe answer once the bus watch is running. Called on the Java thread constructing the player.
  */
 JFXM_EXPORT int32_t jfxm_player_init(void* media, const JfxmPlayerCallbacks* cb, void* user);
 

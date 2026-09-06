@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2010, 2024, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2010, 2026, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -61,7 +61,10 @@ public:
     CPipeline(CPipelineOptions* pOptions=NULL);
     virtual ~CPipeline();
 
-    void                    SetEventDispatcher(CPlayerEventDispatcher* pEventDispatcher);
+    // Installs the dispatcher this pipeline sends every player event through, taking ownership of
+    // it: ~CPipeline deletes it. Returns false, and installs nothing, when one is already
+    // installed - see the comment on the implementation for why replacing it is not offered.
+    bool                    SetEventDispatcher(CPlayerEventDispatcher* pEventDispatcher);
 
     virtual uint32_t        Init();
     virtual uint32_t        PostBuildInit();

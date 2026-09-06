@@ -49,7 +49,9 @@
          OpenJFX SDK do not work here, because they export JNI Java_* entry points instead
          of the jfxm_* ABI JfxMediaNative requires, so every lookup fails and the media
          stack reports itself unavailable; see WEBKIT-MEDIA-STUBS.md. The headergen tool
-         (src/tools/java) generates jfxmedia_errors.h for that native build. -->
+         (src/tools/java) generates jfxmedia_errors.h for that native build; it is bound
+         in the main build rather than in those profiles, so -DskipNative never leaves a
+         stale header behind for the next native build to compile against. -->
 
     <dependencies>
         <dependency>
@@ -110,6 +112,47 @@
                         ${jfx.headless.args}
                     </argLine>
                 </configuration>
+            </plugin>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-antrun-plugin</artifactId>
+                <executions>
+                    <execution>
+                        <!-- jfxmedia_errors.h, generated from MediaError.java by the in-tree
+                             headergen tool so that the C error codes and the Java enum cannot
+                             drift. Deliberately outside the three native profiles below: those
+                             deactivate on -DskipNative=true, which is documented to skip the
+                             CMake build and nothing else. Generating the header there as well
+                             let a changed MediaError.java be tested against the header an
+                             earlier build wrote, with Java and C disagreeing on error codes and
+                             no warning - in the fast inner loop, which is where -DskipNative
+                             is used most. One copy here also replaces the three identical ones
+                             the profiles carried. Runs in process-classes, before the CMake
+                             configure step of whichever native profile is active: base build
+                             plugins are ordered ahead of the ones a profile injects. -->
+                        <id>media-errors-header</id>
+                        <phase>process-classes</phase>
+                        <goals>
+                            <goal>run</goal>
+                        </goals>
+                        <configuration>
+                            <target>
+                                <mkdir dir="${project.build.directory}/gensrc/headers"/>
+                                <exec executable="${java.home}/bin/java" failonerror="true">
+                                    <arg value="--module-path"/>
+                                    <arg value="${jfx.root}/modules/javafx.base/target/classes${path.separator}${jfx.root}/modules/javafx.graphics/target/classes${path.separator}${project.build.outputDirectory}"/>
+                                    <arg value="--add-modules"/>
+                                    <arg value="javafx.media"/>
+                                    <arg value="--add-exports"/>
+                                    <arg value="javafx.media/com.sun.media.jfxmedia=ALL-UNNAMED"/>
+                                    <arg value="${project.basedir}/src/tools/java/headergen/HeaderGen.java"/>
+                                    <arg value="${project.build.directory}/gensrc/headers/jfxmedia_errors.h"/>
+                                    <arg value="${project.basedir}/src/main/java"/>
+                                </exec>
+                            </target>
+                        </configuration>
+                    </execution>
+                </executions>
             </plugin>
         </plugins>
     </build>
@@ -177,38 +220,6 @@
             <build>
                 <plugins>
                     <plugin>
-                        <groupId>org.apache.maven.plugins</groupId>
-                        <artifactId>maven-antrun-plugin</artifactId>
-                        <executions>
-                            <execution>
-                                <!-- jfxmedia_errors.h, generated from MediaError.java by the
-                                     in-tree headergen tool so that the C error codes and the
-                                     Java enum cannot drift. Runs before CMake configures. -->
-                                <id>media-errors-header</id>
-                                <phase>process-classes</phase>
-                                <goals>
-                                    <goal>run</goal>
-                                </goals>
-                                <configuration>
-                                    <target>
-                                        <mkdir dir="${project.build.directory}/gensrc/headers"/>
-                                        <exec executable="${java.home}/bin/java" failonerror="true">
-                                            <arg value="--module-path"/>
-                                            <arg value="${jfx.root}/modules/javafx.base/target/classes${path.separator}${jfx.root}/modules/javafx.graphics/target/classes${path.separator}${project.build.outputDirectory}"/>
-                                            <arg value="--add-modules"/>
-                                            <arg value="javafx.media"/>
-                                            <arg value="--add-exports"/>
-                                            <arg value="javafx.media/com.sun.media.jfxmedia=ALL-UNNAMED"/>
-                                            <arg value="${project.basedir}/src/tools/java/headergen/HeaderGen.java"/>
-                                            <arg value="${project.build.directory}/gensrc/headers/jfxmedia_errors.h"/>
-                                            <arg value="${project.basedir}/src/main/java"/>
-                                        </exec>
-                                    </target>
-                                </configuration>
-                            </execution>
-                        </executions>
-                    </plugin>
-                    <plugin>
                         <groupId>org.codehaus.mojo</groupId>
                         <artifactId>exec-maven-plugin</artifactId>
                         <executions>
@@ -273,38 +284,6 @@
             <build>
                 <plugins>
                     <plugin>
-                        <groupId>org.apache.maven.plugins</groupId>
-                        <artifactId>maven-antrun-plugin</artifactId>
-                        <executions>
-                            <execution>
-                                <!-- jfxmedia_errors.h, generated from MediaError.java by the
-                                     in-tree headergen tool so that the C error codes and the
-                                     Java enum cannot drift. Runs before CMake configures. -->
-                                <id>media-errors-header</id>
-                                <phase>process-classes</phase>
-                                <goals>
-                                    <goal>run</goal>
-                                </goals>
-                                <configuration>
-                                    <target>
-                                        <mkdir dir="${project.build.directory}/gensrc/headers"/>
-                                        <exec executable="${java.home}/bin/java" failonerror="true">
-                                            <arg value="--module-path"/>
-                                            <arg value="${jfx.root}/modules/javafx.base/target/classes${path.separator}${jfx.root}/modules/javafx.graphics/target/classes${path.separator}${project.build.outputDirectory}"/>
-                                            <arg value="--add-modules"/>
-                                            <arg value="javafx.media"/>
-                                            <arg value="--add-exports"/>
-                                            <arg value="javafx.media/com.sun.media.jfxmedia=ALL-UNNAMED"/>
-                                            <arg value="${project.basedir}/src/tools/java/headergen/HeaderGen.java"/>
-                                            <arg value="${project.build.directory}/gensrc/headers/jfxmedia_errors.h"/>
-                                            <arg value="${project.basedir}/src/main/java"/>
-                                        </exec>
-                                    </target>
-                                </configuration>
-                            </execution>
-                        </executions>
-                    </plugin>
-                    <plugin>
                         <groupId>org.codehaus.mojo</groupId>
                         <artifactId>exec-maven-plugin</artifactId>
                         <executions>
@@ -365,38 +344,6 @@
             </activation>
             <build>
                 <plugins>
-                    <plugin>
-                        <groupId>org.apache.maven.plugins</groupId>
-                        <artifactId>maven-antrun-plugin</artifactId>
-                        <executions>
-                            <execution>
-                                <!-- jfxmedia_errors.h, generated from MediaError.java by the
-                                     in-tree headergen tool so that the C error codes and the
-                                     Java enum cannot drift. Runs before CMake configures. -->
-                                <id>media-errors-header</id>
-                                <phase>process-classes</phase>
-                                <goals>
-                                    <goal>run</goal>
-                                </goals>
-                                <configuration>
-                                    <target>
-                                        <mkdir dir="${project.build.directory}/gensrc/headers"/>
-                                        <exec executable="${java.home}/bin/java" failonerror="true">
-                                            <arg value="--module-path"/>
-                                            <arg value="${jfx.root}/modules/javafx.base/target/classes${path.separator}${jfx.root}/modules/javafx.graphics/target/classes${path.separator}${project.build.outputDirectory}"/>
-                                            <arg value="--add-modules"/>
-                                            <arg value="javafx.media"/>
-                                            <arg value="--add-exports"/>
-                                            <arg value="javafx.media/com.sun.media.jfxmedia=ALL-UNNAMED"/>
-                                            <arg value="${project.basedir}/src/tools/java/headergen/HeaderGen.java"/>
-                                            <arg value="${project.build.directory}/gensrc/headers/jfxmedia_errors.h"/>
-                                            <arg value="${project.basedir}/src/main/java"/>
-                                        </exec>
-                                    </target>
-                                </configuration>
-                            </execution>
-                        </executions>
-                    </plugin>
                     <plugin>
                         <groupId>org.codehaus.mojo</groupId>
                         <artifactId>exec-maven-plugin</artifactId>

@@ -2,6 +2,33 @@
 
 Repo: `C:\SourceCode\jfx-ffm`, module `modules/javafx.media`. All paths below are relative to `modules/javafx.media/src/main/native/` unless stated. Scratch evidence (dumpbin dumps, dead-code script, ordinal maps, notes): `C:\Users\bestq\AppData\Local\Temp\claude\C--SourceCode-jfx-ffm\16d8edcc-5244-4cc6-b7f7-21d459e4d1ba\scratchpad\phase1\`.
 
+> **Status note (added after the migration landed).** This is a read-only audit taken at the *start*
+> of branch `ffm/media`. It is kept as the evidence behind `FFM-ABI-CONTRACT.md`, not as a
+> description of the current tree, and one thing in it has gone stale in a way worth flagging before
+> you read it: **it cites Makefiles (and `.vcxproj` / `.pbxproj`) as primary build evidence — source
+> lists, `-D` defines, link libraries, include paths — and that build system was deleted in this same
+> branch.** It was replaced by CMake: `modules/javafx.media/native/CMakeLists.txt` plus `win.cmake`,
+> `linux.cmake` and `mac.cmake` (35 files and 6,853 lines out, 4 files and 2,063 lines in). The
+> **evidence remains directionally valid** — the CMake files were derived from those makefiles and
+> the source sets were checked against them file by file — but the mechanics no longer exist, so do
+> not go looking for `jfxmedia/projects/<os>/Makefile` or the `vs_project` / `xcode_project` trees.
+> `FFM-BUILD-PLAN.md` is the current map of the build; the only survivor of the old inputs is
+> `gstreamer/projects/win/gstreamer-lite.def`, which the Windows build still consumes. Line numbers
+> throughout refer to the tree at the fork point. **The branch review named three audit documents as
+> carrying stale build citations; all five do** - `core-jni` and `ios` as well - which is why this
+> same note appears in all five rather than in three of them.
+>
+> **A second correction, specific to this slice.** Section 1 concludes that the plugin, gstreamer-lite
+> and 3rd_party trees need "no migration work", and that is right about the *facade*: no FFM binding
+> was written for them and Java never calls them. It is **not** true that they were left alone. Seven
+> files in those trees were modified on this branch, `+500 / −71`. The review names **one** stale claim
+> in this document; there were **three**, and all three are marked SUPERSEDED in place: the
+> `javasource.c` row in section 5 ("none; stays as is"), the `marshal.c` row beside it
+> ("none (regenerable)"), and the first bullet of the Recommendation ("leave them untouched").
+> The manifest of every one of those patches is `FFM-ABI-CONTRACT.md` section 14.2, which
+> exists because `verify-no-jni.pl` skips exactly these directories and so no automated control in the
+> branch can see a change made in them.
+
 ## 1. Verdict
 
 **Split, and most of the slice needs no work at all.** `gstreamer/plugins/**`, `gstreamer/gstreamer-lite/**` and `gstreamer/3rd_party/**` contain **zero JNI tokens** (grep for `jni.h|JNIEnv|JNIEXPORT|jobject|JavaVM|jclass|jmethodID|jfieldID|JNI_OnLoad` returns nothing in any of the three trees, nor anywhere under `gstreamer/`). They are already JVM-agnostic engine code: every plugin file reaches `gst_*`/`g_*` (gstreamer-lite/glib-lite), and the platform wrappers reach COM/DirectShow (`CoCreateInstance` x11, `CLSIDFromString` x6), Media Foundation (`MFStartup`, `MFTEnumEx`, `MFCreateSample`, `IMFTransform`), libav (`avcodec_send_packet`, `avformat_open_input`, `dlsym("sws_getContext")`) or file I/O (`CreateFileA`/`ReadFile`/`WriteFile` on Windows, `open`/`read`/`write`/`lseek`/`unlink` on POSIX). Verdict counts for the plugin/lite side: **~38 plugin source files, all `OS-CALL` (engine)**, 0 `WRAPPER`, 0 `PURE`, 0 `PURE-HOT`; no C ABI is designed for them and no FFM facade should be written — Java never calls them, only `jfxmedia` does (through 80 `gst_*` + 46 `g_*` imports, evidence in section 4). The only JNI in scope is the **jfxmedia side of the javasource interface**: `jni/JavaInputStreamCallbacks.cpp` (10 functions), the three static helpers in `Locator/Locator.cpp`, and `InitMedia` + the 2 `JNIEXPORT`s in `platform/gstreamer/GstMedia.cpp` — **15 `JNI-GLUE` functions** replaced by one callback table (`JfxmStreamCallbacks`, 9 slots) and two exports (`jfxm_media_create`, `jfxm_media_dispose`). Of the `PURE` candidates asked about in Q5: `Track/AudioTrack/VideoTrack/SubtitleTrack.cpp` and `MediaWarningDispatcher.cpp` are `PURE`, `PARITY: exact` (field pass-through; Java counterparts `com.sun.media.jfxmedia.track.*` and `MediaUtils.nativeWarning` exist) and become scalar callback payloads; `LowLevelPerf.cpp` is dead-by-config (`ENABLE_LOWLEVELPERF 0`); `Locator.cpp` is 3 JNI-GLUE helpers around a 5-field struct; `ColorConverter.c` is `PURE-HOT` with `PARITY: unknown` (SSE2 path on x86 vs a partially unimplemented generic-C path on macOS arm64) and **stays native**. The dead-code sweep found **77 unreferenced source files** (28 iOS files incl. a stale `jfxmedia_errors.h`, `NativeVideoConverter.cpp` whose Java class does not exist, `AutoLock.h`, 40 gstreamer-lite files, 10 3rd_party files) plus the unwired `vs_project/`, `xcode_project/`, `headergen` and `def-*.pl` build inputs.
@@ -105,8 +132,8 @@ Evidence = named external symbol(s). Verdicts for plugin files are per file (fun
 
 | Function / file | Verdict | Evidence | Parity | Replacement |
 |---|---|---|---|---|
-| `javasource.c` — 26 fns (`java_source_loop:532`, `_getrange:809`, `_perform_seek:418`, `_query:726`, `_change_state:874`, `_class_init:176`, `_init:289`, `_set/get_property:314,349`, `_finalize:362`, `_activatemode:378`, `_event:511`, `_get_type:132`, `_plugin_init:945`, …) | OS-CALL (engine) | `gst_pad_start_task`, `gst_pad_push`, `gst_pad_push_event`, `gst_buffer_new_allocate`, `gst_buffer_map`, `g_signal_emit`, `gst_event_new_segment`, `g_type_register_static_simple`, `gst_element_register` | n/a | none; stays as is. Its signal contract is the FFM callback table (section 8) |
-| `marshal.c` — 5 generated closures | OS-CALL (glib closure ABI) | `g_value_get_*`/`GClosure` marshaller; generated from `marshal.in` by `genmarshal.sh` | n/a | none (regenerable) |
+| `javasource.c` — 26 fns (`java_source_loop:532`, `_getrange:809`, `_perform_seek:418`, `_query:726`, `_change_state:874`, `_class_init:176`, `_init:289`, `_set/get_property:314,349`, `_finalize:362`, `_activatemode:378`, `_event:511`, `_get_type:132`, `_plugin_init:945`, …) | OS-CALL (engine) | `gst_pad_start_task`, `gst_pad_push`, `gst_pad_push_event`, `gst_buffer_new_allocate`, `gst_buffer_map`, `g_signal_emit`, `gst_event_new_segment`, `g_type_register_static_simple`, `gst_element_register` | n/a | **SUPERSEDED - it was NOT left as is.** `javasource.c` is `+78/-7` on this branch: the `copy-block` signal is re-registered with `G_TYPE_INT` so that the Java byte count reaches C, and both the push (`java_source_loop`) and pull (`java_source_getrange`) paths now act on a short return with `GST_FLOW_ERROR` instead of pushing an uninitialised buffer. Recorded in `FFM-ABI-CONTRACT.md` section 14.2, the patch manifest. Its signal contract is the FFM callback table (section 8) |
+| `marshal.c` — 5 generated closures | OS-CALL (glib closure ABI) | `g_value_get_*`/`GClosure` marshaller; generated from `marshal.in` by `genmarshal.sh` | n/a | **SUPERSEDED - regenerated, not untouched.** `marshal.c` is `+21/-17` and `marshal.h` `+7/-7`; and, the part that matters, the generator input `marshal.in:11` was correctly updated to `INT:POINTER,INT`. Regenerate from `marshal.in`, never by hand - a regeneration from a stale input silently reverts the `copy_block` return value to garbage. Recorded in `FFM-ABI-CONTRACT.md` section 14.2 |
 | `fxplugins.c` `fxplugins_init`, `gst_plugin_desc` | OS-CALL | `gst_element_register` via sub-inits; `GstPluginDesc` consumed by `gst_plugin_load_file` | n/a | none |
 | `progressbuffer.c` — 48 fns | OS-CALL | `gst_pad_push_event` x7, `gst_pad_start_task` x2, `gst_element_post_message` x2, `gst_pad_pull_range`, `g_thread_new`; cache via `filecache.c` | n/a | none |
 | `hlsprogressbuffer.c` — 27 fns | OS-CALL | `gst_pad_push_event` x5, `gst_element_post_message` x4, `gst_pad_start_task` x3 | n/a | none |
@@ -255,7 +282,7 @@ Not dead, keep: `plugins/javasource/marshal.in` + `genmarshal.sh` (generator inp
 
 ### Recommendation
 
-* **Plugins, gstreamer-lite, glib-lite, 3rd_party: no migration work, no ABI, no facade.** They are JNI-free engine code; leave them untouched. Only the Windows `.def` files (via `def-gstlite.pl`/`def-glib.pl`) ever need attention, when jfxmedia starts using a new `gst_*` symbol.
+* **Plugins, gstreamer-lite, glib-lite, 3rd_party: no migration work, no ABI, no facade.** They are JNI-free engine code and no FFM facade was written for any of them, which is what this recommendation was about. **It must not be read as "nothing in these trees changed": seven files did**, `+500/-71` - `javasource.c`, `marshal.{c,h,in}` and the three DirectSound files - and they are the one part of the module that `verify-no-jni.pl` deliberately cannot see. Each is recorded with its rationale and its observable delta in `FFM-ABI-CONTRACT.md` section 14.2, the patch manifest for the vendored tree. Only the Windows `.def` files (via `def-gstlite.pl`/`def-glib.pl`) ever need attention, when jfxmedia starts using a new `gst_*` symbol.
 * **Migration commit (behaviour-neutral):** add `JfxmStreamCallbacks`, `jfxm_media_create`, `jfxm_media_dispose`, `jfxm_sizeof_stream_callbacks` and `CFfiStreamCallbacks` beside the JNI code; add `JfxMediaNative.mediaCreate/mediaDispose`; flip `GSTMedia` (2 natives, the Locator upcalls move into `GSTMedia` Java code); then delete `JavaInputStreamCallbacks.cpp/.h`, `CLocator::{LocatorGetStringLocation,CreateConnectionHolder,GetAudioStreamConnectionHolder}`, the `jni/JniUtils.h` include in `Locator.h`, and the two `JNIEXPORT`s. Run the binding tests above and the WAV smoke test after the flip. This step depends on nothing else in the media migration order and can go first or alongside `Logger`.
 * **Prune commit (no behaviour change, separate):** delete `jfxmedia/platform/ios/**`, `NativeVideoConverter.cpp`, `AutoLock.h`, `LowLevelPerf.cpp` (+ macro sites); decide on `vs_project/`, `xcode_project/`, `headergen`; optionally the 50 unreferenced gstreamer-lite/3rd_party files (weigh against upstream-merge friction).
 * **Java-reimplementation commits (parity-tested, separate):** track carriers -> scalar `PlayerCallbacks` payloads and `MediaWarningDispatcher` -> `warning` slot, landing with the dispatcher slice's callback-table work.

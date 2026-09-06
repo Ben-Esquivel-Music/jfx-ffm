@@ -168,15 +168,25 @@ public abstract class NativeMedia extends Media {
      * Registers an action to run once {@code jfxm_media_dispose} has returned, i.e. once no callback of
      * this media's player or streams can fire again. Used by the platform players for the resources
      * whose lifetime the contract ties to the media's, not to {@code playerDispose()}.
+     * <p>
+     * A media that is already disposed has no "later" left, so the action runs inline, on this thread,
+     * before the call returns - and the caller is told which of the two happened, because after the
+     * inline run the resources it was registering are already gone. The player constructors read the
+     * arena that action closes on the very next statement, so they have to fail rather than carry on.
+     * Reporting it rather than letting the caller poll a {@code disposed} flag first is what makes the
+     * answer race-free: this method holds the same monitor {@code dispose()} does.
      *
      * @param action the action, never {@code null}
+     * @return {@code true} if the action was registered for this media's dispose, {@code false} if the
+     *         media was already disposed and the action has already run
      */
-    public final synchronized void runAfterDispose(Runnable action) {
+    public final synchronized boolean runAfterDispose(Runnable action) {
         if (disposed) {
             action.run();
-        } else {
-            afterDispose.add(action);
+            return false;
         }
+        afterDispose.add(action);
+        return true;
     }
 
     /**

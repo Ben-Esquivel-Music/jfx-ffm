@@ -60,7 +60,15 @@
     int previousHeight;
     int previousPlayerState; // avoid repeated states
 
-    BOOL isDisposed;
+    // Set once, by -dispose, under @synchronized(self). Two kinds of reader: the sends that must not
+    // outlive the dispatcher test it inside that same monitor, and -observeValueForKeyPath:,
+    // -extractTrackInfo and -sendPixelBuffer: read it unlocked, as an advisory early-out, because
+    // they must not hold the monitor across the AVFoundation work that follows (the reasons differ
+    // per site and are written at each one). _Atomic rather than volatile for those readers:
+    // volatile would guarantee the load is really performed but leaves a concurrent read/write pair
+    // a data race, which is undefined behaviour; _Atomic makes it defined, and on the platforms this
+    // builds for it generates the same load and store.
+    _Atomic(BOOL) isDisposed;
     NSMutableArray *keyPathsObserved;
     NSMutableArray *playerObservers; // player item notification observers
 }

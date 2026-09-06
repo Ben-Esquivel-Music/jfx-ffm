@@ -2,6 +2,27 @@
 
 Scope: `modules/javafx.media/src/main/native/jfxmedia/platform/osx/**` (3,765 lines), the macOS-only Utils they use (`Utils/JObjectPeers.m` 214, `Utils/JavaUtils.m` 56, `Utils/MTObjectProxy.m` 258 + headers), `jfxmedia/projects/mac/Makefile`, and the Java classes `com.sun.media.jfxmediaimpl.platform.osx.{OSXPlatform, OSXMedia, OSXMediaPlayer}`. Notes persisted at `<scratchpad>/phase1/osx-notes.md`. This platform cannot be compiled or run on this machine (Windows); everything below is source evidence plus the Windows prebuilt `jfxmedia.dll` for the shared core.
 
+> **Status note (added after the migration landed).** This is a read-only audit taken at the *start*
+> of branch `ffm/media`. It is kept as the evidence behind `FFM-ABI-CONTRACT.md`, not as a
+> description of the current tree, and one thing in it has gone stale in a way worth flagging before
+> you read it: **it cites Makefiles (and `.vcxproj` / `.pbxproj`) as primary build evidence — source
+> lists, `-D` defines, link libraries, include paths — and that build system was deleted in this same
+> branch.** It was replaced by CMake: `modules/javafx.media/native/CMakeLists.txt` plus `win.cmake`,
+> `linux.cmake` and `mac.cmake` (35 files and 6,853 lines out, 4 files and 2,063 lines in). The
+> **evidence remains directionally valid** — the CMake files were derived from those makefiles and
+> the source sets were checked against them file by file — but the mechanics no longer exist, so do
+> not go looking for `jfxmedia/projects/<os>/Makefile` or the `vs_project` / `xcode_project` trees.
+> `FFM-BUILD-PLAN.md` is the current map of the build; the only survivor of the old inputs is
+> `gstreamer/projects/win/gstreamer-lite.def`, which the Windows build still consumes. Line numbers
+> throughout refer to the tree at the fork point. **The branch review named three audit documents as
+> carrying stale build citations; all five do** - `core-jni` and `ios` as well - which is why this
+> same note appears in all five rather than in three of them.
+>
+> **One cross-reference.** This document rules `Utils/MTObjectProxy.m` **PURE and dead, delete** - no
+> call sites, only an unused `#import` in `OSXMediaPlayer.h:27`. `FFM-AUDIT-core-jni.md` provisionally
+> listed the same file under "OS-CALL (keep)". **This document is the correct one**; the deletion in
+> this branch is right, and the `core-jni` note now says so.
+
 ## 1. Verdict
 
 **Migrate — the library is an OS engine integration and stays native — but delete its JNI glue outright rather than porting it.** `libjfxmedia_avf.dylib` is AVFoundation/CoreVideo/MediaToolbox integration whose callbacks arrive on OS-owned threads (AVFoundation KVO threads, the main dispatch queue, the CVDisplayLink thread, the MTAudioProcessingTap real-time audio thread, and a resource-loader dispatch queue). Triage of the 3,765 lines in scope: **OS-CALL 6 units** (`OSXPlatform.osxPlatformInit` + `OSXMediaPlayer.+initPlayerPlatform`, `CVVideoFrame`, `AVFMediaPlayer`, `AVFAudioProcessor`, `AVFAudioSpectrumUnit`, all with named framework/GStreamer symbols), **PURE-HOT 2** (`AVFAudioEqualizer`, `AVFSoundLevelUnit` — vDSP kernels that execute *inside* the MTAudioProcessingTap process callback on the real-time audio thread, where a Java upcall is not permissible; parity would be `tolerance` (unmeasured) and `exact` respectively but is moot), **PURE 1** (`MTObjectProxy` — dead code, no call sites), **JNI-GLUE 3 files** (the JNI half and peer-map plumbing of `OSXMediaPlayer.mm`, `JObjectPeers.m`, `JavaUtils.m`), **WRAPPER 0**. No function in scope is a wrapper that Java could bind directly: every entry point goes through Objective-C messaging into AVFoundation, which has no C-callable symbol for Java to bind. Result: the 23 JNI exports become the *same* `jfxm_player_*` C ABI the GStreamer backend gets (one Java facade, two backends; the OSX-only deltas are mute and platform init), and roughly 1,100 lines of Objective-C JNI glue (`JObjectPeers`, `JavaUtils`, `MTObjectProxy`, the JNI section of `OSXMediaPlayer.mm`) are deleted, replaced by ~120 lines of C entry points over `OSXPlayerProtocol`.

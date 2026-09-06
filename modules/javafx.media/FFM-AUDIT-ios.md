@@ -5,6 +5,31 @@ session usage limit before it could format a final report; the notes are complet
 recommendation). Line numbers refer to the tree at the start of branch `ffm/media`. The decision
 (delete, not migrate) is recorded in `FFM-ABI-CONTRACT.md` section 1.
 
+> **Status note (added after the migration landed).** This is a read-only audit taken at the *start*
+> of branch `ffm/media`. It is kept as the evidence behind `FFM-ABI-CONTRACT.md`, not as a
+> description of the current tree, and one thing in it has gone stale in a way worth flagging before
+> you read it: **it cites Makefiles (and `.vcxproj` / `.pbxproj`) as build evidence — source lists,
+> `-D` defines, link libraries, include paths — and that build system was deleted in this same
+> branch.** It was replaced by CMake: `modules/javafx.media/native/CMakeLists.txt` plus `win.cmake`,
+> `linux.cmake` and `mac.cmake` (35 files and 6,853 lines out, 4 files and 2,063 lines in). The
+> **evidence remains directionally valid** — the CMake files were derived from those makefiles and
+> the source sets were checked against them file by file — but the mechanics no longer exist, so do
+> not go looking for `jfxmedia/projects/<os>/Makefile` or the `vs_project` / `xcode_project` trees.
+> `FFM-BUILD-PLAN.md` is the current map of the build; the only survivor of the old inputs is
+> `gstreamer/projects/win/gstreamer-lite.def`, which the Windows build still consumes. Line numbers
+> throughout refer to the tree at the fork point. **The branch review named three audit documents as
+> carrying stale build citations; all five do** - `core-jni` and this one as well - which is why the
+> same note appears in all five.
+>
+> **One thing this slice decided that no review list named.** The decision recorded below - delete the
+> iOS platform rather than migrate it - also removed **`NativeAudioClip` (12 natives) and
+> `AudioClipProvider`**, and that deletion is legitimate for a reason worth restating: the
+> implementation was iOS-only, so on every platform this fork builds, `AudioClipProvider`'s
+> constructor always took its `catch (UnsatisfiedLinkError)` branch and forwarded to
+> `NativeMediaAudioClip`. The new code does that unconditionally. `FFM-COVERAGE-MAP.md` re-derived it
+> independently and counts the 40 iOS Java natives among its 47 DELETED entry points, with
+> **0 UNACCOUNTED**.
+
 # ios slice notes (jni-auditor) — branch ffm/media
 
 ## Section 1: Java natives (28 iOS + 12 NativeAudioClip = 40)

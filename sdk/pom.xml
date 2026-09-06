@@ -196,6 +196,10 @@
                         <configuration>
                             <target>
                                 <mkdir dir="${jfx.sdk.dir}/${jfx.sdk.native.dir}"/>
+                                <!-- Lenient on purpose: a -DskipNative build has no native bin
+                                     directories at all and still has to assemble. Whether the
+                                     missing libraries are acceptable is decided by the
+                                     sdk-require-natives / sdk-java-only profiles below, not here. -->
                                 <copy todir="${jfx.sdk.dir}/${jfx.sdk.native.dir}" failonerror="false" quiet="true">
                                     <fileset dir="${jfx.root}/modules/javafx.graphics/target/native/bin"
                                              includes="*.dll,*.so,*.dylib" erroronmissingdir="false"/>
@@ -213,4 +217,100 @@ javafx.runtime.build=${jfx.promoted.build.number}
             </plugin>
         </plugins>
     </build>
+
+    <profiles>
+        <!-- The copy above cannot fail, so nothing used to notice that it had copied nothing: a
+             failed or never-run native build produced an SDK that assembles, installs and starts,
+             and then reports the media stack unavailable at MediaPlayer construction and cannot
+             open a window at all. These two profiles decide which of the two situations it is,
+             using the same skipNative activation the native profiles of javafx.graphics and
+             javafx.media use, so the answer is the one the developer asked for. -->
+        <profile>
+            <id>sdk-require-natives</id>
+            <activation>
+                <property>
+                    <name>skipNative</name>
+                    <value>!true</value>
+                </property>
+            </activation>
+            <build>
+                <plugins>
+                    <plugin>
+                        <groupId>org.apache.maven.plugins</groupId>
+                        <artifactId>maven-antrun-plugin</artifactId>
+                        <executions>
+                            <execution>
+                                <!-- Runs after sdk-native-and-properties: executions of one plugin
+                                     keep POM order, and a profile's are appended to the build's. -->
+                                <id>sdk-verify-natives</id>
+                                <phase>package</phase>
+                                <goals>
+                                    <goal>run</goal>
+                                </goals>
+                                <configuration>
+                                    <target>
+                                        <resourcecount property="jfx.sdk.graphics.natives">
+                                            <fileset dir="${jfx.root}/modules/javafx.graphics/target/native/bin"
+                                                     includes="*.dll,*.so,*.dylib" erroronmissingdir="false"/>
+                                        </resourcecount>
+                                        <resourcecount property="jfx.sdk.media.natives">
+                                            <fileset dir="${jfx.root}/modules/javafx.media/target/native/bin"
+                                                     includes="*.dll,*.so,*.dylib" erroronmissingdir="false"/>
+                                        </resourcecount>
+                                        <!-- The message is an attribute, not nested text: antrun
+                                             serialises the target through an Xpp3Dom, which does not
+                                             carry text and a child element side by side. -->
+                                        <fail message="The SDK would ship without native libraries: javafx.graphics contributed ${jfx.sdk.graphics.natives} and javafx.media ${jfx.sdk.media.natives} from their target/native/bin directories. Build them (mvn -pl modules/javafx.graphics,modules/javafx.media process-classes), or pass -DskipNative=true to assemble a deliberately Java-only SDK.">
+                                            <condition>
+                                                <or>
+                                                    <equals arg1="${jfx.sdk.graphics.natives}" arg2="0"/>
+                                                    <equals arg1="${jfx.sdk.media.natives}" arg2="0"/>
+                                                </or>
+                                            </condition>
+                                        </fail>
+                                    </target>
+                                </configuration>
+                            </execution>
+                        </executions>
+                    </plugin>
+                </plugins>
+            </build>
+        </profile>
+        <profile>
+            <id>sdk-java-only</id>
+            <activation>
+                <property>
+                    <name>skipNative</name>
+                    <value>true</value>
+                </property>
+            </activation>
+            <build>
+                <plugins>
+                    <plugin>
+                        <groupId>org.apache.maven.plugins</groupId>
+                        <artifactId>maven-antrun-plugin</artifactId>
+                        <executions>
+                            <execution>
+                                <id>sdk-java-only-notice</id>
+                                <phase>package</phase>
+                                <goals>
+                                    <goal>run</goal>
+                                </goals>
+                                <configuration>
+                                    <target>
+                                        <echo level="warning">-DskipNative=true: this SDK carries only
+whatever native libraries an earlier build of this tree left in
+modules/javafx.graphics/target/native/bin and modules/javafx.media/target/native/bin.
+Where those are absent or stale, an application run against ${jfx.sdk.dir} fails to
+start, or starts and reports the media stack unavailable at MediaPlayer construction.
+Do not ship this SDK.</echo>
+                                    </target>
+                                </configuration>
+                            </execution>
+                        </executions>
+                    </plugin>
+                </plugins>
+            </build>
+        </profile>
+    </profiles>
 </project>

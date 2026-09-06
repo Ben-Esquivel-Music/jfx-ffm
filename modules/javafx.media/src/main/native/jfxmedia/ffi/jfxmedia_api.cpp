@@ -127,6 +127,46 @@ int32_t jfxm_offsetof_frame_info(int32_t field)
     }
 }
 
+// The two callback tables are the one part of this ABI a sizeof check cannot police: every slot is
+// a function pointer, so a permutation of them compiles to the same size and the Java layout - which
+// is generated from a single array of slot names - goes on agreeing with itself. These walk the
+// compiler's own offsetof so the Java side can bind index by index instead.
+int32_t jfxm_offsetof_player_callbacks(int32_t field)
+{
+    switch (field) {
+    case JFXM_PLAYER_CALLBACKS_MEDIA_ERROR:     return (int32_t)offsetof(JfxmPlayerCallbacks, media_error);
+    case JFXM_PLAYER_CALLBACKS_HALT:            return (int32_t)offsetof(JfxmPlayerCallbacks, halt);
+    case JFXM_PLAYER_CALLBACKS_STATE:           return (int32_t)offsetof(JfxmPlayerCallbacks, state);
+    case JFXM_PLAYER_CALLBACKS_NEW_FRAME:       return (int32_t)offsetof(JfxmPlayerCallbacks, new_frame);
+    case JFXM_PLAYER_CALLBACKS_FRAME_SIZE:      return (int32_t)offsetof(JfxmPlayerCallbacks, frame_size);
+    case JFXM_PLAYER_CALLBACKS_AUDIO_TRACK:     return (int32_t)offsetof(JfxmPlayerCallbacks, audio_track);
+    case JFXM_PLAYER_CALLBACKS_VIDEO_TRACK:     return (int32_t)offsetof(JfxmPlayerCallbacks, video_track);
+    case JFXM_PLAYER_CALLBACKS_SUBTITLE_TRACK:  return (int32_t)offsetof(JfxmPlayerCallbacks, subtitle_track);
+    case JFXM_PLAYER_CALLBACKS_MARKER:          return (int32_t)offsetof(JfxmPlayerCallbacks, marker);
+    case JFXM_PLAYER_CALLBACKS_BUFFER_PROGRESS: return (int32_t)offsetof(JfxmPlayerCallbacks, buffer_progress);
+    case JFXM_PLAYER_CALLBACKS_DURATION_UPDATE: return (int32_t)offsetof(JfxmPlayerCallbacks, duration_update);
+    case JFXM_PLAYER_CALLBACKS_AUDIO_SPECTRUM:  return (int32_t)offsetof(JfxmPlayerCallbacks, audio_spectrum);
+    case JFXM_PLAYER_CALLBACKS_WARNING:         return (int32_t)offsetof(JfxmPlayerCallbacks, warning);
+    default:                                    return -1;
+    }
+}
+
+int32_t jfxm_offsetof_stream_callbacks(int32_t field)
+{
+    switch (field) {
+    case JFXM_STREAM_CALLBACKS_NEED_BUFFER:      return (int32_t)offsetof(JfxmStreamCallbacks, need_buffer);
+    case JFXM_STREAM_CALLBACKS_IS_SEEKABLE:      return (int32_t)offsetof(JfxmStreamCallbacks, is_seekable);
+    case JFXM_STREAM_CALLBACKS_IS_RANDOM_ACCESS: return (int32_t)offsetof(JfxmStreamCallbacks, is_random_access);
+    case JFXM_STREAM_CALLBACKS_READ_NEXT_BLOCK:  return (int32_t)offsetof(JfxmStreamCallbacks, read_next_block);
+    case JFXM_STREAM_CALLBACKS_READ_BLOCK:       return (int32_t)offsetof(JfxmStreamCallbacks, read_block);
+    case JFXM_STREAM_CALLBACKS_COPY_BLOCK:       return (int32_t)offsetof(JfxmStreamCallbacks, copy_block);
+    case JFXM_STREAM_CALLBACKS_SEEK:             return (int32_t)offsetof(JfxmStreamCallbacks, seek);
+    case JFXM_STREAM_CALLBACKS_PROPERTY:         return (int32_t)offsetof(JfxmStreamCallbacks, property);
+    case JFXM_STREAM_CALLBACKS_CLOSE_CONNECTION: return (int32_t)offsetof(JfxmStreamCallbacks, close_connection);
+    default:                                     return -1;
+    }
+}
+
 //*************************************************************************************************
 //********** Library initialisation and logging
 //*************************************************************************************************
@@ -257,6 +297,18 @@ static int32_t InitGstMedia(const char* content_type, const char* location, int6
     }
 
     //***** Create the media object
+    //
+    // Both adapters are watched from here to the end of the function: while a slot is registered,
+    // ~CFfiStreamCallbacks NULLs the local that points at it, so if anything below this line frees
+    // an adapter the cleanup block sees NULL and does not free it a second time. Nothing does
+    // today - the block below sets out why at length - and with the slots in place that argument
+    // no longer has to hold for this function to be correct, only for it to be leak free. The
+    // slots are the addresses of locals, so they must not outlive this frame: the two lines before
+    // the return unregister them, and every exit from here down goes through that return.
+    callbacks->SetOwnerSlot(&callbacks);
+    if (NULL != audioStreamCallbacks)
+        audioStreamCallbacks->SetOwnerSlot(&audioStreamCallbacks);
+
     uErrCode = pManager->CreatePlayer(locator, NULL, &pMedia);
 
     //***** return
@@ -287,8 +339,7 @@ static int32_t InitGstMedia(const char* content_type, const char* location, int6
         // CreateSourceElement hands each one to a javasource element, but only GStreamer frees
         // them: the "close-connection" connection carries a GClosureNotify
         // (CGstPipelineFactory::SourceCallbacksDestroyed) and the adapter dies with that closure.
-        // Nothing on this path ever finalizes it, so the two deletes below are still the only free,
-        // and they cannot double free:
+        // Nothing on this path ever finalizes it, so the two deletes below are still the only free:
         //   - no failing exit at or below CreateSourceElement unrefs the javasource element. Its
         //     own three returns after the connects abandon javaSource or the floating bin holding
         //     it; CreatePlayerPipeline returns with a stack GstElementContainer whose destructor
@@ -302,15 +353,33 @@ static int32_t InitGstMedia(const char* content_type, const char* location, int6
         //     CMedia::IsValid cannot fail; and were it reachable, the only way in is IsValid
         //     answering false, which means m_pPipeline is NULL, and ~CMedia then disposes nothing
         //     and unrefs nothing.
-        // Anyone who adds a gst_object_unref to one of those failure paths must delete these two
-        // lines in the same commit, because that unref would finalize the closure and free the
-        // adapters here. Skipping them would leave the adapters holding upcall-stub addresses that
-        // GSTMedia.createNativeMedia frees in its finally block, and would make the "nothing is
-        // retained by C" promise of jfxmedia_api.h false. close_connection is deliberately not
-        // invoked: the Java side closes the connection holders itself on this path.
+        // Both of those are arguments about a free that does not happen, and neither of them is
+        // enforced by anything: a gst_object_unref added to one of those failure paths would
+        // finalize the closure, free the adapters and make the two deletes below a double free.
+        // That is what the owner slots registered across CreatePlayer above are for. An adapter
+        // freed underneath this function NULLs its own local, so the matching delete becomes a
+        // no-op and the other case - no element ever took ownership - still frees exactly once.
+        // Neither outcome leaks: whoever owns the adapter at that point is who freed it. The
+        // failure path is therefore correct on its own rather than on the strength of this
+        // comment, and an edit that adds the unref no longer has to remember to come here. The
+        // deletes stay because they are still the only free on the path that exists today.
+        //
+        // They may not simply be dropped: the adapters hold upcall-stub addresses that
+        // GSTMedia.createNativeMedia frees in its finally block, so leaving them alive would make
+        // the "nothing is retained by C" promise of jfxmedia_api.h false. close_connection is
+        // deliberately not invoked: the Java side closes the connection holders itself on this
+        // path.
         delete audioStreamCallbacks;
         delete callbacks;
     }
+
+    // Unregister the owner slots: they are addresses of locals in this frame, and on the success
+    // path the adapters outlive it by a long way. Whatever is left here is either NULL or an
+    // adapter the pipeline now owns, and neither may be holding a pointer into a dead stack.
+    if (NULL != callbacks)
+        callbacks->SetOwnerSlot(NULL);
+    if (NULL != audioStreamCallbacks)
+        audioStreamCallbacks->SetOwnerSlot(NULL);
 
     return (int32_t)uErrCode;
 }
@@ -465,7 +534,20 @@ static int32_t GstPlayerInit(JfxmMedia* media, const JfxmPlayerCallbacks* cb, vo
     if (NULL == pEventDispatcher)
         return ERROR_MEMORY_ALLOCATION;
 
-    pPipeline->SetEventDispatcher(pEventDispatcher);
+    // A second jfxm_player_init on the same media is refused rather than served, and the dispatcher
+    // just allocated - handed to nobody, so unreachable from any other thread - is what gets freed.
+    // CPipeline::SetEventDispatcher carries the reasoning; the short version is that the first
+    // dispatcher is live by then and there is no safe moment to delete it. ERROR_MEDIA_CREATION is
+    // the code the AVF backend has always answered a second jfxm_avf_player_init with.
+    //
+    // This is a behaviour change against both the JNI original and the first FFM cut, which
+    // silently replaced the dispatcher and leaked the old one. No caller in the tree makes the
+    // second call: GSTMediaPlayer calls JfxMediaNative.playerInit once, from its constructor.
+    if (!pPipeline->SetEventDispatcher(pEventDispatcher))
+    {
+        delete pEventDispatcher;
+        return ERROR_MEDIA_CREATION;
+    }
 
     return (int32_t)pPipeline->Init();
 }

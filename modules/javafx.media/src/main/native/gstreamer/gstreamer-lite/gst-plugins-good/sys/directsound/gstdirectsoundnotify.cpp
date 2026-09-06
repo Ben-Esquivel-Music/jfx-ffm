@@ -27,8 +27,37 @@
 
 #include "gstdirectsoundnotify.h"
 
-#include <assert.h>
 #include <process.h>
+
+// Link-time enforcement of the loader-lock constraint that Dispose() below records: neither the
+// wait in Dispose() nor the one in Init() may ever be made under the loader lock, and both would
+// be if this DLL ever grew a DllMain that reached them. Until now that constraint lived in a
+// comment and nothing checked it. This definition makes the linker check it: a DLL has exactly one
+// DllMain, so a second one compiled into gstreamer-lite fails the link with LNK2005 naming this
+// file, and whoever is adding it has to come here and read why. The obvious candidate is
+// gstreamer/gst/gst.c, whose DllMain is guarded out by #ifndef GSTREAMER_LITE today and would come
+// back with an upstream merge that dropped the guard.
+//
+// It has to be a definition and not a declaration: the CRT supplies a default DllMain to a DLL
+// that defines none, so there is nothing for a second one to collide with unless we define the
+// first. Ours is that same no-op, so the DLL behaves as it did - _DllMainCRTStartup calls DllMain
+// for every notification and acts on nothing but a FALSE at process attach - and nothing may ever
+// be added to the body, which runs under the loader lock by definition and so is the one place in
+// this library that must not do any of what the rest of this file does.
+//
+// What it does not cover, and what no check inside this library could: a DllMain in some other
+// module of the process that reaches gst_directsound_sink_finalize. The loader lock is
+// process-wide, so that deadlocks just as surely. Nothing in the tree does it - ReleaseNotificator()
+// is reached from a GObject finalize, on a pipeline teardown driven from Java - and keeping it that
+// way is out of this file's reach.
+extern "C" BOOL WINAPI DllMain(HINSTANCE hinstDLL, DWORD fdwReason, LPVOID lpvReserved);
+
+extern "C" BOOL WINAPI DllMain(HINSTANCE hinstDLL, DWORD fdwReason, LPVOID lpvReserved) {
+  (void)hinstDLL;
+  (void)fdwReason;
+  (void)lpvReserved;
+  return TRUE;
+}
 
 void* InitNotificator(GSTDSNotfierCallback pCallback, void *pData) {
   GSTDirectSoundNotify *pNotify = new GSTDirectSoundNotify();
@@ -114,10 +143,11 @@ bool GSTDirectSoundNotify::Init(GSTDSNotfierCallback pCallback, void *pData) {
   m_hReady = CreateEvent(NULL, TRUE, FALSE, NULL);
   m_hQuit = CreateEvent(NULL, TRUE, FALSE, NULL);
   if (m_hReady != NULL && m_hQuit != NULL) {
-    // _beginthreadex() rather than CreateThread(): this is a DLL, and the thread runs
-    // CRT code (assert() in RunApartment()), so it needs the per thread CRT state that
-    // _beginthreadex() creates and gives back when the thread returns. glib does the
-    // same in this tree (3rd_party/glib/glib/gthread-win32.c).
+    // _beginthreadex() rather than CreateThread(): this is a DLL, and RunApartment() calls
+    // into COM and MMDevAPI, either of which may leave per thread CRT state (errno, locale)
+    // behind on the way through. _beginthreadex() is what creates that state and gives it
+    // back when the thread returns; CreateThread() would leak it. glib does the same in this
+    // tree (3rd_party/glib/glib/gthread-win32.c).
     m_hThread = (HANDLE)_beginthreadex(NULL, 0, ApartmentThreadProc, this, 0, NULL);
     if (m_hThread != NULL) {
       // m_pEnumerator may only be touched by the apartment thread, so wait here until
@@ -157,11 +187,28 @@ void GSTDirectSoundNotify::Dispose() {
     // two calls ran inline on the disposing thread; and that in-flight callback
     // returning, which is new, and short - gst_directsound_device_callback() sets two
     // flags on the sink and takes no lock of its own, so nothing can hold it up.
+    //
+    // The INFINITE is deliberate and a timeout is not an available alternative, even though
+    // the thread this runs on is routinely the FX Application Thread - gst_directsound_sink_
+    // finalize() reaches here from the pipeline teardown that MediaPlayer.dispose() drives.
+    // Abandoning the apartment thread on a timeout would give up everything the join is for:
+    // the unregister may not have been attempted, so MMDevAPI would keep dispatching with
+    // m_pData still pointing at the sink that gst_directsound_sink_finalize() is about to
+    // free, which is the use after free this whole design exists to prevent; the callback
+    // pair would not have been cleared, so the drain described above would not have
+    // happened; and the three CloseHandle() calls below would run on handles the abandoned
+    // thread is still waiting on and still owns. A timeout would convert a bounded stall
+    // into a use after free, which is the wrong trade whatever the bound.
+    //
     // Neither this wait nor the one in Init() may ever be made under the loader lock:
     // this one waits for the apartment thread's DLL_THREAD_DETACH, Init()'s waits for
-    // its DLL_THREAD_ATTACH. No such path exists today - gstreamer-lite builds no
-    // DllMain under GSTREAMER_LITE, and ReleaseNotificator() is reached from a GObject
-    // finalize - and it has to stay that way.
+    // its DLL_THREAD_ATTACH. No such path exists today - the only DllMain gstreamer-lite
+    // has is the empty one at the top of this file, and ReleaseNotificator() is reached
+    // from a GObject finalize - and it has to stay that way. That is no longer left to this
+    // comment to arrange: that empty DllMain is there as a link-time assertion that this DLL
+    // grows no other one, so the first attempt to add a real DllMain to gstreamer-lite fails
+    // the link instead of shipping a deadlock. Read the comment there for what it does not
+    // cover.
     SetEvent(m_hQuit);
     WaitForSingleObject(m_hThread, INFINITE);
     CloseHandle(m_hThread);
@@ -223,14 +270,23 @@ void GSTDirectSoundNotify::RunApartment() {
     // callbacks. Clearing m_bRegistered records that it took; no control flow depends on
     // that any more, since ReleaseNotificator() abandons this object whatever the answer
     // is, so the flag survives past this point as state for a debugger rather than as a
-    // decision. The assert is a developer aid only, since it is compiled out under NDEBUG
-    // and this library has no logging to report to either (GST_DISABLE_GST_DEBUG is
-    // defined for it).
+    // decision.
+    //
+    // A failed unregister is handled, not asserted. This used to carry an
+    // assert(SUCCEEDED(hr)) directly under the branch that handles the failure, which in any
+    // build without NDEBUG - a -DCONF=Debug SDK - turned a device unplug racing an AudioClip
+    // teardown into an abort() of the whole JVM, from a background apartment thread, with no
+    // diagnostic: this library is built with GST_DISABLE_GST_DEBUG, so there was nothing to
+    // log to either. The failure it fired on is not a programming error and not fatal. It
+    // means MMDevAPI still holds this pointer, which is the same position a successful
+    // unregister leaves us in as far as an already dispatched call is concerned, and it is
+    // handled the same way and by the same code: the callback pair is cleared below and
+    // ReleaseNotificator() never frees the object, so a call that arrives afterwards finds a
+    // live vtable, a live lock and a NULL pair. Nothing here is worth ending a process over.
     HRESULT hr = m_pEnumerator->UnregisterEndpointNotificationCallback(this);
     if (SUCCEEDED(hr)) {
       m_bRegistered = false;
     }
-    assert(SUCCEEDED(hr));
 
     // The sink that m_pData points at is being finalized, so the callback must not reach
     // it again. MMDevAPI may still call this object - it was given the pointer without a

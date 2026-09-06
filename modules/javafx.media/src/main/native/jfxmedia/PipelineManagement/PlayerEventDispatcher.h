@@ -46,6 +46,14 @@ class CSubtitleTrack;
  * fresh one is a real deployment state; inserting a virtual function shifts every slot after it and
  * turns that into a call through the wrong slot - a crash or, worse, silently wrong events.
  * Appending keeps slots 0..N-1 meaning what they meant before.
+ *
+ * Nothing detects a mismatch at runtime. jfxm_abi_version guards the flat C ABI of jfxmedia_api.h
+ * and is a symbol of libjfxmedia.dylib; it says nothing about the vtable layout the compiler baked
+ * into libjfxmedia_avf.dylib, and there is no equivalent it could report - a vtable has no
+ * version, only an order. What keeps the pair honest is a packaging invariant rather than a check:
+ * modules/javafx.media/native/mac.cmake builds jfxmedia and jfxmediaAvf from these same headers in
+ * one CMake run, and the SDK ships the two dylibs together. So never replace one of them on its
+ * own, and treat this class as append-only even for a change that "cannot" reach macOS.
  */
 class CPlayerEventDispatcher
 {

@@ -284,8 +284,11 @@ uint32_t CGstPipelineFactory::CreateSourceElement(CLocator *locator, CStreamCall
     // The three failure returns below abandon javaSource - or the floating bin that has taken it -
     // without unreffing it. That pre-existing GstElement leak is what keeps the adapter's closure
     // alive and unfinalized on this path, which is why InitGstMedia in ffi/jfxmedia_api.cpp still
-    // deletes the adapters itself when jfxm_media_create fails. Adding the cleanup unref here means
-    // deleting those two lines in the same commit, or they become a double free.
+    // deletes the adapters itself when jfxm_media_create fails. Adding the cleanup unref here is
+    // safe with respect to that: InitGstMedia registers an owner slot on each adapter across
+    // CMediaManager::CreatePlayer, so an adapter this unref frees through the closure notify
+    // clears the local pointer there and is not freed a second time. It stopped being a double
+    // free waiting to happen; it is still worth reading that cleanup block before changing this.
     if (needBuffer)
     {
         g_object_set(javaSource, "stop-on-pause", FALSE, NULL);

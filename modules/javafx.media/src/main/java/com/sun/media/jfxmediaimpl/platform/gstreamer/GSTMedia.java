@@ -98,11 +98,13 @@ final class GSTMedia extends NativeMedia {
      * the JNI code reported as {@code ERROR_MEMORY_ALLOCATION} - a null string, a null holder or an
      * exception thrown by the locator - is reported the same way here.
      * <p>
-     * One deliberate departure (contract section 14.1, a change in the safe direction): every failing
-     * return closes the connection holders it created. On the success path C closes them for us when
-     * the pipeline teardown fires {@code close_connection}, but a failing {@code jfxm_media_create}
-     * never received the tables, so nothing else ever would - the JNI code left the connection open
-     * until the holder was collected.
+     * One deliberate departure from the JNI behaviour, and a change in the safe direction: every
+     * failing return closes the connection holders it created. On the success path C closes them for
+     * us when the pipeline teardown fires {@code close_connection}, but a failing
+     * {@code jfxm_media_create} never received the tables, so nothing else ever would - the JNI code
+     * left the connection open until the holder was collected. It is a leak the Java side fixes, the
+     * counterpart of the C-side ones the contract lists in section 14.1; do not "restore parity" by
+     * undoing it.
      *
      * @param nativeMediaHandle receives the media handle in element 0
      * @return a {@link MediaError} code

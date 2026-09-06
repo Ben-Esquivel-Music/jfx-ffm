@@ -2,6 +2,22 @@
 
 Repository: `C:\SourceCode\jfx-ffm`. All paths below are repo-relative unless absolute. Notes persisted at `C:\Users\bestq\AppData\Local\Temp\claude\C--SourceCode-jfx-ffm\16d8edcc-5244-4cc6-b7f7-21d459e4d1ba\scratchpad\phase1\gst-platform-notes.md`.
 
+> **Status note (added after the migration landed).** This is a read-only audit taken at the *start*
+> of branch `ffm/media`. It is kept as the evidence behind `FFM-ABI-CONTRACT.md`, not as a
+> description of the current tree, and one thing in it has gone stale in a way worth flagging before
+> you read it: **it cites Makefiles (and `.vcxproj` / `.pbxproj`) as primary build evidence — source
+> lists, `-D` defines, link libraries, include paths — and that build system was deleted in this same
+> branch.** It was replaced by CMake: `modules/javafx.media/native/CMakeLists.txt` plus `win.cmake`,
+> `linux.cmake` and `mac.cmake` (35 files and 6,853 lines out, 4 files and 2,063 lines in). The
+> **evidence remains directionally valid** — the CMake files were derived from those makefiles and
+> the source sets were checked against them file by file — but the mechanics no longer exist, so do
+> not go looking for `jfxmedia/projects/<os>/Makefile` or the `vs_project` / `xcode_project` trees.
+> `FFM-BUILD-PLAN.md` is the current map of the build; the only survivor of the old inputs is
+> `gstreamer/projects/win/gstreamer-lite.def`, which the Windows build still consumes. Line numbers
+> throughout refer to the tree at the fork point. **The branch review named three audit documents as
+> carrying stale build citations; all five do** - `core-jni` and `ios` as well - which is why this
+> same note appears in all five rather than in three of them.
+
 ## 1. Verdict
 
 **Migrate, and delete the dead glue while doing it — do not reimplement anything in Java.** This slice is a JNI marshalling layer (`GstMediaPlayer.cpp`, `GstMedia.cpp`, `GstPlatform.cpp`, `GstJniUtils.cpp`, plus the `jni/` classes they instantiate) sitting on top of a GStreamer engine (`GstMediaManager`, `GstPipelineFactory`, `GstAudioPlaybackPipeline`, `GstAVPlaybackPipeline`, `GstAudioEqualizer`, `GstAudioSpectrum`, `GstVideoFrame`). Triage over the 51 function groups ruled: **JNI-GLUE 12** (the 23 `JNIEXPORT` sites, the dispatcher, the warning listener, the Locator statics, `GstJniUtils`, `JniUtils`), **OS-CALL 34** (every pipeline/manager/factory method reaches `gst_*`/`g_*` — named per file in §4/§5), **PURE 4** (`GstElementContainer`, `CPipeline` base defaults, `CMedia`, `CMediaWarningDispatcher`), **PURE-HOT 1** (`ColorConvert_*` behind `GstVideoFrame::ConvertToFormat` — owned by the NativeVideoBuffer slice, `PARITY: unknown`), **WRAPPER 0**. The parity gate is moot for everything ruled here: the JNI glue becomes a flat C ABI (behaviour-neutral by construction), the four PURE units are either dead code (`CMediaWarningDispatcher`, never instantiated) or internal C++ helpers that are not a boundary, and the one PURE-HOT unit is out of slice. Three findings shape the plan: (a) **`GstJniUtils.cpp` is dead** — `GstGetEnv` has zero callers anywhere under `src/main/native`; (b) **the manager-level warning path is dead** — `CMediaWarningDispatcher` is never instantiated, so `CJavaMediaWarningListener` is never invoked; (c) **`gstreamer-lite.dll`/`glib-lite.dll` export by ordinal only (`[NONAME]`)**, so on Windows Java cannot bind `gst_*` by name — every "Java could call GStreamer directly" argument (the WRAPPER verdict) is blocked at the binary level, which is why the borderline one-liners (`SetVolume` → `g_object_set`) stay behind the C ABI.

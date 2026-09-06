@@ -207,12 +207,14 @@ ObjC locks, and `gst_element_set_state` can block on preroll.
 ## 5. ABI version guard and layout checks
 
 ```c
-#define JFXM_ABI_VERSION 3u
+#define JFXM_ABI_VERSION 4u
 JFXM_EXPORT uint32_t jfxm_abi_version(void);
 JFXM_EXPORT int32_t  jfxm_sizeof_player_callbacks(void);
 JFXM_EXPORT int32_t  jfxm_sizeof_stream_callbacks(void);
 JFXM_EXPORT int32_t  jfxm_sizeof_frame_info(void);
-JFXM_EXPORT int32_t  jfxm_offsetof_frame_info(int32_t field);   /* field index per section 8; -1 if out of range */
+JFXM_EXPORT int32_t  jfxm_offsetof_frame_info(int32_t field);        /* field index per section 8; -1 if out of range */
+JFXM_EXPORT int32_t  jfxm_offsetof_player_callbacks(int32_t field); /* JFXM_PLAYER_CALLBACKS_* index; -1 if bad */
+JFXM_EXPORT int32_t  jfxm_offsetof_stream_callbacks(int32_t field); /* JFXM_STREAM_CALLBACKS_* index; -1 if bad */
 /* Drift guards: the Java constant this library copies, by index; -1 if out of range. */
 JFXM_EXPORT int32_t  jfxm_event_player_state(int32_t pipeline_state);
 JFXM_EXPORT int32_t  jfxm_audio_track_channel(int32_t channel);
@@ -223,10 +225,53 @@ JFXM_EXPORT int32_t  jfxm_log_level(int32_t level);
 `UnsatisfiedLinkError` naming expected and actual versions. The binding test compares the three
 `StructLayout.byteSize()` values and every `JfxmFrameInfo` field offset with the C side.
 
-Version history: 1 was the initial ABI; 2 added `jfxm_audio_track_channel` and `jfxm_log_level`.
-Adding a symbol bumps the version even though it takes nothing away, because `JfxMediaNative` binds
-every handle eagerly - a library built before those two fails on symbol resolution and reports a
-missing symbol instead of the version mismatch this guard exists to produce.
+### 5.1 Why the two callback tables need `offsetof` and not just `sizeof`
+
+`jfxm_sizeof_player_callbacks` / `_stream_callbacks` cannot detect the failure they look like they
+guard against, and this is worth stating explicitly because it was a real review finding (**S1**):
+
+* **Every slot in both tables is a function pointer.** Any permutation of the slots therefore
+  produces the **same `byteSize`**. A size check is *structurally incapable* of detecting a
+  reordering.
+* **The Java layouts are generated from the Java slot arrays.** `PLAYER_CALLBACKS` and
+  `STREAM_CALLBACKS` are built by `tableLayout(PLAYER_SLOTS)` / `tableLayout(STREAM_SLOTS)`, and
+  `invokeSlot` then reads slots by name out of that same Java-derived layout. The two sides agreed
+  because they were derived from one source, not because anything compared them.
+
+A divergence - a slot inserted in the middle of the C struct, or two reordered - would leave both
+sides self-consistent, keep every existing test green, and show up only at runtime as calls landing
+on the **wrong function pointer**: video frames delivered to the error handler, or a `size_t` read as
+a callback address. Detecting that needs actual playback, which this fork has only ever done by hand.
+
+`jfxm_offsetof_player_callbacks` and `jfxm_offsetof_stream_callbacks` close it. Each takes an index
+from the matching enum in `jfxmedia_api.h` - `JFXM_PLAYER_CALLBACKS_MEDIA_ERROR = 0` through
+`_WARNING = 12` (`JFXM_PLAYER_CALLBACKS_FIELD_COUNT = 13`), `JFXM_STREAM_CALLBACKS_NEED_BUFFER = 0`
+through `_CLOSE_CONNECTION = 8` (`JFXM_STREAM_CALLBACKS_FIELD_COUNT = 9`) - resolves it to a **named**
+struct member and returns the C compiler's own `offsetof`, or `-1` for anything out of range. They are
+pure, callable from any thread and hold no state; `jfxm_offsetof_frame_info` was the model.
+`JfxMediaNativeTest.callbackTableSlotOffsetsMatchTheCompiledStructs` asserts, per index,
+`LAYOUT.byteOffset(groupElement(name(i))) == offsetofXxx(i)`, plus `-1` at `-1` and at the slot count.
+It deliberately does **not** hard-code `i * 8` as the expectation - that would be the
+by-construction trap all over again.
+
+**The invariant a future change must keep, and it is append-only:** append the new slot to the end of
+the C struct, append its enumerator immediately before `*_FIELD_COUNT`, bump the count, append the
+matching entry to the end of the Java `PLAYER_SLOTS` / `STREAM_SLOTS` array. Never insert into the
+middle, and never renumber.
+
+**The residual, recorded so the test is not read as stronger than it is:** C exports an *index*, not a
+slot *name*. Reordering the Java `PLAYER_SLOTS` array moves both sides of every comparison together,
+so it stays green. What the assertion does pin is that **C's index enum agrees with C's struct
+declaration order** - the "move a member, forget to renumber the enum" edit that silently redirects
+every upcall while `sizeof` stays 104 / 72. Closing the Java half would need C to export the slot
+*names*.
+
+### 5.2 Version history, and when a bump is the right instrument
+
+1 was the initial ABI; 2 added `jfxm_audio_track_channel` and `jfxm_log_level`. Adding a symbol bumps
+the version even though it takes nothing away, because `JfxMediaNative` binds every handle eagerly -
+a library built before those two fails on symbol resolution and reports a missing symbol instead of
+the version mismatch this guard exists to produce.
 
 3 changed `JfxmStreamCallbacks::copy_block` from `void` to `int32_t` (section 9) and made
 `jfxm_log_init` report success when logging is compiled out (section 6). Neither touches a symbol
@@ -236,12 +281,41 @@ layout checks still pass against a version-2 library - the *only* thing that sep
 return value Java never wrote and fail every block on a garbage byte count; the guard exists
 precisely for a drift a size check cannot see.
 
-**`fxplugins` is version-locked to `jfxmedia`.** The version-3 `copy-block` contract spans two
-shared libraries and `jfxm_abi_version` guards only one of them: the signal's `G_TYPE_INT` return
-type and its `source_marshal_INT__POINTER_INT` marshaller live in **fxplugins**
-(`gstreamer/plugins/javasource/javasource.c:256`, `marshal.c:171`, `marshal.in`), while the handler
-`CGstPipelineFactory::SourceCopyBlock` and `jfxm_abi_version` itself live in **jfxmedia**. A
-mismatched pair passes every check in this section and then fails badly:
+4 added `jfxm_offsetof_player_callbacks` and `jfxm_offsetof_stream_callbacks` (section 5.1). Nothing
+existing changed shape, and the bump is under the **revision-2** rule rather than the revision-3 one:
+eager binding means an older library answers a new symbol with "missing native symbol:
+jfxm_offsetof_player_callbacks" instead of the one-sentence version mismatch. The mixed pair that
+actually occurs here is a Java side *newer* than the library it finds - `-DskipNative=true` reusing
+`target/native/bin`, or a stale `jfxmedia` in `../caches/sdk/bin` shadowing a fresh one, both of which
+this fork has hit - and `checkAbiVersion()` runs in its own static block before any other symbol
+binds, so the bump turns that into one sentence naming both versions.
+
+**Not every departure is a bump, and the distinction matters.** Read the revision-3 note precisely: it
+bumped because a mismatched pair would **silently misbehave**, with nothing else to tell the two sides
+apart. A behaviour change that *cannot* silently misbehave does not need the version constant, and
+spending it anyway trains people to ignore it. The worked example is the departure recorded in section
+14.1 for a second `jfxm_player_init` on one media handle: the affected path has no in-tree caller, and
+both mix directions fail safely - an older Java against a newer library receives an error code it
+already handles, and a newer Java against an older library gets the pre-existing leak. That one is
+written into section 14.1 and **`JFXM_ABI_VERSION` stays at 4**. The rule, for the next person facing
+this call: **the guard exists to convert a silent corruption into a clean diagnostic, not to count
+edits.** Bump when a mismatched pair would misbehave without saying so; otherwise write it in 14.1.
+
+*One note for anyone reading this against the branch review.* The review reports a stale ABI
+**function count** in this document, alongside the genuinely stale ones in `FFM-STATUS.md`. There was
+never one: this document has never quoted how many `jfxm_*` functions exist, and its only other
+number of that shape - the 54 `Java_*` exports of the prebuilt JNI-era `jfxmedia.dll` in section 0 -
+is about master and is correct. What *was* stale here is the `#define JFXM_ABI_VERSION` mirrored at
+the top of this section, which said `3u`; it now says `4u` and matches `jfxmedia_api.h`. Do not go
+looking for a function count to fix.
+
+### 5.3 `fxplugins` is version-locked to `jfxmedia`
+
+The version-3 `copy-block` contract spans two shared libraries and `jfxm_abi_version` guards only one
+of them: the signal's `G_TYPE_INT` return type and its `source_marshal_INT__POINTER_INT` marshaller
+live in **fxplugins** (`gstreamer/plugins/javasource/javasource.c:256`, `marshal.c:171`,
+`marshal.in`), while the handler `CGstPipelineFactory::SourceCopyBlock` and `jfxm_abi_version` itself
+live in **jfxmedia**. A mismatched pair passes every check in this section and then fails badly:
 
 * fresh `fxplugins` + stale `jfxmedia`: the `INT__POINTER_INT` marshaller calls a `void`-returning
   `SourceCopyBlock` through a `gint (*)(gpointer, gpointer, gint, gpointer)` pointer and reads the
@@ -258,6 +332,9 @@ real occurrence: `fxplugins` is loaded by name as a declared dependency of `jfxm
 through the root pom's `${jfx.native.librarypath}`, and `WEBKIT-MEDIA-STUBS.md` tells you to delete
 stale `jfxmedia*`, `gstreamer-lite*`, `glib-lite*` and `fxplugins*` from there for exactly that
 reason. Ship, cache, copy and delete the media libraries as one set; never mix builds.
+
+`libjfxmedia_avf.dylib` is locked to `libjfxmedia.dylib` the same way, for a reason **no version
+number can guard at all** - see the cross-dylib vtable packaging invariant in section 14.3.
 
 The three drift guards exist because the generated JNI headers that used to keep the C copies of
 `NativeMediaPlayer.eventPlayer*`, `AudioTrack.*` and `Logger.*` in step with Java are gone. Each
@@ -342,7 +419,8 @@ JFXM_EXPORT int32_t jfxm_media_create(int32_t backend,
                                       void** out_media);
 
 /* Replaces Java_..._GSTMedia_gstDispose and the teardown half of Java_..._OSXMediaPlayer_osxDispose.
- * After it returns no callback of any table fires again; Java then unregisters and closes arenas. */
+ * After it returns no callback of any table fires again; Java then unregisters and closes arenas.
+ * How far that promise actually reaches, per backend and per path, is in section 7.1. */
 JFXM_EXPORT void    jfxm_media_dispose(void* media);
 
 /* Replaces Java_..._GSTMediaPlayer_gstInitPlayer and the player half of osxCreatePlayer. Creates the
@@ -376,13 +454,104 @@ JFXM_EXPORT int32_t jfxm_player_get_mute(void* media, int32_t* out_mute);
 JFXM_EXPORT int32_t jfxm_player_set_mute(void* media, int32_t mute);
 ```
 
-Failure of `jfxm_player_init` leaves the media handle alive: the Java caller must call `jfxm_media_dispose` itself before propagating the error when it created the media in the same constructor (`OSXMediaPlayer`); `GSTMediaPlayer` leaves that to `GSTMedia.dispose()` exactly as today. On AVF no callback of the table fires after a failed init — `jfxm_avf_player_init` deletes the dispatcher on every failure path. On GST that is not true: the GST backend has by then installed a by-value copy of the table on the pipeline, and `CGstAudioPlaybackPipeline::Init` attaches the bus watch and starts the main loop before the `gst_element_set_state(PIPELINE, GST_STATE_PAUSED)` call that can fail, so a sink error there — the ordinary "audio device cannot be opened" case on a headless machine — still reaches `SendPlayerMediaErrorEvent` through `BusCallback` on the media-manager main-loop thread, a slot of that same table, after `jfxm_player_init` has already returned failure. That is exactly why the function pointers and user values must stay valid until `jfxm_media_dispose` has returned — the same lifetime rule `jfxm_media_create` states for the stream tables. `jfxm_player_init` may be called at most once per media handle: AVF returns `ERROR_MEDIA_CREATION` on a second call, while the GST backend does not detect one and would replace the dispatcher. `NativeMediaPlayer.dispose()` already calls `playerDispose()` and then `media.dispose()` under one lock, so `OSXMedia.dispose()` is where the AVF teardown now happens (previously `osxDispose` in `playerDispose()`); the only difference is that the Java-side field clearing of `playerDispose()` runs a few lines earlier.
+Failure of `jfxm_player_init` leaves the media handle alive: the Java caller must call `jfxm_media_dispose` itself before propagating the error when it created the media in the same constructor (`OSXMediaPlayer`); `GSTMediaPlayer` leaves that to `GSTMedia.dispose()` exactly as today. On AVF no callback of the table fires after a failed init — `jfxm_avf_player_init` deletes the dispatcher on every failure path. On GST that is not true: the GST backend has by then installed a by-value copy of the table on the pipeline, and `CGstAudioPlaybackPipeline::Init` attaches the bus watch and starts the main loop before the `gst_element_set_state(PIPELINE, GST_STATE_PAUSED)` call that can fail, so a sink error there — the ordinary "audio device cannot be opened" case on a headless machine — still reaches `SendPlayerMediaErrorEvent` through `BusCallback` on the media-manager main-loop thread, a slot of that same table, after `jfxm_player_init` has already returned failure. That is exactly why the function pointers and user values must stay valid until `jfxm_media_dispose` has returned — the same lifetime rule `jfxm_media_create` states for the stream tables. `jfxm_player_init` may be called at most once per media handle, and **both backends now enforce that the same way**: a second call returns `ERROR_MEDIA_CREATION` and leaves the first dispatcher in place (section 14.1). AVF has always done so; the GST backend used to replace the dispatcher, leak the old one and return `CPipeline::Init()`'s result. `NativeMediaPlayer.dispose()` already calls `playerDispose()` and then `media.dispose()` under one lock, so `OSXMedia.dispose()` is where the AVF teardown now happens (previously `osxDispose` in `playerDispose()`); the only difference is that the Java-side field clearing of `playerDispose()` runs a few lines earlier.
 
 `GSTMediaPlayer` keeps `throwMediaErrorException` on non-zero returns; `OSXMediaPlayer` keeps
 today's convention (throw only on create/init, ignore return codes of the other calls, return the
 same defaults as before when a call fails). The `jlong` <-> `long` truncation of
 `gstSetAudioSyncDelay` on Windows (C `long` is 32-bit) is preserved on the C side by casting
 exactly as the pipeline code does; the ABI type is `int64_t` because that is what `jlong` was.
+
+### 7.1 How far the `jfxm_media_dispose` guarantee actually reaches
+
+`jfxm_media_dispose`'s header comment says *"after it returns no callback of any table fires again;
+Java then unregisters and closes arenas."* Java relies on it literally: `OSXMediaPlayer` and
+`GSTMediaPlayer` close the `Arena.ofShared()` that owns all 13 upcall trampolines the moment dispose
+returns, which **unmaps** them. A callback arriving afterwards is not a stale-pointer read that
+usually gets away with it, as it was under JNI; it is a jump to an unmapped page. Under JNI the same
+race existed and a stale `CJavaPlayerEventDispatcher*` frequently still held a usable `JavaVM*`, so
+it often "worked". The migration did not create that race - it removed the luck that was hiding it.
+
+**The rule the AVF fence follows, and it is the whole design in one line:** hold the monitor across
+the `eventHandler->Send*` calls, and **never across an AVFoundation call**. It is written into
+`-observeValueForKeyPath:ofObject:change:context:` in those words, with the reason named -
+`-resourceLoader:shouldWaitForLoadingOfRequestedResource:` takes this same monitor on the loader
+queue, so any AVFoundation call under the monitor that can trigger a synchronous load is a lock-order
+inversion - and `-extractTrackInfo` and `-createVideoOutput` back-reference it. Everything
+AVFoundation-side is therefore outside the monitor: the change dictionary, `_player.error`,
+`CMTimeGetSeconds(...duration)`, every `AVAssetTrack` read, and the audio-mixer wiring.
+
+| Path | State |
+|---|---|
+| GStreamer, all slots | **Honoured.** `jfxm_media_dispose` drives the pipeline to `GST_STATE_NULL` and tears down the bus watch before returning; no GStreamer thread can be inside a slot after that. |
+| AVF KVO (`-observeValueForKeyPath:`), duration and tracks | **Fenced.** An advisory unlocked early-out, then the monitor **only around the sends**. `-removeObserver:forKeyPath:` does not drain a notification already being delivered on another thread (a documented Apple hazard), so the monitor is what closes it, not the removal. No longer deadlock-prone, because no AVFoundation call is made under it. |
+| AVF track extraction (`-extractTrackInfo`) | **Fenced**, by the same shape: unlocked early-out, monitor around the sends only, `AVAssetTrack` reads outside it. |
+| AVF `AVPlayerItemDidPlayToEndTimeNotification` main-queue block | **Fenced**, via `-setPlayerState:`, which is the funnel every state event in this player passes through from all four calling threads - the Java caller, the KVO thread, the main queue and the disposing thread. Its whole body is under the monitor behind an `isDisposed` test, which it can afford because it is nothing but a send. This is the path that previously had no fence at all: `-removeObserver:` does not cancel a block already enqueued on the main queue, and `blockSelf` is only `__weak`, so it can still be non-nil while an autorelease pool holds the player. `-dispose` calls `-setPlayerState:` itself, from inside the monitor and **before** setting `isDisposed`, so the HALTED event still goes out exactly as before - `@synchronized` is recursive per thread. |
+| AVF video output (`-createVideoOutput`) | **Fenced** by an `isDisposed` test inside its pre-existing monitor - and it is **the one place left where the monitor is held across AVFoundation calls** (`addOutput:`, the display link). See the constraint below. |
+| AVF audio spectrum (`-sendSpectrumEventDuration:timestamp:`) | **Honoured, and permanently unfenced by necessity.** `SetBands(0, NULL)` blocks until an in-flight `UpdateBands` upcall returns, after which `mBands` and `mSpectrumCallbackProc` are NULL - so it is genuinely fenced by the thing that already had to block. Adding the monitor here deadlocks; see below. |
+| AVF display link (`displayLinkCallback` -> `-sendPixelBuffer:frameTime:hostTime:`) | **Not honoured - HIGH-M1 is OPEN on this path.** An unlocked `isDisposed` test only. See below. |
+
+**`-createVideoOutput` is a known, accepted exception to the rule.** It predates this fork and was not
+narrowed with the rest. It survives the rule for a specific reason worth keeping written down rather
+than leaving in a comment: none of the calls it makes under the monitor reads an `AVAssetTrack`
+property, which is the call class with a documented synchronous-load fallback, and whatever loading
+`addOutput:` goes on to cause happens on AVFoundation's own threads and is not waited for here.
+Narrowing it anyway is a reasonable follow-up, and **it is the second place to look if a `jar:`/`jrt:`
+source ever hangs at load** - the first being the resource-loader inversion the rule exists to
+prevent.
+
+**The two things `-dispose` waits on, which is why the fence is shaped the way it is.** `-dispose`
+holds the monitor from first line to last, and inside it waits on another thread twice:
+
+* `SetBands(0, NULL)` waits on the **real-time audio thread**: `AVFAudioSpectrumUnit::UpdateBands`
+  holds `mBandLock` across `mSpectrumCallbackProc`, and `SetBands` takes that same lock. So the RT
+  audio thread **must never take this monitor** - and does not, because
+  `-sendSpectrumEventDuration:timestamp:` is deliberately left unfenced. **Fencing it deadlocks
+  immediately**: dispose waiting on the band lock, RT thread waiting on the monitor. That is written
+  into the code comment as well, so that nobody "finishes the job" by adding it.
+* `CVDisplayLinkStop` may or may not wait on the display-link thread. If it does, giving
+  `-sendPixelBuffer:` this monitor is a guaranteed hang on the thread running `MediaPlayer.dispose()`
+  whenever a frame is in flight - i.e. routinely. Trading an unproven crash for a probable hang is
+  the wrong way round, which is why the guard there is a plain flag test.
+
+**HIGH-M1 is closed on the KVO, track and main-queue paths and OPEN on the display-link path. Do not
+record it as fixed.** An adversarial review of the fix established that the display-link path stays
+open *whichever way* the `CVDisplayLinkStop` question resolves, which is why the flag test is a
+mitigation and not a fix:
+
+* **If `CVDisplayLinkStop` does join** an executing callback, then the guard in
+  `-sendPixelBuffer:` is dead code - the race it tests for cannot happen - and the path is safe for
+  a reason that has nothing to do with the guard.
+* **If it does not join**, the guard is insufficient. `displayLinkCallback` dereferences the
+  unretained `(__bridge void*)self` in **five places outside** the guarded send, and calls
+  `CVDisplayLinkStop` on an already-released reference. Testing `isDisposed` inside
+  `-sendPixelBuffer:` narrows the upcall window to a few instructions; it does nothing about the
+  use-after-free of `self` on the way there.
+
+**What settles the display-link case:** someone on a Mac establishing whether `CVDisplayLinkStop`
+joins. If it joins, nothing further is needed on this path. If it does not, the fix is larger than a
+flag: the callback has to stop touching an unretained `self` at all, and the fence has to be a lock
+`-dispose` can release *before* calling `CVDisplayLinkStop` (or a trylock the display-link thread can
+fail), never this object's monitor, which it holds throughout.
+
+**`isDisposed` is `_Atomic(BOOL)`**, not `volatile BOOL`. The generated code is the same; what changes
+is that the plain concurrent read/write pair it replaced was formally undefined behaviour, which
+matters here because the display-link guard reads it with no lock at all. **Flagging it as the single
+highest uncompiled risk token in this diff:** only clang compiling Objective-C++ will ever see that
+declaration, and nothing on the machine this was written on can. If macOS CI rejects `_Atomic(BOOL)`
+in an ObjC++ header, `volatile BOOL` is the fallback - it is what was there before, and it loses only
+the formal guarantee, not the behaviour.
+
+**What has and has not been verified for this table.** The AVF backend **is compiled and linked in
+CI on both macOS architectures on every push** - `macos_x64_build` and `macos_aarch64_build`, a full
+`mvn install` with no `-DskipNative`, `Built target jfxmediaAvf` in the logs - and because
+`add_media_library` uses `SHARED` with the default `-undefined error`, macOS is the one platform
+where a dangling symbol is fatal at link, so those green links are real symbol-level evidence
+(`FFM-STATUS.md` section 4). What that does **not** establish is any of the behaviour in this table.
+**No macOS runtime behaviour has been observed at all**, no macOS playback has ever run, and the
+dispose-fencing changes described here are **uncommitted**, so they have not been in any CI run
+either. There is no Objective-C toolchain on the machine this was written on, so every row above is
+reasoning from source.
 
 ## 8. Video frames (replaces the 13 `NativeVideoBuffer` natives)
 
@@ -685,7 +854,22 @@ Nothing is committed by the automation; the user commits.
 
 ### 14.1 Deliberate departures from the JNI behaviour (do not "restore parity" by undoing these)
 
-Everything above is behaviour-neutral. These few points are not, and each one is intentional:
+Everything above is behaviour-neutral **with one exception stated in place**: section 9's
+`copy_block` change from a `void` slot to an `int32_t` one. That is a departure, section 9 is honest
+about it, and it is listed again at the end of this section so that a reader of the register does not
+have to have read section 9 to know about it.
+
+This section is the register. Its purpose is that **every departure is declared, not that there are
+none** - the project's rule is that a migration commit is observably equivalent, and the owner's
+position on breaking that rule is that a change which genuinely fixes a bug is welcome, "in the
+spirit of making it better". What is not acceptable is silence. Nothing below has been reverted or
+split out; what has changed is that it is written down, with a rationale and with the **observable
+delta** a user or a caller could notice. Three registers exist and they do not overlap: this one for
+behaviour departures in first-party code, section 14.2 for the vendored `gstreamer-lite` patches,
+section 14.3 for cross-language invariants the code depends on and no compiler enforces.
+`FFM-STATUS.md` section 4a is the fourth: pre-existing defects deliberately left alone.
+
+Each one is intentional:
 
 * `jfxm_player_get_audio_equalizer` and `jfxm_player_get_audio_spectrum` NULL-check the pipeline
   before asking it for the equalizer/spectrum; `GstMediaPlayer.cpp`'s `gstGetAudioEqualizer` /
@@ -730,15 +914,44 @@ Everything above is behaviour-neutral. These few points are not, and each one is
     and elsewhere, as an asynchronous `AVPlayerItemStatusFailed`. This is the seventh return of
     `jfxm_player_init` on AVF. A *throwing* `CLocatorStream` constructor is still uncovered, exactly
     as in `InitGstMedia`.
-* `OSXMedia.dispose()` closes the `jar:`/`jrt:` `ConnectionHolder` once `jfxm_media_dispose` has
-  returned. On AVF the `close_connection` upcall fires only from `AVFMediaPlayer`'s own dispose,
-  so any failure after `jfxm_media_create` had already succeeded - a failing `jfxm_player_init`,
-  say - left the stream open for the life of the JVM: `ConnectionHolder` has no finalizer and no
-  `Cleaner`, and `CallbackTable.unregister()` only drops the registry entry. The JNI code was
-  worse still, leaking the global ref permanently. `ConnectionHolder.closeConnection` is
-  idempotent, so on the normal path - where the upcall already ran inside `jfxm_media_dispose` -
-  closing a second time is a no-op. `GSTMedia` needs none of this: its pipeline teardown drives
-  READY->NULL, which fires `close_connection` on every path.
+* **Connection holders are closed by Java, on both backends, on every path.** An earlier revision of
+  this register said *"`GSTMedia` needs none of this: its pipeline teardown drives READY->NULL, which
+  fires `close_connection` on every path."* **That is false**, `GSTMedia.dispose()` does exactly the
+  thing the sentence says it does not need, and the code is right while the doc was wrong. Recorded
+  properly:
+  * `OSXMedia.dispose()` closes the `jar:`/`jrt:` `ConnectionHolder` once `jfxm_media_dispose` has
+    returned. On AVF the `close_connection` upcall fires only from `AVFMediaPlayer`'s own dispose, so
+    any failure after `jfxm_media_create` had already succeeded - a failing `jfxm_player_init`, say -
+    left the stream open for the life of the JVM: `ConnectionHolder` has no finalizer and no
+    `Cleaner`, and `CallbackTable.unregister()` only drops the registry entry. The JNI code was worse
+    still, leaking the global ref permanently.
+  * `GSTMedia.dispose()` does the same for `streamConnection` and `audioStreamConnection`, and needs
+    to. `close_connection` reaches the holders from `CGstPipelineFactory::SourceCloseConnection`,
+    i.e. from the pipeline's `READY -> NULL` transition - so a pipeline that **never left
+    `GST_STATE_NULL`** never closes them at all. A media whose `jfxm_player_init` failed, or one that
+    `MediaManager.getMedia()` created and nothing ever played, is exactly that case, and its
+    connection stayed open for the life of the JVM.
+  * `GSTMedia.createNativeMedia` closes the holders it created on **every** failing return (the
+    `finally` block, which also calls `releaseCallbacks()` and clears both fields).
+    `OSXMedia.initNativeMedia` does the same for its single holder. On the success path C closes them;
+    but a failing `jfxm_media_create` never received the tables, so nothing else ever would. The JNI
+    code left the connection open until the holder was collected.
+  * **Observable delta, and it is the reason this belongs in a register rather than a changelog:**
+    there is now **synchronous close I/O on the disposing thread, under the media monitor** - and for
+    an HLS source that can be **network I/O**. `GSTMedia.dispose()` is `synchronized` and
+    `NativeMediaPlayer.dispose()` calls it under its own lock, so a slow close is a slow
+    `MediaPlayer.dispose()`. The JNI build had the same shape wherever the transition did happen
+    (`gstDispose` drove `READY -> NULL` from inside the same `synchronized dispose()`, and
+    `close_connection` ran the same close on that thread); the close that is genuinely new is the one
+    for a pipeline that never reached `READY`, where the holder has nothing open but the connection
+    the `Locator` made.
+  * Closing twice is safe and is expected on the normal path. The base holder and its File, URI and
+    Memory subclasses close idempotently, and `HLSConnectionHolder.closeConnection` gained an
+    `AtomicBoolean` compare-and-set plus null guards on `currentPlaylist` and `playlistLoader` - see
+    the HLS entry below. Nothing tracks which of the two callers closed a given holder, because
+    neither can see the other's: the upcall reaches the holder through the registry, not through the
+    media.
+  * `GSTMedia.createNativeMedia` and `OSXMedia.initNativeMedia` cite this bullet from their javadoc.
 * Windows only: `/OPT:ICF` folds functions with identical bodies, and once `__APPLE__` is compiled
   out `jfxm_player_get_mute` and `jfxm_player_set_mute` have identical bodies (both just return
   `ERROR_NOT_IMPLEMENTED` after the handle check). `dumpbin /EXPORTS` therefore shows them at the
@@ -754,3 +967,267 @@ Everything above is behaviour-neutral. These few points are not, and each one is
 * `jfxm_spectrum_set_bands` takes `(JfxmReleaseFn release, void* release_user)` on top of the JNI
   argument list (sections 4 and 11). That is not decoration: without it C has no way to tell Java
   that a band pair is dead, and `setBandCount()` during playback corrupts the heap.
+* **`CGstAudioSpectrum::UpdateBands` no longer dereferences a NULL holder.** Master called
+  `holder->UpdateBands(...)` on the result of `CBandsHolder::AddRef(m_pHolder)`, which returns `NULL`
+  when no holder has been installed. `GstAudioSpectrum.cpp:129-130` now returns instead. Observable
+  delta: a spectrum that produces data before `setBandCount` has installed a pair - or again after a
+  `SetBands` given none - drops the delivery rather than crashing the process. Unreachable through
+  `NativeAudioSpectrum` today, which is why it sat in `FFM-STATUS.md` section 4a for a while; it is a
+  fix, and section 4a no longer lists it as unfixed.
+* **`CGstAudioSpectrum::SetBands` swaps the holder under `m_BandsLock`.** Master did a bare
+  `g_atomic_pointer_get` followed by a `g_atomic_pointer_set`, which cannot make the read and the
+  `AddRef` in `UpdateBands` one step. `GstAudioSpectrum.cpp:101-119` now takes the lock across the
+  swap, and `UpdateBands` takes the same lock across its read-and-retain (`:124-126`). Both release
+  the superseded holder **outside** the lock, deliberately: dropping the last reference runs
+  `~CFfiBandsHolder`, which calls back into Java, and a spectrum thread blocked on `m_BandsLock` must
+  not be left waiting on a native-to-Java transition. Observable delta: two threads calling
+  `setBandCount()` on one spectrum can no longer both release the same superseded holder - a double
+  free, plus a `release` upcall on freed memory - while one of the two new holders is never released.
+  Serialised by `NativeAudioSpectrum` today, so unreachable, but the ABI's release-exactly-once
+  promise no longer rests on that assumption.
+* **A second `jfxm_player_init` on the same GST media handle is rejected.** It returns
+  `ERROR_MEDIA_CREATION` (0x0102), leaves the first dispatcher in place and frees the one the call
+  asked for. Master replaced `m_pEventDispatcher` without deleting the old one
+  (`CPipeline::SetEventDispatcher`), leaking it and - under FFM - a copy of 13 upcall stub addresses
+  with it, and returned `CPipeline::Init()`'s result. **The backends now agree**: AVF's
+  `jfxm_avf_player_init` has always returned `ERROR_MEDIA_CREATION` for a second call, so this removes
+  a divergence rather than creating one, and section 7's text has been corrected to match.
+  * *Why reject rather than delete the old dispatcher.* By the time a second init is possible the bus
+    watch is running, so a GStreamer thread can be inside a `Send*Event` on the first dispatcher.
+    Deleting it would convert a leak into a use-after-free on a foreign thread - a strictly worse
+    trade.
+  * *Observable delta:* none in-tree. No caller makes the second call; `NativeMediaPlayer` creates one
+    player per media.
+  * *Why this is **not** an ABI version bump.* See section 5.2. A mismatched pair cannot silently
+    misbehave here: an older Java against a newer library receives an error code it already handles,
+    and a newer Java against an older library gets the pre-existing leak. `JFXM_ABI_VERSION` stays
+    at 4.
+  * *Two corrections to the review record, verified against the merge base.* The reviewer speculated
+    that the JNI-era orphaned dispatcher was lighter than the FFM one; it was not - the JNI orphan
+    held **global refs**, pinning the Java player graph. And the FFM orphan holds stub addresses **by
+    value**, which does not by itself keep the `Arena.ofShared()` open: Java closes that arena
+    explicitly. So "strictly worse under FFM" is wrong in both halves. The JNI-parity claim itself was
+    reported unverified and is now confirmed: `939aa61ea` `GstMediaPlayer.cpp:54-79` shows
+    `gstInitPlayer` unconditionally `new`ing a dispatcher, and `939aa61ea` `Pipeline.cpp:63-66` is the
+    same bare assignment. Not drift.
+* **The AVF resource-loader read loop was rewritten** (`AVFMediaPlayer.mm`, the
+  `-resourceLoader:shouldWaitForLoadingOfRequestedResource:` fill loop). Master read the block count
+  into an **`unsigned int`**, so `-1` (EOS) and `-2` (error) became values near `UINT_MAX`, passed the
+  `blockSize <= 0` test, and fell through into copying data the stream had never staged. The branch
+  keeps the count `int`; breaks on negative and distinguishes EOS from error; breaks on `0`; clamps
+  against the loop's remaining `requestedLength` rather than `dataRequest.requestedLength`; treats a
+  short `CopyBlock` as a failure; and answers a failed read with `finishLoadingWithError:`
+  (`ERROR_LOCATOR_CONNECTION_LOST`) instead of `finishLoading`. Every one of those is a fix.
+  * *Observable delta, and it is a real one:* a `jar:`/`jrt:` media whose Java read throws mid-playback
+    previously got garbage bytes handed to the demuxer and usually played on or glitched. It now fails
+    the loading request, which fails the `AVPlayerItem` and surfaces as `kPlayerState_HALTED` - **a
+    `MediaException` where master gave a glitch.** That is a better failure, and it is still a
+    different one.
+  * *Blast radius is small.* `onCopyBlock` stages `min(bufferCapacity, size)` and every in-tree
+    `ConnectionHolder` guarantees capacity at least the requested `readSize`, so the short-copy branch
+    is effectively unreachable; the change that can actually be observed is confined to the `-2` and
+    EOS paths.
+* **`HLSConnectionHolder.closeConnection` is idempotent.** It gained an `AtomicBoolean`
+  compare-and-set plus null guards on `currentPlaylist` and `playlistLoader`. This is a genuine
+  double-close/NPE fix, and it is *made necessary* by the close paths above: the Java-side close and
+  the `close_connection` upcall can now both reach the same holder, from different threads, and
+  neither can see the other's. Observable delta: a second close is a no-op instead of an NPE.
+* **`ConnectionHolderBridge` is new API surface, and it is reachable from `javafx.web`.** The
+  `JfxmStreamCallbacks` upcall targets in `JfxMediaNative` need `needBuffer`, `isSeekable`,
+  `isRandomAccess`, `readBlock` and `property` on a `ConnectionHolder`. `JavaInputStreamCallbacks.cpp`
+  reached them through `CallBooleanMethod`/`CallIntMethod`, which performs no access check; ordinary
+  Java code does, so the five members are forwarded through a public bridge class rather than being
+  widened on `ConnectionHolder` itself. That keeps `ConnectionHolder`'s own API untouched but does
+  **not** confine the widening to the package: `module-info.java` carries
+  `exports com.sun.media.jfxmedia.locator to javafx.web`, so the bridge is reachable from
+  `javafx.web`, on a holder a live pipeline owns. Accepted rather than designed around - `javafx.web`
+  is first-party, is built from this repository, and uses exactly one type of this package
+  (`Locator`, in `com.sun.javafx.webkit.prism.WCMediaPlayerImpl`); containing it would mean moving
+  `ConnectionHolder` and `HLSConnectionHolder` out of an exported package, which
+  `Locator.createConnectionHolder()` and `Locator.getAudioStreamConnectionHolder(ConnectionHolder)`
+  would then name in signatures `javafx.web` cannot resolve. It is real API-surface growth introduced
+  *for* the migration, and it is recorded here for that reason.
+* **A player built over an already-disposed source media reports `ERROR_MEDIA_INVALID` (260).**
+  `NativeMedia.runAfterDispose` now returns a boolean saying whether the action was registered for
+  later or run inline because the media was already disposed; `GSTMediaPlayer` and `OSXMediaPlayer`
+  skip `playerInit` in the second case and fall into the failure path they already had, which
+  disposes and throws the proper `MediaException`. Previously they went on to call `playerInit` with a
+  closed arena and got an `IllegalStateException`. The check is race-free because
+  `runAfterDispose` is `synchronized` on the same monitor `dispose()` holds - a caller-side
+  `isDisposed()` pre-check would have had a real window. Observable delta: none in-tree, since no
+  caller passes a disposed media; this is hardening, recorded because that is what this register is
+  for.
+* **`JfxMediaNative.onRelease` no longer unregisters before it knows what it has.** Master's FFM code
+  looked the id up, unregistered it unconditionally, and then switched on the type. It now switches on
+  the lookup and unregisters only inside the `BandHandover` and `Runnable` arms; an unrecognised type
+  logs at `Logger.ERROR` and **keeps** the entry, because silently dropping it is the failure the
+  finding was about. `case null` stays silent - a double release is harmless, as it is for every other
+  slot.
+* **`copy_block` returns the number of bytes copied** (section 9, ABI revision 3), where the JNI slot
+  was `void` and `memcpy`'d `size` bytes unconditionally. The Java target bounds the copy by what is
+  staged, zero-fills the remainder, logs at ERROR and returns the count. This is listed here as well as
+  in section 9 so that this register is complete. **It is not a parity defect**: the old behaviour on
+  the input where the two differ was a heap over-read, i.e. undefined, and the short path is
+  unreachable through GStreamer anyway, because `javasource.c` allocates exactly the length
+  `read_next_block` returned.
+* **An AVF player state change can now wait on a resource-loader read.** The dispose fence puts the
+  monitor around `-setPlayerState:`'s send, and
+  `-resourceLoader:shouldWaitForLoadingOfRequestedResource:` takes the same monitor on the loader
+  queue, so a state event can block behind an in-flight read. The wait is bounded by a local
+  `jar:`/`jrt:` read; the resource loader is **never installed at all for `file:` or `http:`
+  sources**, so those paths cannot see it; and it is the same wait `-dispose` already took before
+  this change. Recorded because it is a real, if small, new coupling between the state machine and
+  I/O, and because section 7.1's rule - never hold the monitor across an AVFoundation call - exists
+  precisely to keep it from becoming a lock-order inversion.
+* **`AVFMediaPlayer`'s `isDisposed` is `_Atomic(BOOL)`**, where it was a plain `BOOL` and briefly a
+  `volatile BOOL`. No generated code changes; what changes is that the concurrent read/write pair it
+  replaced was formally undefined behaviour, which matters because the display-link guard reads it
+  with no lock. It is also **the single highest uncompiled risk token in this branch** - only clang
+  compiling Objective-C++ will ever see that declaration, and nothing on the machine this was
+  written on can. `volatile BOOL` is the fallback if macOS CI rejects it (section 7.1).
+* **Internal changes with no observable delta**, recorded only because the register should be
+  complete: `CPipeline::SetEventDispatcher` now returns `bool` (one call site); `m_bClosed` is an
+  `int` accessed with `g_atomic_int_get`/`g_atomic_int_set`, so there is one atomic load per
+  stream-callback call where there was a plain load.
+
+### 14.2 Patches to the vendored `gstreamer-lite` tree (the patch manifest)
+
+These files are **third-party sources under their own licence**, and they are the one part of the
+module `buildtools/ffm-media/verify-no-jni.pl` deliberately cannot see: it skips
+`gstreamer/gstreamer-lite`, `gstreamer/3rd_party` and `gstreamer/plugins`, correctly, because those
+trees contain no JNI. The exclusion is right and the consequence is that **no automated control in
+this branch covers a change made in them**. This subsection is that control: it is the manifest of the
+local delta, and a future upstream GStreamer merge should start here rather than with `git log`.
+
+Measured at the merge base `939aa61ea`: seven files, `+500 / −71`. Per-file deltas are in
+`FFM-STATUS.md` section 1b.
+
+**`plugins/javasource/javasource.c`** (+78 / −7) and **`marshal.c` / `marshal.h` / `marshal.in`**
+(+21 / −17, +7 / −7, +1 / −1)
+
+* The `copy-block` signal is re-registered with `G_TYPE_INT` and an `INT__POINTER_INT` marshaller so
+  that the Java side's byte count reaches C (section 9, ABI revision 3). Both `javasource` paths act
+  on a short return: the push path (`java_source_loop`) unrefs the buffer, sets `GST_FLOW_ERROR` and
+  stops the task, so the buffer is never pushed; the pull path (`java_source_getrange`) unmaps and
+  unrefs and returns `GST_FLOW_ERROR`, so the pulling element reports the failure instead of receiving
+  short data. Master pushed whatever was in the freshly allocated, uninitialised buffer.
+* **`marshal.c` and `marshal.h` are generated**, by `glib-genmarshal` from `marshal.in`, and
+  **`marshal.in` was correctly updated too** - line 11 now reads `INT:POINTER,INT`. This is the single
+  highest-yield trap in the whole change and the authors did not fall into it: had the generator input
+  been left at `VOID:POINTER,INT`, the next regeneration would have **silently reverted `copy_block`'s
+  return value to garbage**, with the failure mode described in section 5.3 and no diagnostic
+  anywhere. If you regenerate these two files, regenerate them from `marshal.in` and diff the result
+  against what is committed.
+
+**`gstreamer-lite/gst-plugins-good/sys/directsound/gstdirectsoundnotify.cpp` / `.h`** (+232 / −21,
++57 / −1) and **`gstdirectsoundsink.c`** (+104 / −17)
+
+* **A deliberate, permanent, unbounded leak on the registered path.** `ReleaseNotificator` calls
+  `Dispose()` and then does **not** free the `GSTDirectSoundNotify` - about 80 bytes of heap holding a
+  valid vtable pointer, a valid `SRWLOCK` and a NULL callback pair. This is the departure with the
+  largest cost in the branch, and it is recorded here in full because **the tests still cannot detect
+  the leak itself**. That claim is now narrower than it was, and the difference is worth stating.
+  When this entry was first written, the only test that opened an audio sink was skipped wherever
+  there was no audio output - which included CI - and asserted nothing when it did run; twenty green
+  tests would have been equally green at 80 MB leaked per playback. Since then
+  `JfxMediaNativeTest.playerOverATinyWavFileDisposesWithoutLeaks` gained real assertions - the
+  event-queue thread count back to baseline under a bounded wait, total JVM threads no more than
+  baseline + 10 after 20 playbacks, and registry size back to baseline - and `MediaPlaybackTest` runs
+  and asserts in full on both Linux CI jobs, which write a null `~/.asoundrc` so the sink always
+  opens. So the *thread* and *registry* halves of the trade are now pinned, and the 20-playback
+  thread bound is precisely the shape that would catch an unbounded thread leak here.
+  **The heap allocation is still invisible to all of it**: no test measures native memory, and 80
+  bytes per playback would not move any assertion that exists. Read the trade as deliberate and
+  partially fenced, not as detected.
+  * *Why.* MMDevAPI keeps the raw pointer it was handed at registration, takes no reference of its own,
+    and reaches the object through a **virtual call** - the vtable load happens inside MMDevAPI before
+    a single instruction of ours runs. No lock, flag or refcount taken on entry can come early enough
+    to protect the object's own lifetime, and `UnregisterEndpointNotificationCallback` promises no
+    in-flight drain, so a successful unregister does not rule the race out either. The only thing that
+    makes an already-dispatched call safe is the object still being there when it lands. The trade is
+    a fixed, inert allocation instead of a use-after-free, and it is the right way round.
+  * *Scale, in the authors' own words at the site:* an element is created per audio pipeline, "so per
+    `MediaPlayer` with audio and per `AudioClip.play()`, which makes it **proportional to playbacks
+    rather than to live players**". Each element also costs a thread create, a COM create and a thread
+    join. **That is what makes this MEDIUM rather than LOW:** 80 bytes is nothing, but it is unbounded
+    over process lifetime and keyed to the single most repeated operation in the audio API. A game
+    firing `AudioClip`s pays it per sound.
+  * *The failure path is different and does free.* `InitNotificator` calls `Release()` when `Init()`
+    returns false, and that is provably safe: `Init()` returns true only after
+    `RegisterEndpointNotificationCallback()` succeeded, so a false return means MMDevAPI was never told
+    the object exists.
+  * *The amortisation that was not done:* one process-wide notificator holding a list of sinks. That
+    changes who registers with MMDevAPI rather than how long the object lives, and it is separate work.
+* **A failed `UnregisterEndpointNotificationCallback` no longer aborts the process.** The
+  `assert(SUCCEEDED(hr))` is gone. Observable delta is confined to non-`NDEBUG` builds - release builds
+  compiled the assert out and are unaffected - where a driver-level unregister failure during teardown
+  now proceeds instead of aborting.
+* **The untimed join is deliberate and was deliberately kept.** `Dispose()` does
+  `WaitForSingleObject(m_hThread, INFINITE)` on the dispose path, which is routinely the FX Application
+  Thread. A timeout is **not** an available alternative: abandoning the apartment thread means the
+  unregister may never have been attempted, so MMDevAPI keeps dispatching with a pointer to a sink that
+  `gst_directsound_sink_finalize` is about to free; the callback pair is never cleared, so the drain
+  never happens; and the three `CloseHandle` calls run on handles the abandoned thread still owns and
+  is still waiting on. It converts a bounded stall into a use-after-free, which is the wrong trade at
+  any bound. The stall itself is bounded by MMDevAPI returning from the unregister - the same exposure
+  as before this thread existed, when those calls ran inline on the disposing thread - plus one
+  in-flight callback, which sets two flags and takes no lock.
+* **`gstreamer-lite` now defines its own no-op `DllMain`.** Runtime-identical: a DLL that defines none
+  gets the CRT's default, which is the same no-op. Its purpose is a **link-time assertion**. A DLL has
+  exactly one `DllMain`, so any future `DllMain` compiled into `gstreamer-lite` fails the link with
+  `LNK2005` naming this one, instead of shipping a deadlock. That is what turns the loader-lock
+  invariant in section 14.3 from aspirational into enforceable. **The limit, stated because it is
+  real:** it cannot cover a `DllMain` in another module of the process that reaches
+  `gst_directsound_sink_finalize`, because the loader lock is process-wide.
+
+### 14.3 Contract invariants the compiler cannot enforce
+
+Each of these is a real constraint the code depends on. Each lived only in a comment, or nowhere at
+all, and each has a fatal or expensive failure mode. They are not defects; they are the things a
+future change must not break.
+
+* **A video frame is freed by *Java's* `catch`, never by C.**
+  `CFfiPlayerEventDispatcher::SendNewFrameEvent` deletes the frame **only** on the NULL-slot path.
+  When the slot exists and returns
+  0 - which means the Java target threw - C deliberately deletes nothing, because from there it cannot
+  tell whether the target had already taken the frame, already disposed of it, or never touched it, and
+  deleting would risk a double free. Neither `GstAVPlaybackPipeline` call site deletes it either. What
+  makes that safe is `NativeVideoBuffer.createVideoBuffer`: its `catch (Throwable)` calls
+  `MediaDisposer.removeResourceDisposer(nativePeer)` and then `JfxMediaNative.frameDispose(nativePeer)`
+  before rethrowing. **Anyone who "simplifies" that `catch` reintroduces a leak of a `CGstVideoFrame`
+  plus its `GstSample` - roughly 8 MB per 1080p BGRA frame, at frame rate.** The removal before the
+  dispose matters too: `HashMap.put` inserts before it resizes, so a failure inside a resize can leave
+  the entry registered, and disposing without removing it would free the frame a second time when the
+  buffer is collected.
+* **The DirectSound joins must never be made under the loader lock.** Both the wait in
+  `GSTDirectSoundNotify::Dispose()` and the one in `Init()` wait on the apartment thread's
+  `DLL_THREAD_DETACH` / `DLL_THREAD_ATTACH`. Making either under the loader lock **deadlocks**. No such
+  path exists today - `ReleaseNotificator` is reached from a GObject finalize, on a pipeline teardown
+  driven from Java - and it has to stay that way. Within `gstreamer-lite` this is now enforced by the
+  no-op `DllMain` described in section 14.2; across the process it cannot be, because the loader lock
+  is process-wide.
+* **The `SCRATCH` cell rests on two invariants nothing checks.** One `Arena.ofAuto()` 120-byte
+  `ThreadLocal` cell is shared by all eight out-param wrappers in `JfxMediaNative`. It requires
+  **(a)** every out-param entry point writes `*out` **last**, after any upcall (sections 2 and 4 state
+  this, and a `jfxm_*` out-param function that upcalls after storing `*out` is forbidden by this
+  contract); and **(b)** no upcall target reaches an out-param wrapper on a thread already inside one.
+  (b) is pinned by a test for all nine stream slots, and it was independently confirmed that no
+  `ConnectionHolder` subclass references `JfxMediaNative`, so it holds today. Violating either
+  corrupts a parameter across calls. This is a standing constraint on any *future* out-param wrapper,
+  not a present defect.
+* **The cross-dylib `CPlayerEventDispatcher` vtable is a packaging invariant, not a checkable one.**
+  AVF's fragile ABI boundary is **not** `JfxmPlayerCallbacks` - the AVF tree never sees that struct at
+  all; `jfxm_avf_player_init` hands the pointer straight to `CFfiPlayerEventDispatcher`, which copies
+  it by value. The real boundary is the **vtable** of `CPlayerEventDispatcher`, which
+  `libjfxmedia_avf.dylib` calls into `libjfxmedia.dylib`. `PlayerEventDispatcher.h` carries an
+  append-only warning and `SendSubtitleTrackEvent` was correctly appended rather than inserted for FFM.
+  But **`jfxm_abi_version` cannot see a vtable** - it is a symbol of `libjfxmedia.dylib`, and a vtable
+  has no version, only an order - so a mixed-vintage dylib pair is undetectable by any check in this
+  contract. What keeps the pair honest is packaging: `native/mac.cmake` builds both from these headers
+  in one run and the SDK ships them together. **Never replace one of the two dylibs on its own.**
+* **`NativeVideoBuffer` reads one `FrameInfo` snapshot at construction**, where the JNI implementation
+  queried C on every accessor call. Equivalent - nothing mutates a `CVideoFrame`'s geometry after it
+  has been dispatched - but a real structural difference, and it is what makes the ten former getters
+  collapse into one `jfxm_frame_get_info`. Recorded because it was not written down anywhere: an
+  accessor added later must be served from the snapshot, or the snapshot has to be refreshed
+  deliberately.

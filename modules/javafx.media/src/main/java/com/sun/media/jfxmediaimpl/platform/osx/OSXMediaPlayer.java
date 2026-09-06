@@ -54,9 +54,20 @@ final class OSXMediaPlayer extends NativeMediaPlayer {
             // The 13 upcall stubs and the registry entry must outlive jfxm_media_dispose, which runs
             // in OSXMedia.dispose(), i.e. after playerDispose() (contract sections 4 and 7).
             Arena playerArena = Arena.ofShared();
-            JfxMediaNative.CallbackTable callbacks;
+            // Declared before the try, and null, so that the catch can undo the registry entry: a
+            // variable first assigned inside a try is not definitely assigned in its catch.
+            // installPlayerCallbacks registers this player as its last act, and until runAfterDispose
+            // below has taken that undo over, nothing else in the process would ever remove the entry -
+            // the registry is static and its ids are never reused, so it would pin
+            // player -> media -> locator -> connection holders for the life of the JVM.
+            JfxMediaNative.CallbackTable callbacks = null;
+            boolean registered;
             try {
-                callbacks = JfxMediaNative.installPlayerCallbacks(playerArena, this);
+                // installed is the lambda's effectively final view of the table; callbacks is the same
+                // one, for the catch below and for playerInit.
+                JfxMediaNative.CallbackTable installed =
+                        JfxMediaNative.installPlayerCallbacks(playerArena, this);
+                callbacks = installed;
                 // Registering the close action is the last statement of the block, so anything that
                 // throws above it leaves the arena with no owner at all: nothing else references it, and
                 // a shared arena frees neither its segment nor the stubs it has already allocated until
@@ -67,11 +78,20 @@ final class OSXMediaPlayer extends NativeMediaPlayer {
                 // native thread has not unwound from a stub: the table is handed to C by
                 // jfxm_player_init below, and until that call returns no native code has ever seen any
                 // of these stubs.
-                sourceMedia.runAfterDispose(() -> {
-                    callbacks.unregister();
+                registered = sourceMedia.runAfterDispose(() -> {
+                    installed.unregister();
                     playerArena.close();
                 });
             } catch (Throwable t) {
+                if (callbacks != null) {
+                    // The entry exists from the moment installPlayerCallbacks returned; the lambda that
+                    // was to remove it never got registered.
+                    try {
+                        callbacks.unregister();
+                    } catch (Throwable unregisterFailure) {
+                        t.addSuppressed(unregisterFailure);
+                    }
+                }
                 try {
                     playerArena.close();
                 } catch (Throwable closeFailure) {
@@ -88,7 +108,16 @@ final class OSXMediaPlayer extends NativeMediaPlayer {
                 }
                 throw t;
             }
-            rc = JfxMediaNative.playerInit(sourceMedia.getNativeMediaRef(), callbacks);
+            // A source media that was already disposed ran the action inline, so the arena the table
+            // lives in is closed and the registry entry is gone. playerInit would marshal that table out
+            // of a closed arena and fail with IllegalStateException, which OSXPlatform.createMediaPlayer
+            // turns into a null player instead of the MediaException every other creation failure
+            // produces - and it leaves the native media initNativeMedia() built behind, because a
+            // constructor that throws hands its caller nothing to dispose. Reporting it as a bad return
+            // reaches the teardown below instead. Unreachable while the only caller passes a media it
+            // has just constructed; explicit so that it stays a decision rather than an accident.
+            rc = registered ? JfxMediaNative.playerInit(sourceMedia.getNativeMediaRef(), callbacks)
+                    : MediaError.ERROR_MEDIA_INVALID.code();
         }
         if (rc != MediaError.ERROR_NONE.code()) {
             // Where osxCreatePlayer threw a MediaException. super(sourceMedia) and init() have already
@@ -96,9 +125,10 @@ final class OSXMediaPlayer extends NativeMediaPlayer {
             // the whole player has to come down, not just the media: dispose() terminates the loop,
             // runs the (empty) playerDispose() and then OSXMedia.dispose(), which is the same teardown
             // GSTMediaPlayer runs on the same failure. Disposing the media alone left one live event
-            // loop thread behind per attempt at a bad URL. Safe from either failure point: the early
-            // one never created an arena, a callback table or a native player, and OSXMedia.dispose()
-            // is idempotent, so the media is not disposed twice.
+            // loop thread behind per attempt at a bad URL. Safe from every failure point: the early one
+            // never created an arena, a callback table or a native player, the already-disposed one has
+            // had both released inline, and OSXMedia.dispose() is idempotent, so the media is not
+            // disposed twice.
             dispose();
             MediaError error = MediaError.getFromCode(rc);
             throw new MediaException("OSXMediaPlayer: unable to create player", null, error);

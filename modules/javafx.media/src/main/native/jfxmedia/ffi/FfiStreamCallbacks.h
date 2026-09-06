@@ -63,10 +63,36 @@ public:
     void    CloseConnection();
     int     Property(int prop, int value);
 
+    // Registers, or with NULL unregisters, the caller's own pointer variable as this object's
+    // owning slot: while it is set, ~CFfiStreamCallbacks NULLs that variable, so a caller holding
+    // the only other copy of the pointer can tell whether somebody else has already freed the
+    // object. InitGstMedia (ffi/jfxmedia_api.cpp) is the one user and the comment on its cleanup
+    // block is the reason this exists; nothing here is thread safe, and it must not be used from
+    // a slot that can outlive the object or from one that another thread can be writing.
+    void    SetOwnerSlot(CFfiStreamCallbacks** ppSlot);
+
 private:
     JfxmStreamCallbacks m_Callbacks;
     void*               m_pUser;
-    bool                m_bClosed;
+    // The closed latch, read and written with g_atomic_int_get/g_atomic_int_set - hence an int
+    // rather than a bool, since glib has no atomic bool and its gint is an int. Spelled int and
+    // not gint so that this header stays free of glib; only the .cpp includes it.
+    //
+    // It is written by CloseConnection() on whichever thread took javasource's element lock to
+    // run the READY -> NULL state change, and read by the eight other methods on the javasource
+    // source task or on the thread pulling that element's pad. The two are ordered in practice -
+    // java_source_change_state deactivates the pads, and so joins the source task, before it
+    // emits "close-connection", and CGstPipelineFactory::SourceCloseConnection disconnects the
+    // other five handlers before it returns - so no read is expected to see the write at all. A
+    // plain bool would still be a data race in the language, on an object whose ordering rests
+    // entirely on invariants held one layer up in javasource.c, and the atomics cost a relaxed
+    // load on every call to say so in the code instead of in a comment. This latch has no JNI
+    // predecessor to be bug-compatible with: the JNI adapter dropped a global reference here and
+    // had no flag.
+    int                 m_bClosed;
+    // The owning slot registered by SetOwnerSlot(), or NULL. Touched only by the creating thread,
+    // before this object has been handed to anything else, and by the destructor.
+    CFfiStreamCallbacks** m_ppOwnerSlot;
 };
 
 #endif // _FFI_STREAM_CALLBACKS_H_
