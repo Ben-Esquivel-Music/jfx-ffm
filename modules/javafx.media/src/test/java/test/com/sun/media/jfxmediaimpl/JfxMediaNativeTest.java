@@ -30,6 +30,8 @@ import com.sun.media.jfxmedia.MediaError;
 import com.sun.media.jfxmedia.MediaPlayer;
 import com.sun.media.jfxmedia.effects.AudioEqualizer;
 import com.sun.media.jfxmedia.effects.AudioSpectrum;
+import com.sun.media.jfxmedia.events.PlayerStateEvent;
+import com.sun.media.jfxmedia.events.PlayerStateListener;
 import com.sun.media.jfxmedia.locator.ConnectionHolder;
 import com.sun.media.jfxmedia.locator.Locator;
 import com.sun.media.jfxmedia.logging.Logger;
@@ -56,6 +58,8 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
 import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.MethodOrderer;
@@ -124,6 +128,14 @@ public class JfxMediaNativeTest {
      * {@code createMediaPlayer} has returned null.
      */
     private static final long LOG_GRACE_MILLIS = 5_000L;
+
+    /**
+     * How long a player gets to preroll before {@link #playerOverATinyWavFileDisposesWithoutLeaks} gives
+     * up on it. Measured on an idle machine the Ready arrives within a fraction of a millisecond of the
+     * player being handed over; this is a bound, not an expectation, and generous enough that a loaded
+     * CI machine cannot reach it while a pipeline that never prerolls still fails rather than hangs.
+     */
+    private static final long PREROLL_TIMEOUT_SECONDS = 10L;
 
     /**
      * What a captured media log looks like when the platform could not open its audio output. GStreamer
@@ -779,12 +791,24 @@ public class JfxMediaNativeTest {
      * stream-callback lifecycle without a sink, plus the Linux and macOS CI jobs, where a sink does open
      * (the Linux workflow installs a null ALSA device for exactly that reason).
      * <p>
+     * Nothing the pipeline knows about the stream is knowable before it has prerolled.
+     * {@code CGstAudioPlaybackPipeline::Init} ends by asking for {@code GST_STATE_PAUSED} and does not
+     * wait for it, and until {@code wavparse}'s loop task has pulled the 44-byte header through
+     * {@code javasource} the duration query fails, {@code playerGetDuration} throws and
+     * {@link NativeMediaPlayer#getDuration()} swallows that into {@code Infinity}. So the duration is
+     * asked for only after the Ready that {@code CGstAudioPlaybackPipeline::BusCallback} publishes once
+     * the pipeline has reached {@code PAUSED} with no state change pending - which is also the only
+     * coverage the {@code player_state} upcall slot of {@code JfxmPlayerCallbacks} has. Any future
+     * assertion on a {@code jfxm_player_get_*} value belongs after that wait too:
+     * {@code jfxm_player_get_presentation_time} is the same shape, its {@code GetStreamTime} answering
+     * {@code ERROR_GSTREAMER_PIPELINE_QUERY_POSITION} for as long as the pipeline is not up yet.
+     * <p>
      * The registry has to be back where it started afterwards, which is what proves the arenas and the
      * ids were released in the right order.
      */
     @Test
     @Order(10)
-    void playerOverATinyWavFileDisposesWithoutLeaks() throws IOException, URISyntaxException {
+    void playerOverATinyWavFileDisposesWithoutLeaks() throws IOException, InterruptedException, URISyntaxException {
         Path file = tinyWavFile();
         try {
             Locator locator = tinyWavLocator(file);
@@ -798,6 +822,15 @@ public class JfxMediaNativeTest {
             try {
                 assertTrue(JfxMediaNative.registrySize() > baseline,
                         "the connection holder and the player must be registered while the player lives");
+
+                // The pipeline is still prerolling; see the javadoc. Registering after the fact is safe:
+                // NativeMediaPlayer caches state events until a first listener arrives and replays them
+                // to it, so the Ready cannot be missed however early or late this runs.
+                ReadyLatch ready = new ReadyLatch();
+                player.addMediaPlayerListener(ready);
+                assertTrue(ready.await(PREROLL_TIMEOUT_SECONDS, TimeUnit.SECONDS),
+                        "the pipeline never prerolled to PAUSED");
+                player.removeMediaPlayerListener(ready);
 
                 // Downcalls through the pipeline the player just built.
                 assertEquals(0.0025, player.getDuration(), 1.0e-6, "20 bytes of 8 bit mono at 8 kHz");
@@ -1057,6 +1090,49 @@ public class JfxMediaNativeTest {
             ConnectionHolder holder = super.createConnectionHolder();
             holders.add(holder);
             return holder;
+        }
+    }
+
+    /**
+     * A {@link PlayerStateListener} that opens its latch on the Ready the player publishes once its
+     * pipeline has prerolled, and ignores the other six notifications - a player that is never played
+     * sends none of them. This is the only thing that arrives through the {@code player_state} upcall in
+     * this class, so the latch opening is also that slot's coverage.
+     */
+    private static final class ReadyLatch implements PlayerStateListener {
+        private final CountDownLatch ready = new CountDownLatch(1);
+
+        boolean await(long timeout, TimeUnit unit) throws InterruptedException {
+            return ready.await(timeout, unit);
+        }
+
+        @Override
+        public void onReady(PlayerStateEvent evt) {
+            ready.countDown();
+        }
+
+        @Override
+        public void onPlaying(PlayerStateEvent evt) {
+        }
+
+        @Override
+        public void onPause(PlayerStateEvent evt) {
+        }
+
+        @Override
+        public void onStop(PlayerStateEvent evt) {
+        }
+
+        @Override
+        public void onStall(PlayerStateEvent evt) {
+        }
+
+        @Override
+        public void onFinish(PlayerStateEvent evt) {
+        }
+
+        @Override
+        public void onHalt(PlayerStateEvent evt) {
         }
     }
 }

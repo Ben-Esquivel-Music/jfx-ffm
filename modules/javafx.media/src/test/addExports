@@ -12,6 +12,7 @@
 --add-exports javafx.media/com.sun.media.jfxmediaimpl.platform=ALL-UNNAMED
 --add-exports javafx.media/com.sun.media.jfxmediaimpl.platform.gstreamer=ALL-UNNAMED
 --add-exports javafx.media/com.sun.media.jfxmedia.effects=ALL-UNNAMED
+--add-exports javafx.media/com.sun.media.jfxmedia.events=ALL-UNNAMED
 # The macOS platform classes are compiled into target/classes on every platform (only the module jar
 # excludes them off macOS), so this line is harmless where OSXLocatorStreamOwnershipTest is skipped.
 --add-exports javafx.media/com.sun.media.jfxmediaimpl.platform.osx=ALL-UNNAMED
