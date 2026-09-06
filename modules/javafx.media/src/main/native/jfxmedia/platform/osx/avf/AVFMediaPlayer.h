@@ -45,6 +45,17 @@
                                      AVAssetResourceLoaderDelegate>
 {
     CVDisplayLinkRef _displayLink;
+
+    // The context handed to CVDisplayLinkSetOutputCallback: a registry token, never a pointer to
+    // this object. What the registry is for, and why the context cannot be a pointer, is written
+    // out above the registry itself at the top of AVFMediaPlayer.mm. Assigned once by the
+    // initializer, before anything can reach -createVideoOutput; cleared by -dispose when it
+    // retires the entry. _Atomic for the same reason isDisposed is: -dispose clears it outside
+    // @synchronized(self) while -createVideoOutput reads it inside, and a plain uintptr_t would
+    // make that concurrent pair a data race, which is undefined behaviour rather than merely a
+    // stale read.
+    _Atomic(uintptr_t) _displayLinkToken;
+
     CMVideoFormatDescriptionRef _videoFormat;
 
     dispatch_queue_t playerQueue;

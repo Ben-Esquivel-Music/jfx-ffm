@@ -25,6 +25,14 @@
 
 #import "AVFMediaPlayer.h"
 #import <objc/runtime.h>
+// The display-link registry below: its lock and condition variable, and the allocation of its
+// entries. pthread rather than a dispatch or Objective-C lock because the registry needs a
+// condition variable for the join in -dispose, and because PTHREAD_MUTEX_INITIALIZER needs no
+// dispatch_once to become usable. AVFAudioSpectrumUnit guards its bands with pthread too.
+#import <pthread.h>
+#import <stdlib.h>
+// std::nothrow, for the frame allocation in -sendPixelBuffer:.
+#import <new>
 #import "CVVideoFrame.h"
 
 #import <jni/Logger.h>
@@ -146,6 +154,267 @@ static void AVFDestroyLocatorStream(CLocatorStream *ls, BOOL closeConnection) {
     delete ls;
 }
 
+#pragma mark -
+#pragma mark Display-link callback registry
+
+// CVDisplayLinkSetOutputCallback takes one void* of context and hands it back on every vsync, on a
+// thread CoreVideo owns and this file never joins. Passing (__bridge void *)self there - which is
+// what this file used to do - makes that context an unretained pointer to an object -dispose is in
+// the middle of tearing down, and displayLinkCallback dereferences it before -sendPixelBuffer: is
+// entered (self.playerOutput) and again after it returns (self.hlsBugResetCount, self.lastHostTime,
+// self.player.rate, -hlsBugReset). The isDisposed test inside -sendPixelBuffer: therefore never was
+// the fence and could not have been made into one: by the time it is read the pointer may already
+// be freed memory, because -[OSXMediaPlayer dispose] releases the player - running -dealloc - as
+// soon as [player dispose] returns, then deletes the CPlayerEventDispatcher this callback sends
+// through, after which OSXMedia.java closes the shared Arena holding all 13 upcall stubs.
+//
+// jfxmedia_api.h promises the opposite ("after jfxm_media_dispose returns no callback of any table
+// fires again") and the Java side frees the stubs and the registry entry on the strength of it, so
+// the promise has to be made true here rather than assumed. This registry is what makes it true:
+//
+//   * The callback context is a token - a plain integer that is never dereferenced - so a callback
+//     that arrives late cannot fault on the context itself. That is what sinks the obvious
+//     alternative, a heap-allocated context struct holding a retained self that is freed when the
+//     player goes: the struct has to be freed at some point too, and a late callback would fault
+//     on that instead.
+//   * The token names an entry that holds a strong reference to the player, so a callback that has
+//     found its entry cannot have the player deallocated underneath it.
+//   * The entry is guarded by this file's own lock, never by the player's monitor, and the callback
+//     holds that lock only for the lookup and for the matching release - never across an
+//     AVFoundation call, never across an eventHandler send, never across a vsync's worth of work.
+//     Worth recording, because it is the one cost this design puts on the render path:
+//     gDisplayLinkLock is a process-global, non-priority-inheriting pthread mutex, taken twice per
+//     vsync by a thread CoreVideo schedules with a time-constraint (real-time) policy, so a lower
+//     priority thread holding it could in principle delay a frame. It is acceptable because every
+//     hold on the render path is a short list walk with no allocation, no syscall and no
+//     Objective-C message in it, and the list has one node per live player. The one hold that can
+//     syscall is the pthread_cond_broadcast in the claim's destructor, and that runs only while a
+//     dispose is in progress, never on an ordinary vsync. os_unfair_lock would add priority
+//     donation, but it cannot back a condition variable and the join needs one, so it would have to
+//     be a second lock over the same state - more to reason about than the contention it removes.
+//   * -dispose retires the entry and waits for the in-flight count to reach zero BEFORE it takes
+//     @synchronized(self). After that join no callback is running and none can start, so stopping
+//     and releasing the display link, deleting eventHandler and unmapping the upcall stubs are all
+//     safe - and none of it depends on whether CVDisplayLinkStop drains a callback that is already
+//     executing, which Apple documents neither way. That undocumented behaviour was the third
+//     rejected alternative: relying on it means the correctness of the whole teardown rests on an
+//     implementation detail, and testing it locally would prove nothing about other macOS versions.
+//
+// The fourth alternative, and the closest one, is worth naming because the first bullet above does
+// not actually rule it out: a per-player heap box holding the retain, the in-flight count, the
+// retiring flag and the condition variable, handed to CVDisplayLinkSetOutputCallback as itself and
+// then *deliberately never freed*. A box that is never freed is never a dangling pointer, so the
+// token, this list and the walk all disappear and the callback is one dereference plus the same
+// lock pair. It was not chosen for three reasons, none of them about correctness: the leak is
+// bounded per player but unbounded over a process lifetime, so an application that creates and
+// disposes many MediaPlayers accumulates it; a box that nothing references any more is a real leak
+// to leaks(1) and to the sanitizers, i.e. permanent noise in exactly the tools that would be used
+// to check this code; and a list that is empty once every player is disposed is a checkable
+// invariant, where "everything ever allocated is still allocated on purpose" is not. If the walk
+// ever shows up in a profile, the box is the design to move to.
+//
+// Why the join cannot deadlock, stated as what each thread holds and what it waits for:
+//
+//   * The display-link thread waits for the registry lock, twice, and holds nothing else while it
+//     does. It never asks for @synchronized(self) - no step of the callback takes that monitor -
+//     and the Java it upcalls into only offers onto an unbounded queue.
+//   * The disposing thread holds the registry lock and waits for the in-flight count; while it
+//     waits, pthread_cond_wait has released even that, so it holds nothing at all. Crucially it has
+//     NOT yet taken @synchronized(self): a callback can be inside an AVFoundation call that demands
+//     bytes from a jar:/jrt: source, and those arrive through
+//     -resourceLoader:shouldWaitForLoadingOfRequestedResource:, whose entire body runs inside that
+//     monitor on the loader queue. Joining while holding the monitor would deadlock exactly there;
+//     joining before taking it cannot, because the monitor is free for the loader queue to take.
+//   * The wait therefore terminates whenever an in-flight callback terminates, and every step of
+//     one is bounded: AVFoundation calls on the video output, a CVVideoFrame construction, two
+//     upcalls that enqueue and return, and two dispatch_asyncs that never wait for their block.
+//   * The disposing thread is a Java thread inside a downcall, so the JVM has it in native state
+//     and blocking it holds up no safepoint; the display-link thread can still attach, allocate and
+//     let GC run while the join waits.
+typedef struct AVFDisplayLinkEntry {
+    uintptr_t token;
+    // The player, holding the +1 taken at registration and given back at retirement. Kept as a
+    // void* rather than an object pointer so that this stays a plain C struct: the retain and the
+    // release are the two __bridge_retained / __bridge_transfer casts below and nowhere else.
+    void *player;
+    int inFlight;
+    BOOL retiring;
+    struct AVFDisplayLinkEntry *next;
+} AVFDisplayLinkEntry;
+
+static pthread_mutex_t gDisplayLinkLock = PTHREAD_MUTEX_INITIALIZER;
+static pthread_cond_t gDisplayLinkIdle = PTHREAD_COND_INITIALIZER;
+static AVFDisplayLinkEntry *gDisplayLinkEntries = NULL;
+// Token 0 means "no entry", so it is never handed out: a player whose registration failed, and a
+// display link created by -createVideoOutput after -dispose has already retired the token, both end
+// up looking up something that cannot be found, which is the outcome they want.
+static uintptr_t gDisplayLinkNextToken = 1;
+
+// Callers hold gDisplayLinkLock. Players are counted in ones, not thousands, so the list is walked
+// rather than hashed; the walk is the only per-vsync cost this registry adds beyond the lock.
+static AVFDisplayLinkEntry *AVFFindDisplayLinkEntry(uintptr_t token) {
+    if (token == 0) {
+        return NULL;
+    }
+    for (AVFDisplayLinkEntry *entry = gDisplayLinkEntries; entry != NULL; entry = entry->next) {
+        if (entry->token == token) {
+            return entry;
+        }
+    }
+    return NULL;
+}
+
+// Returns the token to hand to CVDisplayLinkSetOutputCallback, or 0 if the entry could not be
+// allocated - in which case every callback returns immediately and no video is delivered, which is
+// the same outcome as never creating the display link at all and is the only safe answer available:
+// an unregistered player has nothing to fence its callbacks with.
+static uintptr_t AVFRegisterDisplayLinkTarget(AVFMediaPlayer *player) {
+    AVFDisplayLinkEntry *entry = (AVFDisplayLinkEntry *)calloc(1, sizeof(AVFDisplayLinkEntry));
+    if (entry == NULL) {
+        return 0;
+    }
+    entry->player = (__bridge_retained void *)player;
+    pthread_mutex_lock(&gDisplayLinkLock);
+    entry->token = gDisplayLinkNextToken++;
+    entry->next = gDisplayLinkEntries;
+    gDisplayLinkEntries = entry;
+    uintptr_t token = entry->token;
+    pthread_mutex_unlock(&gDisplayLinkLock);
+    return token;
+}
+
+// The join. Marks the entry so that no further callback can claim it, waits for the callbacks
+// already inside it to leave, unlinks it and gives back the reference it held. After this returns,
+// no displayLinkCallback for this token is running and none can start again - tokens are never
+// reused, so a display link still wired to this one can only ever miss.
+static void AVFRetireDisplayLinkTarget(uintptr_t token) {
+    if (token == 0) {
+        return;
+    }
+
+    void *retiredPlayer = NULL;
+    AVFDisplayLinkEntry *entry = NULL;
+    BOOL unlinked = NO;
+
+    pthread_mutex_lock(&gDisplayLinkLock);
+    entry = AVFFindDisplayLinkEntry(token);
+    if (entry != NULL) {
+        entry->retiring = YES;
+        while (entry->inFlight > 0) {
+            // entry stays valid across the wait: only the thread that set retiring unlinks or frees
+            // it, and only after this loop. Two threads retiring the same token cannot happen -
+            // the caller takes the token out of the ivar with an atomic exchange, so exactly one
+            // caller ever sees a non-zero token for a given entry.
+            pthread_cond_wait(&gDisplayLinkIdle, &gDisplayLinkLock);
+        }
+        AVFDisplayLinkEntry **link = &gDisplayLinkEntries;
+        while (*link != NULL && *link != entry) {
+            link = &(*link)->next;
+        }
+        // Everything below the unlink is conditional on the unlink having happened, and that is
+        // not belt and braces. AVFFindDisplayLinkEntry only ever returns a node it reached by
+        // walking this same list, so falling off the end here is impossible - but "impossible" and
+        // "checked" are different things, and freeing a node that is still linked would leave
+        // gDisplayLinkEntries pointing into freed memory, which the very next claim would walk on
+        // the real-time display-link thread. So a miss leaks the node and its retain deliberately
+        // and says so, rather than converting a broken invariant into a use-after-free. A leaked
+        // node is inert: retiring is already set, so no future claim can take it.
+        if (*link == entry) {
+            *link = entry->next;
+            unlinked = YES;
+            retiredPlayer = entry->player;
+            entry->player = NULL;
+        }
+    }
+    pthread_mutex_unlock(&gDisplayLinkLock);
+
+    if (unlinked) {
+        free(entry);
+    } else if (entry != NULL) {
+        LOGGER_ERRORMSG("AVFMediaPlayer: display link registry entry was not on the list, "
+                        "leaking it rather than freeing a reachable node\n");
+    }
+
+    if (retiredPlayer != NULL) {
+        // Balances the retain taken at registration, deliberately outside the lock: dropping the
+        // last reference to a player runs -dealloc, which calls -dispose, which comes back here -
+        // and gDisplayLinkLock is not recursive. It cannot be the last reference in practice (the
+        // only caller is -dispose, and -[OSXMediaPlayer dispose] holds one across it), and this is
+        // also why the strong reference held by the entry is not a leak-making cycle: [player
+        // dispose] always precedes [player release] on both of OSXMediaPlayer's teardown paths, so
+        // the entry is always gone before the player's last reference is dropped. Doing the release
+        // out here costs nothing and removes the question.
+        AVFMediaPlayer *retired = (__bridge_transfer AVFMediaPlayer *)retiredPlayer;
+        (void)retired;
+    }
+}
+
+namespace {
+
+// One display-link callback's claim on a registry entry: the constructor takes it if the entry
+// exists and is not retiring, the destructor gives it back. A destructor rather than a call at the
+// end of displayLinkCallback, because that function returns early on three paths, and because an
+// exception could still unwind through it - CVVideoFrame's constructor throws only const char *,
+// which -sendPixelBuffer: catches, and its allocation is nothrow, but the Foundation and
+// eventHandler calls on the way could raise an NSException. What the destructor buys is that the
+// registry stays consistent on every one of those exits; a claim leaked on any of them would hang
+// the next -dispose for good. It does not make an unwind into CoreVideo's C frame survivable -
+// nothing here could - which is why the one such unwind this code could itself produce was removed
+// at the allocation instead.
+class AVFDisplayLinkCall {
+public:
+    explicit AVFDisplayLinkCall(uintptr_t token) : m_entry(NULL), m_player(NULL) {
+        if (token == 0) {
+            return;
+        }
+        pthread_mutex_lock(&gDisplayLinkLock);
+        AVFDisplayLinkEntry *entry = AVFFindDisplayLinkEntry(token);
+        if (entry != NULL && !entry->retiring) {
+            entry->inFlight++;
+            m_entry = entry;
+            m_player = entry->player;
+        }
+        pthread_mutex_unlock(&gDisplayLinkLock);
+    }
+
+    ~AVFDisplayLinkCall() {
+        if (m_entry == NULL) {
+            return;
+        }
+        pthread_mutex_lock(&gDisplayLinkLock);
+        // The entry cannot have been unlinked or freed while this claim was outstanding:
+        // AVFRetireDisplayLinkTarget waits for inFlight to reach zero before it touches either.
+        m_entry->inFlight--;
+        // Signalling only on the retiring path keeps the ordinary vsync free of it; nobody waits on
+        // this condition except a retirement in progress.
+        if (m_entry->retiring && m_entry->inFlight == 0) {
+            pthread_cond_broadcast(&gDisplayLinkIdle);
+        }
+        pthread_mutex_unlock(&gDisplayLinkLock);
+    }
+
+    // The player this token names, or NULL when the entry is gone or retiring. Returned as a void*
+    // so that the __bridge cast happens at the call site, where its result goes straight into a
+    // __strong local and is a plain retain: an object pointer returned across a C++ function
+    // boundary goes through ARC's autorelease-return convention instead, and the display-link
+    // thread has no autorelease pool of its own. The entry keeps the player alive for as long as
+    // this claim is outstanding, so the cast at the call site always has something live to retain.
+    void *player() const {
+        return m_player;
+    }
+
+private:
+    AVFDisplayLinkCall(const AVFDisplayLinkCall &);
+    AVFDisplayLinkCall &operator=(const AVFDisplayLinkCall &);
+
+    AVFDisplayLinkEntry *m_entry;
+    void *m_player;
+};
+
+}
+
+#pragma mark -
+
 @implementation AVFMediaPlayer
 
 static void SpectrumCallbackProc(void *context, double duration, double timestamp);
@@ -227,6 +496,20 @@ static CVReturn displayLinkCallback(CVDisplayLinkRef displayLink,
 
         // Set the player item end action to NONE since we'll handle it internally
         _player.actionAtItemEnd = AVPlayerActionAtItemEndNone;
+
+        // The context the display link will be given, taken here rather than in -createVideoOutput
+        // because that method can run on the KVO thread the moment the observers below are
+        // installed, and a display link wired with a token this initializer had not assigned yet
+        // would deliver no frames for the life of the player. Both of this initializer's
+        // nil-returning paths are above this line, so an entry created here is always matched by
+        // the retirement in -dispose - which is what keeps the entry's strong reference from
+        // stranding the player.
+        uintptr_t token = AVFRegisterDisplayLinkTarget(self);
+        _displayLinkToken = token;
+        if (token == 0) {
+            LOGGER_ERRORMSG("AVFMediaPlayer: unable to register the display link callback target, "
+                            "video will not be rendered\n");
+        }
 
         /*
          * AVPlayerItem notifications we could listen for:
@@ -367,10 +650,19 @@ static CVReturn displayLinkCallback(CVDisplayLinkRef displayLink,
             _playerOutput.suppressesPlayerRendering = YES;
 
             // Set up the display link (do we need this??)
-            // might need to create a display link context struct that retains us
-            // rather than passing self as the context
+            // The context is the registry token, not (__bridge void *)self - see the display-link
+            // registry at the top of this file, which is also the answer to the note that used to
+            // stand here about needing a context struct that retains us.
+            //
+            // The token is read from the ivar on every call rather than cached, so that the one
+            // interleaving that can still build a display link after teardown ends harmlessly:
+            // -dispose retires the token before it blocks on the monitor this method is holding, so
+            // this reads either the retired token or the zero -dispose left behind, and a callback
+            // finds no entry either way. The link itself is then stopped and released by -dispose
+            // as soon as it gets the monitor.
+            uintptr_t token = _displayLinkToken;
             CVDisplayLinkCreateWithActiveCGDisplays(&_displayLink);
-            CVDisplayLinkSetOutputCallback(_displayLink, displayLinkCallback, (__bridge void *)self);
+            CVDisplayLinkSetOutputCallback(_displayLink, displayLinkCallback, (void *)token);
             // Pause display link to conserve power
             CVDisplayLinkStop(_displayLink);
 
@@ -615,6 +907,27 @@ static CVReturn displayLinkCallback(CVDisplayLinkRef displayLink,
 }
 
 - (void) dispose {
+    // The display-link join, and it has to be here: before the monitor, before the player is
+    // stopped, before anything is released. The full argument is above the registry at the top of
+    // this file; the two halves that decide this placement are that a callback in flight can be
+    // waiting on @synchronized(self) by way of the resource loader, so joining while holding that
+    // monitor would deadlock, and that once this returns the callback thread is gone for good, so
+    // everything below - CVDisplayLinkStop, CVDisplayLinkRelease, the eventHandler that
+    // -[OSXMediaPlayer dispose] deletes next, and the upcall arena Java closes after that - has
+    // nothing left to race with.
+    //
+    // Taking the token out of the ivar makes this idempotent and single-shot: the -dispose that
+    // -dealloc calls, and any second -dispose, read zero and retire nothing. An exchange rather
+    // than a load followed by a store, so that "exactly one caller ever sees a non-zero token" is a
+    // property of this line alone. -[OSXMediaPlayer dispose] does hold its own monitor across
+    // [player dispose] today, which would serialize two disposers anyway - but two retirers of the
+    // same token would both wait and then both unlink and free it, so the invariant that
+    // AVFRetireDisplayLinkTarget relies on is worth owning here instead of borrowing from another
+    // file that could change. The exchange is also the concurrent partner of the plain atomic load
+    // in -createVideoOutput, which is why the ivar is _Atomic.
+    uintptr_t retiringToken = __c11_atomic_exchange(&_displayLinkToken, (uintptr_t)0, __ATOMIC_SEQ_CST);
+    AVFRetireDisplayLinkTarget(retiringToken);
+
     @synchronized(self) {
         if (!isDisposed) {
             if (_player != nil) {
@@ -648,6 +961,9 @@ static CVReturn displayLinkCallback(CVDisplayLinkRef displayLink,
             }
 
             if (_displayLink) {
+                // Safe to stop and release outright: the join at the top of this method already
+                // guarantees no callback is executing and none can start, so it does not matter
+                // whether CVDisplayLinkStop waits for one.
                 CVDisplayLinkStop(_displayLink);
                 CVDisplayLinkRelease(_displayLink);
                 _displayLink = NULL;
@@ -889,34 +1205,35 @@ static CVReturn displayLinkCallback(CVDisplayLinkRef displayLink,
 }
 
 - (void) sendPixelBuffer:(CVPixelBufferRef)buf frameTime:(double)frameTime hostTime:(int64_t)hostTime {
-    // An unlocked read, on purpose - and, said plainly: the dispose race is NOT closed on this
-    // path. What follows is why the obvious fixes are both wrong, and what would actually settle it.
+    // An unlocked read, and by now a redundant one: this path is fenced by the display-link join in
+    // -dispose, not by this test. displayLinkCallback below is the only caller, it reaches this
+    // method only while holding a claim on the player's registry entry, and -dispose retires that
+    // entry and waits for every outstanding claim before it goes any further.
     //
-    // displayLinkCallback below is the only caller. It runs on the CVDisplayLink thread with an
-    // unretained (__bridge void*)self, and -dispose stops and releases the link while holding
-    // @synchronized(self). Apple does not document whether CVDisplayLinkStop waits for a callback
-    // that is already executing, and the two possible answers need opposite fixes:
-    //   - if it does wait, then -dispose has already drained this thread before it deletes
-    //     eventHandler, there is no race, and this test is dead code. Taking the monitor here would
-    //     then be actively harmful: -dispose would sit inside CVDisplayLinkStop waiting for this
-    //     thread while this thread waited for the monitor -dispose holds. A guaranteed hang of
-    //     whatever thread called MediaPlayer.dispose(), whenever a frame is in flight.
-    //   - if it does not wait, this test is not enough. The caller dereferences the unretained self
-    //     outside it - self.playerOutput before the call, self.hlsBugResetCount after it,
-    //     self.lastHostTime and self.player.rate on the other branch - and calls CVDisplayLinkStop
-    //     on a link -dispose has already released. Under ARC the [player release] in
-    //     -[OSXMediaPlayer dispose] runs -dealloc before the delete eventHandler that follows it, so
-    //     in that window self is freed memory and even reading isDisposed is a use-after-free.
-    // So this narrows the window - from the whole of -dispose to the span between this test and the
-    // sends below, which is not instructions but microseconds: constructing a CVVideoFrame, possibly
-    // CVPixelBufferGetPixelFormatType and -setFallbackVideoFormat, possibly a
-    // SendFrameSizeChangedEvent before the SendNewFrameEvent - and it makes the ordinary case cheap.
-    // It does not make the guarantee in jfxmedia_api.h true here.
+    // Note what that does and does not say about where -dispose is while this runs. The ordinary
+    // interleaving is not that -dispose has not started: it has very likely zeroed the token,
+    // entered AVFRetireDisplayLinkTarget, set retiring, and be sitting in pthread_cond_wait for
+    // this very claim. What holds is that it is blocked there, which is *before* it takes
+    // @synchronized(self) - and three things follow from that alone. The only write that ever turns
+    // isDisposed YES is inside that monitor, so it is still NO (the initializer's isDisposed = NO is
+    // the other write, and it runs before this player has a registry entry to claim). self cannot be
+    // deallocated, because the
+    // registry entry holds a reference until the join completes and the callback holds another.
+    // eventHandler is still the live dispatcher, because -[OSXMediaPlayer dispose] deletes it only
+    // after [player dispose] has returned, which cannot be until this claim is given back. The
+    // registry block at the top of this file has the whole argument; the point here is that the
+    // sends at the bottom of this method need no monitor and no isDisposed test to be safe, which
+    // is why they have neither.
     //
-    // Settling it needs a Mac. If CVDisplayLinkStop joins, delete this and say so. If it does not,
-    // the fence has to be something -dispose can release before it calls CVDisplayLinkStop - this
-    // object's monitor cannot be it, because -dispose holds that across the whole teardown - plus a
-    // retain of self for the duration of the callback.
+    // What this test still buys is what it always bought - it costs one atomic load and it saves
+    // building a frame for a player that is already gone - so it stays. What it no longer has to be,
+    // and what the note that used to stand here correctly said it could never be, is the fence: the
+    // caller touches the player outside this method, both before it is entered (self.playerOutput)
+    // and after it returns (self.hlsBugResetCount, self.lastHostTime, self.player.rate,
+    // -hlsBugReset), so no test placed inside it could ever have protected those. Taking
+    // @synchronized(self) here is still the wrong answer for the reason it always was - -dispose
+    // holds that monitor across the whole teardown - and is now also pointless, because the join
+    // has already ruled out the window it would have covered.
     if (isDisposed) {
         return;
     }
@@ -924,7 +1241,14 @@ static CVReturn displayLinkCallback(CVDisplayLinkRef displayLink,
     _lastHostTime = hostTime;
     CVVideoFrame *frame = NULL;
     try {
-        frame = new CVVideoFrame(buf, frameTime, _lastHostTime);
+        // nothrow, because this runs on a thread CoreVideo owns and returns into a C frame: a
+        // std::bad_alloc raised here would unwind out of displayLinkCallback with no handler in
+        // sight and reach std::terminate, killing the process to report a dropped frame. With
+        // nothrow the failure arrives as a NULL, which the existing test below already handles -
+        // that test was dead code until now. The catch is unaffected: nothrow only changes what a
+        // failing allocation does, and every throw in CVVideoFrame's constructor is a
+        // const char * that still lands here.
+        frame = new (std::nothrow) CVVideoFrame(buf, frameTime, _lastHostTime);
     } catch (const char *message) {
         // Check if the video format is supported, if not try our fallback format
         OSType format = CVPixelBufferGetPixelFormatType(buf);
@@ -1178,7 +1502,21 @@ static void SpectrumCallbackProc(void *context, double duration, double timestam
 
 static CVReturn displayLinkCallback(CVDisplayLinkRef displayLink, const CVTimeStamp *inNow, const CVTimeStamp *inOutputTime, CVOptionFlags flagsIn, CVOptionFlags *flagsOut, void *displayLinkContext)
 {
-    AVFMediaPlayer *self = (__bridge AVFMediaPlayer *)displayLinkContext;
+    // displayLinkContext is a registry token, not a pointer to the player: see the registry block at
+    // the top of this file. Claiming it is what keeps self alive, and eventHandler valid, for the
+    // whole of this function - including the two dereferences that sit outside -sendPixelBuffer:.
+    // A token whose player has been disposed claims nothing and this returns at once, which is also
+    // what a display link that -outputMediaDataWillChange: started after retirement gets: its
+    // callbacks fire and do nothing until -dispose stops the link.
+    //
+    // The claim is released by the destructor, on every path out of this function including the two
+    // early returns below and an exception unwinding out of -sendPixelBuffer:.
+    AVFDisplayLinkCall displayLinkCall((uintptr_t)displayLinkContext);
+    AVFMediaPlayer *self = (__bridge AVFMediaPlayer *)displayLinkCall.player();
+    if (self == nil) {
+        return kCVReturnSuccess;
+    }
+
     AVPlayerItemVideoOutput *playerItemVideoOutput = self.playerOutput;
 
     // The displayLink calls back at every vsync (screen refresh)

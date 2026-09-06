@@ -69,7 +69,7 @@ version resource shared with javafx.graphics).
 | `glibLite` | `glib-lite` | Windows, macOS | Linux links the **system** GLib instead |
 | `gstreamerLite` | `gstreamer-lite` | all | Windows exports come from `gstreamer/projects/win/gstreamer-lite.def` (ordinals, `NONAME`) |
 | `fxplugins` | `fxplugins` | all | Windows adds the DirectShow `baseclasses` archive, `dshowwrapper` and `mfwrapper` |
-| `avplugin` | `avplugin*` | Linux only | optional: skipped with a `message(STATUS)` when pkg-config finds no libavcodec/libavformat |
+| `avplugin` | `avplugin*` | Linux only | optional: skipped with a `message(STATUS)` when pkg-config finds no libavcodec/libavformat/libswscale |
 | `jfxmedia` | `jfxmedia` | all | the only target that needs the JDK includes today |
 | `jfxmediaAvf` | `jfxmedia_avf` | macOS only | links `jfxmedia` plus AVFoundation/CoreMedia/Accelerate/AudioUnit/MediaToolbox |
 
@@ -163,7 +163,7 @@ compile Java only, exactly as before this branch.
 `gstreamer/projects/linux/{gstreamer-lite,fxplugins,avplugin}/Makefile`. Linux uses the **system**
 GLib through pkg-config (`glib-2.0 gobject-2.0 gmodule-2.0 gthread-2.0`), so there is no `glibLite`
 target, and it adds `avplugin`, which is skipped with a `message(STATUS)` when pkg-config finds no
-`libavcodec`/`libavformat` (CI installs no ffmpeg development packages).
+`libavcodec`/`libavformat`/`libswscale` (the Linux CI jobs install all three).
 
 Built in WSL (Ubuntu 26.04, gcc, Ninja, JDK 25) out of the `/mnt/c` tree:
 
