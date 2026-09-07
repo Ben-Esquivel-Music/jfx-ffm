@@ -142,8 +142,20 @@ jobs:
             echo "::error::${so} was not built - check libavcodec-dev/libavformat-dev/libswscale-dev"
             exit 1
           fi
-          readelf -d "${so}" | grep NEEDED
-          # libswscale must NOT appear above: it is loaded with dlopen at runtime.
+          # The assignment doubles as an assertion: under bash -e a file with no
+          # dynamic section leaves grep without a match, which fails the step here.
+          needed=$(readelf -d "${so}" | grep NEEDED)
+          echo "${needed}"
+          # libswscale must not be among them. avplugin compiles against
+          # <libswscale/swscale.h>, but every sws_* entry point is reached through
+          # dlopen/dlsym in plugins/av/videodecoder.c, so a system without the library
+          # loses only H.265/HEVC 10/12-bit decoding instead of failing to load the
+          # plugin at all. A NEEDED entry would turn that recoverable capability check
+          # into a hard load failure.
+          if echo "${needed}" | grep -q libswscale; then
+            echo "::error::${so} must dlopen libswscale at runtime, not link against it"
+            exit 1
+          fi
           nm -D --defined-only "${so}" | grep gst_plugin_desc
 
   linux_aarch64_build:
@@ -229,8 +241,20 @@ jobs:
             echo "::error::${so} was not built - check libavcodec-dev/libavformat-dev/libswscale-dev"
             exit 1
           fi
-          readelf -d "${so}" | grep NEEDED
-          # libswscale must NOT appear above: it is loaded with dlopen at runtime.
+          # The assignment doubles as an assertion: under bash -e a file with no
+          # dynamic section leaves grep without a match, which fails the step here.
+          needed=$(readelf -d "${so}" | grep NEEDED)
+          echo "${needed}"
+          # libswscale must not be among them. avplugin compiles against
+          # <libswscale/swscale.h>, but every sws_* entry point is reached through
+          # dlopen/dlsym in plugins/av/videodecoder.c, so a system without the library
+          # loses only H.265/HEVC 10/12-bit decoding instead of failing to load the
+          # plugin at all. A NEEDED entry would turn that recoverable capability check
+          # into a hard load failure.
+          if echo "${needed}" | grep -q libswscale; then
+            echo "::error::${so} must dlopen libswscale at runtime, not link against it"
+            exit 1
+          fi
           nm -D --defined-only "${so}" | grep gst_plugin_desc
 
   macos_x64_build:
