@@ -67,7 +67,7 @@ public final class ES2Natives {
      * Any of them present with no {@code prism_es2} means the natives were built but ES2 was left out -
      * still a skip, because ES2 is optional, but a more specific one.
      */
-    private static final List<String> SIBLING_FILES = List.of(System.mapLibraryName("prism_common"),
+    private static final List<String> SIBLING_FILES = List.of(
             System.mapLibraryName("prism_sw"), System.mapLibraryName("glass"),
             System.mapLibraryName("javafx_font"), System.mapLibraryName("javafx_iio"),
             System.mapLibraryName("decora_sse"));

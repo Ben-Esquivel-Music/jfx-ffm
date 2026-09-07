@@ -168,14 +168,6 @@ add_jfx_library(glass
     LINK_LIBS ${JFX_FRAMEWORK_LINK_LIBS})
 
 # ---------------------------------------------------------------------------
-# libprism_common.dylib (Gradle: -O3 -DINLINE=inline in every configuration)
-# ---------------------------------------------------------------------------
-add_jfx_library(prism
-    OUTPUT_NAME prism_common
-    SOURCE_DIRS "${GRAPHICS_SRC}/native-prism"
-    COMPILE_OPTIONS -O3 -DINLINE=inline)
-
-# ---------------------------------------------------------------------------
 # libprism_sw.dylib
 # ---------------------------------------------------------------------------
 add_jfx_library(prismSW

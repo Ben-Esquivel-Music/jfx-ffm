@@ -175,13 +175,6 @@ add_jfx_library(glass
         /DELAYLOAD:shlwapi.dll /DELAYLOAD:version.dll)
 
 # ---------------------------------------------------------------------------
-# prism_common.dll
-# ---------------------------------------------------------------------------
-add_jfx_library(prism
-    OUTPUT_NAME prism_common
-    SOURCE_DIRS "${GRAPHICS_SRC}/native-prism")
-
-# ---------------------------------------------------------------------------
 # prism_sw.dll
 # ---------------------------------------------------------------------------
 add_jfx_library(prismSW

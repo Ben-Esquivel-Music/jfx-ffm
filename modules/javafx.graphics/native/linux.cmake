@@ -155,14 +155,6 @@ add_jfx_library(glassgtk3
     LINK_LIBS PkgConfig::GTK3)
 
 # ---------------------------------------------------------------------------
-# libprism_common.so
-# ---------------------------------------------------------------------------
-add_jfx_library(prism
-    OUTPUT_NAME prism_common
-    SOURCE_DIRS "${GRAPHICS_SRC}/native-prism"
-    COMPILE_OPTIONS ${JFX_C_STRICT_OPTIONS} -DINLINE=inline)
-
-# ---------------------------------------------------------------------------
 # libprism_sw.so
 # ---------------------------------------------------------------------------
 add_jfx_library(prismSW

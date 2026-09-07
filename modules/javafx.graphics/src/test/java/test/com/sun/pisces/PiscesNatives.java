@@ -51,7 +51,7 @@ import static org.junit.jupiter.api.Assumptions.abort;
  * javafx.graphics native library does either; otherwise it has to load and work.</em> The surefire
  * {@code argLine} of {@code modules/javafx.graphics/pom.xml} sets {@code java.library.path} to this
  * module's own {@code target/native/bin}, so that path is where the build's output is looked for. A
- * directory holding the module's other libraries ({@code glass}, {@code prism_common}, ...) and no
+ * directory holding the module's other libraries ({@code glass}, ...) and no
  * {@code prism_sw} means the native build ran, reported success and dropped the one library these
  * tests exist for - that fails too.
  */
@@ -66,7 +66,7 @@ public final class PiscesNatives {
      * Other libraries the javafx.graphics CMake build writes into the same directory on every
      * platform. Any of them next to no {@code prism_sw} is a broken build, not a tree without natives.
      */
-    private static final List<String> SIBLING_FILES = List.of(System.mapLibraryName("prism_common"),
+    private static final List<String> SIBLING_FILES = List.of(
             System.mapLibraryName("glass"), System.mapLibraryName("javafx_font"),
             System.mapLibraryName("javafx_iio"), System.mapLibraryName("decora_sse"));
 

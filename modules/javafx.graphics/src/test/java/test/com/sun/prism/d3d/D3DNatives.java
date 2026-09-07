@@ -64,7 +64,7 @@ public final class D3DNatives {
      * Other libraries the javafx.graphics CMake build writes into the same directory on Windows. Any
      * of them next to no {@code prism_d3d} is a broken build, not a tree without natives.
      */
-    private static final List<String> SIBLING_FILES = List.of(System.mapLibraryName("prism_common"),
+    private static final List<String> SIBLING_FILES = List.of(
             System.mapLibraryName("prism_sw"), System.mapLibraryName("glass"),
             System.mapLibraryName("javafx_font"), System.mapLibraryName("javafx_iio"),
             System.mapLibraryName("decora_sse"));
