@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2012, 2024, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2012, 2026, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -30,12 +30,6 @@ import com.sun.javafx.PlatformUtil;
 import java.util.HashMap;
 
 abstract class GLFactory {
-
-    private static native boolean
-            nIsGLExtensionSupported(long nativeContextObject, String glExtStr);
-    private static native String nGetGLVendor(long nativeCtxInfo);
-    private static native String nGetGLRenderer(long nativeCtxInfo);
-    private static native String nGetGLVersion(long nativeCtxInfo);
 
     private static final GLFactory platformFactory;
 
@@ -113,8 +107,8 @@ abstract class GLFactory {
     abstract GLGPUInfo[] getRejectList();
 
     private static GLGPUInfo readGPUInfo(long nativeCtxInfo) {
-        String glVendor = nGetGLVendor(nativeCtxInfo);
-        String glRenderer = nGetGLRenderer(nativeCtxInfo);
+        String glVendor = ES2Native.contextGetString(nativeCtxInfo, ES2Native.STR_VENDOR);
+        String glRenderer = ES2Native.contextGetString(nativeCtxInfo, ES2Native.STR_RENDERER);
         return new GLGPUInfo(glVendor.toLowerCase(),
                 glRenderer.toLowerCase());
     }
@@ -189,7 +183,12 @@ abstract class GLFactory {
     }
 
     boolean isGLExtensionSupported(String sglExtStr) {
-        return nIsGLExtensionSupported(nativeCtxInfo, sglExtStr);
+        // Fold of nIsGLExtensionSupported: fetch the GL_EXTENSIONS string and do the
+        // space-bounded token match in Java. ES2Native.isExtensionSupported mirrors the
+        // native isExtensionSupported (GLFactory.c) exactly, so "GL_ARB_texture" does not
+        // match inside "GL_ARB_texture_float".
+        String extensions = ES2Native.contextGetString(nativeCtxInfo, ES2Native.STR_EXTENSIONS);
+        return ES2Native.isExtensionSupported(extensions, sglExtStr);
     }
 
     boolean isNPOTSupported() {
@@ -205,8 +204,8 @@ abstract class GLFactory {
 
     void printDriverInformation(int adapter) {
         /* We are assuming a system with a single or homogeneous GPUs. */
-        System.out.println("Graphics Vendor: " + nGetGLVendor(nativeCtxInfo));
-        System.out.println("       Renderer: " + nGetGLRenderer(nativeCtxInfo));
-        System.out.println("        Version: " + nGetGLVersion(nativeCtxInfo));
+        System.out.println("Graphics Vendor: " + ES2Native.contextGetString(nativeCtxInfo, ES2Native.STR_VENDOR));
+        System.out.println("       Renderer: " + ES2Native.contextGetString(nativeCtxInfo, ES2Native.STR_RENDERER));
+        System.out.println("        Version: " + ES2Native.contextGetString(nativeCtxInfo, ES2Native.STR_VERSION));
     }
 }

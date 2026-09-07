@@ -401,9 +401,6 @@
                                 <exclude>com/sun/prism/es2/X11GL*</exclude>
                                 <exclude>com/sun/glass/ui/monocle/**</exclude>
                                 <exclude>com/sun/prism/es2/Monocle*</exclude>
-                                <exclude>com/sun/glass/ui/ios/**</exclude>
-                                <exclude>com/sun/prism/es2/IOS*</exclude>
-                                <exclude>com/sun/glass/ui/android/**</exclude>
                             </excludes>
                         </configuration>
                     </plugin>
@@ -475,9 +472,6 @@
                                 <exclude>com/sun/prism/es2/EGL*</exclude>
                                 <exclude>com/sun/glass/ui/monocle/**</exclude>
                                 <exclude>com/sun/prism/es2/Monocle*</exclude>
-                                <exclude>com/sun/glass/ui/ios/**</exclude>
-                                <exclude>com/sun/prism/es2/IOS*</exclude>
-                                <exclude>com/sun/glass/ui/android/**</exclude>
                             </excludes>
                         </configuration>
                     </plugin>
@@ -547,9 +541,6 @@
                                 <exclude>com/sun/prism/es2/X11GL*</exclude>
                                 <exclude>com/sun/glass/ui/monocle/**</exclude>
                                 <exclude>com/sun/prism/es2/Monocle*</exclude>
-                                <exclude>com/sun/glass/ui/ios/**</exclude>
-                                <exclude>com/sun/prism/es2/IOS*</exclude>
-                                <exclude>com/sun/glass/ui/android/**</exclude>
                             </excludes>
                         </configuration>
                     </plugin>
