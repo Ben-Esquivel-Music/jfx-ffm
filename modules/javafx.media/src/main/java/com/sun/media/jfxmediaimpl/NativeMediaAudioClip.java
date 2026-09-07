@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2010, 2024, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2010, 2026, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -36,8 +36,14 @@ import java.util.concurrent.atomic.AtomicInteger;
 
 /**
  * AudioClip implementation that uses NativeMediaPlayer to play sounds.
+ * <p>
+ * Public so that {@link AudioClip}'s three static factories can reach it directly, from
+ * {@code com.sun.media.jfxmedia}: it is the only implementation left now that {@code NativeAudioClip}
+ * (iOS only) is gone, and the {@code AudioClipProvider} singleton that used to forward to it carried no
+ * choice any more. {@code module-info.java} exports {@code com.sun.media.jfxmediaimpl} to nothing, so
+ * this widens the reach by one package inside javafx.media and by nothing outside it.
  */
-final class NativeMediaAudioClip extends AudioClip {
+public final class NativeMediaAudioClip extends AudioClip {
     private URI sourceURI;
     private Locator mediaLocator;
     private AtomicInteger playCount; // track current and scheduled play requests

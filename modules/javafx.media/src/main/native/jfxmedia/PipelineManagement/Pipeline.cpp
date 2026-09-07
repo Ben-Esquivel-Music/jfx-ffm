@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2010, 2022, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2010, 2026, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -60,9 +60,30 @@ CPipeline::~CPipeline()
         delete m_pEventDispatcher;
 }
 
-void CPipeline::SetEventDispatcher(CPlayerEventDispatcher* pEventDispatcher)
+bool CPipeline::SetEventDispatcher(CPlayerEventDispatcher* pEventDispatcher)
 {
+    // One dispatcher per pipeline, installed once. This used to overwrite whatever was already
+    // there, which leaked the old dispatcher - the JNI gstInitPlayer it was ported from did the
+    // same, so this is not migration drift, but it is worth more under FFM: the abandoned
+    // CFfiPlayerEventDispatcher holds a by-value copy of thirteen upcall stub addresses, and an
+    // object nobody can reach is an object nobody can prove is idle, which is exactly what closing
+    // the shared Arena that owns those stubs requires.
+    //
+    // Refusing is the fix rather than deleting the old one. By the time a second install could
+    // happen the first dispatcher is live: CGstAudioPlaybackPipeline::Init has attached the bus
+    // watch and started the main loop, so a GStreamer bus or streaming thread can be inside one of
+    // its Send*Event calls at any moment, and nothing here synchronises with those threads.
+    // Deleting it would turn a leak into a use after free on a foreign thread. Freeing the
+    // caller's new dispatcher instead is provably safe, because it has been handed to nobody, so
+    // that is what the caller does with the false.
+    //
+    // This mirrors the AVF backend, where jfxm_avf_player_init has always rejected a second call
+    // on the same media with ERROR_MEDIA_CREATION.
+    if (NULL != m_pEventDispatcher)
+        return false;
+
     m_pEventDispatcher = pEventDispatcher;
+    return true;
 }
 
 uint32_t CPipeline::Init()

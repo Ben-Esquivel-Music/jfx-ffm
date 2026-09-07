@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2010, 2024, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2010, 2026, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -31,6 +31,7 @@ import com.sun.media.jfxmedia.Media;
 import com.sun.media.jfxmedia.MediaPlayer;
 import com.sun.media.jfxmedia.locator.Locator;
 import com.sun.media.jfxmedia.logging.Logger;
+import com.sun.media.jfxmediaimpl.JfxMediaNative;
 import com.sun.media.jfxmediaimpl.platform.Platform;
 import java.util.Arrays;
 
@@ -70,6 +71,15 @@ public final class OSXPlatform extends Platform {
             // Do this early so we can report the correct content types
             boolean isLoaded = false;
             try {
+                // This is the load that maps libjfxmedia_avf, so that the objc_getClass("AVFMediaPlayer")
+                // lookup reached through jfxm_osx_platform_init finds the class; the dylib exports no
+                // jfxm_* symbol of its own, so this is the only thing it has to be loaded for. It must
+                // run before loadPlatform(), and class initialization order guarantees it does: only
+                // getPlatformInstance(), which runs this initializer, can hand out the instance that
+                // loadPlatform() is then called on. libjfxmedia is loaded before any of this, which the
+                // avf dylib needs since it links -ljfxmedia: NativeMediaManager's constructor calls
+                // JfxMediaNative.loadLibraries() before anything reaches initNativeLayer() and
+                // PlatformManager, which is what runs this initializer.
                 NativeLibLoader.loadLibrary("jfxmedia_avf");
                 isLoaded = true;
             } catch (UnsatisfiedLinkError ule) { }
@@ -100,7 +110,7 @@ public final class OSXPlatform extends Platform {
 
         // ULE should not happen here, but just in case
         try {
-            return osxPlatformInit();
+            return JfxMediaNative.osxPlatformInit();
         } catch (UnsatisfiedLinkError ule) {
             if (Logger.canLog(Logger.DEBUG)) {
                 Logger.logMsg(Logger.DEBUG, "Unable to load OSX platform.");
@@ -137,6 +147,4 @@ public final class OSXPlatform extends Platform {
         }
         return null;
     }
-
-    private static native boolean osxPlatformInit();
 }

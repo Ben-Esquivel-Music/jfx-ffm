@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2010, 2013, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2010, 2026, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -49,8 +49,16 @@ public:
     virtual void      SetThreshold(int threshold);
 
 private:
-    GstElement*            m_pSpectrum;
-    volatile CBandsHolder* m_pHolder;
+    GstElement*   m_pSpectrum;
+
+    // m_BandsLock guards m_pHolder. Acquiring a reference has to happen atomically with the swap
+    // in SetBands: a lock-free read followed by AddRef can be overtaken by a SetBands that drops
+    // the last reference in between, leaving UpdateBands to increment a counter that has already
+    // been freed. Both sides therefore take this lock, and both drop the reference they lose
+    // outside it - ~CFfiBandsHolder hands the band pair back to Java (jfxmedia_api.h,
+    // JfxmReleaseFn), which must not run while a spectrum thread waits on the lock.
+    GMutex        m_BandsLock;
+    CBandsHolder* m_pHolder;
 };
 
 #endif // _GST_AUDIO_SPECTRUM_H_

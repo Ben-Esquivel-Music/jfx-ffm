@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2010, 2024, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2010, 2026, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -87,7 +87,12 @@ public final class PlatformManager {
             }
         }
 
-        if (!PlatformUtil.isIOS() && isPlatformEnabled("GSTPlatform")) {
+        // GSTPlatform is registered unconditionally. Upstream guarded this test with !isIOS() to pair it
+        // with an IOSPlatform registration that this fork does not have: FFM-ABI-CONTRACT.md decision 3
+        // deletes the iOS platform rather than migrating it, and PlatformUtil.isIOS() is false on every JDK
+        // this fork supports. Kept on its own the guard could only leave iOS with JavaPlatform, i.e. ID3
+        // metadata and no playback at all.
+        if (isPlatformEnabled("GSTPlatform")) {
             platty = getPlatformInstance(
                     "com.sun.media.jfxmediaimpl.platform.gstreamer.GSTPlatform");
             if (null != platty) {
@@ -99,14 +104,6 @@ public final class PlatformManager {
         if (PlatformUtil.isMac() && isPlatformEnabled("OSXPlatform")) {
             platty = getPlatformInstance(
                     "com.sun.media.jfxmediaimpl.platform.osx.OSXPlatform");
-            if (null != platty) {
-                platforms.add(platty);
-            }
-        }
-
-        if (PlatformUtil.isIOS() && isPlatformEnabled("IOSPlatform")) {
-            platty = getPlatformInstance(
-                    "com.sun.media.jfxmediaimpl.platform.ios.IOSPlatform");
             if (null != platty) {
                 platforms.add(platty);
             }

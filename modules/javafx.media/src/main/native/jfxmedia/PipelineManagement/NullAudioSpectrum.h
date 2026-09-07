@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2014, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2014, 2026, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -34,8 +34,11 @@
 
 class CNullAudioSpectrum : public CAudioSpectrum {
 public:
-    CNullAudioSpectrum() : CAudioSpectrum(), mEnabled(false) {}
-    virtual ~CNullAudioSpectrum() {}
+    CNullAudioSpectrum() : CAudioSpectrum(), mEnabled(false), mBandsHolder(NULL), mBandCount(0),
+                           mInterval(0.0), mThreshold(0) {}
+    virtual ~CNullAudioSpectrum() {
+        CBandsHolder::ReleaseRef(mBandsHolder);
+    }
 
     virtual bool IsEnabled() {
         return mEnabled;
@@ -46,8 +49,13 @@ public:
     }
 
     virtual void SetBands(int bands, CBandsHolder* holder) {
+        // Retain what is kept and release what is replaced, as every CAudioSpectrum must
+        // (AudioSpectrum.h): doing neither would pin each holder for ever, and the pair it owns
+        // with it.
+        CBandsHolder *oldHolder = mBandsHolder;
         mBandCount = bands;
-        mBandsHolder = holder;
+        mBandsHolder = CBandsHolder::AddRef(holder);
+        CBandsHolder::ReleaseRef(oldHolder);
     }
 
     virtual size_t GetBands() {

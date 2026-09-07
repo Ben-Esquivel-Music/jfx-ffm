@@ -30,13 +30,13 @@ extern void source_marshal_INT__UINT64_UINT (GClosure     *closure,
                                              gpointer      invocation_hint,
                                              gpointer      marshal_data);
 
-/* VOID:POINTER,INT (marshal.in:11) */
-extern void source_marshal_VOID__POINTER_INT (GClosure     *closure,
-                                              GValue       *return_value,
-                                              guint         n_param_values,
-                                              const GValue *param_values,
-                                              gpointer      invocation_hint,
-                                              gpointer      marshal_data);
+/* INT:POINTER,INT (marshal.in:11) */
+extern void source_marshal_INT__POINTER_INT (GClosure     *closure,
+                                             GValue       *return_value,
+                                             guint         n_param_values,
+                                             const GValue *param_values,
+                                             gpointer      invocation_hint,
+                                             gpointer      marshal_data);
 
 /* INT:INT,INT (marshal.in:14) */
 extern void source_marshal_INT__INT_INT (GClosure     *closure,

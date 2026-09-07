@@ -1,14 +1,18 @@
 # Web Testing
 
-The web project needs WebKit and Media shared libraries to run tests.
+The web project needs a WebKit shared library (`jfxwebkit`) to run tests. The
+media libraries it also loads are built from source by this build and must not
+be supplied from elsewhere; see the note under **Prebuilt libraries** below.
 
-These can be supplied in a number of ways. See sections below.
+The WebKit library can be supplied in a number of ways. See sections below.
 
 ## Compiled from source
 
-The Maven build in this fork does not compile the WebKit and Media native
-libraries from source (the former Gradle COMPILE_WEBKIT / COMPILE_MEDIA
-switches).
+The Maven build in this fork does not compile the WebKit native library from
+source (the former Gradle COMPILE_WEBKIT switch). It does compile the Media
+libraries: what the Gradle COMPILE_MEDIA switch used to select is now the
+default, in the `native-win` / `native-linux` / `native-mac` profiles of
+`modules/javafx.media/pom.xml`.
 
 For WebKit there is a GitHub Actions workflow that does it instead:
 `.github/workflows/build-webkit.yml` ("Build jfxwebkit"). It is
@@ -32,13 +36,37 @@ already, they extract straight into `caches/sdk` (see below).
 The build takes hours per platform, so run it only when the WebKit native
 sources or the FFM ABI change. `ccache` is enabled and cached between runs.
 
-For Media there is no equivalent yet; use one of the options below.
+Media needs no such workflow. `mvn install` builds `jfxmedia`,
+`gstreamer-lite` and `fxplugins` through CMake into
+`modules/javafx.media/target/native/bin`, together with `glib-lite` on Windows
+and macOS (Linux links the system GLib instead), `jfxmedia_avf` on macOS, and
+`avplugin` on Linux when the system ffmpeg development packages are installed.
+`-DskipNative=true` skips that build rather than selecting libraries from
+anywhere else. None of the options below apply to Media.
 
 
 ## Prebuilt libraries
 
-You can manually place the WebKit and Media shared libraries (`*.dll`, `*.so`
-or `*.dylib`) in the directory the build already uses as `java.library.path`:
+> **The Media libraries are now built from source, and a prebuilt `jfxmedia`
+> from an older OpenJFX SDK no longer works.** On the `ffm/media` branch
+> `javafx.media` calls a plain C ABI (`jfxm_*`) instead of JNI, and
+> `modules/javafx.media/pom.xml` builds `jfxmedia`, `gstreamer-lite` and
+> `fxplugins` — plus `glib-lite` on Windows and macOS, where the bundled GLib
+> subset is used instead of the system one — through CMake like the graphics
+> natives (see `modules/javafx.media/FFM-BUILD-PLAN.md`); `-DskipNative=true`
+> skips that. A JNI-era `jfxmedia` exports `Java_*` entry points but none of
+> the `jfxm_*` symbols, so loading one fails with
+> `UnsatisfiedLinkError: missing native symbol: jfxm_abi_version` and the media
+> stack reports itself unavailable. Delete any stale `jfxmedia*`,
+> `gstreamer-lite*`, `glib-lite*`, `fxplugins*` and `avplugin*` from
+> `../caches/sdk/{bin,lib}` rather than letting them shadow the freshly built
+> ones — the root pom puts `modules/javafx.media/target/native/bin` first on
+> `java.library.path`, but the cache directories are still on it. This note
+> does not apply to `jfxwebkit`, which is still supplied prebuilt.
+
+You can manually place the WebKit shared library (`jfxwebkit.dll`,
+`libjfxwebkit.so` or `libjfxwebkit.dylib`) in the directory the build already
+uses as `java.library.path`:
 
 ````
     modules/javafx.graphics/target/native/bin
@@ -52,8 +80,10 @@ The SDK assembly also copies every shared library found there into
 assembled SDK as well.
 
 The web module loads `jfxwebkit`; the media module loads `jfxmedia` together
-with its platform dependencies (`glib-lite`, `gstreamer-lite`, `fxplugins`,
-and `jfxmedia_avf` on macOS).
+with its platform dependencies — `gstreamer-lite` and `fxplugins` on every
+platform, `glib-lite` on Windows and macOS, `jfxmedia_avf` on macOS, and
+`avplugin` on Linux when it was built — which its own native build has already
+written to `modules/javafx.media/target/native/bin`.
 
 The Maven build also puts `../caches/sdk/bin` and `../caches/sdk/lib`
 (relative to the repository root) on `java.library.path` for the `javafx.web`
@@ -63,10 +93,12 @@ automatically on the next test run.
 
 ## Officially released libraries
 
-You can download officially released libraries from
+You can download an officially released `jfxwebkit` from
 [MavenCentral](https://search.maven.org/search?q=g:org.openjfx%20AND%20a:javafx)
-(artifacts `javafx-web` and `javafx-media` with your platform classifier) and
-extract the shared libraries into the folder above.
+(artifact `javafx-web` with your platform classifier) and extract the shared
+library into the folder above. Do **not** do the same with `javafx-media`:
+every released `jfxmedia` is JNI-era, so it leaves the media stack reporting
+itself unavailable as described above.
 
 Note that these libraries may not be compatible with the source tree you are working with. Always use the [latest version](https://search.maven.org/search?q=g:org.openjfx%20AND%20a:javafx); this may improve your chances of compatibility.
 

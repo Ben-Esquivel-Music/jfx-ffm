@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2010, 2024, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2010, 2026, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -84,10 +84,15 @@ private:
     // javasource signals
     static gint     SourceReadNextBlock(GstElement *src, gpointer data);
     static gint     SourceReadBlock(GstElement *src, guint64 position, guint size, gpointer data);
-    static void     SourceCopyBlock(GstElement *src, gpointer buffer, int size, gpointer data);
+    static gint     SourceCopyBlock(GstElement *src, gpointer buffer, int size, gpointer data);
     static gint64   SourceSeekData(GstElement *src, guint64 offset, gpointer data);
     static void     SourceCloseConnection(GstElement *src, gpointer data);
     static int      SourceProperty(GstElement *src, int prop, int value, gpointer data);
+
+    // GClosureNotify of the "close-connection" closure, and the only place the CStreamCallbacks
+    // shared by the six handlers above is freed. CreateSourceElement explains why that closure owns
+    // it; SourceCloseConnection therefore does not delete it.
+    static void     SourceCallbacksDestroyed(gpointer data, GClosure *closure);
 };
 
 #endif  //_GST_PIPELINE_FACTORY_H_

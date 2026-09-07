@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2010, 2013, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2010, 2026, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -26,6 +26,7 @@
 #ifndef _SINGLETON_H_
 #define _SINGLETON_H_
 
+#include <stddef.h> // NULL; used to arrive through <jni.h>
 #include <stdint.h>
 #include <jfxmedia_errors.h>
 

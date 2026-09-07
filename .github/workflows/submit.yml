@@ -30,8 +30,12 @@
 # We download a specific version of the boot JDK and use the Maven and native
 # toolchains (MSVC, CMake, Xcode) that are preinstalled on each runner.
 #
-# The native javafx.graphics libraries are built by the Maven build on all
-# three platforms (via CMake); the unit test suite therefore runs everywhere.
+# The native javafx.graphics and javafx.media libraries are built by the Maven
+# build on all three platforms (via CMake); the unit test suite therefore runs
+# everywhere. Two media libraries exist on one platform only and are checked by
+# a dedicated step after the build: avplugin on Linux (optional, needs the
+# ffmpeg development packages) and jfxmedia_avf on macOS (the AVFoundation
+# backend, which no development machine in this project can compile).
 #
 # NOTE: much of the build logic is duplicated for each platform. Keep this in
 # mind when making changes.
@@ -74,8 +78,26 @@ jobs:
         run: |
           set -x
           sudo apt-get update
+          # The libav* packages are for the Linux-only avplugin, which
+          # modules/javafx.media/native/linux.cmake builds only when pkg-config finds
+          # them and otherwise skips with a STATUS message. libavcodec and libavformat
+          # are compiled and linked against; libswscale supplies a header only - the
+          # library itself is loaded with dlopen at runtime by plugins/av/videodecoder.c
+          # and is deliberately never linked, so a system without it degrades instead
+          # of failing to load.
           sudo apt-get -y install libgl1-mesa-dev libx11-dev libxxf86vm-dev libxt-dev \
-            pkg-config libgtk-3-dev libxtst-dev libfreetype-dev libpango1.0-dev
+            pkg-config libgtk-3-dev libxtst-dev libfreetype-dev libpango1.0-dev libasound2-dev \
+            libavcodec-dev libavformat-dev libswscale-dev
+
+      - name: Provide a null ALSA device
+        run: |
+          set -x
+          # The javafx.media unit tests build a real GStreamer playback pipeline, whose Linux
+          # audio sink is alsasink; it opens the default PCM as soon as the pipeline goes to
+          # READY. A GitHub-hosted runner has no sound card, so that open fails, the pipeline
+          # state change fails and GSTPlatform.createMediaPlayer hands back null. A null PCM
+          # accepts the audio and discards it, which is all these tests need: nothing is played.
+          printf 'pcm.!default { type null }\nctl.!default { type null }\n' > "${HOME}/.asoundrc"
 
       - name: Download boot JDK
         run: |
@@ -106,6 +128,35 @@ jobs:
           # passed to its separate test run: after a failure Maven still builds and
           # tests every module that does not depend on the failed one.
           mvn -B -ntp -fae install "-Djfx.web.skipFfmTests=false"
+
+      - name: Verify the optional avplugin was built
+        if: ${{ !cancelled() }}
+        working-directory: jfx
+        run: |
+          set -x
+          # avplugin is the one media library whose CMake target is conditional, so a
+          # dropped ffmpeg development package would remove ffmpeg-backed playback from
+          # the build and from the artifacts with no other signal at all. Assert it.
+          so=modules/javafx.media/target/native/bin/libavplugin.so
+          if [ ! -f "${so}" ]; then
+            echo "::error::${so} was not built - check libavcodec-dev/libavformat-dev/libswscale-dev"
+            exit 1
+          fi
+          # The assignment doubles as an assertion: under bash -e a file with no
+          # dynamic section leaves grep without a match, which fails the step here.
+          needed=$(readelf -d "${so}" | grep NEEDED)
+          echo "${needed}"
+          # libswscale must not be among them. avplugin compiles against
+          # <libswscale/swscale.h>, but every sws_* entry point is reached through
+          # dlopen/dlsym in plugins/av/videodecoder.c, so a system without the library
+          # loses only H.265/HEVC 10/12-bit decoding instead of failing to load the
+          # plugin at all. A NEEDED entry would turn that recoverable capability check
+          # into a hard load failure.
+          if echo "${needed}" | grep -q libswscale; then
+            echo "::error::${so} must dlopen libswscale at runtime, not link against it"
+            exit 1
+          fi
+          nm -D --defined-only "${so}" | grep gst_plugin_desc
 
   linux_aarch64_build:
     name: Linux aarch64
@@ -126,8 +177,26 @@ jobs:
         run: |
           set -x
           sudo apt-get update
+          # The libav* packages are for the Linux-only avplugin, which
+          # modules/javafx.media/native/linux.cmake builds only when pkg-config finds
+          # them and otherwise skips with a STATUS message. libavcodec and libavformat
+          # are compiled and linked against; libswscale supplies a header only - the
+          # library itself is loaded with dlopen at runtime by plugins/av/videodecoder.c
+          # and is deliberately never linked, so a system without it degrades instead
+          # of failing to load.
           sudo apt-get -y install libgl1-mesa-dev libx11-dev libxxf86vm-dev libxt-dev \
-            pkg-config libgtk-3-dev libxtst-dev libfreetype-dev libpango1.0-dev
+            pkg-config libgtk-3-dev libxtst-dev libfreetype-dev libpango1.0-dev libasound2-dev \
+            libavcodec-dev libavformat-dev libswscale-dev
+
+      - name: Provide a null ALSA device
+        run: |
+          set -x
+          # The javafx.media unit tests build a real GStreamer playback pipeline, whose Linux
+          # audio sink is alsasink; it opens the default PCM as soon as the pipeline goes to
+          # READY. A GitHub-hosted runner has no sound card, so that open fails, the pipeline
+          # state change fails and GSTPlatform.createMediaPlayer hands back null. A null PCM
+          # accepts the audio and discards it, which is all these tests need: nothing is played.
+          printf 'pcm.!default { type null }\nctl.!default { type null }\n' > "${HOME}/.asoundrc"
 
       - name: Download boot JDK
         run: |
@@ -158,6 +227,35 @@ jobs:
           # passed to its separate test run: after a failure Maven still builds and
           # tests every module that does not depend on the failed one.
           mvn -B -ntp -fae install "-Djfx.web.skipFfmTests=false"
+
+      - name: Verify the optional avplugin was built
+        if: ${{ !cancelled() }}
+        working-directory: jfx
+        run: |
+          set -x
+          # avplugin is the one media library whose CMake target is conditional, so a
+          # dropped ffmpeg development package would remove ffmpeg-backed playback from
+          # the build and from the artifacts with no other signal at all. Assert it.
+          so=modules/javafx.media/target/native/bin/libavplugin.so
+          if [ ! -f "${so}" ]; then
+            echo "::error::${so} was not built - check libavcodec-dev/libavformat-dev/libswscale-dev"
+            exit 1
+          fi
+          # The assignment doubles as an assertion: under bash -e a file with no
+          # dynamic section leaves grep without a match, which fails the step here.
+          needed=$(readelf -d "${so}" | grep NEEDED)
+          echo "${needed}"
+          # libswscale must not be among them. avplugin compiles against
+          # <libswscale/swscale.h>, but every sws_* entry point is reached through
+          # dlopen/dlsym in plugins/av/videodecoder.c, so a system without the library
+          # loses only H.265/HEVC 10/12-bit decoding instead of failing to load the
+          # plugin at all. A NEEDED entry would turn that recoverable capability check
+          # into a hard load failure.
+          if echo "${needed}" | grep -q libswscale; then
+            echo "::error::${so} must dlopen libswscale at runtime, not link against it"
+            exit 1
+          fi
+          nm -D --defined-only "${so}" | grep gst_plugin_desc
 
   macos_x64_build:
     name: macOS x64
@@ -205,6 +303,27 @@ jobs:
           # tests every module that does not depend on the failed one.
           mvn -B -ntp -fae install "-Djfx.web.skipFfmTests=false"
 
+      - name: Verify the AVFoundation backend compiled and linked
+        if: ${{ !cancelled() }}
+        working-directory: jfx
+        run: |
+          set -x
+          # These two jobs are the only place jfxmedia/platform/osx/avf is ever
+          # compiled: no machine this project is developed on has an Objective-C
+          # toolchain. add_media_library uses SHARED with clang's default
+          # -undefined error, so macOS is also the one platform where a dangling
+          # symbol is fatal at link - which is what makes a clean link here real
+          # evidence rather than a formality. This runs even when an earlier step
+          # failed, so the AVF result is reported either way.
+          dylib=modules/javafx.media/target/native/bin/libjfxmedia_avf.dylib
+          if [ ! -f "${dylib}" ]; then
+            echo "::error::${dylib} was not built - the AVFoundation backend did not compile or link"
+            exit 1
+          fi
+          file "${dylib}"
+          otool -L "${dylib}"
+          nm -gU "${dylib}" | head -40
+
   macos_aarch64_build:
     name: macOS aarch64
     runs-on: "macos-15"
@@ -250,6 +369,27 @@ jobs:
           # passed to its separate test run: after a failure Maven still builds and
           # tests every module that does not depend on the failed one.
           mvn -B -ntp -fae install "-Djfx.web.skipFfmTests=false"
+
+      - name: Verify the AVFoundation backend compiled and linked
+        if: ${{ !cancelled() }}
+        working-directory: jfx
+        run: |
+          set -x
+          # These two jobs are the only place jfxmedia/platform/osx/avf is ever
+          # compiled: no machine this project is developed on has an Objective-C
+          # toolchain. add_media_library uses SHARED with clang's default
+          # -undefined error, so macOS is also the one platform where a dangling
+          # symbol is fatal at link - which is what makes a clean link here real
+          # evidence rather than a formality. This runs even when an earlier step
+          # failed, so the AVF result is reported either way.
+          dylib=modules/javafx.media/target/native/bin/libjfxmedia_avf.dylib
+          if [ ! -f "${dylib}" ]; then
+            echo "::error::${dylib} was not built - the AVFoundation backend did not compile or link"
+            exit 1
+          fi
+          file "${dylib}"
+          otool -L "${dylib}"
+          nm -gU "${dylib}" | head -40
 
   windows_x64_build:
     name: Windows x64

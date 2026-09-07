@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2010, 2024, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2010, 2026, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -23,17 +23,15 @@
  * questions.
  */
 
-#import "com_sun_media_jfxmediaimpl_platform_osx_OSXPlatform.h"
 #import <jni/Logger.h>
 #import "OSXMediaPlayer.h"
+#import <ffi/jfxmedia_avf.h>
 
 /*
- * Class:     com_sun_media_jfxmediaimpl_platform_osx_OSXPlatform
- * Method:    osxPlatformInit
- * Signature: ()V
+ * FFM entry point behind jfxm_osx_platform_init() (jfxmedia_api.h); replaces the former
+ * Java_..._OSXPlatform_osxPlatformInit export.
  */
-JNIEXPORT jboolean JNICALL Java_com_sun_media_jfxmediaimpl_platform_osx_OSXPlatform_osxPlatformInit
-    (JNIEnv *env, jclass klass)
+int32_t jfxm_avf_platform_init(void)
 {
     // Workaround for JDK-8202393. All errors will be considered as warnings if code below fails.
     NSBundle *main = [NSBundle mainBundle];
@@ -56,5 +54,5 @@ JNIEXPORT jboolean JNICALL Java_com_sun_media_jfxmediaimpl_platform_osx_OSXPlatf
     }
 
     // Tell OSXMediaPlayer to initialize itself
-    return (jboolean)[OSXMediaPlayer initPlayerPlatform];
+    return [OSXMediaPlayer initPlayerPlatform] ? 1 : 0;
 }

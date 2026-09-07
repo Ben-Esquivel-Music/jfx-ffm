@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2010, 2023, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2010, 2026, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -32,6 +32,7 @@ import com.sun.media.jfxmedia.MediaPlayer;
 import com.sun.media.jfxmedia.events.PlayerStateEvent.PlayerState;
 import com.sun.media.jfxmedia.locator.Locator;
 import com.sun.media.jfxmedia.logging.Logger;
+import com.sun.media.jfxmediaimpl.JfxMediaNative;
 import com.sun.media.jfxmediaimpl.MediaUtils;
 import com.sun.media.jfxmediaimpl.platform.Platform;
 import java.util.Arrays;
@@ -78,10 +79,10 @@ public final class GSTPlatform extends Platform {
 
     @Override
     public boolean loadPlatform() {
-        // Initialize GStreamer JNI and supporting native classes.
+        // Initialize GStreamer and the supporting native classes.
         MediaError ret;
         try {
-            ret = MediaError.getFromCode(gstInitPlatform());
+            ret = MediaError.getFromCode(JfxMediaNative.platformInit());
         } catch (UnsatisfiedLinkError ule) {
             ret = MediaError.ERROR_MANAGER_ENGINEINIT_FAIL;
         }
@@ -184,11 +185,4 @@ public final class GSTPlatform extends Platform {
         }
         return player;
     }
-
-    /**
-     * Initialize the native peer of this media manager.
-     *
-     * @return A status code.
-     */
-    private static native int gstInitPlatform();
 }

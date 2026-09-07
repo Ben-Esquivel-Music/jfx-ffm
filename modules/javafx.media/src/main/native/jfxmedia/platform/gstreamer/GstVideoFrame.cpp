@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2010, 2024, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2010, 2026, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -29,7 +29,6 @@
 #include <jni/Logger.h>
 #include <Common/ProductFlags.h>
 #include <Common/VSMemory.h>
-#include <Utils/LowLevelPerf.h>
 #include <Utils/ColorConverter.h>
 
 static inline guint32 swap_uint32(guint32 x)
@@ -118,16 +117,12 @@ CGstVideoFrame::CGstVideoFrame()
 
 CGstVideoFrame::~CGstVideoFrame()
 {
-    LOWLEVELPERF_COUNTERDEC("CGstVideoFrame", 1, 1);
-
     if (NULL != m_pBuffer)
         Dispose();
 }
 
 bool CGstVideoFrame::Init(GstSample* sample)
 {
-    LOWLEVELPERF_COUNTERINC("CGstVideoFrame", 1, 1);
-
     // Increment the ref count as this object will be created
     // by the video sink and pushed into the FrameQueue.
     m_pSample = gst_sample_ref(sample);

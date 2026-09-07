@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2010, 2024, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2010, 2026, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -32,7 +32,6 @@
 #include <MediaManagement/Media.h>
 #include <jni/Logger.h>
 #include <Common/VSMemory.h>
-#include <Utils/LowLevelPerf.h>
 #include <fxplugins_common.h>
 
 #include <string.h>
@@ -319,8 +318,6 @@ void CGstAVPlaybackPipeline::SetEncodedVideoFrameRate(float frameRate)
  */
 GstFlowReturn CGstAVPlaybackPipeline::OnAppSinkHaveFrame(GstElement* pElem, CGstAVPlaybackPipeline* pPipeline)
 {
-    LOWLEVELPERF_RESETCOUNTER("FPS");
-
     //***** get the buffer from appsink
     GstSample* pSample = gst_app_sink_pull_sample(GST_APP_SINK (pElem));
     if (pSample == NULL)
@@ -395,8 +392,6 @@ GstFlowReturn CGstAVPlaybackPipeline::OnAppSinkHaveFrame(GstElement* pElem, CGst
  */
 GstFlowReturn CGstAVPlaybackPipeline::OnAppSinkPreroll(GstElement* pElem, CGstAVPlaybackPipeline* pPipeline)
 {
-    LOWLEVELPERF_EXECTIMESTOP("nativeInitNativeMediaManagerToVideoPreroll");
-
     //***** get the buffer from appsink
     GstSample* pSample = gst_app_sink_pull_preroll(GST_APP_SINK (pElem));
 

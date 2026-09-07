@@ -276,12 +276,33 @@ gst_directsound_sink_class_init (GstDirectSoundSinkClass * klass)
 }
 
 #ifdef GSTREAMER_LITE
+/* Runs on a thread MMDevAPI owns, dispatched from
+ * GSTDirectSoundNotify::OnDefaultDeviceChanged(), concurrently with the streaming thread,
+ * which reads and clears reload and sets need_reload in gst_directsound_sink_write(), and
+ * with whichever thread runs the state change that calls gst_directsound_sink_open().
+ *
+ * Both flags are therefore exchanged with glib's int atomics. Using dsound_lock instead
+ * is not an option here: MMDevAPI dispatches this notification while holding locks of its
+ * own and the notify object holds m_srwCallback across the call, so a dsound_lock taken
+ * here would nest under both. The streaming thread holds dsound_lock while it calls into
+ * DirectSound, and this code cannot rule out that such a call reaches an audio engine
+ * lock the notification path also holds - that is the inversion. A callback blocked here
+ * would also stall teardown, which waits on m_srwCallback for exactly this call to return
+ * before gst_directsound_sink_finalize() may free the sink. The comments in
+ * gstdirectsoundnotify.cpp state the dependency directly: m_srwCallback is a leaf lock
+ * only because this function takes no lock and makes no COM call. glib's int atomics keep
+ * it one - on Windows they are MemoryBarrier() and InterlockedCompareExchange(),
+ * G_ATOMIC_LOCK_FREE being defined for this build - and they are legal on these fields as
+ * declared, gboolean being a gint typedef. */
 static void
 gst_directsound_device_callback (GstDirectSoundSink * dsoundsink)
 {
-  if (dsoundsink->need_reload) {
-    dsoundsink->reload = TRUE;
-    dsoundsink->need_reload = TRUE;
+  if (g_atomic_int_get (&dsoundsink->need_reload)) {
+    g_atomic_int_set (&dsoundsink->reload, TRUE);
+    /* Redundant as written: nothing clears need_reload after gst_directsound_sink_init(),
+     * so it is already TRUE on this branch. Kept verbatim - this change makes the two
+     * flags race free and deliberately leaves the reload state machine as it was. */
+    g_atomic_int_set (&dsoundsink->need_reload, TRUE);
   }
 }
 #endif // GSTREAMER_LITE
@@ -307,8 +328,15 @@ gst_directsound_sink_init (GstDirectSoundSink * dsoundsink)
   memset(&dsoundsink->wfx, 0, sizeof(WAVEFORMATEX));
   dsoundsink->gst_ds_notifier = InitNotificator(&gst_directsound_device_callback,
                                                 dsoundsink);
-  dsoundsink->reload = FALSE;
-  dsoundsink->need_reload = FALSE;
+  /* Atomic like every other access to these two flags. InitNotificator() above has
+   * already handed this sink to the notification client, so on the path where that
+   * succeeded gst_directsound_device_callback() may be running on an MMDevAPI thread by
+   * the time these stores execute. They are not what establishes the initial FALSE -
+   * g_type_create_instance() zero fills the instance before instance_init() runs, so a
+   * callback arriving in that window reads FALSE either way - they only make it
+   * explicit. */
+  g_atomic_int_set (&dsoundsink->reload, FALSE);
+  g_atomic_int_set (&dsoundsink->need_reload, FALSE);
 #endif // GSTREAMER_LITE
 }
 
@@ -550,7 +578,8 @@ gst_directsound_sink_open (GstAudioSink * asink)
 #ifdef GSTREAMER_LITE
     dsoundsink->pDS = NULL;
     if (hRes == DSERR_NODRIVER) {
-      dsoundsink->need_reload = TRUE;
+      /* Atomic: read by gst_directsound_device_callback() on an MMDevAPI thread. */
+      g_atomic_int_set (&dsoundsink->need_reload, TRUE);
       g_free(lpGuid);
       return TRUE;
     }
@@ -757,6 +786,15 @@ gst_directsound_sink_close (GstAudioSink * asink)
 }
 
 #ifdef GSTREAMER_LITE
+/* Releases whichever DirectSound interfaces the sink currently owns.
+ *
+ * Callers must hold dsound_lock. pDS and pDSBSecondary are covered by that lock, not by
+ * the atomics that cover the reload and need_reload flags: gst_directsound_sink_reset()
+ * dereferences pDSBSecondary under the lock from the thread running the state change,
+ * concurrently with the ring buffer thread that runs write() and the reload below, so
+ * releasing the interfaces without the lock frees them under reset(). Both call sites
+ * hold it - the DSERR_BUFFERLOST branch of gst_directsound_sink_write() and
+ * gst_directsound_sink_reload(). */
 static void
 gst_directsound_sink_prereload(GstAudioSink* asink)
 {
@@ -774,20 +812,46 @@ gst_directsound_sink_prereload(GstAudioSink* asink)
   }
 }
 
+/* Recreates the device and the secondary buffer after the default endpoint changed.
+ * Runs on the ring buffer thread, called from gst_directsound_sink_write() only.
+ *
+ * dsound_lock is taken here, in two sections, rather than around the whole function: the
+ * DirectSoundCreate loop between them sleeps for up to DS_RELOAD_TIMEOUT waiting for the
+ * replacement endpoint to appear, and holding dsound_lock for that minute would block
+ * gst_directsound_sink_reset() - every pause and stop - for just as long. Every write to
+ * an interface pointer is inside one of the two sections, so from another thread the
+ * pointers still only ever change valid -> NULL (the release below) or NULL -> valid (the
+ * publication below) with the lock held. While the loop runs the sink simply has no
+ * device, which is a state the rest of the sink already handles: write() takes its
+ * no_device_write path, and reset() finds pDSBSecondary NULL under the lock and does
+ * nothing.
+ *
+ * gst_directsound_sink_delay() is the one reader this does not cover: it tests and then
+ * dereferences both pointers without taking dsound_lock at all, so it can still race a
+ * release. That is left as it was, deliberately. It is upstream code, it is called to
+ * answer the audio clock, and dsound_lock is held across the Sleep(5) cursor drain loop
+ * in reset() and across the no_device_write Sleep() in write() - so making delay() wait
+ * on the lock would trade a narrow race for a clock query that can stall the pipeline. */
 static gboolean
 gst_directsound_sink_reload(GstAudioSink* asink)
 {
   GstDirectSoundSink* dsoundsink;
   HRESULT hRes = S_OK;
   gint timeout = DS_RELOAD_TIMEOUT;
+  LPDIRECTSOUND pDS = NULL;
+  LPDIRECTSOUNDBUFFER pDSBSecondary = NULL;
 
   dsoundsink = GST_DIRECTSOUND_SINK(asink);
 
   // To avoid memory leaks in case it gets called again
+  GST_DSOUND_LOCK (dsoundsink);
   gst_directsound_sink_prereload(asink);
+  GST_DSOUND_UNLOCK (dsoundsink);
 
+  /* Built in locals and published below, so that the sink never exposes a device without
+   * a buffer, or a buffer that has not been configured yet, to a concurrent reset(). */
   do {
-    hRes = DirectSoundCreate(NULL, &dsoundsink->pDS, NULL);
+    hRes = DirectSoundCreate(NULL, &pDS, NULL);
     if (FAILED(hRes)) {
       Sleep(DS_RELOAD_INTERVAL);
       timeout -= DS_RELOAD_INTERVAL;
@@ -798,22 +862,28 @@ gst_directsound_sink_reload(GstAudioSink* asink)
     return FALSE;
   }
 
-  hRes = IDirectSound_SetCooperativeLevel(dsoundsink->pDS,
+  hRes = IDirectSound_SetCooperativeLevel(pDS,
                                           GetDesktopWindow(), DSSCL_PRIORITY);
   if (FAILED(hRes)) {
-    IDirectSound_Release(dsoundsink->pDS);
-    dsoundsink->pDS = NULL;
+    IDirectSound_Release(pDS);
     return FALSE;
   }
 
-  hRes = IDirectSound_CreateSoundBuffer(dsoundsink->pDS, &dsoundsink->descSecondary,
-                                        &dsoundsink->pDSBSecondary, NULL);
+  hRes = IDirectSound_CreateSoundBuffer(pDS, &dsoundsink->descSecondary,
+                                        &pDSBSecondary, NULL);
   if (FAILED(hRes)) {
-    IDirectSound_Release(dsoundsink->pDS);
-    dsoundsink->pDS = NULL;
+    IDirectSound_Release(pDS);
     return FALSE;
   }
 
+  GST_DSOUND_LOCK (dsoundsink);
+
+  dsoundsink->pDS = pDS;
+  dsoundsink->pDSBSecondary = pDSBSecondary;
+
+  /* The three calls below and the Play() dereference dsoundsink->pDSBSecondary, so they
+   * stay under the lock that just published it. None of them takes dsound_lock itself,
+   * which matters because it is a plain GMutex and is not recursive. */
   gst_directsound_sink_set_volume(dsoundsink,
                             gst_directsound_sink_get_volume(dsoundsink), FALSE);
   gst_directsound_sink_set_mute(dsoundsink, dsoundsink->mute);
@@ -826,8 +896,11 @@ gst_directsound_sink_reload(GstAudioSink* asink)
     dsoundsink->pDS = NULL;
     IDirectSoundBuffer_Release(dsoundsink->pDSBSecondary);
     dsoundsink->pDSBSecondary = NULL;
+    GST_DSOUND_UNLOCK (dsoundsink);
     return FALSE;
   }
+
+  GST_DSOUND_UNLOCK (dsoundsink);
 
   return TRUE;
 }
@@ -850,8 +923,21 @@ gst_directsound_sink_write (GstAudioSink * asink, gpointer data, guint length)
   dsoundsink = GST_DIRECTSOUND_SINK (asink);
 
 #ifdef GSTREAMER_LITE
-  if (dsoundsink->reload) {
-    dsoundsink->reload = FALSE;
+  /* Test and clear in one atomic operation. gst_directsound_device_callback() sets reload
+   * from an MMDevAPI thread and can do so at any point, including between a separate read
+   * and clear; this is its only reader, so the exchange consumes one reload request
+   * exactly once, which is what the read/clear pair did whenever it was not racing. The
+   * flag only ever holds TRUE or FALSE, so comparing against TRUE is exact.
+   *
+   * The atomics cover these two flags and nothing else. The interface pointers that the
+   * reload then releases and recreates are covered by dsound_lock, which
+   * gst_directsound_sink_reload() takes around each half of that work itself - see the
+   * comment on it for why the lock is not simply held across this block. The pDS test
+   * below needs no lock of its own: the writers are reload() and the prereload() on the
+   * DSERR_BUFFERLOST path, both on this thread, plus open(), prepare() and close() on
+   * the state change thread, and those three cannot overlap it - the ring buffer thread
+   * is created after prepare() and joined before unprepare() and close(). */
+  if (g_atomic_int_compare_and_exchange (&dsoundsink->reload, TRUE, FALSE)) {
     if (!gst_directsound_sink_reload(asink)) {
       GST_ELEMENT_ERROR (dsoundsink, RESOURCE, OPEN_WRITE,
                         ("Failed to load audio render device"), (NULL));
@@ -955,7 +1041,8 @@ no_device_write:
         // Audio device gone. Call prereload to free current device and wait for
         // new device on callback.
         gst_directsound_sink_prereload(asink);
-        dsoundsink->need_reload = TRUE;
+        /* Atomic: read by gst_directsound_device_callback() on an MMDevAPI thread. */
+        g_atomic_int_set (&dsoundsink->need_reload, TRUE);
         GST_DSOUND_UNLOCK (dsoundsink);
         goto no_device_write;
       }

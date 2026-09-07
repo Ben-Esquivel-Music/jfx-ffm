@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2014, 2022, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2014, 2026, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -30,7 +30,11 @@
 #import <CoreVideo/CoreVideo.h>
 
 #import "OSXPlayerProtocol.h"
-#import "jni/JavaPlayerEventDispatcher.h"
+// Track types used by the -createTrack* methods. They used to arrive transitively through
+// jni/JavaPlayerEventDispatcher.h, which this file no longer includes.
+#import <PipelineManagement/AudioTrack.h>
+#import <PipelineManagement/VideoTrack.h>
+#import <PipelineManagement/SubtitleTrack.h>
 #import "AVFAudioSpectrumUnit.h"
 #import "AVFAudioEqualizer.h"
 
@@ -41,12 +45,23 @@
                                      AVAssetResourceLoaderDelegate>
 {
     CVDisplayLinkRef _displayLink;
+
+    // The context handed to CVDisplayLinkSetOutputCallback: a registry token, never a pointer to
+    // this object. What the registry is for, and why the context cannot be a pointer, is written
+    // out above the registry itself at the top of AVFMediaPlayer.mm. Assigned once by the
+    // initializer, before anything can reach -createVideoOutput; cleared by -dispose when it
+    // retires the entry. _Atomic for the same reason isDisposed is: -dispose clears it outside
+    // @synchronized(self) while -createVideoOutput reads it inside, and a plain uintptr_t would
+    // make that concurrent pair a data race, which is undefined behaviour rather than merely a
+    // stale read.
+    _Atomic(uintptr_t) _displayLinkToken;
+
     CMVideoFormatDescriptionRef _videoFormat;
 
     dispatch_queue_t playerQueue;
     dispatch_queue_t playerLoaderQueue;
 
-    CJavaPlayerEventDispatcher *eventHandler;
+    CPlayerEventDispatcher *eventHandler;
     CLocatorStream *locatorStream;
 
     int requestedState; // 0 - stop, 1 - play, 2 - pause
@@ -56,7 +71,15 @@
     int previousHeight;
     int previousPlayerState; // avoid repeated states
 
-    BOOL isDisposed;
+    // Set once, by -dispose, under @synchronized(self). Two kinds of reader: the sends that must not
+    // outlive the dispatcher test it inside that same monitor, and -observeValueForKeyPath:,
+    // -extractTrackInfo and -sendPixelBuffer: read it unlocked, as an advisory early-out, because
+    // they must not hold the monitor across the AVFoundation work that follows (the reasons differ
+    // per site and are written at each one). _Atomic rather than volatile for those readers:
+    // volatile would guarantee the load is really performed but leaves a concurrent read/write pair
+    // a data race, which is undefined behaviour; _Atomic makes it defined, and on the platforms this
+    // builds for it generates the same load and store.
+    _Atomic(BOOL) isDisposed;
     NSMutableArray *keyPathsObserved;
     NSMutableArray *playerObservers; // player item notification observers
 }
@@ -87,7 +110,7 @@
 @property (nonatomic,readonly) CAudioEqualizer *audioEqualizer;
 @property (nonatomic,readonly) CAudioSpectrum *audioSpectrum;
 
-- (id) initWithURL:(NSURL *)source eventHandler:(CJavaPlayerEventDispatcher*)hdlr locatorStream:(CLocatorStream*)ls;
+- (id) initWithURL:(NSURL *)source eventHandler:(CPlayerEventDispatcher*)hdlr locatorStream:(CLocatorStream*)ls;
 - (void) setPlayerState:(int)newState;
 - (void) hlsBugReset;
 

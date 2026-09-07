@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2010, 2024, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2010, 2026, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -25,9 +25,7 @@
 
 package javafx.scene.media;
 
-import com.sun.javafx.PlatformUtil;
 import com.sun.javafx.geom.BaseBounds;
-import com.sun.javafx.geom.transform.Affine3D;
 import com.sun.javafx.geom.transform.BaseTransform;
 import com.sun.javafx.scene.DirtyBits;
 import com.sun.javafx.scene.AbstractNode;
@@ -36,19 +34,16 @@ import com.sun.javafx.scene.media.MediaViewHelper;
 import com.sun.javafx.sg.prism.MediaFrameTracker;
 import com.sun.javafx.sg.prism.NGNode;
 import com.sun.javafx.tk.Toolkit;
-import com.sun.media.jfxmedia.control.MediaPlayerOverlay;
 import javafx.application.Platform;
 import javafx.beans.InvalidationListener;
 import javafx.beans.Observable;
 import javafx.beans.property.*;
-import javafx.beans.value.ChangeListener;
 import javafx.beans.value.ObservableObjectValue;
 import javafx.collections.ObservableMap;
 import javafx.event.EventHandler;
 import javafx.geometry.NodeOrientation;
 import javafx.geometry.Rectangle2D;
 import javafx.scene.Node;
-import javafx.scene.Parent;
 
 /**
  * A {@link Node} that provides a view of {@link Media} being played by a
@@ -101,11 +96,6 @@ public class MediaView extends AbstractNode {
             @Override
             public void doUpdatePeer(Node node) {
                 ((MediaView) node).doUpdatePeer();
-            }
-
-            @Override
-            public void doTransformsChanged(Node node) {
-                ((MediaView) node).doTransformsChanged();
             }
 
             @Override
@@ -177,117 +167,6 @@ public class MediaView extends AbstractNode {
             };
         }
     }
-
-    /* *************************************** Media Player Overlay support ************************* */
-
-    private MediaPlayerOverlay mediaPlayerOverlay = null;
-
-    private ChangeListener<Parent> parentListener;
-    private ChangeListener<Boolean> treeVisibleListener;
-    private ChangeListener<Number> opacityListener;
-
-    private void createListeners() {
-        parentListener = (ov2, oldParent, newParent) -> {
-            updateOverlayVisibility();
-        };
-
-        treeVisibleListener = (ov1, oldVisible, newVisible) -> {
-            updateOverlayVisibility();
-        };
-
-        opacityListener = (ov, oldOpacity, newOpacity) -> {
-            updateOverlayOpacity();
-        };
-    }
-
-    private boolean determineVisibility() {
-        return (getParent() != null && isVisible());
-    }
-
-    private synchronized void updateOverlayVisibility() {
-        if (mediaPlayerOverlay != null) {
-            mediaPlayerOverlay.setOverlayVisible(determineVisibility());
-        }
-    }
-
-    private synchronized void updateOverlayOpacity() {
-        if (mediaPlayerOverlay != null) {
-            mediaPlayerOverlay.setOverlayOpacity(getOpacity());
-        }
-    }
-
-    private synchronized void updateOverlayX() {
-        if (mediaPlayerOverlay != null) {
-            mediaPlayerOverlay.setOverlayX(getX());
-        }
-    }
-
-    private synchronized void updateOverlayY() {
-        if (mediaPlayerOverlay != null) {
-            mediaPlayerOverlay.setOverlayY(getY());
-        }
-    }
-
-    private synchronized void updateOverlayWidth() {
-        if (mediaPlayerOverlay != null) {
-            mediaPlayerOverlay.setOverlayWidth(getFitWidth());
-        }
-    }
-
-    private synchronized void updateOverlayHeight() {
-        if (mediaPlayerOverlay != null) {
-            mediaPlayerOverlay.setOverlayHeight(getFitHeight());
-        }
-    }
-
-    private synchronized void updateOverlayPreserveRatio() {
-        if (mediaPlayerOverlay != null) {
-            mediaPlayerOverlay.setOverlayPreserveRatio(isPreserveRatio());
-        }
-    }
-
-    private static Affine3D calculateNodeToSceneTransform(Node node) {
-        final Affine3D transform = new Affine3D();
-        do {
-            transform.preConcatenate(NodeHelper.getLeafTransform(node));
-            node = node.getParent();
-        } while (node != null);
-
-        return transform;
-    }
-
-    private void updateOverlayTransform() {
-        if (mediaPlayerOverlay != null) {
-            final Affine3D trans = MediaView.calculateNodeToSceneTransform(this);
-            mediaPlayerOverlay.setOverlayTransform(
-                    trans.getMxx(), trans.getMxy(), trans.getMxz(), trans.getMxt(),
-                    trans.getMyx(), trans.getMyy(), trans.getMyz(), trans.getMyt(),
-                    trans.getMzx(), trans.getMzy(), trans.getMzz(), trans.getMzt());
-        }
-    }
-
-    private void updateMediaPlayerOverlay() {
-        mediaPlayerOverlay.setOverlayX(getX());
-        mediaPlayerOverlay.setOverlayY(getY());
-        mediaPlayerOverlay.setOverlayPreserveRatio(isPreserveRatio());
-        mediaPlayerOverlay.setOverlayWidth(getFitWidth());
-        mediaPlayerOverlay.setOverlayHeight(getFitHeight());
-        mediaPlayerOverlay.setOverlayOpacity(getOpacity());
-        mediaPlayerOverlay.setOverlayVisible(determineVisibility());
-        updateOverlayTransform();
-    }
-
-    /*
-     *
-     * Note: This method MUST only be called via its accessor method.
-     */
-    private void doTransformsChanged() {
-        if (mediaPlayerOverlay != null) {
-            updateOverlayTransform();
-        }
-    }
-
-    /* ***************************************** End of iOS specific stuff ************************* */
 
     /**
      * @return reference to MediaView
@@ -488,13 +367,8 @@ public class MediaView extends AbstractNode {
 
                 @Override
                 protected void invalidated() {
-                    if (PlatformUtil.isIOS()) {
-                        updateOverlayPreserveRatio();
-                    }
-                    else {
-                        NodeHelper.markDirty(MediaView.this, DirtyBits.NODE_VIEWPORT);
-                        NodeHelper.geomChanged(MediaView.this);
-                    }
+                    NodeHelper.markDirty(MediaView.this, DirtyBits.NODE_VIEWPORT);
+                    NodeHelper.geomChanged(MediaView.this);
                 }
 
                 @Override
@@ -589,13 +463,8 @@ public class MediaView extends AbstractNode {
 
                 @Override
                 protected void invalidated() {
-                    if (PlatformUtil.isIOS()) {
-                        updateOverlayX();
-                    }
-                    else {
-                        NodeHelper.markDirty(MediaView.this, DirtyBits.NODE_GEOMETRY);
-                        NodeHelper.geomChanged(MediaView.this);
-                    }
+                    NodeHelper.markDirty(MediaView.this, DirtyBits.NODE_GEOMETRY);
+                    NodeHelper.geomChanged(MediaView.this);
                 }
 
                 @Override
@@ -639,13 +508,8 @@ public class MediaView extends AbstractNode {
 
                 @Override
                 protected void invalidated() {
-                    if (PlatformUtil.isIOS()) {
-                        updateOverlayY();
-                    }
-                    else {
-                        NodeHelper.markDirty(MediaView.this, DirtyBits.NODE_GEOMETRY);
-                        NodeHelper.geomChanged(MediaView.this);
-                    }
+                    NodeHelper.markDirty(MediaView.this, DirtyBits.NODE_GEOMETRY);
+                    NodeHelper.geomChanged(MediaView.this);
                 }
 
                 @Override
@@ -698,13 +562,8 @@ public class MediaView extends AbstractNode {
 
                 @Override
                 protected void invalidated() {
-                    if (PlatformUtil.isIOS()) {
-                        updateOverlayWidth();
-                    }
-                    else {
-                        NodeHelper.markDirty(MediaView.this, DirtyBits.NODE_VIEWPORT);
-                        NodeHelper.geomChanged(MediaView.this);
-                    }
+                    NodeHelper.markDirty(MediaView.this, DirtyBits.NODE_VIEWPORT);
+                    NodeHelper.geomChanged(MediaView.this);
                 }
 
                 @Override
@@ -757,13 +616,8 @@ public class MediaView extends AbstractNode {
 
                 @Override
                 protected void invalidated() {
-                    if (PlatformUtil.isIOS()) {
-                        updateOverlayHeight();
-                    }
-                    else {
-                        NodeHelper.markDirty(MediaView.this, DirtyBits.NODE_VIEWPORT);
-                        NodeHelper.geomChanged(MediaView.this);
-                    }
+                    NodeHelper.markDirty(MediaView.this, DirtyBits.NODE_VIEWPORT);
+                    NodeHelper.geomChanged(MediaView.this);
                 }
 
                 @Override
@@ -1026,20 +880,6 @@ public class MediaView extends AbstractNode {
             if (decodedFrameRateListener != null && registerVideoFrameRateListener) {
                 jfxPlayer.getVideoRenderControl().addVideoFrameRateListener(decodedFrameRateListener);
                 registerVideoFrameRateListener = false;
-            }
-
-            // Get media player overlay
-            mediaPlayerOverlay = jfxPlayer.getMediaPlayerOverlay();
-            if (mediaPlayerOverlay != null) {
-                // Init media player overlay support
-                createListeners();
-                parentProperty().addListener(parentListener);
-                NodeHelper.treeVisibleProperty(this).addListener(treeVisibleListener);
-                opacityProperty().addListener(opacityListener);
-
-                synchronized (this) {
-                    updateMediaPlayerOverlay();
-                }
             }
         }
     }

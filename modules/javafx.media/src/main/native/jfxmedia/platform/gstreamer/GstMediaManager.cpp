@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2010, 2015, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2010, 2026, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -27,7 +27,6 @@
 #include <jfxmedia_errors.h>
 #include <jni/Logger.h>
 #include <Common/VSMemory.h>
-#include <Utils/LowLevelPerf.h>
 
 //*************************************************************************************************
 //********** class CGstMediaManager
@@ -127,7 +126,6 @@ uint32_t CGstMediaManager::Init()
 #endif // ENABLE_VISUAL_STUDIO_MEMORY_LEAKS_DETECTION
 
     //***** Try to initialize the GStreamer system
-    LOWLEVELPERF_EXECTIMESTART("gst_init_check()");
     // disable installing SIGSEGV signal handling as it interferes with Java's signal handling
     gst_segtrap_set_enabled(false);
     if (!gst_init_check(NULL, NULL, NULL))
@@ -135,7 +133,6 @@ uint32_t CGstMediaManager::Init()
         LOGGER_LOGMSG(LOGGER_DEBUG, "Could not init GStreamer!\n");
         return ERROR_MANAGER_ENGINEINIT_FAIL;
     }
-    LOWLEVELPERF_EXECTIMESTOP("gst_init_check()");
 
 #if ENABLE_VISUAL_STUDIO_MEMORY_LEAKS_DETECTION && TARGET_OS_WIN32
     _CrtSetDbgFlag(_CRTDBG_ALLOC_MEM_DF | _CRTDBG_LEAK_CHECK_DF);

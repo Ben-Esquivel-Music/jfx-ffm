@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2010, 2013, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2010, 2026, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -28,21 +28,25 @@
 
 #include <Common/ProductFlags.h>
 
+// Level definitions. These mirror the constants of com.sun.media.jfxmedia.logging.Logger, which
+// the generated JNI header com_sun_media_jfxmedia_logging_Logger.h used to supply; jfxm_log_level
+// exports them so a Java binding test can prove the copy still matches. Defined outside the
+// ENABLE_LOGGING guard because that guard controls whether messages are emitted, not what the
+// levels of the Java API are - jfxmedia_api.cpp needs them either way.
+#define LOGGER_OFF     2147483647
+#define LOGGER_ERROR   4
+#define LOGGER_WARNING 3
+#define LOGGER_INFO    2
+#define LOGGER_DEBUG   1
+
 #if ENABLE_LOGGING
-#include <com_sun_media_jfxmedia_logging_Logger.h>
+#include <jfxmedia_api.h>
 
 #include <Utils/Singleton.h>
 
 #include <string>
 
 using namespace std;
-
-// Level difinitions
-#define LOGGER_OFF     com_sun_media_jfxmedia_logging_Logger_OFF
-#define LOGGER_ERROR   com_sun_media_jfxmedia_logging_Logger_ERROR
-#define LOGGER_WARNING com_sun_media_jfxmedia_logging_Logger_WARNING
-#define LOGGER_INFO    com_sun_media_jfxmedia_logging_Logger_INFO
-#define LOGGER_DEBUG   com_sun_media_jfxmedia_logging_Logger_DEBUG
 
 // Macros for logging
 // These macros should be used instead of calling CLogger directly
@@ -76,7 +80,7 @@ public:
     }
 
     inline void logWarningMsg(const char *msg) {
-        logMsg(LOGGER_DEBUG, msg);
+        logMsg(LOGGER_WARNING, msg);
     }
 
     inline void logDebugMsg(const char *msg) {
@@ -92,7 +96,7 @@ public:
     }
 
     inline void logWarningMsg(const char *srcClass, const char *srcMethod, const char *msg) {
-        logMsg(LOGGER_DEBUG, srcClass, srcMethod, msg);
+        logMsg(LOGGER_WARNING, srcClass, srcMethod, msg);
     }
 
     inline void logDebugMsg(const char *srcClass, const char *srcMethod, const char *msg) {
@@ -100,10 +104,13 @@ public:
     }
 
 public:
-    // Do NOT use this function. Instead use init() from Java layer.
-    bool init(JNIEnv *env, jclass cls);
     // Do NOT use this function. Instead use setLevel() from Java layer.
     void setLevel(int level);
+
+    // FFM log sink (jfxm_log_init): logMsg() forwards to fn when one is installed and drops the
+    // message otherwise. fn may be NULL to detach the sink. Returns false only when the singleton
+    // cannot be created.
+    static bool initSink(JfxmLogFn fn, void* user);
 
     static inline CLogger *getLogger() {
         CLogger *logger = NULL;
@@ -118,12 +125,23 @@ public:
     static uint32_t CreateInstance(CLogger **ppLogger);
 
 private:
-    bool m_areJMethodIDsInitialized;
+    /*
+     * Reads m_currentLevel and copies m_sinkFn/m_sinkUser under the lock Logger.cpp owns, then
+     * releases it. Returns true, with *pFn and *ppUser set, only when the message passes the level
+     * filter and a sink is installed; otherwise *pFn is NULL and the caller drops the message.
+     * Callers must invoke the sink through the copy AFTER this returns, never with the lock held:
+     * that is what makes the pointer that was tested the pointer that is called, keeps (fn, user)
+     * a matched pair, and keeps a sink that logs re-entrantly from deadlocking.
+     */
+    bool copySink(int level, JfxmLogFn *pFn, void **ppUser);
+
+private:
+    // Written by setLevel and initSink from the Java caller thread, read by every native thread
+    // that logs; all accesses go through the lock in Logger.cpp.
     int m_currentLevel;
-    JavaVM *m_jvm;
-    jclass m_cls;
-    jmethodID m_logMsg1Method;
-    jmethodID m_logMsg2Method;
+    // CreateInstance value-initialises the object, so these start out NULL.
+    JfxmLogFn m_sinkFn;
+    void *m_sinkUser;
 };
 #else // ENABLE_LOGGING
 #define LOGGER_LOGMSG(l, m) NULL
