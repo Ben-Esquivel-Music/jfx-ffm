@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2011, 2020, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2011, 2026, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -35,6 +35,8 @@ public final class JavaSurface extends AbstractSurface {
 
     public JavaSurface(int[] dataInt, int dataType, int width, int height) {
         super(width, height);
+        // The C side trusts pixels() to hold width * height ints and does not re-check the length,
+        // so this test is the one guard on it; dataInt is never reassigned afterwards.
         if (dataInt.length / width < height) {
             throw new IllegalArgumentException("width(=" + width + ") * height(="
                     + height + ") is greater than dataInt.length(=" + dataInt.length + ")");
@@ -42,12 +44,11 @@ public final class JavaSurface extends AbstractSurface {
         this.dataInt = dataInt;
         this.dataBuffer = IntBuffer.wrap(this.dataInt);
 
-        initialize(dataType, width, height);
-        // The native method initialize() creates the native object of
-        // struct JavaSurface and saves it's reference in the super class
-        // member AbstractSurface.nativePtr. This reference is needed for
-        // creating disposer record hence the below call to addDisposerRecord()
-        // is needed here and cannot be made in super class constructor.
+        createNativeSurface(dataType);
+        // createNativeSurface() stores the native surface handle in the super class member
+        // AbstractSurface.nativePtr. This handle is needed for creating the disposer record,
+        // hence the below call to addDisposerRecord() is needed here and cannot be made in
+        // the super class constructor.
         addDisposerRecord();
     }
 
@@ -55,5 +56,8 @@ public final class JavaSurface extends AbstractSurface {
         return this.dataBuffer;
     }
 
-    private native void initialize(int dataType, int width, int height);
+    @Override
+    int[] pixels() {
+        return dataInt;
+    }
 }
