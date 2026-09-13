@@ -27,22 +27,17 @@
  * prism_es2_api.c - the platform-neutral part of the flat C ABI declared in prism_es2_api.h.
  *
  * Every body here is the corresponding Java_com_sun_prism_es2_GLContext_n* / GLFactory_n* body from
- * GLContext.c and GLFactory.c with the JNI marshalling removed: jlong_to_ptr becomes a cast,
+ * GLContext.c and GLFactory.c with the JNI marshalling removed: the handle macros become casts,
  * Get*ArrayCritical / GetDirectBufferAddress become the pointer Java now passes, strJavaToC becomes
  * the UTF-8 pointer, and the Prism-constant translation tables (translatePrismToGL,
  * translateScaleFactor, translatePixelStore) are not called because the ABI takes real GL enums
- * (audit 7.3 option A). The shared helpers are the ones GLContext.c defines with external linkage
+ * (prism_es2_api.h, "GL enums"). The shared helpers are the ones GLContext.c defines with external linkage
  * (initState, clearBuffers, bindFBO, checkFramebufferStatus, createAndAttachRenderBuffer,
  * setCullMode, setPolyonMode, deleteCtxInfo) and GLPixelFormat.c's deletePixelFormatInfo, reached
- * through the extern declarations below - the idiom windows/WinGLContext.c already uses. The one
- * static helper this file needs, setVertexAttributePointers, is duplicated verbatim (step-4:
- * dedupe). The platform lifecycle functions (factory, pixel format, drawable, context) live in
+ * through the extern declarations below - the idiom windows/WinGLContext.c already uses. The
+ * vertex-attribute helper setVertexAttributePointers is file-static here. The platform lifecycle
+ * functions (factory, pixel format, drawable, context) live in
  * windows/prism_es2_api_win.c, x11/prism_es2_api_x11.c and macosx/prism_es2_api_mac.m.
- *
- * PrismES2Defs.h still pulls in the three generated JNI headers (and, through them, jni.h) and
- * still spells some struct fields as jboolean / jlong; outside the fenced JNI cross-check block
- * below nothing in this file names a JNI type, so step 4 can retype PrismES2Defs.h and delete that
- * block without touching anything else here.
  */
 
 #include "prism_es2_api.h"
@@ -81,25 +76,8 @@ ES2_STATIC_ASSERT(sizeof(GLenum) == sizeof(int32_t), GLenum_is_32_bits);
 ES2_STATIC_ASSERT(sizeof(GLint) == sizeof(int32_t), GLint_is_32_bits);
 ES2_STATIC_ASSERT(sizeof(GLfloat) == sizeof(float), GLfloat_is_float);
 
-/* ---- JNI cross-check block: step 4 deletes this block together with the generated headers ---- */
-/* The platform files hand an Es2PixelFormatAttrs to the legacy jint[] helpers (getPFD, setGLXAttrs,
- * createPixelFormat), so its field order must be the GLPixelFormat.Attributes index order. */
-ES2_STATIC_ASSERT(offsetof(Es2PixelFormatAttrs, red_size) == RED_SIZE * sizeof(int32_t), Attributes_RED_SIZE);
-ES2_STATIC_ASSERT(offsetof(Es2PixelFormatAttrs, green_size) == GREEN_SIZE * sizeof(int32_t), Attributes_GREEN_SIZE);
-ES2_STATIC_ASSERT(offsetof(Es2PixelFormatAttrs, blue_size) == BLUE_SIZE * sizeof(int32_t), Attributes_BLUE_SIZE);
-ES2_STATIC_ASSERT(offsetof(Es2PixelFormatAttrs, alpha_size) == ALPHA_SIZE * sizeof(int32_t), Attributes_ALPHA_SIZE);
-ES2_STATIC_ASSERT(offsetof(Es2PixelFormatAttrs, depth_size) == DEPTH_SIZE * sizeof(int32_t), Attributes_DEPTH_SIZE);
-ES2_STATIC_ASSERT(offsetof(Es2PixelFormatAttrs, double_buffer) == DOUBLEBUFFER * sizeof(int32_t),
-        Attributes_DOUBLEBUFFER);
-ES2_STATIC_ASSERT(offsetof(Es2PixelFormatAttrs, on_screen) == ONSCREEN * sizeof(int32_t), Attributes_ONSCREEN);
-ES2_STATIC_ASSERT(ES2_PIXEL_FORMAT_ATTR_COUNT == NUM_ITEMS, Attributes_NUM_ITEMS);
-ES2_STATIC_ASSERT(sizeof(jint) == sizeof(int32_t), jint_is_32_bits);
-/* ---- end JNI cross-check block ---- */
-
 /* ------------------------------------------------------------------------------------------------
- * Helpers defined with external linkage in GLContext.c but not declared in PrismES2Defs.h. The
- * jboolean parameters of clearBuffers are spelt GLboolean here: both are unsigned char, so the
- * declarations are compatible, and this file stays free of JNI type names.
+ * Helpers defined with external linkage in GLContext.c but not declared in PrismES2Defs.h.
  * ---------------------------------------------------------------------------------------------- */
 
 extern void deleteCtxInfo(ContextInfo *ctxInfo);
@@ -127,6 +105,46 @@ es2_abi_version(void) {
 PRISM_ES2_EXPORT int64_t
 es2_sizeof_pixel_format_attrs(void) {
     return (int64_t) sizeof(Es2PixelFormatAttrs);
+}
+
+/* The GLenum names resolved through the same headers the library compiles against, in EXACTLY the
+ * order of the "GL enums" comment in prism_es2_api.h - the order ES2GLEnumTableTest.TABLE holds. */
+static const GLenum ES2_GL_ENUMS[] = {
+    /* blend factors (translateScaleFactor), 15 */
+    GL_ZERO, GL_ONE, GL_SRC_COLOR, GL_ONE_MINUS_SRC_COLOR, GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA,
+    GL_DST_ALPHA, GL_ONE_MINUS_DST_ALPHA, GL_DST_COLOR, GL_ONE_MINUS_DST_COLOR, GL_SRC_ALPHA_SATURATE,
+    GL_CONSTANT_COLOR, GL_ONE_MINUS_CONSTANT_COLOR, GL_CONSTANT_ALPHA, GL_ONE_MINUS_CONSTANT_ALPHA,
+    /* pixel types (translatePrismToGL), 5 */
+    GL_FLOAT, GL_UNSIGNED_BYTE, GL_UNSIGNED_INT_8_8_8_8_REV, GL_UNSIGNED_INT_8_8_8_8,
+    GL_UNSIGNED_SHORT_8_8_APPLE,
+    /* pixel formats, 7 */
+    GL_RGBA, GL_BGRA, GL_RGB, GL_LUMINANCE, GL_ALPHA, GL_RGBA32F, GL_YCBCR_422_APPLE,
+    /* textures, 6 */
+    GL_TEXTURE_2D, GL_TEXTURE_BINDING_2D, GL_NEAREST, GL_LINEAR, GL_NEAREST_MIPMAP_NEAREST,
+    GL_LINEAR_MIPMAP_LINEAR,
+    /* wrap modes (WRAPMODE_*), 3 */
+    GL_REPEAT, GL_CLAMP_TO_EDGE, GL_CLAMP_TO_BORDER,
+    /* pixel store (translatePixelStore), 4 */
+    GL_UNPACK_ALIGNMENT, GL_UNPACK_ROW_LENGTH, GL_UNPACK_SKIP_PIXELS, GL_UNPACK_SKIP_ROWS,
+    /* glGetIntegerv names, 10 */
+    GL_MAX_FRAGMENT_UNIFORM_COMPONENTS, GL_MAX_FRAGMENT_UNIFORM_VECTORS, GL_MAX_TEXTURE_IMAGE_UNITS,
+    GL_MAX_TEXTURE_SIZE, GL_MAX_VARYING_COMPONENTS, GL_MAX_VARYING_VECTORS, GL_MAX_VERTEX_ATTRIBS,
+    GL_MAX_VERTEX_UNIFORM_COMPONENTS, GL_MAX_VERTEX_UNIFORM_VECTORS, GL_MAX_VERTEX_TEXTURE_IMAGE_UNITS
+};
+
+ES2_STATIC_ASSERT(sizeof(ES2_GL_ENUMS) / sizeof(ES2_GL_ENUMS[0]) == 50, ES2_GL_ENUMS_has_50_entries);
+
+PRISM_ES2_EXPORT int32_t
+es2_gl_enum_count(void) {
+    return (int32_t) (sizeof(ES2_GL_ENUMS) / sizeof(ES2_GL_ENUMS[0]));
+}
+
+PRISM_ES2_EXPORT int32_t
+es2_gl_enum(int32_t index) {
+    if (index < 0 || index >= es2_gl_enum_count()) {
+        return -1;
+    }
+    return (int32_t) ES2_GL_ENUMS[index];
 }
 
 /* ------------------------------------------------------------------------------------------------
@@ -176,8 +194,8 @@ es2_context_get_string(void *ctx, int32_t kind, char *buf, int32_t cap) {
     return (int32_t) len;
 }
 
-/* Name -> ContextInfo member of every entry point es2_context_create resolves (WinGLContext.c:183-282,
- * X11GLContext.c:171-270, MacGLContext.c:158-257) plus the platform swap-interval function. */
+/* Name -> ContextInfo member of every entry point es2_context_create resolves (at commit 868c4801ec:
+ * WinGLContext.c:183-282, X11GLContext.c:171-270, MacGLContext.c:158-257) plus the platform swap-interval function. */
 typedef struct Es2ProcEntry {
     const char *name;
     size_t offset;
@@ -660,7 +678,7 @@ es2_uniform4i(void *ctx, int32_t loc, int32_t v0, int32_t v1, int32_t v2, int32_
     ctxInfo->glUniform4i(loc, v0, v1, v2, v3);
 }
 
-/* nUniform4fv0 / nUniform4fv1 merged (audit D8): Java hands over the (already offset) pointer. */
+/* nUniform4fv0 / nUniform4fv1 merged: Java hands over the (already offset) pointer. */
 PRISM_ES2_EXPORT void
 es2_uniform4fv(void *ctx, int32_t loc, int32_t count, const float *values) {
     ContextInfo *ctxInfo = (ContextInfo *) ctx;
@@ -670,7 +688,7 @@ es2_uniform4fv(void *ctx, int32_t loc, int32_t count, const float *values) {
     ctxInfo->glUniform4fv((GLint) loc, (GLsizei) count, (const GLfloat *) values);
 }
 
-/* nUniform4iv0 / nUniform4iv1 merged (audit D8). */
+/* nUniform4iv0 / nUniform4iv1 merged. */
 PRISM_ES2_EXPORT void
 es2_uniform4iv(void *ctx, int32_t loc, int32_t count, const int32_t *values) {
     ContextInfo *ctxInfo = (ContextInfo *) ctx;
@@ -1057,7 +1075,7 @@ es2_program_create(void *ctx, int32_t vert_id, const int32_t *frag_ids, int32_t 
             fprintf(stderr, "glLinkProgram: GL_LINK_STATUS returns GL_FALSE but GL_INFO_LOG_LENGTH returns 0\n");
         }
 
-        /* GLContext.c:582-602 shadowed the fragment count with the info-log length here and read
+        /* GLContext.c:582-602 at commit 868c4801ec shadowed the fragment count with the info-log length here and read
          * fragIDs[] past its end on a failed link; this loop uses the fragment count. */
         ctxInfo->glDetachShader(shaderProgram, (GLuint) vert_id);
         ctxInfo->glDeleteShader((GLuint) vert_id);
@@ -1143,8 +1161,8 @@ es2_get_uniform_location(void *ctx, int32_t program_id, const char *name) {
  * the pointers in an inconsistent state.
  */
 
-/* Verbatim copy of the static helper at GLContext.c:1638; the cache fields are non-const, so the
- * const pointers Java passes are cast once here. step-4: dedupe when the JNI body goes. */
+/* Verbatim copy of the static helper at GLContext.c:1638 (commit 868c4801ec); the cache fields are non-const, so the
+ * const pointers Java passes are cast once here. The JNI copy is gone; this is the only one. */
 static void setVertexAttributePointers(ContextInfo *ctx, const float *pFloat, const uint8_t *pByte) {
     if (pFloat != ctx->vbFloatData) {
         ctx->glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, coordStride, pFloat);
@@ -1178,7 +1196,7 @@ es2_draw_indexed_quads(void *ctx, int32_t num_vertices, const float *coords, con
 
 /* ------------------------------------------------------------------------------------------------
  * 3D mesh (GLContext.c nCreateES2Mesh, nReleaseES2Mesh, nBuildNativeGeometryShort/Int,
- * nRenderMeshView with the MeshViewInfo inputs passed as scalars - audit D4)
+ * nRenderMeshView with the MeshViewInfo inputs passed as scalars)
  * ---------------------------------------------------------------------------------------------- */
 
 PRISM_ES2_EXPORT void *

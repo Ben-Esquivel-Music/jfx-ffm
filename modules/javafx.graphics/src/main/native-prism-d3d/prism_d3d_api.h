@@ -76,7 +76,7 @@ extern "C" {
  * JNI header for D3DContext). D3DNativeTest asserts each equals the Java constant it mirrors.
  */
 
-/* com.sun.prism.d3d.D3DContext.D3DCOMPMODE_* (D3DContext.java:57-61) */
+/* com.sun.prism.d3d.D3DContext.D3DCOMPMODE_* */
 enum D3dCompMode {
     D3D_COMPMODE_CLEAR   = 0,
     D3D_COMPMODE_SRC     = 1,
@@ -85,7 +85,7 @@ enum D3dCompMode {
     D3D_COMPMODE_ADD     = 4
 };
 
-/* com.sun.prism.d3d.D3DContext.CULL_* (D3DContext.java:70-72) */
+/* com.sun.prism.d3d.D3DContext.CULL_* */
 enum D3dCullMode {
     D3D_CULL_BACK  = 110,
     D3D_CULL_FRONT = 111,

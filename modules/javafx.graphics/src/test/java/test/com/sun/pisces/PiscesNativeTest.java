@@ -27,10 +27,12 @@ package test.com.sun.pisces;
 
 import com.sun.pisces.JavaSurface;
 import com.sun.pisces.PiscesNativeShim;
+import com.sun.pisces.PiscesRenderer;
 import com.sun.pisces.RendererBase;
 import com.sun.pisces.Transform6;
 import java.lang.foreign.MemorySegment;
 import java.lang.foreign.SymbolLookup;
+import java.util.Arrays;
 import java.util.List;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
@@ -200,5 +202,101 @@ public class PiscesNativeTest {
     public void javaSurfaceRejectsUnsupportedDataTypes() {
         assertThrows(IllegalArgumentException.class,
                 () -> new JavaSurface(new int[64], RendererBase.TYPE_INT_ARGB_PRE + 1, 8, 8));
+    }
+
+    /**
+     * A texture of width or height 0 passes {@code PiscesRenderer.inputImageCheck}, which rejects only
+     * negative dimensions, and reaches the C guard of {@code psw_renderer_set_texture} - the JNI-era
+     * {@code setTextureImpl} test that fell through to the OOM error when it failed. The status ABI
+     * keeps that: {@code PSW_ERR_OOM}, so an {@link OutOfMemoryError} with the common text rather than
+     * an {@code IllegalArgumentException}.
+     */
+    @Test
+    public void setTextureWithAZeroDimensionReachesTheCGuardAndIsAnOutOfMemoryError() {
+        PiscesRenderer pr = new PiscesRenderer(
+                new JavaSurface(new int[64 * 64], RendererBase.TYPE_INT_ARGB_PRE, 64, 64));
+        int[] texture = PiscesGoldenRenderTest.opaqueTexture();
+        Transform6 identity = new Transform6();
+
+        OutOfMemoryError zeroWidth = assertThrows(OutOfMemoryError.class, () -> pr.setTexture(
+                RendererBase.TYPE_INT_ARGB_PRE, texture, 0, 16, 16, identity, false, false, false));
+        assertEquals(PiscesNativeShim.oomMessage(), zeroWidth.getMessage());
+        OutOfMemoryError zeroHeight = assertThrows(OutOfMemoryError.class, () -> pr.setTexture(
+                RendererBase.TYPE_INT_ARGB_PRE, texture, 16, 0, 16, identity, false, false, false));
+        assertEquals(PiscesNativeShim.oomMessage(), zeroHeight.getMessage());
+    }
+
+    /**
+     * The width/height test of the JNI {@code surface_acquire} survives in {@code psw_surface_bind}, and
+     * the facade is the only way to reach it: {@code AbstractSurface} rejects a negative size in Java,
+     * so the descriptor is created directly. The first pixel-touching call fails with the generic
+     * JNI-era text, before anything is bound or written.
+     */
+    @Test
+    public void aSurfaceWithANegativeHeightIsRejectedByTheFirstPixelCall() {
+        MemorySegment surface = PiscesNativeShim.surfaceCreate(RendererBase.TYPE_INT_ARGB_PRE, 8, -1);
+        MemorySegment renderer = PiscesNativeShim.rendererCreate(surface);
+        try {
+            int[] pixels = new int[64];
+            IllegalArgumentException e = assertThrows(IllegalArgumentException.class,
+                    () -> PiscesNativeShim.rendererFillRect(renderer, pixels, 0, 0, 8 << 16, 8 << 16));
+            assertEquals(PiscesNativeShim.argMessage(), e.getMessage());
+            assertArrayEquals(new int[64], pixels, "a rejected call must not have touched the pixels");
+        } finally {
+            PiscesNativeShim.rendererDispose(renderer);
+            PiscesNativeShim.surfaceDispose(surface);
+        }
+    }
+
+    /**
+     * A coverage row outside the clip is dropped whole: {@code psw_renderer_emit_and_clear_alpha_row}
+     * tests {@code y} against the clip before it touches anything, so neither the surface nor the delta
+     * array - which the in-clip path consumes and zeroes in place - changes.
+     */
+    @Test
+    public void emitAndClearAlphaRowOutsideTheClipLeavesTheDeltasAndPixelsUntouched() {
+        int[] pixels = new int[64 * 64];
+        PiscesRenderer pr = new PiscesRenderer(new JavaSurface(pixels, RendererBase.TYPE_INT_ARGB_PRE, 64, 64));
+        pr.setClip(0, 0, 64, 32);
+        pr.setColor(10, 20, 30, 255);
+        int[] deltas = new int[80];
+        int width = PiscesGoldenRenderTest.fillRampDeltas(deltas, 4);
+        int[] before = deltas.clone();
+
+        pr.emitAndClearAlphaRow(PiscesGoldenRenderTest.alphaMap(), deltas, 40, 3, 3 + width - 1, 4, 0);
+
+        assertArrayEquals(before, deltas, "a row outside the clip must leave the deltas untouched");
+        assertArrayEquals(new int[64 * 64], pixels, "a row outside the clip must not render");
+    }
+
+    /**
+     * {@code drawImage} with {@code hasAlpha == false} takes the opaque paint path, which the golden
+     * script never exercises (it passes {@code true} throughout). On an opaque image it renders, and it
+     * renders the same pixels as the {@code hasAlpha == true} path.
+     */
+    @Test
+    public void drawImageWithoutAlphaRendersAsTheAlphaPathDoesForAnOpaqueImage() {
+        int[] image = PiscesGoldenRenderTest.opaqueTexture();
+        int[] withAlpha = drawOpaqueImage(image, true);
+        int[] withoutAlpha = drawOpaqueImage(image, false);
+
+        assertTrue(Arrays.stream(withoutAlpha).anyMatch(pixel -> pixel != 0),
+                "drawImage with hasAlpha=false must render something");
+        assertArrayEquals(withAlpha, withoutAlpha,
+                "an opaque image must render identically with and without hasAlpha");
+    }
+
+    /** Draws the 16x16 {@code image} at the origin, 1:1, onto a fresh 64x64 surface and returns its pixels. */
+    private static int[] drawOpaqueImage(int[] image, boolean hasAlpha) {
+        int[] pixels = new int[64 * 64];
+        PiscesRenderer pr = new PiscesRenderer(new JavaSurface(pixels, RendererBase.TYPE_INT_ARGB_PRE, 64, 64));
+        pr.setClip(0, 0, 64, 64);
+        pr.setColor(0, 0, 0, 255);
+        pr.drawImage(RendererBase.TYPE_INT_ARGB_PRE, RendererBase.IMAGE_MODE_NORMAL, image, 16, 16, 0, 16,
+                new Transform6(), false, false, 0, 0, 16 << 16, 16 << 16,
+                RendererBase.IMAGE_FRAC_EDGE_KEEP, RendererBase.IMAGE_FRAC_EDGE_KEEP,
+                RendererBase.IMAGE_FRAC_EDGE_KEEP, RendererBase.IMAGE_FRAC_EDGE_KEEP,
+                0, 0, 15, 15, hasAlpha);
+        return pixels;
     }
 }

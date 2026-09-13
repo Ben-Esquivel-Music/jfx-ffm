@@ -31,11 +31,8 @@
  * nGetDummyDrawable / nSwapBuffers / nReleaseDrawable and X11GLContext_nInitialize /
  * nGetNativeHandle / nMakeCurrent with the JNI marshalling removed. The helpers (setGLXAttrs,
  * printAndReleaseResources, queryGLX13) stay in X11GLFactory.c and are reached through the same
- * extern declarations X11GLPixelFormat.c uses; the two file-static pieces of X11GLFactory.c
- * (x11errorhit / x11errorDetector) are duplicated below (step-4: dedupe). The
- * GLPixelFormat.Attributes array setGLXAttrs expects is the Es2PixelFormatAttrs struct copied into a
- * jint[] (prism_es2_api.c asserts the two layouts agree); step 4 retypes setGLXAttrs and drops that
- * copy.
+ * extern declarations X11GLPixelFormat.c uses; setGLXAttrs takes the Es2PixelFormatAttrs struct
+ * directly. The X11 error trap (x11errorhit / x11errorDetector) is file-static here.
  */
 
 #include "../prism_es2_api.h"
@@ -47,17 +44,16 @@
 
 #include "../PrismES2Defs.h"
 
-extern void setGLXAttrs(jint *attrs, int *glxAttrs); /* step-4: retype to const Es2PixelFormatAttrs* */
+extern void setGLXAttrs(const Es2PixelFormatAttrs *attrs, int *glxAttrs);
 extern void printAndReleaseResources(Display *display, GLXFBConfig *fbConfigList,
         XVisualInfo *visualInfo, Window win, GLXContext ctx, Colormap cmap,
         const char *message);
-extern GLboolean queryGLX13(Display *display); /* defined as jboolean: the same unsigned char */
+extern GLboolean queryGLX13(Display *display);
 
 #define ES2_BOOL(x) ((GLboolean) ((x) != 0))
 
-/* Verbatim copy of X11GLFactory.c:154-158 (file-static there); the handler is installed only
- * around glXCreateNewContext in es2_factory_init and Xlib ignores its return value.
- * step-4: dedupe. */
+/* The handler is installed only around glXCreateNewContext in es2_factory_init; Xlib ignores
+ * its return value. */
 static int x11errorhit = 0;
 
 static int x11errorDetector(Display *dpy, XErrorEvent *error) {
@@ -75,7 +71,6 @@ PRISM_ES2_EXPORT void *
 es2_factory_init(const Es2PixelFormatAttrs *attrs) {
 
     int glxAttrs[MAX_GLX_ATTRS_LENGTH]; /* value, attr pair plus a None */
-    jint attrArr[ES2_PIXEL_FORMAT_ATTR_COUNT]; /* step-4: goes with setGLXAttrs's parameter type */
     ContextInfo *ctxInfo = NULL;
 
     const char *glVersion;
@@ -102,8 +97,7 @@ es2_factory_init(const Es2PixelFormatAttrs *attrs) {
     if (attrs == NULL) {
         return NULL;
     }
-    memcpy(attrArr, attrs, sizeof(attrArr));
-    setGLXAttrs(attrArr, glxAttrs);
+    setGLXAttrs(attrs, glxAttrs);
 
     display = XOpenDisplay(0);
     if (display == NULL) {
@@ -291,7 +285,6 @@ es2_factory_get_x11_info(void *ctx, int64_t info[3]) {
 PRISM_ES2_EXPORT void *
 es2_pixel_format_create(int64_t native_screen, const Es2PixelFormatAttrs *attrs) {
     int glxAttrs[MAX_GLX_ATTRS_LENGTH]; /* value, attr pair plus a None */
-    jint attrArr[ES2_PIXEL_FORMAT_ATTR_COUNT]; /* step-4: goes with setGLXAttrs's parameter type */
     PixelFormatInfo *pfInfo = NULL;
 
     GLXFBConfig *fbConfigList = NULL;
@@ -309,8 +302,7 @@ es2_pixel_format_create(int64_t native_screen, const Es2PixelFormatAttrs *attrs)
     if (attrs == NULL) {
         return NULL;
     }
-    memcpy(attrArr, attrs, sizeof(attrArr));
-    setGLXAttrs(attrArr, glxAttrs);
+    setGLXAttrs(attrs, glxAttrs);
 
     // JDK-8091981
     // TODO: Need to use nativeScreen to create this requested pixelformat
@@ -721,7 +713,7 @@ es2_context_make_current(void *ctx, void *drawable) {
     int interval;
     GLboolean vSyncNeeded;
 
-    /* New guard (audit R-11): X11GLContext.c:326 dereferenced both without a check; the Windows
+    /* New guard: X11GLContext.c:326 at commit 868c4801ec dereferenced both without a check; the Windows
      * and macOS ports had this check, and the ABI documents NULL as a no-op on every platform. */
     if ((ctxInfo == NULL) || (dInfo == NULL)) {
         return;

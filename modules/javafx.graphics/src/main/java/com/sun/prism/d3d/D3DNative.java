@@ -227,6 +227,9 @@ final class D3DNative {
     /** Names of the bound symbols the library does not export; read by the binding tests. */
     private static final List<String> MISSING_SYMBOLS = new ArrayList<>();
 
+    /** {@code name + " " + descriptor} of every bound symbol, in binding order; test support only. */
+    private static final List<String> DESCRIPTORS = new ArrayList<>();
+
     /**
      * The failure that loading the library, resolving a symbol, being denied native access or checking
      * the ABI version ended in, or {@code null}. Raised by {@link #loadLibrary()} and by every downcall
@@ -399,6 +402,7 @@ final class D3DNative {
     @SuppressWarnings("restricted")
     private static MethodHandle bind(String name, FunctionDescriptor descriptor, Linker.Option... options) {
         BOUND_SYMBOLS.add(name);
+        DESCRIPTORS.add(name + " " + descriptor);
         if (LOOKUP != null) {
             Optional<MemorySegment> symbol = LOOKUP.find(name);
             if (symbol.isEmpty()) {
@@ -507,6 +511,16 @@ final class D3DNative {
     /** The symbols this class bound, in binding order. */
     static List<String> boundSymbols() {
         return Collections.unmodifiableList(new ArrayList<>(BOUND_SYMBOLS));
+    }
+
+    /**
+     * Every bound symbol with the {@link FunctionDescriptor} it was bound with, as
+     * {@code name + " " + descriptor}, in binding order: the Java half of the ABI, which the descriptor
+     * snapshot test holds against a hand transcription of {@code prism_d3d_api.h}. Built whether or not the
+     * library loaded. Test support only.
+     */
+    static List<String> descriptors() {
+        return Collections.unmodifiableList(new ArrayList<>(DESCRIPTORS));
     }
 
     /** The bound symbols the loaded library does not export; empty for a correct build. */

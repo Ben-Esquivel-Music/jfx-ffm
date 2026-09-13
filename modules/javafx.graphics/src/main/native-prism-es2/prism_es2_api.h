@@ -31,7 +31,7 @@
  * memory behind them) or caller-provided buffers, and nothing here ever calls back into Java. No
  * exception crosses this boundary. Failures are reported exactly as the JNI entry points reported
  * them: a NULL handle where the JNI returned 0L, 0 where it returned a GL object name of 0 or
- * JNI_FALSE, and a diagnostic on stderr. The symbol set is identical on Windows, Linux (X11/GLX)
+ * false, and a diagnostic on stderr. The symbol set is identical on Windows, Linux (X11/GLX)
  * and macOS (NSOpenGL); a query that only one platform can answer returns ES2_ERR_NOT_IMPLEMENTED
  * elsewhere (the jfxmedia_api.h convention).
  *
@@ -47,7 +47,7 @@
  *
  * Booleans are int32_t: 0 is false, anything else is true. Never bind them as JAVA_BOOLEAN.
  *
- * GL enums (audit 7.3 option A). Every parameter documented below as "GL enum" takes the real
+ * GL enums. Every parameter documented below as "GL enum" takes the real
  * OpenGL value (GL_SRC_ALPHA = 0x0302, GL_RGBA = 0x1908, ...) and is passed to GL unchanged; the
  * JNI-era translation of the small GLContext.GL_* indices is not applied on this path. For the
  * Java-side table test, the values the JNI translation tables produced were:
@@ -78,7 +78,7 @@
  * shader input in the tree is ASCII, so this is byte-identical to the modified UTF-8 the JNI used).
  * es2_context_get_string copies into a caller buffer; see its comment for the sizing protocol.
  *
- * Linker.Option.critical(true) (audit 7.1). Java may pin heap arrays for: es2_uniform4fv,
+ * Linker.Option.critical(true). Java may pin heap arrays for: es2_uniform4fv,
  * es2_uniform4iv, es2_uniform_matrix4fv, es2_index_buffer16_create, es2_tex_image_2d,
  * es2_tex_sub_image_2d, es2_draw_indexed_quads, es2_mesh_build_geometry_short,
  * es2_mesh_build_geometry_int; each of them is one short GL call around the pinned memory. Every
@@ -86,7 +86,7 @@
  * never be critical: es2_drawable_swap_buffers (vsync), es2_finish, es2_context_make_current,
  * es2_context_create, es2_factory_init, es2_pixel_format_create, es2_shader_compile,
  * es2_program_create, es2_texture_create, es2_fbo_create, es2_depth_buffer_create,
- * es2_render_buffer_create, es2_mesh_create. es2_read_pixels is the audit's R-4 judgement call: the
+ * es2_render_buffer_create, es2_mesh_create. es2_read_pixels is a judgement call: the
  * JNI pinned the array around a glReadPixels that drains the GPU; whichever option Java chooses,
  * the C side is the same.
  *
@@ -97,8 +97,8 @@
  * es2_get_int_param, es2_get_max_sample_size, es2_pixel_storei, es2_tex_params_min_max,
  * es2_tex_image_2d, es2_tex_sub_image_2d - so passing NULL there is neither checked nor an error.
  * A NULL ctx (or mesh / pf / drawable) everywhere else is a no-op, NULL or 0, as the JNI's
- * jlong_to_ptr(0) checks made it; the one guard the JNI lacked and this ABI adds is
- * es2_context_make_current on X11 (X11GLContext.c:326 dereferenced unchecked).
+ * null-handle checks made it; the one guard the JNI lacked and this ABI adds is
+ * es2_context_make_current on X11 (X11GLContext.c:326 at commit 868c4801ec dereferenced unchecked).
  */
 
 #ifndef PRISM_ES2_API_H
@@ -121,7 +121,7 @@ extern "C" {
  * es2_abi_version first and every other symbol eagerly, so an old library fails with a version
  * mismatch rather than a "missing native symbol" on the first new function.
  */
-#define ES2_ABI_VERSION 1u
+#define ES2_ABI_VERSION 2u
 
 /* Return codes of the int32_t status functions. GL object names and lengths are separate. */
 enum {
@@ -159,14 +159,27 @@ enum {
 };
 
 /* ------------------------------------------------------------------------------------------------
- * ABI guard / layout checks (T1)
+ * ABI guard / layout checks
  * ---------------------------------------------------------------------------------------------- */
 
 PRISM_ES2_EXPORT uint32_t es2_abi_version(void);                      /* ES2_ABI_VERSION */
 PRISM_ES2_EXPORT int64_t  es2_sizeof_pixel_format_attrs(void);        /* (int64_t) sizeof(Es2PixelFormatAttrs) */
 
+/*
+ * The 50 GL enum values of the "GL enums" comment at the top of this file, resolved through the GL
+ * headers this library compiles against on each platform, in EXACTLY that order: 15 blend factors,
+ * 5 pixel types, 7 pixel formats, 6 texture values, 3 wrap modes, 4 pixel-store names and 10
+ * glGetIntegerv names. Java pins its own copies of the same values against these
+ * (ES2GLEnumTableTest), so a header whose macro disagrees with the comment fails a test instead of
+ * reaching GL. es2_gl_enum_count() returns 50; es2_gl_enum(index) returns the value at index, or -1
+ * when index < 0 or >= the count. Added after ES2_ABI_VERSION 1 shipped; the version moves to 2 in
+ * the change set that binds them (READY TO BUMP - Java pairs the bump with ES2Native's binding).
+ */
+PRISM_ES2_EXPORT int32_t  es2_gl_enum_count(void);
+PRISM_ES2_EXPORT int32_t  es2_gl_enum(int32_t index);
+
 /* ------------------------------------------------------------------------------------------------
- * Factory (T1). Replaces {Win,X11,Mac}GLFactory.nInitialize and the GLFactory string natives.
+ * Factory. Replaces {Win,X11,Mac}GLFactory.nInitialize and the GLFactory string natives.
  * ---------------------------------------------------------------------------------------------- */
 
 /*
@@ -203,7 +216,7 @@ PRISM_ES2_EXPORT int32_t es2_factory_get_x11_info(void* ctx, int64_t info[3]);
 PRISM_ES2_EXPORT int32_t es2_context_get_string(void* ctx, int32_t kind, char* buf, int32_t cap);
 
 /* ------------------------------------------------------------------------------------------------
- * Pixel format / drawable / context lifecycle (T1)
+ * Pixel format / drawable / context lifecycle
  * ---------------------------------------------------------------------------------------------- */
 
 /*
@@ -278,7 +291,7 @@ PRISM_ES2_EXPORT int64_t es2_context_get_native_handle(void* ctx);
 PRISM_ES2_EXPORT void    es2_context_make_current(void* ctx, void* drawable);
 
 /*
- * Audit 7.4 hook: the GL 2.0+ / FBO entry point es2_context_create resolved and stored in this
+ * Inspection hook: the GL 2.0+ / FBO entry point es2_context_create resolved and stored in this
  * ContextInfo for the given name ("glUniform4fv", "glBindFramebuffer", ...; also
  * "wglSwapIntervalEXT" on Windows and "glXSwapIntervalSGI" on X11), or NULL when ctx or name is
  * NULL, the name is not one the C resolves, or the driver did not provide it. The value is the
@@ -288,7 +301,7 @@ PRISM_ES2_EXPORT void    es2_context_make_current(void* ctx, void* drawable);
 PRISM_ES2_EXPORT void*   es2_context_get_proc_address(void* ctx, const char* name);
 
 /* ------------------------------------------------------------------------------------------------
- * State setters (T2). All take the render ContextInfo*; see the file comment for the ones that
+ * State setters. All take the render ContextInfo*; see the file comment for the ones that
  * ignore it.
  * ---------------------------------------------------------------------------------------------- */
 
@@ -340,7 +353,7 @@ PRISM_ES2_EXPORT void    es2_uniform4iv(void* ctx, int32_t loc, int32_t count, c
 PRISM_ES2_EXPORT void    es2_uniform_matrix4fv(void* ctx, int32_t loc, int32_t transpose, const float* m16);
 
 /* ------------------------------------------------------------------------------------------------
- * Resource creation / deletion (T2). Creation BLOCKS (GPU allocation) and is never critical.
+ * Resource creation / deletion. Creation BLOCKS (GPU allocation) and is never critical.
  * ---------------------------------------------------------------------------------------------- */
 
 /* GL_RGBA / GL_UNSIGNED_BYTE GL_TEXTURE_2D of width x height with GL_LINEAR filters; 0 on any GL error. */
@@ -363,7 +376,7 @@ PRISM_ES2_EXPORT void    es2_blit(void* ctx, int32_t src_fbo, int32_t dst_fbo,
 PRISM_ES2_EXPORT int32_t es2_index_buffer16_create(void* ctx, const int16_t* data, int32_t n);
 
 /* ------------------------------------------------------------------------------------------------
- * Texture upload / readback (T2). pixels may be NULL (GL allocates only); Java applies the byte
+ * Texture upload / readback. pixels may be NULL (GL allocates only); Java applies the byte
  * offset by slicing the segment. target, internal_format, format and type are GL enums.
  * ---------------------------------------------------------------------------------------------- */
 
@@ -380,13 +393,13 @@ PRISM_ES2_EXPORT void    es2_tex_sub_image_2d(void* ctx, int32_t target, int32_t
  * Replaces nReadPixelsByte / nReadPixelsInt. dst receives w x h BGRA pixels as 32-bit
  * GL_UNSIGNED_INT_8_8_8_8_REV values; dst_len_bytes is checked as (len / 4 / w) < h -> 0. Returns 1
  * on success, 0 (with the JNI's stderr text) for a NULL ctx, w or h <= 0, a too-small buffer or a
- * NULL dst. BLOCKING (drains the GPU) - audit R-4.
+ * NULL dst. BLOCKING (drains the GPU) - see critical(true) in the file comment.
  */
 PRISM_ES2_EXPORT int32_t es2_read_pixels(void* ctx, void* dst, int32_t dst_len_bytes,
                                          int32_t x, int32_t y, int32_t w, int32_t h);
 
 /* ------------------------------------------------------------------------------------------------
- * Shaders (T2). UTF-8 strings. Compile / link BLOCK in the driver and are never critical.
+ * Shaders. UTF-8 strings. Compile / link BLOCK in the driver and are never critical.
  * ---------------------------------------------------------------------------------------------- */
 
 /* glCreateShader(is_vertex ? GL_VERTEX_SHADER : GL_FRAGMENT_SHADER) + source + compile; 0 (shader deleted,
@@ -410,23 +423,23 @@ PRISM_ES2_EXPORT void    es2_shaders_dispose(void* ctx, int32_t program_id, int3
 PRISM_ES2_EXPORT int32_t es2_get_uniform_location(void* ctx, int32_t program_id, const char* name);
 
 /* ------------------------------------------------------------------------------------------------
- * 2D draw (T2, hot)
+ * 2D draw (hot)
  * ---------------------------------------------------------------------------------------------- */
 
 /*
  * Client-side arrays: coords holds num_vertices * 7 floats (xyz, uv0, uv1), colors num_vertices * 4
  * bytes; glVertexAttribPointer is re-issued only when an array's address differs from the cached
  * one, then glDrawElements(GL_TRIANGLES, num_vertices / 4 * 6, GL_UNSIGNED_SHORT). Either NULL:
- * no-op. critical ok (audit R-6: the address cache is a hint, exactly as under JNI).
+ * no-op. critical ok (the address cache is a hint, exactly as under JNI).
  */
 PRISM_ES2_EXPORT void    es2_draw_indexed_quads(void* ctx, int32_t num_vertices,
                                                 const float* coords, const uint8_t* colors);
 
 /* ------------------------------------------------------------------------------------------------
- * 3D mesh (T2). Replaces nCreateES2Mesh, nReleaseES2Mesh, nBuildNativeGeometry{Short,Int} and,
+ * 3D mesh. Replaces nCreateES2Mesh, nReleaseES2Mesh, nBuildNativeGeometry{Short,Int} and,
  * folded into es2_mesh_render, nCreateES2MeshView / nReleaseES2MeshView / nSetCullingMode /
- * nSetWireframe / nSetMaterial / nRenderMeshView (audit D4). The phong-material and light setters
- * were dead stores (audit D3) and have no symbol.
+ * nSetWireframe / nSetMaterial / nRenderMeshView. The phong-material and light setters
+ * were dead stores and have no symbol.
  * ---------------------------------------------------------------------------------------------- */
 
 PRISM_ES2_EXPORT void*   es2_mesh_create(void* ctx);     /* MeshInfo* with 2 VBO names; NULL on failure */

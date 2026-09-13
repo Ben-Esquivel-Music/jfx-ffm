@@ -143,7 +143,7 @@ class X11GLFactory extends GLFactory {
             // current pipe doesn't support this pixelFormat request
             return false;
         } else {
-            gl2 = true;
+            gl2 = DESKTOP_GL2;
             return true;
         }
     }
@@ -151,7 +151,7 @@ class X11GLFactory extends GLFactory {
     @Override
     int getAdapterCount() {
         // Single / homogeneous GPU assumption; the native nGetAdapterCount always
-        // returned 1 (JDK-8091992). Absorbed as a constant (audit PARITY: exact).
+        // returned 1 (JDK-8091992). Absorbed as a constant (exact parity).
         return 1;
     }
 

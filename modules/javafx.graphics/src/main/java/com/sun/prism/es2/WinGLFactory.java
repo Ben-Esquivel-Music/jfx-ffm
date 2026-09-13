@@ -93,9 +93,9 @@ class WinGLFactory extends GLFactory {
             return false;
         } else {
             // The desktop ES2 pipe always uses the GL2 profile, not GLES2; nGetIsGL2
-            // returned true here on Windows. Absorbed as a constant (audit PARITY: exact),
+            // returned true here on Windows. Absorbed as a constant (exact parity),
             // matching X11GLFactory.
-            gl2 = true;
+            gl2 = DESKTOP_GL2;
             return true;
         }
     }
@@ -103,7 +103,7 @@ class WinGLFactory extends GLFactory {
     @Override
     int getAdapterCount() {
         // Single / homogeneous GPU assumption; the native nGetAdapterCount always
-        // returned 1 (JDK-8091992). Absorbed as a constant (audit PARITY: exact).
+        // returned 1 (JDK-8091992). Absorbed as a constant (exact parity).
         return 1;
     }
 

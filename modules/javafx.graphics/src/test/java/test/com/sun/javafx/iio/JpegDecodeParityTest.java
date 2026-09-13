@@ -33,10 +33,12 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.TreeSet;
+import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 import test.com.sun.javafx.iio.JpegTestSupport.Decoded;
 import test.com.sun.javafx.iio.JpegTestSupport.Variant;
+import test.com.sun.javafx.test.ParityGate;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
@@ -68,8 +70,14 @@ import static org.junit.jupiter.api.Assertions.fail;
  *     produce different bytes. These follow from the API and hold for any correct decoder, so they
  *     are readable on their own and stay meaningful if the corpus is ever recaptured.</li>
  * </ul>
+ * The golden and the corpus fail loudly when absent ({@link JpegGoldens#load()},
+ * {@code JpegTestSupport.requireResource}); they are never a reason to skip. And the two golden
+ * comparisons are counted key by key, so a run that compared nothing - an empty corpus, a golden
+ * with no {@code decode.} keys - fails at the end of the class ({@link ParityGate}).
  */
 public class JpegDecodeParityTest {
+
+    private static final ParityGate.Ledger LEDGER = ParityGate.ledger(JpegDecodeParityTest.class);
 
     private static JpegGoldens goldens;
     private static Map<String, byte[]> corpus;
@@ -87,6 +95,12 @@ public class JpegDecodeParityTest {
         corpus = JpegTestSupport.assembleCorpus(images, JpegTestSupport::requireResource);
     }
 
+    /** A class that compared nothing against the golden must not be reported green. */
+    @AfterAll
+    static void theOracleRan() {
+        LEDGER.assertOracleRan();
+    }
+
     /**
      * The corpus files themselves are hashed, so a corpus that has been regenerated, re-encoded by a
      * different JDK or mangled by a text-mode checkout fails here - with an explanation - instead of
@@ -94,6 +108,7 @@ public class JpegDecodeParityTest {
      */
     @Test
     void corpusFilesAreTheOnesTheGoldensWereCapturedFrom() {
+        LEDGER.oracleAvailable();
         List<String> mismatches = new ArrayList<>();
         for (Map.Entry<String, byte[]> member : corpus.entrySet()) {
             byte[] jpeg = member.getValue();
@@ -119,6 +134,7 @@ public class JpegDecodeParityTest {
      */
     @Test
     void decodesEveryCorpusMemberExactlyAsTheJniBuildDid() {
+        LEDGER.oracleAvailable();
         List<String> mismatches = new ArrayList<>();
         for (Map.Entry<String, byte[]> member : corpus.entrySet()) {
             for (Variant variant : JpegTestSupport.variantsFor(member.getKey())) {
@@ -248,6 +264,7 @@ public class JpegDecodeParityTest {
     // ---------------------------------------------------------------------------------------------
 
     private static void compare(List<String> mismatches, String key, String actual) {
+        LEDGER.compared();
         String expected = goldens.get(key);
         if (expected == null) {
             mismatches.add(key + ": not in the golden file, but this run produced \"" + actual + "\"");

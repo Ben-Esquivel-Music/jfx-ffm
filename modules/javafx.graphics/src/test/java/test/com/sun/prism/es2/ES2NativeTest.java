@@ -47,7 +47,7 @@ public class ES2NativeTest {
 
     /** Every function {@code prism_es2_api.h} exports, in header order. */
     static final List<String> EXPORTED_SYMBOLS = List.of(
-            "es2_abi_version", "es2_sizeof_pixel_format_attrs",
+            "es2_abi_version", "es2_sizeof_pixel_format_attrs", "es2_gl_enum_count", "es2_gl_enum",
             "es2_factory_init", "es2_factory_get_x11_info", "es2_context_get_string",
             "es2_pixel_format_create", "es2_pixel_format_release",
             "es2_drawable_create", "es2_drawable_create_dummy", "es2_drawable_release",
@@ -79,7 +79,7 @@ public class ES2NativeTest {
 
     @Test
     public void facadeBindsEveryExportedSymbolAndNothingElse() {
-        assertEquals(74, EXPORTED_SYMBOLS.size(), "the header exports 74 es2_* functions");
+        assertEquals(76, EXPORTED_SYMBOLS.size(), "the header exports 76 es2_* functions");
         List<String> bound = ES2NativeShim.boundSymbols();
         assertEquals(EXPORTED_SYMBOLS.size(), bound.size(), "bound symbols: " + bound);
         for (String name : EXPORTED_SYMBOLS) {
@@ -98,7 +98,7 @@ public class ES2NativeTest {
 
     @Test
     public void abiVersionIsTheOneTheFacadeWasWrittenFor() {
-        assertEquals(1, ES2NativeShim.expectedAbiVersion());
+        assertEquals(2, ES2NativeShim.expectedAbiVersion());
         assertEquals(ES2NativeShim.expectedAbiVersion(), ES2NativeShim.abiVersion());
     }
 

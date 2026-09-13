@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2012, 2014, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2012, 2026, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -23,7 +23,6 @@
  * questions.
  */
 
-#include <jni.h>
 #include <stdlib.h>
 #include <assert.h>
 #include <stdio.h>
@@ -31,11 +30,12 @@
 #include <math.h>
 
 #include "../PrismES2Defs.h"
+#include "../prism_es2_api.h"
 
 extern void printAndReleaseResources(HWND hwnd, HGLRC hglrc,
         HDC hdc, LPCTSTR szAppName, char *message);
 extern HWND createDummyWindow(LPCTSTR szAppName);
 extern LONG WINAPI WndProc(HWND hWnd, UINT msg,
         WPARAM wParam, LPARAM lParam);
-extern PIXELFORMATDESCRIPTOR getPFD(jint *attrArr);
+extern PIXELFORMATDESCRIPTOR getPFD(const Es2PixelFormatAttrs *attrs);
 

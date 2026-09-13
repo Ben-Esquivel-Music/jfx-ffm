@@ -65,6 +65,11 @@ public final class D3DNativeShim {
         return D3DNative.boundSymbols();
     }
 
+    /** Every bound symbol with its {@code FunctionDescriptor}, {@code name + " " + descriptor}, in binding order. */
+    public static List<String> descriptors() {
+        return D3DNative.descriptors();
+    }
+
     public static List<String> missingSymbols() {
         return D3DNative.missingSymbols();
     }

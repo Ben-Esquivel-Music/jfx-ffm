@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2012, 2024, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2012, 2026, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -23,7 +23,6 @@
  * questions.
  */
 
-#include <jni.h>
 #include <stdlib.h>
 #include <assert.h>
 #include <stdio.h>
@@ -31,34 +30,3 @@
 #include <math.h>
 
 #include "../PrismES2Defs.h"
-
-#ifdef STATIC_BUILD
-JNIEXPORT jint JNICALL
-JNI_OnLoad_prism_es2(JavaVM *vm, void * reserved) {
-#ifdef JNI_VERSION_1_8
-    //min. returned JNI_VERSION required by JDK8 for builtin libraries
-    JNIEnv *env;
-    if ((*vm)->GetEnv(vm, (void **)&env, JNI_VERSION_1_8) != JNI_OK) {
-        return JNI_VERSION_1_4;
-    }
-    return JNI_VERSION_1_8;
-#else
-    return JNI_VERSION_1_4;
-#endif
-}
-#endif
-
-
-void printAndReleaseResources(jlong pf, jlong ctx, const char *message) {
-    if (message != NULL) {
-        fprintf(stderr, "%s\n", message);
-    }
-    makeCurrentContext(NULL);
-    if (pf != 0) {
-        deletePixelFormat((void *) (intptr_t) pf);
-    }
-    if (ctx != 0) {
-        deleteContext((void *) (intptr_t) ctx);
-    }
-}
-

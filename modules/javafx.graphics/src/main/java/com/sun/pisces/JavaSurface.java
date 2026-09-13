@@ -31,7 +31,7 @@ public final class JavaSurface extends AbstractSurface {
 
     private IntBuffer dataBuffer;
 
-    private int[] dataInt;
+    private final int[] dataInt;
 
     public JavaSurface(int[] dataInt, int dataType, int width, int height) {
         super(width, height);

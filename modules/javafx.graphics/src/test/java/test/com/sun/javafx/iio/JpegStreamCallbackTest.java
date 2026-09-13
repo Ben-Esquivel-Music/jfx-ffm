@@ -25,6 +25,7 @@
 
 package test.com.sun.javafx.iio;
 
+import com.sun.javafx.iio.ImageLoader;
 import java.io.IOException;
 import java.io.InputStream;
 import java.util.Arrays;
@@ -47,9 +48,9 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * and pins what comes out.
  * <p>
  * This is the part of the decoder a migration is most likely to break. The stream is not read by
- * Java: libjpeg pulls from it through {@code imageio_fill_input_buffer} and
- * {@code imageio_skip_input_data}, which call back into {@code InputStream.read} and
- * {@code InputStream.skip} from inside a {@code setjmp} scope, several C frames below the Java call.
+ * Java: libjpeg pulls from it through the {@code read} and {@code skip} slots of the decoder's
+ * callback table, upcall stubs that call {@code InputStream.read} and {@code InputStream.skip} from
+ * inside a {@code setjmp} scope, several C frames below the Java call.
  * A short read, a zero-length read, an early end of stream and a thrown {@code IOException} each
  * take a different route out of that scope, and only one of them is an error. Getting the callback
  * mechanism right but the exhaustion cases wrong produces a decoder that works on files and
@@ -191,11 +192,12 @@ public class JpegStreamCallbackTest {
      * {@code load} as the very same object.
      * <p>
      * The route it takes is the reason this test exists. The exception is thrown by Java code called
-     * from C, inside libjpeg's {@code setjmp} scope; the source manager notices it with
-     * {@code ExceptionCheck} and calls {@code error_exit}, which {@code longjmp}s out of libjpeg to
-     * the handler in {@code decompressIndirect}; that handler finds an exception already pending,
-     * declines to replace it with a JPEG error, and returns false. {@code JPEGImageLoader.load} then
-     * rethrows it unchanged. Preserving the identity - not merely the type - is what
+     * from C, inside libjpeg's {@code setjmp} scope; the {@code read} stub catches it, stashes it in
+     * the loader's pending slot and returns an error; the source manager calls {@code error_exit},
+     * which {@code longjmp}s out of libjpeg to the {@code setjmp} of the same {@code iio_decompress}
+     * call, which reports {@code IIO_ERR_PENDING} rather than a JPEG error; {@code JPEGNative} takes
+     * the stashed exception back out of the slot, and {@code JPEGImageLoader.load} rethrows it
+     * unchanged. Preserving the identity - not merely the type - is what
      * {@code assertSame} is for: an implementation that wraps, replaces or reorders it would still
      * throw {@code IOException} and would still be a change.
      */
@@ -225,6 +227,37 @@ public class JpegStreamCallbackTest {
                 "a stream failure while reading the header must not be swallowed");
         assertSame(failure, thrown, () -> "the constructor must rethrow the stream's own"
                 + " IOException, but threw " + thrown + " caused by " + thrown.getCause());
+    }
+
+    /**
+     * The same, at the stage in between: a failure inside {@code iio_start_decompression}. For a
+     * baseline image that call reads nothing - the entropy-coded data is pulled scanline by scanline
+     * from {@code iio_decompress} - so it takes a progressive image, all of whose scans libjpeg
+     * consumes inside {@code jpeg_start_decompress}, to make the stream fail there. The exception
+     * comes back out of {@code load} as the same object, and before any progress was reported: the
+     * listener has seen the metadata and nothing else, which is how this test tells its stage apart
+     * from the one two tests up.
+     */
+    @Test
+    void anIOExceptionFromStartDecompressionPropagatesUnchanged() {
+        byte[] progressive = JpegTestSupport.writeJpeg(
+                JpegTestSupport.noisePattern(160, 120, 20260102L), 0.95f, true);
+        int scan = JpegTestSupport.startOfScan(progressive);
+        int prefix = scan + ONE_BUFFER;
+        assertTrue(progressive.length > prefix + ONE_BUFFER, () -> "the progressive fixture must"
+                + " carry more than a buffer of scan data past the cut for the cut to land inside"
+                + " jpeg_start_decompress; it is " + progressive.length + " bytes with SOS at " + scan);
+        IOException failure = new IOException("stream failed between the scans");
+        Fixture stream = new ThrowsAfter(progressive, prefix, failure);
+        RecordingListener listener = new RecordingListener();
+
+        IOException thrown = assertThrows(IOException.class,
+                () -> JpegTestSupport.decode(stream, JpegTestSupport.FULL, listener),
+                "a stream failure while starting decompression must not be swallowed");
+        assertSame(failure, thrown, () -> "load must rethrow the stream's own IOException, but threw "
+                + thrown + " caused by " + thrown.getCause());
+        assertEquals(List.of("META"), listener.events(), "the failure must come before the first"
+                + " scanline is reported, that is, from start_decompression rather than decompress");
     }
 
     /**
@@ -265,6 +298,103 @@ public class JpegStreamCallbackTest {
                 + " discarded by libjpeg's marker scanner while the constructor is still parsing the"
                 + " header, so no listener exists to hear about it. Warnings were "
                 + listener.warnings());
+    }
+
+    /**
+     * The {@code skip} callback's first failure branch: {@code InputStream.skip} returns 0. The source
+     * manager treats it as the stream ending ({@code ret <= 0}): it warns of the missing EOI - the
+     * {@code null} warning, {@code emit_warning(NULL)} - fabricates an {@code FF D9} marker and lets
+     * libjpeg finish from what it has. To watch that from a listener the skip has to happen after
+     * {@code load} attached one, so the fixture is progressive with the 8 KB comment placed between its
+     * first and second scans: libjpeg consumes every scan of a progressive image inside
+     * {@code jpeg_start_decompress}, reaches the comment after scan one, asks the stream to skip it,
+     * gets 0, sees the synthetic EOI and completes the image from the DC scan alone. The decode still
+     * reports {@code P:100}; the picture is the coarse one that scan alone describes, so it differs from
+     * the same bytes through a stream whose skip works - and those bytes, with the comment in place,
+     * decode identically to the image without it, which is the control.
+     */
+    @Test
+    void aSkipReturningZeroWarnsOfTheMissingEoiAndStillFinishesTheImage() throws IOException {
+        byte[] progressive = JpegTestSupport.writeJpeg(
+                JpegTestSupport.noisePattern(160, 120, 20260103L), 0.95f, true);
+        byte[] betweenScans = insertBeforeSecondScan(progressive,
+                JpegTestSupport.commentSegment(2 * ONE_BUFFER));
+        Decoded progressiveReference = JpegTestSupport.decode(new Fixture(progressive),
+                JpegTestSupport.FULL, null);
+        Fixture control = new Fixture(betweenScans);
+        assertSameImage(progressiveReference, JpegTestSupport.decode(control, JpegTestSupport.FULL, null),
+                "a comment between two scans, skipped by a working skip,");
+        assertEquals(1, control.skips, "the comment between the scans must reach InputStream.skip once");
+
+        RecordingListener listener = new RecordingListener();
+        ZeroSkip stream = new ZeroSkip(betweenScans);
+        Decoded decoded = JpegTestSupport.decode(stream, JpegTestSupport.FULL, listener);
+
+        assertEquals(1, stream.skips, "one skip, answered with 0; nothing is asked for after the synthetic EOI");
+        assertEquals(Arrays.asList((String) null), listener.warnings(), () -> "exactly the missing-EOI"
+                + " warning, which arrives as null (see JpegWarningOrderTest); warnings were "
+                + listener.warnings());
+        List<String> events = listener.events();
+        assertEquals("META", events.get(0), "metadata first: " + events);
+        assertEquals("W:" + JpegGoldens.NULL, events.get(1), "the warning comes from start_decompression,"
+                + " before any scanline: " + events);
+        assertEquals("P:100.0", events.get(events.size() - 1), "the decode runs to the end: " + events);
+        assertTrue(events.subList(2, events.size()).stream().allMatch(event -> event.startsWith("P:")),
+                "nothing but progress after the warning: " + events);
+        assertEquals(progressiveReference.width(), decoded.width());
+        assertEquals(progressiveReference.height(), decoded.height());
+        assertEquals(progressiveReference.pixels().length, decoded.pixels().length);
+        assertFalse(Arrays.equals(progressiveReference.pixels(), decoded.pixels()),
+                "the image must be the DC scan alone; identical output would mean the skip was never cut");
+    }
+
+    /**
+     * <b>Behaviour pin.</b> The same zero skip one stage earlier: over {@code withComment} the comment
+     * precedes SOF, so the synthetic EOI arrives inside {@code jpeg_read_header}, which was asked not to
+     * require an image ({@code jpeg_read_header(cinfo, FALSE)}) and answers
+     * {@code JPEG_HEADER_TABLES_ONLY}. The C pushes the buffer back and hands over a decoder whose header
+     * is all zero; the constructor keeps it and sets no input attributes; the missing-EOI warning went to
+     * a loader that had no listener yet. What a caller sees is a loader that constructs and then cannot
+     * load: {@code jpeg_read_header} reset the object with {@code jpeg_abort} on the way out, so
+     * {@code jpeg_start_decompress} refuses with {@code JERR_BAD_STATE} in {@code DSTATE_START} (200).
+     */
+    @Test
+    void aSkipReturningZeroInsideTheHeaderYieldsATablesOnlyLoader() throws IOException {
+        ZeroSkip stream = new ZeroSkip(withComment);
+        ImageLoader loader = JpegTestSupport.newLoader(stream);
+        try {
+            assertEquals(1, stream.skips, "the comment forces exactly one skip");
+            RecordingListener listener = new RecordingListener();
+            loader.addListener(listener);
+            IOException thrown = assertThrows(IOException.class, () -> loader.load(0, 0, 0, true, true, 1, 1),
+                    "a tables-only datastream has no image to load");
+            assertEquals("Improper call to JPEG library in state 200", thrown.getMessage(),
+                    "libjpeg's JERR_BAD_STATE for DSTATE_START, the state jpeg_abort left");
+            assertEquals(List.of(), listener.warnings(),
+                    "the missing-EOI warning was emitted before any listener existed, and was dropped");
+        } finally {
+            loader.dispose();
+        }
+    }
+
+    /**
+     * The {@code skip} callback's second failure branch: {@code InputStream.skip} throws. The stub catches
+     * the exception, stashes it in the loader's pending slot and returns the {@code -2} sentinel
+     * ({@code IIO_READ_ERROR}); the source manager aborts through {@code error_exit}, the downcall reports
+     * {@code IIO_ERR_PENDING}, and the same object comes back out. Over {@code withComment} the comment
+     * precedes SOS, so the skip runs inside {@code jpeg_read_header} and the exception surfaces from the
+     * constructor, through {@code initDecompressor}, which disposes the loader on the way out.
+     */
+    @Test
+    void anIOExceptionFromSkipPropagatesUnchanged() {
+        IOException failure = new IOException("stream failed inside skip");
+        ThrowingSkip stream = new ThrowingSkip(withComment, failure);
+        IOException thrown = assertThrows(IOException.class,
+                () -> JpegTestSupport.newLoader(stream),
+                "a stream failure inside skip must not be swallowed");
+        assertSame(failure, thrown, () -> "the constructor must rethrow the stream's own IOException,"
+                + " but threw " + thrown + " caused by " + thrown.getCause());
+        assertEquals(1, stream.skips, "the comment forces exactly one skip, and it is the one that threw");
     }
 
     /**
@@ -325,6 +455,30 @@ public class JpegStreamCallbackTest {
     }
 
     /**
+     * Inserts {@code segment} at the first marker after the first scan's entropy-coded data - between scan
+     * one and scan two of a progressive image, where libjpeg reads markers again and a comment is skipped
+     * through {@code skip_input_data} with a listener already attached. The entropy-coded data is walked
+     * byte by byte: {@code FF 00} is a stuffed byte, {@code FF D0..D7} a restart marker, {@code FF FF} fill.
+     */
+    private static byte[] insertBeforeSecondScan(byte[] jpeg, byte[] segment) {
+        int at = JpegTestSupport.startOfScan(jpeg);
+        while (at + 1 < jpeg.length) {
+            int next = jpeg[at + 1] & 0xFF;
+            if ((jpeg[at] & 0xFF) == 0xFF && next != 0x00 && next != 0xFF && !(next >= 0xD0 && next <= 0xD7)) {
+                break;
+            }
+            at++;
+        }
+        assertTrue(at + 1 < jpeg.length && (jpeg[at + 1] & 0xFF) != 0xD9,
+                "the progressive fixture must have a second scan for the comment to sit before");
+        byte[] out = new byte[jpeg.length + segment.length];
+        System.arraycopy(jpeg, 0, out, 0, at);
+        System.arraycopy(segment, 0, out, at, segment.length);
+        System.arraycopy(jpeg, at, out, at + segment.length, jpeg.length - at);
+        return out;
+    }
+
+    /**
      * A plain, correct stream over a byte array that counts what the decoder does to it. Subclasses
      * override {@link #transfer} to misbehave; overriding that rather than
      * {@code read(byte[], int, int)} keeps the counting intact.
@@ -367,7 +521,7 @@ public class JpegStreamCallbackTest {
         }
 
         @Override
-        public long skip(long count) {
+        public long skip(long count) throws IOException {
             skips++;
             long skipped = Math.max(0, Math.min(count, data.length - position));
             position += (int) skipped;
@@ -440,8 +594,39 @@ public class JpegStreamCallbackTest {
         }
 
         @Override
-        public long skip(long count) {
+        public long skip(long count) throws IOException {
             return super.skip(Math.min(count, limit));
+        }
+    }
+
+    /** Serves reads normally and answers every {@code skip} with 0, as a stream at its end would. */
+    private static final class ZeroSkip extends Fixture {
+
+        ZeroSkip(byte[] data) {
+            super(data);
+        }
+
+        @Override
+        public long skip(long count) {
+            skips++;
+            return 0;
+        }
+    }
+
+    /** Serves reads normally and throws one particular exception object from {@code skip}. */
+    private static final class ThrowingSkip extends Fixture {
+
+        private final IOException failure;
+
+        ThrowingSkip(byte[] data, IOException failure) {
+            super(data);
+            this.failure = failure;
+        }
+
+        @Override
+        public long skip(long count) throws IOException {
+            skips++;
+            throw failure;
         }
     }
 }

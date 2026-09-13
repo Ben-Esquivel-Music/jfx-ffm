@@ -42,6 +42,13 @@ abstract class GLFactory {
     private GLContext shareCtx = null;
 
     /**
+     * What {@code nGetIsGL2} answered on X11, WGL and NSOpenGL - always {@code JNI_TRUE}: the desktop ES2
+     * pipe is the GL2 profile, never GLES2 - absorbed by the FFM port as the value the three desktop
+     * factories assign to {@link #gl2} once {@code es2_factory_init} has succeeded. Monocle still asks.
+     */
+    static final boolean DESKTOP_GL2 = true;
+
+    /**
      * Creates a new GLFactory instance. End users do not need
      * to call this method.
      */

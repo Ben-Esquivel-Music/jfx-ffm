@@ -44,7 +44,7 @@ import static org.junit.jupiter.api.Assumptions.abort;
  * <p>
  * This module compiles {@code javafx_iio} from source ({@code modules/javafx.graphics/native/*.cmake},
  * target {@code iio}), so a library that is reachable and does not work is a broken build, never an
- * environment fact. A missing export, a {@code JNI_OnLoad} that no longer runs, a library left out of
+ * environment fact. A missing export, an ABI version the facade was not written for, a library left out of
  * the CMake build or a stale copy earlier on {@code java.library.path} are all failures and would all
  * be skips under a plain {@code assumeTrue(libraryLoaded)} - which is how a green run comes to report
  * zero JPEG tests.
@@ -65,9 +65,11 @@ public final class JpegNatives {
     private static final String LIBRARY_FILE = System.mapLibraryName("javafx_iio");
 
     /**
-     * Other libraries the javafx.graphics CMake build writes into the same directory on every
-     * platform. Any of them next to no {@code javafx_iio} means the native build ran and reported
-     * success without producing the library these tests exist for.
+     * Other libraries the javafx.graphics CMake build writes into the same directory. Any of them next
+     * to no {@code javafx_iio} means the native build ran and reported success without producing the
+     * library these tests exist for. The list is a union of witnesses, so an entry a platform does not
+     * build only shrinks it: {@code javafx_font} is built on Linux and macOS only, Windows having had
+     * no {@code font} target since {@code directwrite.cpp} was deleted.
      */
     private static final List<String> SIBLING_FILES = List.of(
             System.mapLibraryName("javafx_font"), System.mapLibraryName("decora_sse"));
@@ -131,7 +133,7 @@ public final class JpegNatives {
                     + " with a working javafx_iio: the source manager reports the missing data as an"
                     + " early EOI, injects one, and first_marker rejects it.";
         } catch (IOException expected) {
-            // The library loaded, initJPEGMethodIDs ran and libjpeg rejected an empty stream.
+            // The library loaded, every iio_* symbol bound and libjpeg rejected an empty stream.
             // That round trip is what "the natives work" means here.
         } catch (Throwable broken) {
             failureMessage = failureText(reachable, broken);
@@ -140,10 +142,10 @@ public final class JpegNatives {
     }
 
     /**
-     * Runs {@code JPEGImageLoader}'s static initializer - {@code NativeLibLoader.loadLibrary} plus
-     * {@code initJPEGMethodIDs} - and one real trip through libjpeg. An empty stream cannot produce a
-     * loader: the C source manager reports the missing data as an early EOI, injects one, and
-     * {@code first_marker} rejects it, so a working build throws {@code IOException} here.
+     * Runs {@code JPEGNative}'s static initializer - {@code NativeLibLoader.loadLibrary}, the binding of
+     * every {@code iio_*} symbol and the ABI check - and one real trip through libjpeg. An empty stream
+     * cannot produce a loader: the C source manager reports the missing data as an early EOI, injects
+     * one, and {@code first_marker} rejects it, so a working build throws {@code IOException} here.
      */
     private static void forceNativeInit() throws IOException {
         ImageLoader loader = JPEGImageLoaderFactory.getInstance()

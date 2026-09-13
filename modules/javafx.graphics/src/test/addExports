@@ -7,6 +7,7 @@
 #
 --add-exports javafx.graphics/com.sun.glass.events=ALL-UNNAMED
 --add-exports javafx.graphics/com.sun.glass.ui=ALL-UNNAMED
+--add-exports javafx.graphics/com.sun.glass.ui.win=ALL-UNNAMED
 --add-exports javafx.graphics/com.sun.javafx.animation=ALL-UNNAMED
 --add-exports javafx.graphics/com.sun.javafx.application=ALL-UNNAMED
 --add-exports javafx.graphics/com.sun.javafx.application.preferences=ALL-UNNAMED
@@ -17,6 +18,7 @@
 --add-exports javafx.graphics/com.sun.javafx.css.parser=ALL-UNNAMED
 --add-exports javafx.graphics/com.sun.javafx.embed=ALL-UNNAMED
 --add-exports javafx.graphics/com.sun.javafx.font=ALL-UNNAMED
+--add-exports javafx.graphics/com.sun.javafx.font.directwrite=ALL-UNNAMED
 --add-exports javafx.graphics/com.sun.javafx.geom=ALL-UNNAMED
 --add-exports javafx.graphics/com.sun.javafx.geom.transform=ALL-UNNAMED
 --add-exports javafx.graphics/com.sun.javafx.iio.bmp=ALL-UNNAMED
@@ -59,11 +61,15 @@
 --add-exports javafx.graphics/com.sun.scenario.effect.impl=ALL-UNNAMED
 --add-exports javafx.graphics/com.sun.scenario.effect.impl.state=ALL-UNNAMED
 --add-exports javafx.graphics/com.sun.scenario.effect.impl.prism=ALL-UNNAMED
+--add-exports javafx.graphics/com.sun.scenario.effect.impl.sw=ALL-UNNAMED
+--add-exports javafx.graphics/com.sun.scenario.effect.impl.sw.java=ALL-UNNAMED
+--add-exports javafx.graphics/com.sun.scenario.effect.impl.sw.sse=ALL-UNNAMED
 --add-exports javafx.graphics/com.sun.scenario.effect.light=ALL-UNNAMED
 --add-exports javafx.graphics/com.sun.scenario=ALL-UNNAMED
 --add-opens javafx.graphics/com.sun.javafx.css.parser=ALL-UNNAMED
 --add-opens javafx.graphics/com.sun.scenario.animation=ALL-UNNAMED
 --add-opens javafx.graphics/com.sun.scenario.effect.impl=ALL-UNNAMED
+--add-opens javafx.graphics/com.sun.scenario.effect.impl.sw.sse=ALL-UNNAMED
 --add-opens javafx.graphics/javafx.css=ALL-UNNAMED
 --add-opens javafx.graphics/javafx.scene=ALL-UNNAMED
 --add-opens javafx.graphics/javafx.scene.robot=ALL-UNNAMED

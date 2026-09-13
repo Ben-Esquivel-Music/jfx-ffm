@@ -87,7 +87,17 @@ public abstract class PrismFontFactory implements FontFactory {
         isEmbedded = PlatformUtil.isEmbedded();
         int[] tempCacheLayoutSize = {0x10000};
 
-        NativeLibLoader.loadLibrary("javafx_font");
+        /* javafx_font carries the CoreText path on macOS (MacFontFinder, DFontDecoder,
+         * com.sun.javafx.font.coretext.OS) and the fontconfig path on Linux (FontConfigManager,
+         * which has no loadLibrary of its own and depends on this one). It carries nothing on
+         * Windows: font enumeration is com.sun.javafx.font.WinFontNative and DirectWrite is
+         * com.sun.javafx.font.directwrite.DWNative, both of which bind the system DLLs from Java,
+         * so there is no javafx_font.dll to load once its one remaining source is deleted.
+         * Loading it unconditionally would then be an UnsatisfiedLinkError in a static initializer,
+         * i.e. no fonts at all. */
+        if (!isWindows) {
+            NativeLibLoader.loadLibrary("javafx_font");
+        }
         String dbg = System.getProperty("prism.debugfonts", "");
         debugFonts = "true".equals(dbg);
         jreFontDir = getJDKFontDir();
@@ -942,7 +952,9 @@ public abstract class PrismFontFactory implements FontFactory {
     private static String sysFontDir = null;
     private static String userFontDir = null;
 
-    private static native String getFontPath();
+    private static String getFontPath() {
+        return WinFontPath.getFontPath();
+    }
 
     private static void getPlatformFontDirs() {
 
@@ -1130,12 +1142,15 @@ public abstract class PrismFontFactory implements FontFactory {
         }
     }
 
-    static native void
+    static void
         populateFontFileNameMap(HashMap<String,String> fontToFileMap,
                                  HashMap<String,String> fontToFamilyNameMap,
                                  HashMap<String,ArrayList<String>>
                                      familyToFontListMap,
-                                 Locale locale);
+                                 Locale locale) {
+        WinFontPath.populateFontFileNameMap(fontToFileMap, fontToFamilyNameMap,
+                                            familyToFontListMap, locale);
+    }
 
     protected static String getPathNameWindows(final String filename) {
         if (filename == null) {
@@ -1806,9 +1821,18 @@ public abstract class PrismFontFactory implements FontFactory {
         }
     }
 
-    static native int getLCDContrastWin32();
-    private static native float getSystemFontSizeNative();
-    private static native String getSystemFontNative();
+    static int getLCDContrastWin32() {
+        return WinFontPath.getLCDContrastWin32();
+    }
+
+    private static float getSystemFontSizeNative() {
+        return WinFontPath.getSystemFontSizeNative();
+    }
+
+    private static String getSystemFontNative() {
+        return WinFontPath.getSystemFontNative();
+    }
+
     private static float systemFontSize;
     private static String systemFontFamily = null;
     private static String monospaceFontFamily = null;
@@ -1882,7 +1906,9 @@ public abstract class PrismFontFactory implements FontFactory {
     }
 
     /* Called from PrismFontFile which caches the return value */
-    static native short getSystemLCID();
+    static short getSystemLCID() {
+        return WinFontPath.getSystemLCID();
+    }
 
     public abstract FontFallbackInfo getFallbacks(FontResource primaryResource);
 }

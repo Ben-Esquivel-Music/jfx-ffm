@@ -172,7 +172,7 @@ if(INCLUDE_ES2)
             "${GRAPHICS_SRC}/native-prism-es2/GL"
             "${GRAPHICS_SRC}/native-prism-es2/x11"
         COMPILE_OPTIONS -DLINUX ${JFX_C_STRICT_OPTIONS}
-        LINK_LIBS X11 Xxf86vm GL)
+        LINK_LIBS X11 GL)
 endif()
 
 # ---------------------------------------------------------------------------

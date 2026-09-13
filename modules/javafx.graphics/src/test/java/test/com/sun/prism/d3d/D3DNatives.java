@@ -66,8 +66,7 @@ public final class D3DNatives {
      */
     private static final List<String> SIBLING_FILES = List.of(
             System.mapLibraryName("prism_sw"), System.mapLibraryName("glass"),
-            System.mapLibraryName("javafx_font"), System.mapLibraryName("javafx_iio"),
-            System.mapLibraryName("decora_sse"));
+            System.mapLibraryName("javafx_iio"), System.mapLibraryName("decora_sse"));
 
     private static boolean decided;
     private static String skipReason;

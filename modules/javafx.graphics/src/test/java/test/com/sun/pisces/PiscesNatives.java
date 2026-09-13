@@ -63,8 +63,11 @@ public final class PiscesNatives {
     private static final String LIBRARY_FILE = System.mapLibraryName(LIBRARY_NAME);
 
     /**
-     * Other libraries the javafx.graphics CMake build writes into the same directory on every
-     * platform. Any of them next to no {@code prism_sw} is a broken build, not a tree without natives.
+     * Other libraries the javafx.graphics CMake build writes into the same directory. Any of them next
+     * to no {@code prism_sw} is a broken build, not a tree without natives. The list is a union of
+     * witnesses, so an entry a platform does not build only shrinks it: {@code javafx_font} is built on
+     * Linux and macOS only, Windows having had no {@code font} target since {@code directwrite.cpp}
+     * was deleted.
      */
     private static final List<String> SIBLING_FILES = List.of(
             System.mapLibraryName("glass"), System.mapLibraryName("javafx_font"),

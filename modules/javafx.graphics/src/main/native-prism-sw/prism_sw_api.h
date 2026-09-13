@@ -50,6 +50,16 @@
  * Threading. Like the JNI version, nothing is synchronized: a renderer and its surface belong to
  * one thread at a time, the LCD gamma tables are process-global, and the OOM flag is a plain
  * global - Prism drives this library from its single render thread.
+ *
+ * Transitional ABI. This psw_* surface is a behaviour-neutral replacement for the JNI glue of a
+ * library that is pure computation throughout, hot loops included: it makes no OS call and
+ * imports nothing beyond the C runtime. The whole library is a deletion candidate - a Java port -
+ * once its parity gates are settled: the integer core (blits, masks, fill/clear, texture sampling,
+ * get/set RGB) is PARITY exact against the golden harness; the gradient set-up and generators are
+ * PARITY tolerance, with a bound still to be tested and accepted; the LCD gamma LUT built from
+ * pow() is PARITY unknown.
+ * Do not extend this ABI: new functionality belongs in Java, and anything added here only enlarges
+ * the deletion diff.
  */
 
 #ifndef PRISM_SW_API_H
@@ -184,9 +194,11 @@ PRISM_SW_EXPORT int32_t psw_renderer_set_radial_gradient(void* rdr, int32_t cx, 
  * all) is copied into a buffer the renderer owns, so `data` may be released on return. `image_type`
  * is accepted for symmetry with drawImage and is not consulted (INT_ARGB_PRE only), exactly as the
  * JNI code ignored it. `repeat`, `linear_filtering` and `has_alpha` are booleans compared != 0.
- * The JNI-era dimension guard is kept unchanged: when it fails the JNI code fell through to the
- * OOM error, so this returns PSW_ERR_OOM for that case rather than PSW_ERR_ARG (the Java
- * inputImageCheck rejects such input before the call anyway).
+ * The JNI-era dimension guard is kept unchanged - w > 0, h > 0, stride > 0, w * h * sizeof(int32_t)
+ * below INT_MAX, (h - 1) * stride + w <= data_len - and when it fails this returns PSW_ERR_OOM, not
+ * PSW_ERR_ARG, because the JNI setTextureImpl fell through to setMemErrorFlag() there. The Java
+ * inputImageCheck rejects only negative sizes, stride < w and undersized arrays, so a texture with
+ * w == 0 or h == 0 DOES reach this guard: it returns PSW_ERR_OOM and Java raises OutOfMemoryError.
  */
 PRISM_SW_EXPORT int32_t psw_renderer_set_texture(void* rdr, int32_t image_type,
                                                  const int32_t* data, int32_t data_len,

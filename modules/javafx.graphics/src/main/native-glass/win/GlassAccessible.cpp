@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2013, 2016, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2013, 2026, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -1071,6 +1071,14 @@ IFACEMETHODIMP GlassAccessible::ScrollIntoView()
 JNIEXPORT void JNICALL Java_com_sun_glass_ui_win_WinAccessible__1initIDs
   (JNIEnv *env, jclass jClass)
 {
+    /*
+     * A real JNI native, so FindClass sees javafx.graphics here - it cannot from the UIA callbacks, which
+     * run inside the gwin_run_loop downcall (GlassAccessibleJni.h). Cache what CheckAndClearException needs
+     * before any of them can report: no GlassAccessible exists until this class is initialised. The only
+     * caller now that WinApplication.initIDs is gone (ABI 5); idempotent regardless.
+     */
+    InitExceptionReporting(env);
+
     /* IRawElementProviderSimple */
     mid_GetPatternProvider = env->GetMethodID(jClass, "GetPatternProvider", "(I)J");
     if (env->ExceptionCheck()) return;

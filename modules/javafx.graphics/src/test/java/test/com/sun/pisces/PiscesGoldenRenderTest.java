@@ -41,11 +41,16 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Set;
+import org.junit.jupiter.api.AfterAll;
+import org.junit.jupiter.api.Assumptions;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
+import test.com.sun.javafx.test.ParityGate;
 
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -58,17 +63,39 @@ import static org.junit.jupiter.api.Assertions.fail;
  * software pipeline ({@code com.sun.prism.sw}) uses, on a 64x64 {@code TYPE_INT_ARGB_PRE} surface, and
  * takes a full-frame snapshot of the surface after every step. The golden resource
  * {@value #GOLDEN_RESOURCE} is the raw big-endian concatenation of those snapshots, captured from the
- * <b>JNI build</b> at commit {@code a544256444} (the hash in its name) on Windows x64 - see
- * {@code scratchpad/notes/prism_sw_java.md} of the migration for the capture log. The Pisces C code is
- * integer-only, so the same golden is expected to hold on every platform.
+ * <b>JNI build</b> at commit {@code a544256444} (the hash in its name) on Windows x64.
  * <p>
  * Every later change to the Java side of Pisces - the JNI to FFM flip first of all - has to reproduce
  * this file byte for byte: the C bodies do not change in a migration, so any difference is a
  * marshalling bug in Java and is fixed there, never by regenerating the golden. Regenerating it is a
  * behaviour change and needs its own commit with the reason stated.
  * <p>
+ * The golden is exact across platforms only where the C is integer-only, which is most of it: blits,
+ * masks, fill and clear, get and set RGB. Four groups of steps are not ({@link #FLOAT_STEPS}). Steps 6
+ * to 11 (the linear and radial gradients) and 24 (alpha rows under a gradient paint) run float set-up
+ * in {@code PiscesRenderer.inl} and a per-pixel {@code sqrt} and {@code frac += mx} in
+ * {@code PiscesPaint.c}, contractable to FMA on aarch64; steps 12 to 19 (the four {@code setTexture}
+ * paints and the four {@code drawImage} calls) invert their texture transform in
+ * {@code pisces_transform_invert} ({@code native-prism-sw/PiscesTransform.c:55}, {@code :61-62} at commit
+ * {@code a544256444}, the same lines at {@code 8492cb03b0}: {@code fdet} and the two
+ * translation terms are float products and differences, divided by {@code fdet} and truncated back to
+ * 16.16, so one ulp there moves the sampling grid) - texture sampling is integer, but only once the
+ * inverse is; step 22 (the LCD mask at gamma 1.4) reads a lookup table built with libm {@code pow} in
+ * {@code PiscesBlit.c}. The comparison runs every step and reports every mismatch in one failure, each
+ * named with its class: a mismatch on another platform that is confined to float steps is C float
+ * variance, not a Java marshalling bug, and is handled by a per-platform golden added in its own commit,
+ * never by regenerating this one; a mismatch in an integer step, or on Windows x64 at all, is a bug on
+ * the Java side, and is reported as such even when float steps differ alongside it.
+ * <p>
+ * The JNI glue that produced this golden ({@code native-prism-sw/JPiscesRenderer.c} and its siblings) was deleted in
+ * commit {@code 45f18c168a}. To extend or re-verify this corpus, check out {@code a544256444} and capture there;
+ * capturing on a later commit proves only that the FFM path agrees with itself. The
+ * per-step comparisons are counted, and a run that compared none of them fails at the end of the class
+ * ({@link ParityGate}); a capture run compares nothing by design and is reported as skipped.
+ * <p>
  * Capture mode: with {@code -Dpisces.golden.capture=<absolute path>} the test writes the file to that
- * path instead of asserting against the resource. The per-step layout exists so that a mismatch names
+ * path instead of asserting against the resource, then aborts, so a capture run is reported as skipped
+ * and can never be read as a green verification. The per-step layout exists so that a mismatch names
  * the operation that broke rather than only the pixel.
  */
 public class PiscesGoldenRenderTest {
@@ -76,15 +103,31 @@ public class PiscesGoldenRenderTest {
     static final String GOLDEN_RESOURCE = "pisces-golden-a544256444.bin";
     static final String CAPTURE_PROPERTY = "pisces.golden.capture";
 
+    private static final ParityGate.Ledger LEDGER = ParityGate.ledger(PiscesGoldenRenderTest.class);
+
     static final int W = 64;
     static final int H = 64;
 
     /** Coverage maximum of the synthetic alpha rows; independent of Marlin's configured subpixel grid. */
     static final int MAX_ALPHA = 64;
 
+    /**
+     * The steps whose C runs float arithmetic (see the class comment): 6-11 the gradients, 12-19 the
+     * texture paints and {@code drawImage} calls through {@code pisces_transform_invert}, 22 the LCD mask at
+     * gamma 1.4, 24 the alpha rows under a gradient paint. Every other step is integer-only and has to match
+     * on every platform.
+     */
+    static final Set<Integer> FLOAT_STEPS = Set.of(6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 22, 24);
+
     @BeforeAll
     static void requireNatives() {
         PiscesNatives.require();
+    }
+
+    /** The golden runs on every machine: once the comparison started, every step must have been compared. */
+    @AfterAll
+    static void theOracleRan() {
+        LEDGER.assertOracleRan();
     }
 
     @Test
@@ -94,9 +137,60 @@ public class PiscesGoldenRenderTest {
         String capture = System.getProperty(CAPTURE_PROPERTY);
         if (capture != null && !capture.isBlank()) {
             script.writeGolden(Path.of(capture));
-            return;
+            Assumptions.abort("golden captured to " + capture + "; a capture run verifies nothing");
         }
+        LEDGER.oracleAvailable();
         script.assertMatchesGolden();
+    }
+
+    /**
+     * The report has to name an integer step that differs even when float steps differ too, and has to
+     * class each. The script's own frames stand in for the golden; in a copy, one pixel of step 0
+     * (integer), one of step 7 (a gradient) and one of step 13 (a texture paint, float through
+     * {@code pisces_transform_invert}) are perturbed; the comparison must list all three, class them, and
+     * count the integer one in the verdict rather than stop at, or fold it into, the float ones. The
+     * golden resource is not involved.
+     */
+    @Test
+    public void anIntegerStepMismatchIsReportedEvenWhenFloatStepsAlsoDiffer() {
+        Script script = new Script();
+        script.run();
+        List<int[]> golden = script.steps.stream().map(step -> step.snapshot().clone()).toList();
+        List<Step> perturbed = new ArrayList<>(script.steps);
+        perturb(perturbed, 0, 4095);
+        perturb(perturbed, 7, 100);
+        perturb(perturbed, 13, 2049);
+        assertEquals(List.of(), compare(script.steps, golden), "unperturbed frames compare clean");
+
+        List<Mismatch> mismatches = compare(perturbed, golden);
+        assertEquals(List.of(0, 7, 13), mismatches.stream().map(Mismatch::step).toList(),
+                "every differing step, in step order");
+        Mismatch integer = mismatches.get(0);
+        assertFalse(integer.floatStep(), "step 0 is integer-only");
+        assertEquals(4095, integer.firstPixel());
+        assertEquals(1, integer.differing());
+        assertEquals(golden.get(0)[4095], integer.expected());
+        assertEquals(perturbed.get(0).snapshot()[4095], integer.actual());
+        assertTrue(mismatches.get(1).floatStep(), "step 7 is a gradient");
+        assertTrue(mismatches.get(2).floatStep(), "step 13 is a texture paint: pisces_transform_invert");
+
+        String message = describe(mismatches, perturbed.size());
+        String verdict = "3 of " + perturbed.size() + " steps differ from the golden: 1 in integer steps";
+        assertTrue(message.startsWith(verdict), message);
+        assertTrue(message.contains("step 0 '" + perturbed.get(0).name() + "' [integer]: pixel (63,63)"), message);
+        assertTrue(message.contains("step 7 '" + perturbed.get(7).name() + "' [float]"), message);
+        assertTrue(message.contains("step 13 '" + perturbed.get(13).name() + "' [float]"), message);
+        assertTrue(message.indexOf("step 0 '") < message.indexOf("step 7 '"), "integer steps are listed first");
+
+        assertTrue(describe(mismatches.subList(1, 3), perturbed.size()).contains("all in float steps"),
+                "float-only mismatches are called out as such");
+    }
+
+    /** Replaces step {@code index} with a copy whose pixel {@code pixel} has one colour bit flipped. */
+    private static void perturb(List<Step> steps, int index, int pixel) {
+        int[] snapshot = steps.get(index).snapshot().clone();
+        snapshot[pixel] ^= 0x00010000;
+        steps.set(index, new Step(steps.get(index).name(), snapshot));
     }
 
     @Test
@@ -230,6 +324,85 @@ public class PiscesGoldenRenderTest {
     }
 
     private record Step(String name, int[] snapshot) {
+    }
+
+    /** One step whose snapshot differs from its golden frame: where it first differs, and by how much. */
+    record Mismatch(int step, String name, int firstPixel, int expected, int actual, int differing) {
+
+        boolean floatStep() {
+            return FLOAT_STEPS.contains(step);
+        }
+
+        String describe() {
+            return String.format("step %d '%s' [%s]: pixel (%d,%d) expected 0x%08X but was 0x%08X"
+                    + " (first of %d differing pixels)", step, name, floatStep() ? "float" : "integer",
+                    firstPixel % W, firstPixel / W, expected, actual, differing);
+        }
+    }
+
+    /**
+     * Compares every snapshot with its golden frame and reports every step that differs, in step order,
+     * so that one run names every broken operation and an integer-step regression is never hidden behind
+     * a float-step difference that happens to come first.
+     */
+    static List<Mismatch> compare(List<Step> steps, List<int[]> golden) {
+        List<Mismatch> mismatches = new ArrayList<>();
+        for (int i = 0; i < steps.size(); i++) {
+            Step step = steps.get(i);
+            int[] expected = golden.get(i);
+            int[] actual = step.snapshot();
+            int first = -1;
+            int differing = 0;
+            for (int p = 0; p < expected.length; p++) {
+                if (expected[p] != actual[p]) {
+                    if (first < 0) {
+                        first = p;
+                    }
+                    differing++;
+                }
+            }
+            if (first >= 0) {
+                mismatches.add(new Mismatch(i, step.name(), first, expected[first], actual[first], differing));
+            }
+        }
+        return mismatches;
+    }
+
+    /** The one failure message: the verdict, then every mismatch, integer steps before float steps. */
+    static String describe(List<Mismatch> mismatches, int stepCount) {
+        List<Mismatch> integer = mismatches.stream().filter(m -> !m.floatStep()).toList();
+        List<Mismatch> floating = mismatches.stream().filter(Mismatch::floatStep).toList();
+        StringBuilder message = new StringBuilder();
+        message.append(mismatches.size()).append(" of ").append(stepCount).append(" steps differ from the golden: ");
+        if (integer.isEmpty()) {
+            message.append("all in float steps, which on a platform other than Windows x64 is C float variance"
+                    + " (per-platform golden in its own commit, never a regeneration) and on Windows x64 is a"
+                    + " Java-side bug");
+        } else {
+            message.append(integer.size()).append(" in integer steps, which is a Java-side bug on every platform");
+            if (!floating.isEmpty()) {
+                message.append(", and ").append(floating.size()).append(" in float steps");
+            }
+        }
+        for (Mismatch mismatch : integer) {
+            message.append(System.lineSeparator()).append("  ").append(mismatch.describe());
+        }
+        for (Mismatch mismatch : floating) {
+            message.append(System.lineSeparator()).append("  ").append(mismatch.describe());
+        }
+        return message.toString();
+    }
+
+    /** {@code count} big-endian frames of {@code W * H} ints, as the golden stores them. */
+    static List<int[]> frames(byte[] bytes, int count) {
+        IntBuffer ints = ByteBuffer.wrap(bytes).order(ByteOrder.BIG_ENDIAN).asIntBuffer();
+        List<int[]> frames = new ArrayList<>(count);
+        for (int i = 0; i < count; i++) {
+            int[] frame = new int[W * H];
+            ints.get(frame);
+            frames.add(frame);
+        }
+        return frames;
     }
 
     /** The deterministic sequence of operations and the snapshot taken after each. */
@@ -450,27 +623,10 @@ public class PiscesGoldenRenderTest {
             }
             assertEquals(steps.size() * W * H * 4, bytes.length, "golden size: " + steps.size()
                     + " snapshots of " + W + "x" + H + " ints expected; the script and the golden disagree");
-            IntBuffer golden = ByteBuffer.wrap(bytes).order(ByteOrder.BIG_ENDIAN).asIntBuffer();
-            int[] expected = new int[W * H];
-            for (int i = 0; i < steps.size(); i++) {
-                Step step = steps.get(i);
-                golden.get(expected);
-                int[] actual = step.snapshot();
-                int first = -1;
-                int differing = 0;
-                for (int p = 0; p < expected.length; p++) {
-                    if (expected[p] != actual[p]) {
-                        if (first < 0) {
-                            first = p;
-                        }
-                        differing++;
-                    }
-                }
-                if (first >= 0) {
-                    fail(String.format("step %d '%s': pixel (%d,%d) expected 0x%08X but was 0x%08X"
-                            + " (first of %d differing pixels)", i, step.name(), first % W, first / W,
-                            expected[first], actual[first], differing));
-                }
+            List<Mismatch> mismatches = compare(steps, frames(bytes, steps.size()));
+            LEDGER.compared(steps.size());
+            if (!mismatches.isEmpty()) {
+                fail(describe(mismatches, steps.size()));
             }
         }
     }

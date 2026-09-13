@@ -136,12 +136,12 @@ abstract class GLContext {
     /*
      * The JNI-era Prism-to-GL translation tables (GLContext.c translateScaleFactor, translatePrismToGL,
      * translatePixelStore), moved to Java: the es2_* ABI passes every "GL enum" argument straight to GL
-     * (prism_es2_api.c, audit 7.3 option A), so the wrappers below translate the small GLContext.GL_* /
+     * (prism_es2_api.c), so the wrappers below translate the small GLContext.GL_* /
      * WRAPMODE_* indices to the real OpenGL values here, exactly as the native code used to. The values
      * are the ones prism_es2_api.h documents for the Java-side table test.
      */
 
-    private static int translateScaleFactor(int scaleFactor) {
+    static int translateScaleFactor(int scaleFactor) {
         return switch (scaleFactor) {
             case GL_ZERO -> 0x0000;                        // GL_ZERO
             case GL_ONE -> 0x0001;                         // GL_ONE
@@ -165,7 +165,7 @@ abstract class GLContext {
         };
     }
 
-    private static int translatePrismToGL(int value) {
+    static int translatePrismToGL(int value) {
         return switch (value) {
             case GL_FLOAT -> 0x1406;                       // GL_FLOAT
             case GL_UNSIGNED_BYTE -> 0x1401;               // GL_UNSIGNED_BYTE
@@ -205,7 +205,7 @@ abstract class GLContext {
         };
     }
 
-    private static int translatePixelStore(int pname) {
+    static int translatePixelStore(int pname) {
         return switch (pname) {
             case GL_UNPACK_ALIGNMENT -> 0x0CF5;            // GL_UNPACK_ALIGNMENT
             case GL_UNPACK_ROW_LENGTH -> 0x0CF2;           // GL_UNPACK_ROW_LENGTH

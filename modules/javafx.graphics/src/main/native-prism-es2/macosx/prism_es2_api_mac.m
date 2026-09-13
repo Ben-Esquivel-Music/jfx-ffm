@@ -32,11 +32,9 @@
  * those files this one is plain C: the NSOpenGL calls go through the C helpers of
  * MacOSXWindowSystemInterface.m declared in macosx-window-system.h (createPixelFormat,
  * createContext, makeCurrentContext, deleteContext, deletePixelFormat, flushBuffer,
- * setSwapInterval). MacGLFactory.c's printAndReleaseResources takes jlong handles, so its three
- * lines are duplicated as es2MacReleaseResources (step-4: dedupe). The GLPixelFormat.Attributes
- * array createPixelFormat expects is the Es2PixelFormatAttrs struct copied into a jint[]
- * (prism_es2_api.c asserts the two layouts agree); step 4 retypes createPixelFormat and drops that
- * copy.
+ * setSwapInterval); createPixelFormat takes the Es2PixelFormatAttrs struct directly. The
+ * release-on-failure helper es2MacReleaseResources below is the former MacGLFactory.c
+ * printAndReleaseResources with void* handles.
  *
  * Not compiled on the Windows machine that wrote it; macOS CI is the check.
  */
@@ -52,7 +50,7 @@
 
 #define ES2_BOOL(x) ((GLboolean) ((x) != 0))
 
-/* MacGLFactory.c:53-63 with void* handles instead of jlong. step-4: dedupe. */
+/* Former MacGLFactory.c printAndReleaseResources, with void* handles. */
 static void es2MacReleaseResources(void *pf, void *ctx, const char *message) {
     if (message != NULL) {
         fprintf(stderr, "%s\n", message);
@@ -73,7 +71,6 @@ static void es2MacReleaseResources(void *pf, void *ctx, const char *message) {
 PRISM_ES2_EXPORT void *
 es2_factory_init(const Es2PixelFormatAttrs *attrs) {
 
-    jint attrArr[ES2_PIXEL_FORMAT_ATTR_COUNT]; /* step-4: goes with createPixelFormat's parameter type */
     void *pixelFormat;
     void *context = NULL;
     int viewNotReady;
@@ -91,8 +88,7 @@ es2_factory_init(const Es2PixelFormatAttrs *attrs) {
         return NULL;
     }
 
-    memcpy(attrArr, attrs, sizeof(attrArr));
-    pixelFormat = createPixelFormat(attrArr);
+    pixelFormat = createPixelFormat(attrs);
 
     if (pixelFormat == NULL) {
         // System is incapable of es2 support
@@ -208,7 +204,6 @@ es2_factory_get_x11_info(void *ctx, int64_t info[3]) {
 
 PRISM_ES2_EXPORT void *
 es2_pixel_format_create(int64_t native_screen, const Es2PixelFormatAttrs *attrs) {
-    jint attrArr[ES2_PIXEL_FORMAT_ATTR_COUNT]; /* step-4: goes with createPixelFormat's parameter type */
     void *pixelFormat = NULL;
     PixelFormatInfo *pfInfo = NULL;
 
@@ -217,8 +212,7 @@ es2_pixel_format_create(int64_t native_screen, const Es2PixelFormatAttrs *attrs)
         return NULL;
     }
 
-    memcpy(attrArr, attrs, sizeof(attrArr));
-    pixelFormat = createPixelFormat(attrArr);
+    pixelFormat = createPixelFormat(attrs);
 
     /* allocate the structure */
     pfInfo = (PixelFormatInfo *) malloc(sizeof (PixelFormatInfo));
@@ -226,7 +220,7 @@ es2_pixel_format_create(int64_t native_screen, const Es2PixelFormatAttrs *attrs)
         fprintf(stderr, "nCreatePixelFormat: Failed in malloc\n");
     }
 
-    /* Carried verbatim from MacGLPixelFormat.c:55-62 (audit R-11): a failed malloc prints and
+    /* Carried verbatim from MacGLPixelFormat.c:55-62 at commit 868c4801ec: a failed malloc prints and
      * falls through to the dereference below. To be fixed in a later commit, not silently here. */
     /* initialize the structure */
     initializePixelFormatInfo(pfInfo);

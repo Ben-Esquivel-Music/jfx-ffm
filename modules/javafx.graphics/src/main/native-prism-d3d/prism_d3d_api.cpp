@@ -41,6 +41,7 @@
 #include "prism_d3d_api.h"
 
 #include <new>
+#include <stddef.h>
 #include <string.h>
 
 #include "D3DPipeline.h"
@@ -55,6 +56,18 @@
 /* Struct layouts the Java MemoryLayouts mirror (D3DNativeTest compares them with d3d_sizeof_*). */
 static_assert(sizeof(D3dDriverInfo) == 1364, "D3dDriverInfo layout changed - bump PRISM_D3D_ABI_VERSION");
 static_assert(sizeof(D3dFrameStats) == 32, "D3dFrameStats layout changed - bump PRISM_D3D_ABI_VERSION");
+// sizeof == 32 holds for ANY order of eight int32 fields; D3DNative.FRAME_STATS_LAYOUT reads each counter at
+// the offset its declaration position gives it (OFFSET_NUM_*), so the order is pinned field by field.
+static_assert(offsetof(D3dFrameStats, num_triangles_drawn) == 0, "D3DNative reads num_triangles_drawn at 0");
+static_assert(offsetof(D3dFrameStats, num_draw_calls) == 4, "D3DNative reads num_draw_calls at 4");
+static_assert(offsetof(D3dFrameStats, num_buffer_locks) == 8, "D3DNative reads num_buffer_locks at 8");
+static_assert(offsetof(D3dFrameStats, num_texture_locks) == 12, "D3DNative reads num_texture_locks at 12");
+static_assert(offsetof(D3dFrameStats, num_texture_transfer_bytes) == 16,
+              "D3DNative reads num_texture_transfer_bytes at 16");
+static_assert(offsetof(D3dFrameStats, num_set_texture) == 20, "D3DNative reads num_set_texture at 20");
+static_assert(offsetof(D3dFrameStats, num_set_pixel_shader) == 24, "D3DNative reads num_set_pixel_shader at 24");
+static_assert(offsetof(D3dFrameStats, num_render_target_switch) == 28,
+              "D3DNative reads num_render_target_switch at 28");
 static_assert(sizeof(D3dTextureInfo) == 24, "D3dTextureInfo layout changed - bump PRISM_D3D_ABI_VERSION");
 static_assert(sizeof(D3dDriverInfo::device_description) == MAX_DEVICE_IDENTIFIER_STRING,
               "device_description must hold D3DADAPTER_IDENTIFIER9.Description");
@@ -66,7 +79,7 @@ static_assert(sizeof(D3dDriverInfo::device_name) == sizeof(D3DADAPTER_IDENTIFIER
 static_assert(sizeof(D3dFrameStats) == sizeof(D3DContext::FrameStats), "D3dFrameStats mirrors D3DContext::FrameStats");
 #endif
 
-/* Constant tables pinned to their Java definitions (D3DContext.java:57-61, :70-72) and to
+/* Constant tables pinned to their Java definitions (D3DContext.D3DCOMPMODE_*, D3DContext.CULL_*) and to
  * TextureUploader.h (PFormat == com.sun.prism.PixelFormat.ordinal()). */
 static_assert(D3D_COMPMODE_CLEAR == 0 && D3D_COMPMODE_SRC == 1 && D3D_COMPMODE_SRCOVER == 2 &&
               D3D_COMPMODE_DSTOUT == 3 && D3D_COMPMODE_ADD == 4, "D3DContext.java D3DCOMPMODE_*");

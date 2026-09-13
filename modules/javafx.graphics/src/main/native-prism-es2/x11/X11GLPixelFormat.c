@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2012, 2024, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2012, 2026, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -23,7 +23,6 @@
  * questions.
  */
 
-#include <jni.h>
 #include <stdlib.h>
 #include <assert.h>
 #include <stdio.h>
@@ -31,8 +30,9 @@
 #include <math.h>
 
 #include "../PrismES2Defs.h"
+#include "../prism_es2_api.h"
 
-extern void setGLXAttrs(jint *attrs, int *glxAttrs);
+extern void setGLXAttrs(const Es2PixelFormatAttrs *attrs, int *glxAttrs);
 extern void printAndReleaseResources(Display *display, GLXFBConfig *fbConfigList,
         XVisualInfo *visualInfo, Window win, GLXContext ctx, Colormap cmap,
         const char *message);

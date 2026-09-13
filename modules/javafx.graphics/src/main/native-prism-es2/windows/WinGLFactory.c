@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2012, 2024, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2012, 2026, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -23,7 +23,6 @@
  * questions.
  */
 
-#include <jni.h>
 #include <stdlib.h>
 #include <assert.h>
 #include <stdio.h>
@@ -31,23 +30,9 @@
 #include <math.h>
 
 #include "../PrismES2Defs.h"
+#include "../prism_es2_api.h"
 
-#ifdef STATIC_BUILD
-JNIEXPORT jint JNICALL JNI_OnLoad_prism_es2(JavaVM *vm, void * reserved) {
-#ifdef JNI_VERSION_1_8
-    //min. returned JNI_VERSION required by JDK8 for builtin libraries
-    JNIEnv *env;
-    if ((*vm)->GetEnv(vm, (void **)&env, JNI_VERSION_1_8) != JNI_OK) {
-        return JNI_VERSION_1_4;
-    }
-    return JNI_VERSION_1_8;
-#else
-    return JNI_VERSION_1_4;
-#endif // JNI_VERSION_1_8
-}
-#endif // STATIC_BUILD
-
-PIXELFORMATDESCRIPTOR getPFD(jint* attrArr) {
+PIXELFORMATDESCRIPTOR getPFD(const Es2PixelFormatAttrs *attrs) {
 
     static PIXELFORMATDESCRIPTOR pfd = {
         sizeof (PIXELFORMATDESCRIPTOR),
@@ -69,19 +54,19 @@ PIXELFORMATDESCRIPTOR getPFD(jint* attrArr) {
         0 /* no damage mask */
     };
 
-    if (attrArr[ONSCREEN] != 0) {
+    if (attrs->on_screen != 0) {
         pfd.dwFlags |= PFD_DRAW_TO_WINDOW;
     }
-    if (attrArr[DOUBLEBUFFER] != 0) {
+    if (attrs->double_buffer != 0) {
         pfd.dwFlags |= PFD_DOUBLEBUFFER;
     }
-    pfd.cDepthBits = (BYTE) attrArr[DEPTH_SIZE];
-    pfd.cColorBits = (BYTE) (attrArr[RED_SIZE] + attrArr[GREEN_SIZE]
-            + attrArr[BLUE_SIZE] + attrArr[ALPHA_SIZE]);
-    pfd.cRedBits = (BYTE) attrArr[RED_SIZE];
-    pfd.cGreenBits = (BYTE) attrArr[GREEN_SIZE];
-    pfd.cBlueBits = (BYTE) attrArr[BLUE_SIZE];
-    pfd.cAlphaBits = (BYTE) attrArr[ALPHA_SIZE];
+    pfd.cDepthBits = (BYTE) attrs->depth_size;
+    pfd.cColorBits = (BYTE) (attrs->red_size + attrs->green_size
+            + attrs->blue_size + attrs->alpha_size);
+    pfd.cRedBits = (BYTE) attrs->red_size;
+    pfd.cGreenBits = (BYTE) attrs->green_size;
+    pfd.cBlueBits = (BYTE) attrs->blue_size;
+    pfd.cAlphaBits = (BYTE) attrs->alpha_size;
 
     return pfd;
 }

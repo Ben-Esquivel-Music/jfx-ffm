@@ -129,4 +129,8 @@ public final class PiscesNativeShim {
     public static String stateMessage() {
         return PiscesNative.STATE_MESSAGE;
     }
+
+    public static String argMessage() {
+        return PiscesNative.ARG_MESSAGE;
+    }
 }

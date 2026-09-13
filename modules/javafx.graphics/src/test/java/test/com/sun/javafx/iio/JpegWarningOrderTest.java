@@ -25,7 +25,11 @@
 
 package test.com.sun.javafx.iio;
 
+import com.sun.javafx.iio.ImageLoadListener;
+import com.sun.javafx.iio.ImageLoader;
+import com.sun.javafx.iio.ImageMetadata;
 import java.io.ByteArrayInputStream;
+import java.io.IOException;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
@@ -33,8 +37,11 @@ import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 import test.com.sun.javafx.iio.JpegTestSupport.RecordingListener;
 
+import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertSame;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.junit.jupiter.api.Assertions.fail;
 
@@ -136,6 +143,52 @@ public class JpegWarningOrderTest {
     }
 
     /**
+     * The two warning routes differ in what a throwing listener can do, and the difference is the
+     * JNI glue's, preserved on purpose. The missing-EOI warning - the {@code null} one - was raised by
+     * the source manager with a plain {@code ExceptionCheck} afterwards, so a listener that throws on
+     * it aborts the decode: the {@code emit_warning} stub stashes the exception and returns an error,
+     * the library unwinds, and {@code load} surfaces it as the cause of an {@code IOException} (it is
+     * unchecked, so {@code load} wraps it). The decode never reaches the end of the image.
+     */
+    @Test
+    void aListenerThrowingOnTheNullWarningAbortsTheDecode() {
+        byte[] truncated = corpus.get(JpegTestSupport.TRUNCATED);
+        ThrowingListener listener = new ThrowingListener(true);
+
+        IOException thrown = assertThrows(IOException.class,
+                () -> JpegTestSupport.decode(new ByteArrayInputStream(truncated), JpegTestSupport.FULL,
+                        listener),
+                "a listener throwing on the missing-EOI warning must abort the decode");
+        assertSame(listener.failure, thrown.getCause(), () -> "load must carry the listener's own"
+                + " exception as the cause, but the cause was " + thrown.getCause());
+        assertTrue(listener.threw, "the listener must have been handed the null warning");
+        assertFalse(listener.progress.contains(100.0f), () -> "an aborted decode must not report"
+                + " 100%, but progress was " + listener.progress);
+    }
+
+    /**
+     * A libjpeg-formatted warning - "Corrupt JPEG data: premature end of data segment", which follows
+     * the {@code null} one on the truncated file - went through the JNI glue's
+     * {@code checkAndClearException}, which cleared and dropped whatever the listener threw. The stub
+     * swallows the same way, and the library ignores its return value there, so the decode carries on
+     * to 100% as if the listener had returned normally. The asymmetry is the shipped behaviour:
+     * pinned, not fixed.
+     */
+    @Test
+    void aListenerThrowingOnALibjpegWarningIsIgnored() {
+        byte[] truncated = corpus.get(JpegTestSupport.TRUNCATED);
+        ThrowingListener listener = new ThrowingListener(false);
+
+        assertDoesNotThrow(() -> JpegTestSupport.decode(new ByteArrayInputStream(truncated),
+                JpegTestSupport.FULL, listener),
+                "a listener throwing on a libjpeg warning must not abort the decode");
+        assertTrue(listener.threw, "the listener must have been handed a libjpeg warning and thrown");
+        assertEquals(100.0f, listener.progress.get(listener.progress.size() - 1).floatValue(),
+                () -> "the decode must run to completion regardless, but progress was "
+                        + listener.progress);
+    }
+
+    /**
      * Derived invariant, independent of any golden: progress is reported as whole multiples of five,
      * strictly increasing, starting at 0 and finishing at exactly 100.
      * <p>
@@ -205,5 +258,38 @@ public class JpegWarningOrderTest {
             // Some corpus members are captured as failures; this method records what arrived first.
         }
         return listener;
+    }
+
+    /**
+     * Throws {@link #failure} from the first warning whose message is {@code null} ({@code onNull}) or
+     * is not ({@code !onNull}), and records progress so a test can tell how far the decode got.
+     */
+    private static final class ThrowingListener implements ImageLoadListener {
+
+        private final boolean onNull;
+        final RuntimeException failure = new IllegalStateException("listener refused the warning");
+        final List<Float> progress = new ArrayList<>();
+        boolean threw;
+
+        ThrowingListener(boolean onNull) {
+            this.onNull = onNull;
+        }
+
+        @Override
+        public void imageLoadProgress(ImageLoader loader, float percentageComplete) {
+            progress.add(percentageComplete);
+        }
+
+        @Override
+        public void imageLoadWarning(ImageLoader loader, String message) {
+            if ((message == null) == onNull) {
+                threw = true;
+                throw failure;
+            }
+        }
+
+        @Override
+        public void imageLoadMetaData(ImageLoader loader, ImageMetadata metadata) {
+        }
     }
 }

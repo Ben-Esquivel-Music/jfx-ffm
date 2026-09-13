@@ -30,9 +30,8 @@
  * WinGLDrawable_nCreateDrawable / nGetDummyDrawable / nSwapBuffers / nReleaseDrawable and
  * WinGLContext_nInitialize / nGetNativeHandle / nMakeCurrent with the JNI marshalling removed. The
  * helpers (getPFD, createDummyWindow, printAndReleaseResources) stay in WinGLFactory.c and are
- * reached through the same extern declarations WinGLContext.c uses. The GLPixelFormat.Attributes
- * array getPFD expects is the Es2PixelFormatAttrs struct copied into a jint[] (prism_es2_api.c
- * asserts the two layouts agree); step 4 retypes getPFD and drops that copy.
+ * reached through the same extern declarations WinGLContext.c uses; getPFD takes the
+ * Es2PixelFormatAttrs struct directly.
  */
 
 #include "../prism_es2_api.h"
@@ -46,7 +45,7 @@
 extern void printAndReleaseResources(HWND hwnd, HGLRC hglrc,
         HDC hdc, LPCTSTR szAppName, char *message);
 extern HWND createDummyWindow(LPCTSTR szAppName);
-extern PIXELFORMATDESCRIPTOR getPFD(jint *attrArr); /* step-4: retype to const Es2PixelFormatAttrs* */
+extern PIXELFORMATDESCRIPTOR getPFD(const Es2PixelFormatAttrs *attrs);
 
 #define ES2_BOOL(x) ((GLboolean) ((x) != 0))
 
@@ -62,7 +61,6 @@ es2_factory_init(const Es2PixelFormatAttrs *attrs) {
     HDC hdc = NULL;
     int pixelFormat;
     PIXELFORMATDESCRIPTOR pfd;
-    jint attrArr[ES2_PIXEL_FORMAT_ATTR_COUNT]; /* step-4: goes with getPFD's parameter type */
 
     ContextInfo *ctxInfo = NULL;
     const char *glVersion;
@@ -77,8 +75,7 @@ es2_factory_init(const Es2PixelFormatAttrs *attrs) {
     if (attrs == NULL) {
         return NULL;
     }
-    memcpy(attrArr, attrs, sizeof(attrArr));
-    pfd = getPFD(attrArr);
+    pfd = getPFD(attrs);
 
     /*
      * Select a specified pixel format and bound current context to
@@ -235,15 +232,13 @@ es2_pixel_format_create(int64_t native_screen, const Es2PixelFormatAttrs *attrs)
     HDC hdc = NULL;
     int pixelFormat;
     PIXELFORMATDESCRIPTOR pfd;
-    jint attrArr[ES2_PIXEL_FORMAT_ATTR_COUNT]; /* step-4: goes with getPFD's parameter type */
     PixelFormatInfo *pfInfo = NULL;
 
     (void) native_screen; /* JDK-8090498: unused, single-monitor assumption, as before */
     if (attrs == NULL) {
         return NULL;
     }
-    memcpy(attrArr, attrs, sizeof(attrArr));
-    pfd = getPFD(attrArr);
+    pfd = getPFD(attrs);
 
     // JDK-8090498
     // TODO: Need to use nativeScreen to create this requested pixelformat

@@ -78,4 +78,93 @@ public final class ES2NativeShim {
     public static long pixelFormatAttrsLayoutByteSize() {
         return ES2Native.PIXEL_FORMAT_ATTRS.byteSize();
     }
+
+    /** {@code es2_gl_enum_count()}: the length of the library's GL enum table. */
+    public static int glEnumCount() {
+        return ES2Native.glEnumCount();
+    }
+
+    /** {@code es2_gl_enum(index)}: the library's GL enum at {@code index}, or -1 when out of range. */
+    public static int glEnum(int index) {
+        return ES2Native.glEnum(index);
+    }
+
+    /* ---------------------------------------------------------------------------------------------
+     * Pure Java the port took over from the C - no library involved, so these never skip
+     * ------------------------------------------------------------------------------------------- */
+
+    /** The space-bounded token match of {@code GLFactory.c isExtensionSupported}, now in {@link ES2Native}. */
+    public static boolean isExtensionSupported(String allExtensions, String extension) {
+        return ES2Native.isExtensionSupported(allExtensions, extension);
+    }
+
+    /** {@code GLContext.translateScaleFactor}: a {@code GLContext.GL_*} blend factor to its GL value. */
+    public static int translateScaleFactor(int scaleFactor) {
+        return GLContext.translateScaleFactor(scaleFactor);
+    }
+
+    /** {@code GLContext.translatePrismToGL}: a {@code GLContext.GL_*} or {@code WRAPMODE_*} index to its GL value. */
+    public static int translatePrismToGL(int value) {
+        return GLContext.translatePrismToGL(value);
+    }
+
+    /** {@code GLContext.translatePixelStore}: a {@code GLContext.GL_UNPACK_*} index to its GL value. */
+    public static int translatePixelStore(int pname) {
+        return GLContext.translatePixelStore(pname);
+    }
+
+    /** {@code ES2Native.GL_FRONT}, the cull face the folded {@code nSetCullingMode} passes for {@code GL_FRONT}. */
+    public static int glFront() {
+        return ES2Native.GL_FRONT;
+    }
+
+    /** {@code ES2Native.GL_BACK}, the cull face for {@code GL_BACK} and for {@code GL_NONE} (culling disabled). */
+    public static int glBack() {
+        return ES2Native.GL_BACK;
+    }
+
+    /** {@code ES2Native.GL_LINE}, the polygon mode the folded {@code nSetWireframe} passes for wireframe. */
+    public static int glLine() {
+        return ES2Native.GL_LINE;
+    }
+
+    /** {@code ES2Native.GL_FILL}, the polygon mode for solid. */
+    public static int glFill() {
+        return ES2Native.GL_FILL;
+    }
+
+    /** {@code GLFactory.DESKTOP_GL2}: what every desktop factory's {@code initialize} assigns for {@code nGetIsGL2}. */
+    public static boolean desktopIsGL2() {
+        return GLFactory.DESKTOP_GL2;
+    }
+
+    /** {@code X11GLFactory.getAdapterCount()}: the absorbed {@code nGetAdapterCount}. */
+    public static int x11AdapterCount() {
+        return new X11GLFactory().getAdapterCount();
+    }
+
+    /** {@code X11GLFactory.getAdapterOrdinal(nativeScreen)}: the absorbed {@code nGetAdapterOrdinal}. */
+    public static int x11AdapterOrdinal(long nativeScreen) {
+        return new X11GLFactory().getAdapterOrdinal(nativeScreen);
+    }
+
+    /** {@code WinGLFactory.getAdapterCount()}: the absorbed {@code nGetAdapterCount}. */
+    public static int winAdapterCount() {
+        return new WinGLFactory().getAdapterCount();
+    }
+
+    /** {@code WinGLFactory.getAdapterOrdinal(nativeScreen)}: the absorbed {@code nGetAdapterOrdinal}. */
+    public static int winAdapterOrdinal(long nativeScreen) {
+        return new WinGLFactory().getAdapterOrdinal(nativeScreen);
+    }
+
+    /** {@code MacGLFactory.getAdapterCount()}: the absorbed {@code nGetAdapterCount}. */
+    public static int macAdapterCount() {
+        return new MacGLFactory().getAdapterCount();
+    }
+
+    /** {@code MacGLFactory.getAdapterOrdinal(nativeScreen)}: the absorbed {@code nGetAdapterOrdinal}. */
+    public static int macAdapterOrdinal(long nativeScreen) {
+        return new MacGLFactory().getAdapterOrdinal(nativeScreen);
+    }
 }

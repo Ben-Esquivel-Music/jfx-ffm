@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2012, 2024, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2012, 2026, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -23,7 +23,6 @@
  * questions.
  */
 
-#include <jni.h>
 #include <stdlib.h>
 #include <assert.h>
 #include <stdio.h>
@@ -32,29 +31,14 @@
 #include <X11/Xutil.h>
 
 #include "../PrismES2Defs.h"
-#ifdef STATIC_BUILD
-JNIEXPORT jint JNICALL
-JNI_OnLoad_prism_es2(JavaVM *vm, void * reserved) {
-#ifdef JNI_VERSION_1_8
-    //min. returned JNI_VERSION required by JDK8 for builtin libraries
-    JNIEnv *env;
-    if ((*vm)->GetEnv(vm, (void **)&env, JNI_VERSION_1_8) != JNI_OK) {
-        return JNI_VERSION_1_4;
-    }
-    return JNI_VERSION_1_8;
-#else
-    return JNI_VERSION_1_4;
-#endif
-}
-#endif
+#include "../prism_es2_api.h"
 
-
-void setGLXAttrs(jint *attrs, int *glxAttrs) {
+void setGLXAttrs(const Es2PixelFormatAttrs *attrs, int *glxAttrs) {
     int index = 0;
 
     /* Specify pbuffer as default */
     glxAttrs[index++] = GLX_DRAWABLE_TYPE;
-    if (attrs[ONSCREEN] != 0) {
+    if (attrs->on_screen != 0) {
         glxAttrs[index++] = (GLX_PBUFFER_BIT | GLX_WINDOW_BIT);
     } else {
         glxAttrs[index++] = GLX_PBUFFER_BIT;
@@ -69,23 +53,23 @@ void setGLXAttrs(jint *attrs, int *glxAttrs) {
     glxAttrs[index++] = True;
 
     glxAttrs[index++] = GLX_DOUBLEBUFFER;
-    if (attrs[DOUBLEBUFFER] != 0) {
+    if (attrs->double_buffer != 0) {
         glxAttrs[index++] = True;
     } else {
         glxAttrs[index++] = False;
     }
 
     glxAttrs[index++] = GLX_RED_SIZE;
-    glxAttrs[index++] = attrs[RED_SIZE];
+    glxAttrs[index++] = attrs->red_size;
     glxAttrs[index++] = GLX_GREEN_SIZE;
-    glxAttrs[index++] = attrs[GREEN_SIZE];
+    glxAttrs[index++] = attrs->green_size;
     glxAttrs[index++] = GLX_BLUE_SIZE;
-    glxAttrs[index++] = attrs[BLUE_SIZE];
+    glxAttrs[index++] = attrs->blue_size;
     glxAttrs[index++] = GLX_ALPHA_SIZE;
-    glxAttrs[index++] = attrs[ALPHA_SIZE];
+    glxAttrs[index++] = attrs->alpha_size;
 
     glxAttrs[index++] = GLX_DEPTH_SIZE;
-    glxAttrs[index++] = attrs[DEPTH_SIZE];
+    glxAttrs[index++] = attrs->depth_size;
 
     glxAttrs[index] = None;
 }
@@ -117,7 +101,7 @@ void printAndReleaseResources(Display *display, GLXFBConfig *fbConfigList,
     }
 }
 
-jboolean queryGLX13(Display *display) {
+GLboolean queryGLX13(Display *display) {
 
     int major, minor;
     int errorBase, eventBase;
@@ -125,14 +109,14 @@ jboolean queryGLX13(Display *display) {
     if (!glXQueryExtension(display, &errorBase, &eventBase)) {
         fprintf(stderr, "ES2 Prism: Error - GLX extension is not supported\n");
         fprintf(stderr, "    GLX version 1.3 or higher is required\n");
-        return JNI_FALSE;
+        return GL_FALSE;
     }
 
     /* Query the GLX version number */
     if (!glXQueryVersion(display, &major, &minor)) {
         fprintf(stderr, "ES2 Prism: Error - Unable to query GLX version\n");
         fprintf(stderr, "    GLX version 1.3 or higher is required\n");
-        return JNI_FALSE;
+        return GL_FALSE;
     }
 
     /*
@@ -144,9 +128,9 @@ jboolean queryGLX13(Display *display) {
         fprintf(stderr, "ES2 Prism: Error - reported GLX version = %d.%d\n", major, minor);
         fprintf(stderr, "    GLX version 1.3 or higher is required\n");
 
-        return JNI_FALSE;
+        return GL_FALSE;
     }
 
-    return JNI_TRUE;
+    return GL_TRUE;
 }
 

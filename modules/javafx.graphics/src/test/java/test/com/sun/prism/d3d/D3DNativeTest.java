@@ -32,10 +32,13 @@ import com.sun.prism.d3d.D3DNativeShim.TextureInfo;
 import java.lang.foreign.MemorySegment;
 import java.lang.foreign.SymbolLookup;
 import java.util.List;
+import java.util.concurrent.atomic.AtomicInteger;
+import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.condition.EnabledOnOs;
 import org.junit.jupiter.api.condition.OS;
+import test.com.sun.javafx.test.ParityGate;
 
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -44,7 +47,6 @@ import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
-import static org.junit.jupiter.api.Assumptions.abort;
 
 /**
  * Binding tests for {@code com.sun.prism.d3d.D3DNative}, the FFM facade over the {@code d3d_*} C ABI of
@@ -55,7 +57,10 @@ import static org.junit.jupiter.api.Assumptions.abort;
  * pipeline, context, texture and 3D object lifecycles.
  * <p>
  * The library has to load and bind on every Windows build ({@link D3DNatives}); only the cases that need
- * a device skip, and only when {@code d3d_pipeline_init} itself says why.
+ * a device skip, and only when {@code d3d_pipeline_init} itself says why - or, under
+ * {@code -Djfx.parity.require=true}, fail with that reason, because a GPU-less runner reporting the device
+ * cases green is the defect {@link ParityGate} exists to catch. Unconditionally, at the end of the class, a
+ * machine that reports at least one adapter must have run at least one device body.
  */
 @EnabledOnOs(OS.WINDOWS)
 public class D3DNativeTest {
@@ -106,6 +111,14 @@ public class D3DNativeTest {
 
     private static final int INT_ARGB_PRE = PixelFormat.INT_ARGB_PRE.ordinal();
 
+    private static final ParityGate.Ledger LEDGER = ParityGate.ledger(D3DNativeTest.class);
+
+    /** How many cases asked {@link #requireDevice()} for a device, whether or not they got one. */
+    private static final AtomicInteger DEVICE_REQUESTS = new AtomicInteger();
+
+    /** What {@code d3d_pipeline_init} said the last time it refused, for the end-of-class report. */
+    private static volatile String lastRefusal = "(it never refused)";
+
     @FunctionalInterface
     private interface DeviceCase {
         void run(MemorySegment ctx) throws Exception;
@@ -114,6 +127,30 @@ public class D3DNativeTest {
     @BeforeAll
     static void requireNatives() {
         D3DNatives.require();
+    }
+
+    /**
+     * The unconditional half of the rule. {@code d3d_pipeline_get_adapter_count} answers 0 without a live
+     * pipeline, so the machine is asked once more here, the way {@link #pipelineInitSucceedsOrExplainsWhyNot}
+     * asks it: if it reports an adapter now and some case asked for a device, then a device body must have
+     * run. Nothing is probed when no case asked, so a run filtered to the binding tests, or a class that
+     * {@link D3DNatives} skipped before any test, says nothing here.
+     */
+    @AfterAll
+    static void theOracleRan() {
+        LEDGER.assertOracleRan();
+        int requested = DEVICE_REQUESTS.get();
+        if (requested == 0) {
+            return;
+        }
+        boolean up = D3DNativeShim.pipelineInit(PRODUCTION_FLAGS);
+        int adapters = up ? D3DNativeShim.pipelineGetAdapterCount() : 0;
+        D3DNativeShim.pipelineDispose();
+        assertTrue(adapters == 0 || LEDGER.comparisons() > 0, () -> "this machine reports " + adapters
+                + " Direct3D adapter(s) at the end of the class and " + requested + " case(s) asked for a"
+                + " device, yet no device body ran: the device cases skipped on a machine that has the"
+                + " device. d3d_pipeline_init refused " + LEDGER.timesUnavailable() + " time(s), last with: "
+                + lastRefusal);
     }
 
     /* ---------------------------------------------------------------------------------------------
@@ -302,6 +339,7 @@ public class D3DNativeTest {
     @Test
     public void pipelineCanBeInitializedAgainAfterDispose() {
         requireDevice();
+        LEDGER.compared();
         D3DNativeShim.pipelineDispose();
         assertTrue(D3DNativeShim.pipelineInit(PRODUCTION_FLAGS),
                 "d3d_pipeline_init after d3d_pipeline_dispose - the D3DPipeline.reinitialize contract");
@@ -382,9 +420,12 @@ public class D3DNativeTest {
     public void frameStatsAreReportedAsTheLibraryWasCompiled() throws Exception {
         withDevice(ctx -> {
             int[] stats = D3DNativeShim.contextGetFrameStats(ctx, false);
-            if (stats == null) {
-                return; // PERF_COUNTERS compiled out: 0, as nGetFrameStats answered false
-            }
+            // PERF_COUNTERS compiled out: null, as nGetFrameStats answered false. D3DContext.h defines it
+            // unless NO_PERF_COUNTERS, so null is a build that switched it off - a skip that names itself,
+            // never a silent pass over eight unchecked counters.
+            LEDGER.requireOracle(stats != null, () -> "d3d_context_get_frame_stats(ctx, false) returned NULL:"
+                    + " prism_d3d was built without PERF_COUNTERS, so the frame statistics cannot be checked"
+                    + " in this build.");
             assertEquals(8, stats.length);
             for (int i = 0; i < stats.length; i++) {
                 assertTrue(stats[i] >= 0, FRAME_STATS_FIELDS[i] + " = " + stats[i]);
@@ -420,14 +461,19 @@ public class D3DNativeTest {
      * Brings the pipeline up with the production flags, or aborts the calling case with the reason
      * {@code d3d_pipeline_init} gave. A library that is present but cannot create a device in this
      * session (no interactive desktop, a rejected driver) is an environment fact; a library that
-     * cannot load is not, and {@link D3DNatives} has already failed the class for that.
+     * cannot load is not, and {@link D3DNatives} has already failed the class for that. Under
+     * {@code -Djfx.parity.require=true} the abort is a failure that names the refusal ({@link ParityGate}).
      */
     private static void requireDevice() {
-        if (!D3DNativeShim.pipelineInit(PRODUCTION_FLAGS)) {
-            String reason = D3DNativeShim.pipelineGetErrorMessage();
+        DEVICE_REQUESTS.incrementAndGet();
+        boolean up = D3DNativeShim.pipelineInit(PRODUCTION_FLAGS);
+        String reason = up ? null : D3DNativeShim.pipelineGetErrorMessage();
+        if (!up) {
             D3DNativeShim.pipelineDispose();
-            abort("no Direct3D device in this session: " + reason);
+            lastRefusal = reason;
         }
+        LEDGER.requireOracle(up, () -> "no Direct3D device in this session: d3d_pipeline_init("
+                + PRODUCTION_FLAGS + ") refused with: " + reason);
     }
 
     private static void withDevice(DeviceCase body) throws Exception {
@@ -435,6 +481,7 @@ public class D3DNativeTest {
         try {
             MemorySegment ctx = D3DNativeShim.contextGet(0);
             assertNotEquals(0L, ctx.address(), "d3d_context_get(0) with a live pipeline");
+            LEDGER.compared();
             body.run(ctx);
         } finally {
             D3DNativeShim.pipelineDispose();

@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2012, 2022, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2012, 2026, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -23,7 +23,6 @@
  * questions.
  */
 
-#include <jni.h>
 #include <stdlib.h>
 #include <assert.h>
 #include <stdio.h>
@@ -127,12 +126,12 @@ void initState(ContextInfo *ctxInfo) {
 
     // depthtest is set to false
     // Note: This state is cached in GLContext.java
-    ctxInfo->state.depthWritesEnabled = JNI_FALSE;
+    ctxInfo->state.depthWritesEnabled = GL_FALSE;
     glDepthMask(ctxInfo->state.depthWritesEnabled);
     glDisable(GL_DEPTH_TEST);
 
     if (ctxInfo->state.scissorEnabled) {
-        ctxInfo->state.scissorEnabled = JNI_FALSE;
+        ctxInfo->state.scissorEnabled = GL_FALSE;
         glDisable(GL_SCISSOR_TEST);
     }
 
@@ -146,14 +145,14 @@ void initState(ContextInfo *ctxInfo) {
     ctxInfo->vbFloatData = NULL;
     ctxInfo->vbByteData = NULL;
     ctxInfo->state.fillMode = GL_FILL;
-    ctxInfo->state.cullEnable = JNI_FALSE;
+    ctxInfo->state.cullEnable = GL_FALSE;
     ctxInfo->state.cullMode = GL_BACK;
     ctxInfo->state.fbo = 0;
 }
 
 void clearBuffers(ContextInfo *ctxInfo,
         GLclampf red, GLclampf green, GLclampf blue, GLclampf alpha,
-        jboolean clearColor, jboolean clearDepth, jboolean ignoreScissor) {
+        GLboolean clearColor, GLboolean clearDepth, GLboolean ignoreScissor) {
     GLbitfield clearBIT = 0;
 
     if (ctxInfo == NULL) {
@@ -264,7 +263,7 @@ GLuint attachRenderbuffer(ContextInfo *ctxInfo, GLuint rbID, GLenum attachment) 
     } else {
         // explicitly clear the render buffers, since it may contain
         // garbage after initialization
-        clearBuffers(ctxInfo, 0, 0, 0, 0, JNI_FALSE, JNI_TRUE, JNI_TRUE);
+        clearBuffers(ctxInfo, 0, 0, 0, 0, GL_FALSE, GL_TRUE, GL_TRUE);
     }
     return rbID;
 }

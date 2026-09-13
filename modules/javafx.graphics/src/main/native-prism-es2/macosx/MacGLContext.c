@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2012, 2015, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2012, 2026, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -23,7 +23,6 @@
  * questions.
  */
 
-#include <jni.h>
 #include <dlfcn.h>
 #include <stdlib.h>
 #include <assert.h>
@@ -32,7 +31,3 @@
 #include <math.h>
 
 #include "../PrismES2Defs.h"
-
-extern void printAndReleaseResources(jlong pf, jlong ctx, const char *message);
-
-

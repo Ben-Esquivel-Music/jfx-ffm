@@ -44,33 +44,22 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
  * Pins the loader's lifecycle: what may be called twice, what must fail, and where the failure is
  * raised.
  * <p>
- * The native decompressor is owned by a single {@code long} field and freed by {@code disposeNative},
- * and {@code load} disposes in its own {@code finally} whether it succeeded or not. Everything below
- * follows from that, and none of it is enforced by the type system, so a rewrite can get every pixel
- * right and still free the wrong thing twice.
+ * The native decompressor is an opaque handle held in a single field, freed by
+ * {@code JPEGNative.dispose} and reset to {@code NULL}, and {@code load} disposes in its own
+ * {@code finally} whether it succeeded or not. Everything below follows from that, and none of it is
+ * enforced by the type system, so a rewrite can get every pixel right and still free the wrong thing
+ * twice.
  *
- * <h2>Two cases the brief asked for and this test deliberately does not contain</h2>
+ * <h2>A second {@code load}</h2>
  * Calling {@code load} a second time, and calling {@code load} after {@code dispose}, are the same
- * case, and in this build that case is a native null dereference, not an exception:
- * <ul>
- * <li>{@code load}'s {@code finally} runs {@code dispose()}, which calls {@code disposeNative} and
- *     sets {@code structPointer} to 0. A loader is therefore spent as soon as {@code load} returns -
- *     successfully or not.</li>
- * <li>A second {@code load} passes that 0 straight to {@code startDecompression}, whose first two
- *     statements are {@code imageIODataPtr data = (imageIODataPtr) jlong_to_ptr(ptr);} and
- *     {@code j_decompress_ptr cinfo = (j_decompress_ptr) data-&gt;jpegObj;}. There is no null check
- *     anywhere on that path.</li>
- * </ul>
- * The result is a segmentation fault that takes the surefire fork with it - an {@code hs_err_pid}
- * file and a build that reports a crashed JVM rather than a failed test - so writing those two tests
- * here would turn every run of this module red. They belong in a forked-JVM harness under
- * {@code tests/system}, where a crash can be an expected outcome and asserted as one.
- * <p>
- * This is a real defect, it predates the migration, and it is recorded here rather than fixed:
- * {@code JPEGImageLoader} is production code and this change is test-only. Whatever replaces
- * {@code jpegloader.c} should either keep {@code load} single-shot and reject a spent loader in
- * Java - {@code IllegalStateException} would be the natural choice - or check the pointer before
- * dereferencing it. Either is a behaviour change and needs its own commit.
+ * case: a loader is spent as soon as {@code load} returns - successfully or not - because its
+ * {@code finally} disposed the decoder and nulled the handle. Under JNI that case was a native null
+ * dereference: {@code startDecompression} cast the zeroed {@code long} to a pointer and read through
+ * it without a check, a segmentation fault that took the surefire fork with it, so those two tests
+ * could not be written here and were only described. The {@code iio_*} ABI checks the handle first
+ * and reports {@code IOException("Invalid JPEG decoder handle")} instead. That is a defined outcome,
+ * it is testable in-process, and it is pinned below: a spent loader is still not reusable, only the
+ * way it says so changed - a crash became an exception, which no caller could have depended on.
  */
 public class JpegLifecycleTest {
 
@@ -123,6 +112,38 @@ public class JpegLifecycleTest {
     }
 
     /**
+     * A second {@code load} on a loader that has already decoded is refused by the handle check of
+     * the {@code iio_*} ABI: {@code load}'s {@code finally} disposed the decoder and nulled the
+     * handle, and {@code iio_start_decompression} reports a {@code NULL} handle as an
+     * {@code IOException} rather than dereferencing it as the JNI code did. The loader stays
+     * disposable afterwards.
+     */
+    @Test
+    void aSecondLoadIsRefusedWithAnInvalidDecoderHandle() throws IOException {
+        ImageLoader loader = JpegTestSupport.newLoader(fixture);
+        assertNotNull(loader.load(0, 0, 0, true, true, 1, 1), "the first load must decode");
+
+        IOException thrown = assertThrows(IOException.class,
+                () -> loader.load(0, 0, 0, true, true, 1, 1),
+                "a loader is spent once load has returned, so a second load must be refused");
+        assertEquals("Invalid JPEG decoder handle", thrown.getMessage());
+        assertDoesNotThrow(loader::dispose, "a refused load must leave the loader disposable");
+    }
+
+    /** The same case reached the other way round: {@code dispose} first, then {@code load}. */
+    @Test
+    void loadAfterDisposeIsRefusedWithAnInvalidDecoderHandle() throws IOException {
+        ImageLoader loader = JpegTestSupport.newLoader(fixture);
+        loader.dispose();
+
+        IOException thrown = assertThrows(IOException.class,
+                () -> loader.load(0, 0, 0, true, true, 1, 1),
+                "a disposed loader must refuse to load");
+        assertEquals("Invalid JPEG decoder handle", thrown.getMessage());
+        assertDoesNotThrow(loader::dispose, "and must still be disposable afterwards");
+    }
+
+    /**
      * Asking for an image index other than 0 returns null, and does so before the loader is locked
      * or the native decompressor is touched - so the loader is still usable and still has to be
      * disposed. JPEG holds one image per stream; this is how a caller finds that out.
@@ -166,10 +187,12 @@ public class JpegLifecycleTest {
 
     /**
      * Re-entering {@code load} from the progress callback is rejected too, but it comes back
-     * wrapped: the progress callback runs from inside {@code decompressIndirect}, so the
-     * {@code IllegalStateException} is pending in a JNI frame, {@code error_exit} longjmps out of
-     * libjpeg, the handler leaves the pending exception alone, and {@code load}'s
-     * {@code catch (Throwable t) -> new IOException(t)} wraps it on the way out.
+     * wrapped: the progress callback runs from an upcall inside {@code iio_decompress}, so the stub
+     * catches the {@code IllegalStateException} and stashes it in the loader's pending slot, the
+     * library unwinds through libjpeg's {@code error_exit} and {@code longjmp} to the {@code setjmp}
+     * of that same downcall and reports {@code IIO_ERR_PENDING}, {@code JPEGNative} rethrows the
+     * stashed exception, and {@code load}'s {@code catch (Throwable t) -> new IOException(t)} wraps
+     * it on the way out.
      * <p>
      * This is the most valuable assertion in this class for the migration. It is the only place a
      * test can observe what happens when Java code called from inside libjpeg's {@code setjmp} scope

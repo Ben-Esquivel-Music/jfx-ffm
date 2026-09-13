@@ -189,8 +189,8 @@ final class PiscesNative {
 
     /**
      * Resolves {@code name} and binds it with {@link Linker.Option#critical critical(true)}: every
-     * {@code psw_*} function is short, integer-only, never blocks and never calls back, and the ten that
-     * take arrays need heap segments passed straight through.
+     * {@code psw_*} function is short, integer-only, never blocks and never calls back, and the eleven
+     * that take arrays need heap segments passed straight through.
      *
      * @throws UnsatisfiedLinkError if the library does not export {@code name}
      */
@@ -227,7 +227,11 @@ final class PiscesNative {
     }
 
     /**
-     * The one place a {@code psw_*} status becomes an exception.
+     * The one place a {@code psw_*} status becomes an exception. None of them was ever observed under
+     * JNI: {@code JNI_ThrowNew} called {@code ThrowNew} and then, finding {@code ExceptionCheck()} true
+     * for the exception it had just raised, {@code FatalError}, so every argument, OOM and state failure
+     * of {@code prism_sw} aborted the JVM; the status ABI delivers the exception that was always
+     * intended.
      *
      * @param argumentMessage the JNI-era {@code IllegalArgumentException} text of the check that can
      *        still fail at the call site once the Java-side validation has run
@@ -363,7 +367,9 @@ final class PiscesNative {
      * Creates a renderer bound to {@code surface}, which must outlive it. Disposal order of the two is
      * free: {@code psw_renderer_dispose} never touches surface memory.
      *
-     * @throws OutOfMemoryError if the allocation failed
+     * @throws OutOfMemoryError if the allocation failed, with the common {@link #OOM_MESSAGE}: the JNI
+     *         renderer initialiser alone said {@code "...failed!!!"}, a text no caller could have seen
+     *         (see {@link #check}) and that is not carried over
      */
     static MemorySegment rendererCreate(MemorySegment surface) {
         MemorySegment renderer;

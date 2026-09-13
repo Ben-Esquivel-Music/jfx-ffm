@@ -82,7 +82,7 @@ import static java.lang.foreign.ValueLayout.JAVA_LONG;
  * block, allocate a GPU resource or drain the pipe, so it only ever receives off-heap memory - a direct
  * buffer, or a per-call confined arena. {@link #readPixels} writes its result back and blocks the GPU
  * ({@code glReadPixels}); like the D3D read-back it copies through an off-heap scratch segment for a heap
- * array rather than pinning it (audit R-4: the rendered pixels are identical either way).
+ * array rather than pinning it (the rendered pixels are identical either way).
  * <p>
  * Loading and binding follow {@code com.sun.prism.d3d.D3DNative}: the library is loaded in the class
  * initializer, {@code es2_abi_version} is bound and checked first, every other symbol is bound eagerly,
@@ -92,8 +92,11 @@ import static java.lang.foreign.ValueLayout.JAVA_LONG;
  */
 final class ES2Native {
 
-    /** The {@code es2_*} ABI revision this class is written against ({@code ES2_ABI_VERSION}). */
-    static final int ABI_VERSION = 1;
+    /**
+     * The {@code es2_*} ABI revision this class is written against ({@code ES2_ABI_VERSION}): 2 since
+     * {@code es2_gl_enum_count} / {@code es2_gl_enum} were bound.
+     */
+    static final int ABI_VERSION = 2;
 
     static final String LIBRARY_NAME = "prism_es2";
 
@@ -104,7 +107,7 @@ final class ES2Native {
     static final int STR_EXTENSIONS = 3;
 
     /*
-     * GL enums es2_mesh_render takes for cull_mode_gl and fill_mode_gl (audit 7.3 option A: the real
+     * GL enums es2_mesh_render takes for cull_mode_gl and fill_mode_gl (the real
      * OpenGL values are passed straight to GL). ES2MeshView translates GLContext.GL_BACK / GL_FRONT /
      * GL_NONE and the wireframe flag into these, exactly as the JNI nSetCullingMode / nSetWireframe did.
      */
@@ -177,6 +180,15 @@ final class ES2Native {
 
     private static final MethodHandle ES2_SIZEOF_PIXEL_FORMAT_ATTRS = bind("es2_sizeof_pixel_format_attrs",
             FunctionDescriptor.of(JAVA_LONG));
+    /*
+     * The fifty-entry GL enum table of the header's "GL enums" comment, resolved through the GL headers
+     * the library compiled against; read back by ES2GLEnumTableTest against the Java literals. Test-only
+     * readers, bound eagerly like everything else so a build that lacks them fails the binding test.
+     */
+    private static final MethodHandle ES2_GL_ENUM_COUNT = bind("es2_gl_enum_count",
+            FunctionDescriptor.of(JAVA_INT));
+    private static final MethodHandle ES2_GL_ENUM = bind("es2_gl_enum",
+            FunctionDescriptor.of(JAVA_INT, JAVA_INT));
 
     /* Factory. */
     private static final MethodHandle ES2_FACTORY_INIT = bind("es2_factory_init",
@@ -519,6 +531,24 @@ final class ES2Native {
         }
     }
 
+    /** {@code es2_gl_enum_count()}: the length of the library's GL enum table, 50. */
+    static int glEnumCount() {
+        try {
+            return (int) ES2_GL_ENUM_COUNT.invokeExact();
+        } catch (Throwable t) {
+            throw unexpected(t);
+        }
+    }
+
+    /** {@code es2_gl_enum(index)}: the GL enum at {@code index} of the library's table, or -1 out of range. */
+    static int glEnum(int index) {
+        try {
+            return (int) ES2_GL_ENUM.invokeExact(index);
+        } catch (Throwable t) {
+            throw unexpected(t);
+        }
+    }
+
     /* ---------------------------------------------------------------------------------------------
      * Factory - runs on the thread that initialises ES2Pipeline
      * ------------------------------------------------------------------------------------------- */
@@ -601,8 +631,8 @@ final class ES2Native {
     }
 
     /**
-     * The exact token match {@code GLFactory.c isExtensionSupported} performed, moved to Java (audit
-     * §10): true only when {@code extension} occurs in the space-separated {@code allExtensions}, is not
+     * The exact token match {@code GLFactory.c isExtensionSupported} performed, moved to Java:
+     * true only when {@code extension} occurs in the space-separated {@code allExtensions}, is not
      * empty, contains no space, and is bounded by the string start / end or by a space on both sides, so
      * {@code "GL_ARB_texture"} does not match inside {@code "GL_ARB_texture_float"}. Replaces
      * {@code nIsGLExtensionSupported}, which has no symbol.
@@ -736,7 +766,7 @@ final class ES2Native {
         }
     }
 
-    /** The stored GL / FBO entry point of {@code name}, or {@code 0L} - the audit 7.4 hook. */
+    /** The stored GL / FBO entry point of {@code name}, or {@code 0L} - a test hook for the resolved entry points. */
     static long contextGetProcAddress(long ctx, String name) {
         try (Arena arena = Arena.ofConfined()) {
             MemorySegment nameSeg = arena.allocateFrom(name);
@@ -1153,7 +1183,7 @@ final class ES2Native {
      * {@code length} is the byte count the caller derived from the buffer's capacity, which the C checks.
      * A direct buffer is written in place; a heap array goes through an off-heap scratch, prefilled from
      * the array and copied back whole, so the array ends exactly as the JNI's {@code GetPrimitiveArray}
-     * copy-back left it. {@code glReadPixels} drains the GPU, so the array is never pinned (audit R-4).
+     * copy-back left it. {@code glReadPixels} drains the GPU, so the array is never pinned.
      */
     static boolean readPixels(long ctx, int length, ByteBuffer direct, byte[] pixels, int x, int y, int w, int h) {
         if (pixels == null) {
@@ -1275,7 +1305,7 @@ final class ES2Native {
      * 2D draw
      * ------------------------------------------------------------------------------------------- */
 
-    /** {@code num_vertices * 7} floats of coords and {@code * 4} bytes of colors. critical (audit R-6). */
+    /** {@code num_vertices * 7} floats of coords and {@code * 4} bytes of colors. critical. */
     static void drawIndexedQuads(long ctx, int numVertices, float[] coords, byte[] colors) {
         try {
             ES2_DRAW_INDEXED_QUADS.invokeExact(seg(ctx), numVertices,
