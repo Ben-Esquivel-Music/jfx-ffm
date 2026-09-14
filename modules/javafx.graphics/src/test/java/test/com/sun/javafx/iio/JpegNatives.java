@@ -67,12 +67,14 @@ public final class JpegNatives {
     /**
      * Other libraries the javafx.graphics CMake build writes into the same directory. Any of them next
      * to no {@code javafx_iio} means the native build ran and reported success without producing the
-     * library these tests exist for. The list is a union of witnesses, so an entry a platform does not
-     * build only shrinks it: {@code javafx_font} is built on Linux and macOS only, Windows having had
-     * no {@code font} target since {@code directwrite.cpp} was deleted.
+     * library these tests exist for. {@code prism_sw} and {@code glass} are built on every platform. The
+     * list is a union of witnesses, so an entry a platform does not build only shrinks it:
+     * {@code javafx_font} is built on Linux and macOS only, Windows having had no {@code font} target
+     * since {@code directwrite.cpp} was deleted.
      */
     private static final List<String> SIBLING_FILES = List.of(
-            System.mapLibraryName("javafx_font"), System.mapLibraryName("decora_sse"));
+            System.mapLibraryName("prism_sw"), System.mapLibraryName("glass"),
+            System.mapLibraryName("javafx_font"));
 
     private static boolean decided;
     private static String skipReason;

@@ -119,7 +119,7 @@
                         <!-- Generate and compile the Decora/Prism JSL shaders. This mirrors the
                              Gradle addJSL/compileFullJava pipeline:
                              1. compile the JSL shader compilers against pass-one classes
-                             2. run GenAllDecoraShaders / CompileJSL to emit .java/.hlsl/.frag/.cc
+                             2. run GenAllDecoraShaders / CompileJSL to emit .java/.hlsl/.frag
                              3. recompile the whole module (main + generated) as a second pass,
                                 emitting the JNI headers used by the native build -->
                         <id>jsl-codegen</id>
@@ -173,6 +173,7 @@
                                     <arg value="-pkg"/>
                                     <arg value="com/sun/scenario/effect"/>
                                     <arg line="${jfx.jsl.backends}"/>
+                                    <!-- placeholders: GenAllDecoraShaders.java drops the last two args and sets each shader's output types -->
                                     <arg value="-all"/>
                                     <arg value="GenAllDecoraShaders"/>
                                 </java>

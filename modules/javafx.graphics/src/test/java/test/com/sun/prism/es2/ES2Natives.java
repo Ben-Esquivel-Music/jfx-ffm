@@ -76,8 +76,7 @@ public final class ES2Natives {
      */
     private static final List<String> SIBLING_FILES = List.of(
             System.mapLibraryName("prism_sw"), System.mapLibraryName("glass"),
-            System.mapLibraryName("javafx_font"), System.mapLibraryName("javafx_iio"),
-            System.mapLibraryName("decora_sse"));
+            System.mapLibraryName("javafx_font"), System.mapLibraryName("javafx_iio"));
 
     private static boolean decided;
     private static String skipReason;

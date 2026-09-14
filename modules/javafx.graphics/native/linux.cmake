@@ -211,13 +211,3 @@ add_jfx_library(iio
     OUTPUT_NAME javafx_iio
     SOURCE_DIRS "${GRAPHICS_SRC}/native-iio" "${GRAPHICS_SRC}/native-iio/libjpeg"
     COMPILE_OPTIONS ${JFX_C_STRICT_OPTIONS} -fvisibility=hidden)
-
-# ---------------------------------------------------------------------------
-# libdecora_sse.so (generated JSL .cc files + native-decora; despite the name
-# the sources are scalar C++ without SSE intrinsics, so this also builds on
-# non-x86 architectures, matching the Gradle build)
-# ---------------------------------------------------------------------------
-add_jfx_library(decora
-    OUTPUT_NAME decora_sse
-    SOURCE_DIRS "${GENSRC_DIR}/jsl-decora" "${GRAPHICS_SRC}/native-decora"
-    COMPILE_OPTIONS -ffast-math)

@@ -63,7 +63,7 @@ public final class WinGlassNatives {
      */
     private static final List<String> SIBLING_FILES = List.of(
             System.mapLibraryName("prism_sw"),
-            System.mapLibraryName("javafx_iio"), System.mapLibraryName("decora_sse"));
+            System.mapLibraryName("javafx_iio"));
 
     private static boolean decided;
     private static String skipReason;

@@ -262,15 +262,6 @@ add_jfx_library(iio
     SOURCE_DIRS "${GRAPHICS_SRC}/native-iio" "${GRAPHICS_SRC}/native-iio/libjpeg")
 
 # ---------------------------------------------------------------------------
-# decora_sse.dll (generated JSL .cc files + native-decora)
-# ---------------------------------------------------------------------------
-add_jfx_library(decora
-    OUTPUT_NAME decora_sse
-    JNI
-    SOURCE_DIRS "${GENSRC_DIR}/jsl-decora" "${GRAPHICS_SRC}/native-decora"
-    COMPILE_OPTIONS /fp:fast)
-
-# ---------------------------------------------------------------------------
 # Pixel shader .obj resources bundled into javafx-graphics.jar
 # ---------------------------------------------------------------------------
 set(SHADER_OBJS)
