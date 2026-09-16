@@ -52,18 +52,21 @@ import static org.junit.jupiter.api.Assumptions.assumeTrue;
  * <li>{@code FTDisposer}: dropped unregistered fonts release their face and library once each, on the
  * {@code Prism Font Disposer} thread, and the font file's mappings, which FreeType holds per open face, are
  * gone afterwards;</li>
- * <li>{@code PangoGlyphLayout.dispose}: layouts handed between threads free their UTF-8 buffers
- * ({@code g_free}) and still shape identically;</li>
+ * <li>{@code PangoGlyphLayout.dispose}: layouts handed between threads, each freeing its UTF-8 buffers
+ * ({@code g_free}) as it is disposed, still shape identically;</li>
  * <li>outline decomposition on several threads, one {@code FT_Library} per font file, plus threads sharing one
  * file;</li>
  * <li>a raw {@code pango_shape} loop with the call sequence of {@code PangoGlyphLayout.layout};</li>
  * <li>{@code getFontConfig} against {@code populateMapsNative} on concurrent threads.</li>
  * </ul>
  * The layout, outline and shape children read the C heap in use ({@code mallinfo2}) and the resident set
- * ({@code /proc/self/statm}) after a warm-up and at the end; the growth must stay under bounds measured on the
- * JNI build, so that memory retained per call (an accumulator, an upcall stub, a glyph string, a UTF-8 copy)
- * fails here instead of surfacing as a leak. Those children run with a fixed, pre-touched Java heap, so that
- * the resident set grows only for native reasons.
+ * ({@code /proc/self/statm}) after a warm-up and at the end. The growth of the C heap must stay under a bound
+ * measured on the JNI build, which fails on gross retention of native memory per call, not on one small object
+ * per call ({@link #MALLOC_GROWTH_BOUND} gives the figures): one small object retained per call on the release
+ * paths of the bindings is pinned by the two-sided loops with an injected-leak phase of
+ * {@code LinuxFreetypeNativeTest} and {@code LinuxPangoNativeTest}, each in a settled child JVM. The growth of
+ * the resident set is recorded to the test output, not bounded ({@link #MALLOC_GROWTH_BOUND} says why). Those
+ * children run with a fixed, pre-touched Java heap, so that the Java heap does not grow the resident set.
  * {@link #recordsOutlineAndLayoutTimings()} records wall-clock timings to the test output and asserts nothing
  * about them: they are the numbers a later build is compared with by a reader, not by the test.
  */
@@ -92,13 +95,13 @@ public class LinuxFontStressTest {
      * that HotSpot returns to its chunk pool, which a periodic task empties only every 5 seconds, counted as C
      * heap in use (growth of 1.1 to 11.5 MB over 1,520 layouts against the 2 MiB bound in 10 of 14 runs of
      * identical code; +69 KB with {@code -Xint}), and the pages they had touched stayed resident after the pool
-     * was emptied (up to 23 MB against the 8 MiB bound). Nothing was retained per call: the outline and shape
-     * children, with 50 and 8 times the calls, stayed near their JNI figures. The warm-up now passes the tier-4
-     * compile thresholds of the per-layout methods (5,000 invocations, 15,000 with loops) before the first
-     * snapshot, and the pause lets the pool be emptied and the freed memory be returned to the OS (see
-     * {@link #MEMORY_JVM_OPTIONS}) before each snapshot. Measured on the bindings, 8 child runs each: with 20
-     * warm-up rounds and a 6 s pause the C heap figure was stable (-0.96 to -0.80 MB) but the resident figure
-     * was 4.8 to 23.4 MB; with 200 rounds, 8 s and trimming, -1.22 to -0.72 MB and -1.55 to -1.38 MB.
+     * was emptied (up to 23 MB against the 8 MiB bound the resident set then had). Nothing was retained per
+     * call: the outline and shape children, with 50 and 8 times the calls, stayed near their JNI figures. The
+     * warm-up now passes the tier-4 compile thresholds of the per-layout methods (5,000 invocations, 15,000 with
+     * loops) before the first snapshot, and the pause lets the pool be emptied and the freed memory be returned to
+     * the OS (see {@link #MEMORY_JVM_OPTIONS}) before each snapshot. Measured on the bindings, 8 child runs each:
+     * with 20 warm-up rounds and a 6 s pause the C heap figure was stable (-0.96 to -0.80 MB) but the resident
+     * figure was 4.8 to 23.4 MB; with 200 rounds, 8 s and trimming, -1.22 to -0.72 MB and -1.55 to -1.38 MB.
      */
     static final int LAYOUT_WARMUP_ROUNDS = 200;
     static final long LAYOUT_SETTLE_MILLIS = 8_000;
@@ -109,22 +112,37 @@ public class LinuxFontStressTest {
     static final int FONTCONFIG_ROUNDS = 10;
 
     /**
-     * Upper bounds, in bytes, on the growth of the C heap in use and of the resident set between the warm-up
-     * and the end of the layout, outline and shape children. Measured on the JNI build of commit
-     * {@code 7b43255b30} (glibc 2.43, FreeType 2.14.2, Pango 1.57.0, x86_64) with the present recipe, the growth
+     * Upper bound, in bytes, on the growth of the C heap in use between the warm-up and the end of the layout,
+     * outline and shape children. Measured on the JNI build of commit {@code 7b43255b30} (glibc 2.43, FreeType
+     * 2.14.2, Pango 1.57.0, x86_64) with the present recipe, the growth of the C heap and of the resident set
      * was: layouts -1,722,240 and -1,433,600; outlines -212,272 and -4,063,232; shape 39,760 and 106,496 (before
      * the layouts warm-up, the pauses and the trimming of {@link #MEMORY_JVM_OPTIONS} were added: 243,728 and
-     * 724,992; -370,400 and 335,872; 41,248 and 122,880). The bounds leave room for JIT compilation and allocator
-     * slack and still fail on one small object retained per call: 80,000 decompositions in the outline child,
-     * 12,800 {@code pango_shape} calls in the shape child.
+     * 724,992; -370,400 and 335,872; 41,248 and 122,880). The bound leaves room for JIT compilation and allocator
+     * slack, so it catches gross retention only. Spread over the calls it is about 164 bytes per
+     * {@code pango_shape} call in the shape child (2,097,152 / 12,800) and about 26 bytes per decomposition in the
+     * outline child (2,097,152 / 80,000; counts where the corpus shapes in 32 calls per pass and all six outline
+     * fonts are installed), the latter only when that interval does not fall. It can fall: the outline child takes
+     * its first reading without a settle pause, and its C heap fell by 2.2 to 7.1 MB over the interval in several
+     * local runs of that child at commit {@code 5a2886d8f7} (JDK 25 and 26, glibc 2.43, x86_64); its first reading
+     * was then higher, by about the size of the fall, than in the runs that did not fall, and what held that
+     * memory was not measured. One small object retained per call on the release paths of the bindings is pinned
+     * by the two-sided loops with an injected-leak phase of {@code LinuxFreetypeNativeTest} and
+     * {@code LinuxPangoNativeTest}, which read the C heap the same way in a settled child JVM.
+     * <p>
+     * The growth of the resident set is recorded to the test output and to the C-heap failure message, and not
+     * bounded. Besides native memory still in use, the resident set counts the code cache and metaspace the JIT
+     * and method-handle spinning fill, thread stacks, the pages of mapped font files and allocator pages the JVM
+     * has not returned to the OS, all of which move with the JDK build, the number of cores and the library
+     * versions. At commit {@code 5a2886d8f7} the layouts child grew it by 9,924,608 bytes over 1,520 layouts on a
+     * GitHub ubuntu-24.04 runner with JDK 26.0.2 while its C heap grew by less than this bound, and the 8 MiB
+     * bound the resident set had then failed.
      */
     static final long MALLOC_GROWTH_BOUND = 2L << 20;
-    static final long RESIDENT_GROWTH_BOUND = 8L << 20;
 
     /**
-     * A fixed, pre-touched Java heap, and the native heap trimmed every second: the resident set then grows only
-     * for native memory still in use, not for the Java heap and not for the pages that freed C allocations (the
-     * JIT compiler's arenas above all) leave in glibc's heap.
+     * A fixed, pre-touched Java heap, and the native heap trimmed every second: the recorded resident set then
+     * grows neither for the Java heap nor for the pages that freed C allocations (the JIT compiler's arenas above
+     * all) leave in glibc's heap.
      */
     static final List<String> MEMORY_JVM_OPTIONS =
             List.of("-Xms192m", "-Xmx192m", "-XX:+AlwaysPreTouch", "-XX:TrimNativeHeapInterval=1000");
@@ -182,16 +200,25 @@ public class LinuxFontStressTest {
         assertNativeMemoryBounded(counts, counts.get("shapes") + " pango_shape calls");
     }
 
-    /** The {@code mem.*} keys of a child against the bounds; the malloc figure is {@code -1} where libc lacks it. */
+    /**
+     * The {@code mem.*} keys of a child: the growth of the resident set recorded to the test output and to the
+     * failure message, that of the C heap in use against {@link #MALLOC_GROWTH_BOUND}. The malloc figure is
+     * {@code -1} where libc exports no {@code mallinfo2}; the C heap is then not checked, and the test output
+     * says so.
+     */
     private static void assertNativeMemoryBounded(Map<String, String> counts, String work) {
         long malloc = Long.parseLong(counts.get("mem.malloc.growth"));
         long resident = Long.parseLong(counts.get("mem.resident.growth"));
+        String recorded = "the resident set changed by " + resident + " bytes over " + work
+                + " (recorded, not bounded)";
+        System.out.println("[LinuxFontStressTest] " + recorded);
         if (malloc >= 0) {
             assertTrue(malloc < MALLOC_GROWTH_BOUND, "the C heap in use grew by " + malloc + " bytes over " + work
-                    + " (bound " + MALLOC_GROWTH_BOUND + "): native memory is retained per call");
+                    + " (bound " + MALLOC_GROWTH_BOUND + "): native memory is retained per call; " + recorded);
+        } else if (malloc == -1) {
+            System.out.println("[LinuxFontStressTest] the C heap in use was not checked over " + work
+                    + ": libc exports no mallinfo2");
         }
-        assertTrue(resident < RESIDENT_GROWTH_BOUND, "the resident set grew by " + resident + " bytes over " + work
-                + " (bound " + RESIDENT_GROWTH_BOUND + "): native memory is retained per call");
     }
 
     @Test

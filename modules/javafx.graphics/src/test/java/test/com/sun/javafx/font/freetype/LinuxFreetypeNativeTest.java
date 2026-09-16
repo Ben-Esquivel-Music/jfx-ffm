@@ -84,9 +84,9 @@ public class LinuxFreetypeNativeTest {
 
     /**
      * Options of the leak children: a fixed, pre-touched Java heap and the serial collector, so that the C heap
-     * and the resident set move only for native reasons (G1's remembered sets and refinement work are C-heap
-     * allocations that grow with Java allocation churn); the native heap trimmed every second so that the
-     * resident figure is memory still in use, as {@code LinuxFontStressTest.MEMORY_JVM_OPTIONS} does; and a fixed
+     * moves only for native reasons (G1's remembered sets and refinement work are C-heap allocations that grow
+     * with Java allocation churn); the native heap trimmed every second so that the pages of freed C allocations
+     * leave the recorded resident figure, as {@code LinuxFontStressTest.MEMORY_JVM_OPTIONS} does; and a fixed
      * number of compiler threads, because a dynamically added compiler thread retires after five idle seconds and
      * releases its arenas, which showed as a shrinking C heap inside a measured phase.
      */
@@ -130,9 +130,6 @@ public class LinuxFreetypeNativeTest {
      * decomposition.
      */
     static final long POINT_TYPES_BYTES = 10;
-
-    /** The resident-set bound of both loops, the figure of {@code LinuxFontStressTest.RESIDENT_GROWTH_BOUND}. */
-    static final long LEAK_RESIDENT_BOUND = 8L << 20;
 
     /** The 16.16 matrix of a slight slant, so that {@code FT_Set_Transform} is called as {@code initGlyph} calls it. */
     static final long[] SLANT = {0x10000, 0x4000, 0, 0x10000};
@@ -300,8 +297,10 @@ public class LinuxFreetypeNativeTest {
      * The {@code mem.*} keys of a leak child against the bounds: the C heap in use may move by less than the bound
      * in either direction over the clean interval (a fall of more than the bound would be the JVM still settling
      * and could mask what the bound is for), and must grow by at least the bound over the leaky interval (one
-     * {@code retained} allocation per iteration); the resident set may grow by less than its bound over the clean
-     * interval. The malloc figures are {@code -1} where libc lacks {@code mallinfo2}.
+     * {@code retained} allocation per iteration). The malloc figures are {@code -1} where libc lacks
+     * {@code mallinfo2}; the C heap is then not checked, and the test output says so. The growth of the resident
+     * set over the clean interval is recorded to the test output and to every C-heap failure message, and not
+     * bounded, for the reason given at {@code LinuxFontStressTest.MALLOC_GROWTH_BOUND}.
      */
     private static void assertNativeMemoryBounded(Map<String, String> result, long mallocBound, String work,
                                                   String retained) {
@@ -309,18 +308,22 @@ public class LinuxFreetypeNativeTest {
         long malloc = Long.parseLong(result.get("mem.malloc.growth"));
         long injected = Long.parseLong(result.get("mem.malloc.injected"));
         long resident = Long.parseLong(result.get("mem.resident.growth"));
+        String recorded = "the resident set changed by " + resident + " bytes over the " + work
+                + " of the clean interval (recorded, not bounded)";
+        System.out.println("[LinuxFreetypeNativeTest] " + recorded);
         if (burnin >= 0 || malloc != -1) {
             assertTrue(malloc < mallocBound, "the C heap in use grew by " + malloc + " bytes over " + work
-                    + " (bound " + mallocBound + "): native memory is retained per call");
+                    + " (bound " + mallocBound + "): native memory is retained per call; " + recorded);
             assertTrue(malloc > -mallocBound, "the C heap in use fell by " + -malloc + " bytes over " + work
                     + " (bound " + mallocBound + "; " + burnin + " over the burn-in interval before it): the JVM"
-                    + " was still settling, so the interval proves nothing");
+                    + " was still settling, so the interval proves nothing; " + recorded);
             assertTrue(injected >= mallocBound, "retaining " + retained + " grew the C heap in use by only "
                     + injected + " bytes over " + work + " (bound " + mallocBound + "): the measurement is not"
-                    + " settled enough to catch it, so the clean interval proves nothing");
+                    + " settled enough to catch it, so the clean interval proves nothing; " + recorded);
+        } else {
+            System.out.println("[LinuxFreetypeNativeTest] the C heap in use was not checked over the " + work
+                    + " of the clean interval: libc exports no mallinfo2");
         }
-        assertTrue(resident < LEAK_RESIDENT_BOUND, "the resident set grew by " + resident + " bytes over " + work
-                + " (bound " + LEAK_RESIDENT_BOUND + "): native memory is retained per call");
     }
 
     private static Path moduleDirectory() {

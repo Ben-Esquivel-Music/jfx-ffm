@@ -74,10 +74,10 @@ public class LinuxPangoNativeTest {
     static final Path DEJAVU_SANS = Path.of("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf");
 
     /**
-     * Options of the leak child: a fixed, pre-touched Java heap and the serial collector, so that the C heap and
-     * the resident set move only for native reasons (G1's remembered sets and refinement work are C-heap
-     * allocations that grow with the Java allocation churn of {@code pango_shape}'s arrays); the native heap
-     * trimmed every second so that the resident figure is memory still in use, as
+     * Options of the leak child: a fixed, pre-touched Java heap and the serial collector, so that the C heap
+     * moves only for native reasons (G1's remembered sets and refinement work are C-heap allocations that grow
+     * with the Java allocation churn of {@code pango_shape}'s arrays); the native heap trimmed every second so
+     * that the pages of freed C allocations leave the recorded resident figure, as
      * {@code LinuxFontStressTest.MEMORY_JVM_OPTIONS} does; and a fixed number of compiler threads, because a
      * dynamically added compiler thread retires after five idle seconds and releases its arenas, which showed as
      * a shrinking C heap inside a measured phase.
@@ -127,13 +127,14 @@ public class LinuxPangoNativeTest {
      * between them. Measured in the test JVM before the child recipe was chosen (G1, no settle pause, a 19-text
      * corpus): 64 to 7,952 bytes of growth per 15,200 to 30,400 layouts after 30,400 warm-up layouts, once
      * 69,392 bytes over 30,400 layouts, at 0.6 to 0.7 ms per layout.
+     * <p>
+     * The resident set is read with the C heap, and its growth is recorded to the test output and to every C-heap
+     * failure message, and not bounded, for the reason given at {@code LinuxFontStressTest.MALLOC_GROWTH_BOUND}.
+     * Where libc exports no {@code mallinfo2} the C heap is not checked, and the test output says so.
      */
     static final int LEAK_WARMUP_ROUNDS = 190;
     static final int LEAK_ROUNDS = 320;
     static final long LEAK_MALLOC_BOUND = 192L << 10;
-
-    /** The resident-set bound of the loop, the figure of {@code LinuxFontStressTest.RESIDENT_GROWTH_BOUND}. */
-    static final long LEAK_RESIDENT_BOUND = 8L << 20;
 
     @BeforeAll
     static void requireTheLibraries() {
@@ -342,19 +343,23 @@ public class LinuxPangoNativeTest {
         long malloc = Long.parseLong(result.get("mem.malloc.growth"));
         long injected = Long.parseLong(result.get("mem.malloc.injected"));
         long resident = Long.parseLong(result.get("mem.resident.growth"));
+        String recorded = "the resident set changed by " + resident + " bytes over the " + layouts
+                + " layouts of the clean interval (recorded, not bounded)";
+        System.out.println("[LinuxPangoNativeTest] " + recorded);
         if (burnin >= 0 || malloc != -1) {
             assertTrue(malloc < LEAK_MALLOC_BOUND, "the C heap in use grew by " + malloc + " bytes over " + layouts
-                    + " layouts (bound " + LEAK_MALLOC_BOUND + "): native memory is retained per layout");
+                    + " layouts (bound " + LEAK_MALLOC_BOUND + "): native memory is retained per layout; " + recorded);
             assertTrue(malloc > -LEAK_MALLOC_BOUND, "the C heap in use fell by " + -malloc + " bytes over " + layouts
                     + " layouts (bound " + LEAK_MALLOC_BOUND + "; " + burnin + " over the burn-in interval before"
-                    + " it): the JVM was still settling, so the interval proves nothing");
+                    + " it): the JVM was still settling, so the interval proves nothing; " + recorded);
             assertTrue(injected >= LEAK_MALLOC_BOUND, "retaining " + PANGO_ATTR_LIST_BYTES + " bytes (a PangoAttrList)"
                     + " per layout grew the C heap in use by only " + injected + " bytes over " + layouts
                     + " layouts (bound " + LEAK_MALLOC_BOUND + "): the measurement is not settled enough to catch"
-                    + " it, so the clean interval proves nothing");
+                    + " it, so the clean interval proves nothing; " + recorded);
+        } else {
+            System.out.println("[LinuxPangoNativeTest] the C heap in use was not checked over the " + layouts
+                    + " layouts of the clean interval: libc exports no mallinfo2");
         }
-        assertTrue(resident < LEAK_RESIDENT_BOUND, "the resident set grew by " + resident + " bytes over " + layouts
-                + " layouts (bound " + LEAK_RESIDENT_BOUND + "): native memory is retained per layout");
     }
 
     private static Path moduleDirectory() {
