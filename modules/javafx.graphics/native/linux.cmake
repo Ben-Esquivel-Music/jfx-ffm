@@ -46,8 +46,6 @@ set(GTK3_MIN_MICRO_VERSION 0)
 pkg_check_modules(GTK3 REQUIRED IMPORTED_TARGET
     "gtk+-3.0>=3.${GTK3_MIN_MINOR_VERSION}.${GTK3_MIN_MICRO_VERSION}"
     gthread-2.0 xtst gio-unix-2.0)
-pkg_check_modules(FREETYPE2 REQUIRED IMPORTED_TARGET freetype2)
-pkg_check_modules(PANGOFT2 REQUIRED IMPORTED_TARGET pangoft2)
 
 # ---------------------------------------------------------------------------
 # Global flags: exact parity with the retired Gradle Linux toolchain config,
@@ -155,14 +153,6 @@ add_jfx_library(glassgtk3
     LINK_LIBS PkgConfig::GTK3)
 
 # ---------------------------------------------------------------------------
-# libprism_common.so
-# ---------------------------------------------------------------------------
-add_jfx_library(prism
-    OUTPUT_NAME prism_common
-    SOURCE_DIRS "${GRAPHICS_SRC}/native-prism"
-    COMPILE_OPTIONS ${JFX_C_STRICT_OPTIONS} -DINLINE=inline)
-
-# ---------------------------------------------------------------------------
 # libprism_sw.so
 # ---------------------------------------------------------------------------
 add_jfx_library(prismSW
@@ -180,37 +170,8 @@ if(INCLUDE_ES2)
             "${GRAPHICS_SRC}/native-prism-es2/GL"
             "${GRAPHICS_SRC}/native-prism-es2/x11"
         COMPILE_OPTIONS -DLINUX ${JFX_C_STRICT_OPTIONS}
-        LINK_LIBS X11 Xxf86vm GL)
+        LINK_LIBS X11 GL)
 endif()
-
-# ---------------------------------------------------------------------------
-# libjavafx_font.so (platform-independent font sources; the platform-specific
-# files self-exclude via #ifdef guards)
-# ---------------------------------------------------------------------------
-add_jfx_library(font
-    OUTPUT_NAME javafx_font
-    SOURCE_DIRS "${GRAPHICS_SRC}/native-font"
-    COMPILE_OPTIONS -DJFXFONT_PLUS)
-
-# ---------------------------------------------------------------------------
-# libjavafx_font_freetype.so
-# ---------------------------------------------------------------------------
-add_jfx_library(fontFreetype
-    OUTPUT_NAME javafx_font_freetype
-    EXTRA_SOURCES "${GRAPHICS_SRC}/native-font/freetype.c"
-    INCLUDE_DIRS "${GRAPHICS_SRC}/native-font"
-    COMPILE_OPTIONS -DJFXFONT_PLUS ${JFX_C_STRICT_OPTIONS} -D_ENABLE_PANGO
-    LINK_LIBS PkgConfig::FREETYPE2)
-
-# ---------------------------------------------------------------------------
-# libjavafx_font_pango.so
-# ---------------------------------------------------------------------------
-add_jfx_library(fontPango
-    OUTPUT_NAME javafx_font_pango
-    EXTRA_SOURCES "${GRAPHICS_SRC}/native-font/pango.c"
-    INCLUDE_DIRS "${GRAPHICS_SRC}/native-font"
-    COMPILE_OPTIONS -DJFXFONT_PLUS ${JFX_C_STRICT_OPTIONS} -D_ENABLE_PANGO
-    LINK_LIBS PkgConfig::PANGOFT2)
 
 # ---------------------------------------------------------------------------
 # libjavafx_iio.so
@@ -219,13 +180,3 @@ add_jfx_library(iio
     OUTPUT_NAME javafx_iio
     SOURCE_DIRS "${GRAPHICS_SRC}/native-iio" "${GRAPHICS_SRC}/native-iio/libjpeg"
     COMPILE_OPTIONS ${JFX_C_STRICT_OPTIONS} -fvisibility=hidden)
-
-# ---------------------------------------------------------------------------
-# libdecora_sse.so (generated JSL .cc files + native-decora; despite the name
-# the sources are scalar C++ without SSE intrinsics, so this also builds on
-# non-x86 architectures, matching the Gradle build)
-# ---------------------------------------------------------------------------
-add_jfx_library(decora
-    OUTPUT_NAME decora_sse
-    SOURCE_DIRS "${GENSRC_DIR}/jsl-decora" "${GRAPHICS_SRC}/native-decora"
-    COMPILE_OPTIONS -ffast-math)
