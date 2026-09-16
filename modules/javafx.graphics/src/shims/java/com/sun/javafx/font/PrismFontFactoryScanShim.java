@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2013, 2026, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2026, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -23,35 +23,24 @@
  * questions.
  */
 
-package com.sun.javafx.font.freetype;
+package com.sun.javafx.font;
 
-import com.sun.javafx.font.DisposerRecord;
-import com.sun.javafx.font.PrismFontFactory;
+/**
+ * Test seam onto the font-directory scan of {@link PrismFontFactory}: the pass that adds the fonts of
+ * {@code ${java.home}/lib/fonts} to the factory's maps once the platform fonts are known. The scan offers every
+ * file with a font suffix to {@code registerEmbeddedFont} before it parses the file, so a test that scans a
+ * directory of its own reaches the rasterizer with files of its choosing.
+ */
+public final class PrismFontFactoryScanShim {
 
-class FTDisposer implements DisposerRecord  {
-    long library;
-    long face;
-
-    FTDisposer(long library, long face) {
-        this.library = library;
-        this.face = face;
+    private PrismFontFactoryScanShim() {
     }
 
-    @Override
-    public synchronized void dispose() {
-        if (face != 0) {
-            FTNative.FT_Done_Face(face);
-            if (PrismFontFactory.debugFonts) {
-                System.err.println("Done Face=" + face);
-            }
-            face = 0;
-        }
-        if (library != 0) {
-            FTNative.FT_Done_FreeType(library);
-            if (PrismFontFactory.debugFonts) {
-                System.err.println("Done Library=" + library);
-            }
-            library = 0;
-        }
+    /**
+     * {@code PrismFontFactory.populateFontFileNameMapGeneric}. The platform maps must already exist, as they do when
+     * the factory scans the JDK font directory; any font lookup through {@code factory} builds them.
+     */
+    public static void populateFontFileNameMapGeneric(PrismFontFactory factory, String fontDirectory) {
+        factory.populateFontFileNameMapGeneric(fontDirectory);
     }
 }

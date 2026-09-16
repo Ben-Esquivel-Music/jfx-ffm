@@ -87,15 +87,17 @@ public abstract class PrismFontFactory implements FontFactory {
         isEmbedded = PlatformUtil.isEmbedded();
         int[] tempCacheLayoutSize = {0x10000};
 
-        /* javafx_font carries the CoreText path on macOS (MacFontFinder, DFontDecoder,
-         * com.sun.javafx.font.coretext.OS) and the fontconfig path on Linux (FontConfigManager,
-         * which has no loadLibrary of its own and depends on this one). It carries nothing on
-         * Windows: font enumeration is com.sun.javafx.font.WinFontNative and DirectWrite is
-         * com.sun.javafx.font.directwrite.DWNative, both of which bind the system DLLs from Java,
-         * so there is no javafx_font.dll to load once its one remaining source is deleted.
-         * Loading it unconditionally would then be an UnsatisfiedLinkError in a static initializer,
-         * i.e. no fonts at all. */
-        if (!isWindows) {
+        /* javafx_font exists only for the CoreText path of macOS and iOS (MacFontFinder.c,
+         * coretext.c, dfontdecoder.c behind MacFontFinder, com.sun.javafx.font.coretext.OS and
+         * DFontDecoder). Windows and Linux build no such library: font enumeration is
+         * com.sun.javafx.font.WinFontNative and DirectWrite is com.sun.javafx.font.directwrite.DWNative
+         * on Windows; fontconfig is com.sun.javafx.font.FontConfigNative, FreeType
+         * com.sun.javafx.font.freetype.FTNative and Pango com.sun.javafx.font.freetype.PangoNative on
+         * Linux, each binding the system library it needs from Java on first use (the JNI sources
+         * fontpath_linux.c, freetype.c and pango.c of commit 7b43255b30 are gone). Loading
+         * javafx_font where it is not built would be an UnsatisfiedLinkError in this static
+         * initializer, i.e. no fonts at all. AndroidFontFinder loads its own copy. */
+        if (isMacOSX || isIOS) {
             NativeLibLoader.loadLibrary("javafx_font");
         }
         String dbg = System.getProperty("prism.debugfonts", "");

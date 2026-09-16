@@ -70,9 +70,10 @@ public final class ES2Natives {
      * Other libraries the javafx.graphics CMake build writes into the same directory. Any of them
      * present with no {@code prism_es2} means the natives were built but ES2 was left out - still a
      * skip, because ES2 is optional, but a more specific one. The list is a union of witnesses, so an
-     * entry a platform does not build only shrinks it: {@code javafx_font} is built on Linux and macOS
-     * only - the two platforms that also build {@code prism_es2} - Windows having had no {@code font}
-     * target since {@code directwrite.cpp} was deleted.
+     * entry a platform does not build only shrinks it: {@code javafx_font} is built on macOS only (its
+     * CoreText sources). Windows lost its {@code font} target with {@code directwrite.cpp}; Linux, which
+     * still builds {@code prism_es2}, lost it when {@code fontpath_linux.c}, {@code freetype.c} and
+     * {@code pango.c} of commit {@code 7b43255b30} were replaced by Java bindings of the system libraries.
      */
     private static final List<String> SIBLING_FILES = List.of(
             System.mapLibraryName("prism_sw"), System.mapLibraryName("glass"),

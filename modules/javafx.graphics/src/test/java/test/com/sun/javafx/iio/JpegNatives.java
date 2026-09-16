@@ -69,8 +69,10 @@ public final class JpegNatives {
      * to no {@code javafx_iio} means the native build ran and reported success without producing the
      * library these tests exist for. {@code prism_sw} and {@code glass} are built on every platform. The
      * list is a union of witnesses, so an entry a platform does not build only shrinks it:
-     * {@code javafx_font} is built on Linux and macOS only, Windows having had no {@code font} target
-     * since {@code directwrite.cpp} was deleted.
+     * {@code javafx_font} is built on macOS only (its CoreText sources). Windows lost its {@code font}
+     * target with {@code directwrite.cpp}; Linux lost it when {@code fontpath_linux.c}, {@code freetype.c}
+     * and {@code pango.c} of commit {@code 7b43255b30} were replaced by Java bindings of the system
+     * libraries.
      */
     private static final List<String> SIBLING_FILES = List.of(
             System.mapLibraryName("prism_sw"), System.mapLibraryName("glass"),
