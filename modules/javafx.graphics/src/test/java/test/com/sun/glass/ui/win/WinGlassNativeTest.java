@@ -138,6 +138,11 @@ public class WinGlassNativeTest {
             "glass!gwin_clipboard_push_target_action", "glass!gwin_clipboard_pop_supported_actions",
             "glass!gwin_dnd_push", "glass!gwin_dnd_dispose", "glass!gwin_sizeof_file_filter",
             "glass!gwin_dialog_file", "glass!gwin_dialog_folder",
+            "glass!gwin_sizeof_accessible_callbacks", "glass!gwin_sizeof_text_range_callbacks",
+            "glass!gwin_sizeof_variant", "glass!gwin_a11y_set_callbacks",
+            "glass!gwin_a11y_text_range_set_callbacks", "glass!gwin_a11y_create", "glass!gwin_a11y_destroy",
+            "glass!gwin_a11y_text_range_create", "glass!gwin_a11y_text_range_destroy",
+            "glass!gwin_a11y_raise_property_changed",
             "user32!SendInput", "user32!mouse_event", "user32!GetCursorPos", "user32!GetSystemMetrics",
             "user32!MapVirtualKeyW", "user32!ShowCursor", "user32!GetKeyState", "user32!GetSysColor",
             "user32!SystemParametersInfoW", "kernel32!GetVersion",
@@ -162,6 +167,16 @@ public class WinGlassNativeTest {
      */
     static final List<String> SHCORE_SYMBOLS = List.of(
             "shcore!GetProcessDpiAwareness", "shcore!SetProcessDpiAwareness", "shcore!GetDpiForMonitor");
+
+    /**
+     * The fifth lazy holder, {@code UIAutomationCore}, which the facade forces only when accessibility
+     * raises an event or asks whether a client is listening - the {@code /DELAYLOAD} the JNI had. This
+     * class never forces it, so it is expected only when another class in the shared surefire JVM
+     * already did; the class that does ({@code WinAccessibilityNativeTest}) forces the four older
+     * holders first, so this pair is always last however the two are ordered.
+     */
+    static final List<String> UIA_SYMBOLS = List.of(
+            "UIAutomationCore!UiaRaiseAutomationEvent", "UIAutomationCore!UiaClientsAreListening");
 
     /** winuser.h virtual keys used by the tests, none of which is layout-dependent. */
     static final int VK_RETURN = 0x0D;
@@ -248,11 +263,17 @@ public class WinGlassNativeTest {
     // Symbols, ABI version and constants
     // ---------------------------------------------------------------------------------------------
 
-    /** {@link #BOUND_SYMBOLS}, plus {@link #SHCORE_SYMBOLS} when the facade found all three. */
+    /**
+     * {@link #BOUND_SYMBOLS}, plus {@link #SHCORE_SYMBOLS} when the facade found all three, plus
+     * {@link #UIA_SYMBOLS} when accessibility has already forced that holder in this JVM.
+     */
     static List<String> expectedBoundSymbols() {
         List<String> expected = new ArrayList<>(BOUND_SYMBOLS);
         if (WinGlassNativeShim.dpiFunctionsResolved()) {
             expected.addAll(SHCORE_SYMBOLS);
+        }
+        if (WinGlassNativeShim.uiaSymbolsBound()) {
+            expected.addAll(UIA_SYMBOLS);
         }
         return expected;
     }
@@ -291,18 +312,21 @@ public class WinGlassNativeTest {
 
     @Test
     public void abiVersionIsTheOneTheFacadeWasWrittenFor() {
-        // 3 since the loop/invoke/menu batch: gwin_run_loop, gwin_terminate_loop, the two
+        // 3 since the loop/invoke/menu flip: gwin_run_loop, gwin_terminate_loop, the two
         // gwin_*_nested_event_loop, gwin_invoke_and_wait, gwin_invoke_later, gwin_app_set_callbacks,
         // gwin_menu_set_callbacks and the two matching gwin_sizeof_*_callbacks probes were added to
-        // glass_win_api.h, which bumped GLASS_WIN_ABI_VERSION 2 -> 3. 4 since the view batch: the
+        // glass_win_api.h, which bumped GLASS_WIN_ABI_VERSION 2 -> 3. 4 since the view flip: the
         // sixteen exports of the header's view section landed additively under 3, and the bump 3 -> 4
         // is the change set that flips WinView - Java_..._WinView__1create takes a jlong view id from
         // then on - so the literal here, WinGlassNative.ABI_VERSION and the define move together. 5 since
-        // the screen batch: gwin_app_create, gwin_view_create and the screen section landed additively under 4,
+        // the screen flip: gwin_app_create, gwin_view_create and the screen section landed additively under 4,
         // and the bump is the change set in which the facade binds them and stops binding gwin_robot_pixel_color -
         // which, with gwin_test_screen_anchor, ABI 5 defined as test-only; the shim bound both until they were
-        // deleted, without a bump.
-        assertEquals(5, WinGlassNativeShim.expectedAbiVersion());
+        // deleted, without a bump. 6 since the accessibility flip: the thirteen exports of the header's
+        // accessibility section landed additively under 5, and the bump 5 -> 6 is the change set in which
+        // WinAccessible and WinTextRangeProvider are flipped onto the two callback tables and the nine
+        // Java_* bodies and this library's JNI_OnLoad are deleted.
+        assertEquals(6, WinGlassNativeShim.expectedAbiVersion());
         assertEquals(WinGlassNativeShim.expectedAbiVersion(), WinGlassNativeShim.abiVersion());
     }
 

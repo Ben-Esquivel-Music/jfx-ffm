@@ -43,9 +43,11 @@ find_package(PkgConfig REQUIRED)
 # Glass Gtk is built with GTK+ 3. Requires GTK+ 3.20.0 or newer.
 set(GTK3_MIN_MINOR_VERSION 20)
 set(GTK3_MIN_MICRO_VERSION 0)
+# xtst is deliberately absent: GlassRobot.cpp of commit 033187ad90 was the last C
+# to call libXtst; com.sun.glass.ui.gtk.GtkGlassNative binds libXtst.so.6 at run time.
 pkg_check_modules(GTK3 REQUIRED IMPORTED_TARGET
     "gtk+-3.0>=3.${GTK3_MIN_MINOR_VERSION}.${GTK3_MIN_MICRO_VERSION}"
-    gthread-2.0 xtst gio-unix-2.0)
+    gthread-2.0 gio-unix-2.0)
 
 # ---------------------------------------------------------------------------
 # Global flags: exact parity with the retired Gradle Linux toolchain config,
@@ -122,31 +124,32 @@ function(add_jfx_library name)
     target_compile_options(${name} PRIVATE
         ${JFX_COMMON_COMPILE_OPTIONS} ${JFX_COMPILE_OPTIONS})
     target_include_directories(${name} PRIVATE
-        "${JDK_HOME}/include" "${JDK_HOME}/include/linux"
-        "${HEADERS_DIR}"
         ${JFX_SOURCE_DIRS} ${JFX_INCLUDE_DIRS})
     target_link_libraries(${name} PRIVATE ${JFX_LINK_LIBS})
     target_link_options(${name} PRIVATE ${JFX_COMMON_LINK_OPTIONS})
 endfunction()
 
 # ---------------------------------------------------------------------------
-# libglass.so (the GTK launcher/loader only)
-# ---------------------------------------------------------------------------
-add_jfx_library(glass
-    OUTPUT_NAME glass
-    EXTRA_SOURCES "${GRAPHICS_SRC}/native-glass/gtk/launcher.c"
-    INCLUDE_DIRS "${GRAPHICS_SRC}/native-glass/gtk"
-    COMPILE_OPTIONS -Werror
-    LINK_LIBS X11 dl)
-
-# ---------------------------------------------------------------------------
-# libglassgtk3.so (all GTK glass sources except the launcher)
+# libglassgtk3.so (the GTK glass sources). Linux builds no libglass.so: the
+# launcher.c of commit 033187ad90 was the whole of it, and the library query it
+# answered, GtkApplication._queryLibrary, is done by
+# com.sun.glass.ui.gtk.GtkGlassNative in Java. GtkApplication still maps a
+# library of that name when the deployment has one, which is how a glassgtk3
+# build renamed to libglass.so is found.
+#
+# The only target of this file that still needs HEADERS_DIR and the JDK
+# include directories: the GTK glass sources declare no JNI function and
+# include no jni.h, but they do include the javac -h constant headers of
+# com.sun.glass.events.* and com.sun.glass.ui.* (glass_key.cpp and
+# glass_window.cpp alone read most of them), and every javac -h header starts
+# with #include <jni.h>. prismSW, prismES2 and iio need neither, so both sets
+# are named here instead of in add_jfx_library.
 # ---------------------------------------------------------------------------
 add_jfx_library(glassgtk3
     OUTPUT_NAME glassgtk3
     SOURCE_DIRS "${GRAPHICS_SRC}/native-glass/gtk"
-    EXCLUDE_REGEX "launcher\\.c$"
     INCLUDE_DIRS "${GRAPHICS_SRC}/native-glass/gtk/libpipewire/include"
+        "${HEADERS_DIR}" "${JDK_HOME}/include" "${JDK_HOME}/include/linux"
     COMPILE_OPTIONS -Werror -Wno-deprecated-declarations
         -DGTK_3_MIN_MINOR_VERSION=${GTK3_MIN_MINOR_VERSION}
         -DGTK_3_MIN_MICRO_VERSION=${GTK3_MIN_MICRO_VERSION}

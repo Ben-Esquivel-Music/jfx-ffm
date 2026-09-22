@@ -68,8 +68,8 @@
 
 // The com.sun.glass.events.KeyEvent MODIFIER_* bits held down right now (GetKeyState), for the event
 // callbacks of ViewContainer.cpp and GlassWindow.cpp. The JNI helpers that used to share this banner
-// (GetEnv / CheckAndClearException / InitExceptionReporting) serve UI Automation only and live in
-// GlassAccessibleJni.h.
+// (GetEnv / CheckAndClearException / InitExceptionReporting) served UI Automation only and went with
+// GlassAccessibleJni.h when the accessibility JNI was deleted.
 
 int32_t GetModifiers();
 

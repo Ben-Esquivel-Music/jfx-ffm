@@ -128,7 +128,8 @@ const GwinDndCallbacks* GlassDndCallbacks()
 }
 
 /* By value - this library never retains the caller's struct - and a NULL slot keeps its no-op.
- * The slots are written before the flag, so a reader never sees a half-copied table. */
+ * Installed once, before any clipboard transfer can exist; not safe against a concurrent install - the flag is a
+ * plain bool and the table a plain struct assignment, with no release store between them. */
 void SetGlassClipboardCallbacks(const GwinClipboardCallbacks* cb)
 {
     GwinClipboardCallbacks t = NOOP_CLIPBOARD_CALLBACKS;

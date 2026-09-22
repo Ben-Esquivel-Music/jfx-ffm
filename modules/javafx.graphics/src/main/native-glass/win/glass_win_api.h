@@ -124,11 +124,35 @@
  * carries only the display-change event the WndProc sees. They landed ADDITIVE under ABI 4 (with no table
  * installed GlassScreen::HandleDisplayChange took its JNI path); the version moved 4 -> 5 together with
  * WinGlassNative.ABI_VERSION, in the change set that binds them. THE JAVA SIDE AND THAT BUMP TRAVEL TOGETHER.
- * Beside them, additive as well: gwin_test_report_exception_in_downcall, the shim-only test hook of the
- * fix that lets CheckAndClearException deliver exceptions from inside a downcall (its own short section
- * after the screen section). Still under version 5, WinApplication's and
+ * Beside them, additive as well and also under version 5: gwin_test_report_exception_in_downcall, the
+ * shim-only test hook of the fix that let CheckAndClearException deliver exceptions from inside a
+ * downcall; it went with the accessibility delete below, which left this library with no JNI to report
+ * from. Still under version 5, WinApplication's and
  * WinView's six JNI bodies and the two test-only exports gwin_robot_pixel_color and
  * gwin_test_screen_anchor were then deleted (see the ABI 5 note at GLASS_WIN_ABI_VERSION).
+ *
+ * WinAccessible + WinTextRangeProvider, the last JNI of this library, add thirteen exports, listed at
+ * the head of their section: the two callback tables GwinAccessibleCallbacks (70 slots - the 69
+ * jmethodIDs of WinAccessible._initIDs plus accessible_disposed, which stands where ~GlassAccessible's
+ * DeleteGlobalRef stood) and GwinTextRangeCallbacks (19 slots, the same shape for
+ * WinTextRangeProvider) with their installers and sizeof probes, the four gwin_a11y_* entry points
+ * that own the two COM objects' lifetime, gwin_a11y_raise_property_changed, GwinVariant with its
+ * sizeof and offset probes, and the two fire hooks. UiaRaiseAutomationEvent and UiaClientsAreListening
+ * are WRAPPERs and get NO export (Java binds UIAutomationCore itself) and the two _initIDs were JNI
+ * bookkeeping that disappeared with them. The section landed ADDITIVE in the same sense as the view,
+ * window and clipboard sections - while no table was installed every one of the 87 upcall sites took
+ * its JNI arm and all nine JNI bodies kept running - and the nine Java_* bodies, the cached ids, the
+ * two global refs, GlassAccessibleJni.cpp/.h and this library's JNI_OnLoad were then deleted. With
+ * that deletion glass.dll exports no Java_* and no JNI_OnLoad and includes no javac -h header that
+ * declares one; what remains of jni.h is the <jni.h> that the javac -h CONSTANTS headers pull in
+ * (com_sun_glass_events_*.h, com_sun_glass_ui_*.h - eleven translation units include one), which is
+ * why the glass target still asks win.cmake for the JDK include path. With no table installed the 87
+ * sites now answer the E_FAIL their JNI arm answered without a JNIEnv.
+ * GLASS_WIN_ABI_VERSION WENT 5 -> 6 IN THE CHANGE SET THAT FLIPPED WinAccessible.java and
+ * WinTextRangeProvider.java ONTO THE TABLES, together with WinGlassNative.ABI_VERSION. THE JAVA SIDE
+ * AND THAT BUMP TRAVELLED TOGETHER, for the reason every bump before it did: the facade compares
+ * gwin_abi_version() with its own ABI_VERSION for exact equality in both directions, so a C-only bump
+ * makes every Windows glass test fail with UnsatisfiedLinkError. BOTH SIDES NOW READ 6.
  *
  * Threading is a PER-FUNCTION rule, not a blanket one, and the per-function comment below is the
  * authority. Most functions declared here run on the JavaFX application thread, which on Windows is
@@ -176,7 +200,7 @@ extern "C" {
  * WinGlassNative binds. An export added together with its Java binding rides the current version, and
  * shim-only test hooks never bump it. Java binds gwin_abi_version first, then every symbol it uses, eagerly.
  */
-#define GLASS_WIN_ABI_VERSION 5
+#define GLASS_WIN_ABI_VERSION 6
 /* ABI 4 = the WinView / WinGestureSupport and WinWindow exports, flipped together; the clipboard / DnD /
  * dialog exports ride the same version - they are additive under it, as are the four test hooks
  * gwin_test_fire_window_callback / gwin_test_fire_clipboard_callback / gwin_test_fire_dnd_callback /
@@ -185,13 +209,25 @@ extern "C" {
  * ABI 5 = the six exports of the WinApplication / WinView._create flip (gwin_app_create, gwin_view_create,
  * gwin_sizeof_screen_callbacks, gwin_screen_set_callbacks, gwin_test_fire_screen_callback,
  * gwin_test_screen_anchor), paired with WinGlassNative.ABI_VERSION 5, and beside them
- * gwin_test_report_exception_in_downcall. Two test-only exports the facade never bound,
- * gwin_robot_pixel_color and gwin_test_screen_anchor, were later deleted without a further bump.
+ * gwin_test_report_exception_in_downcall. Three test-only exports the facade never bound,
+ * gwin_robot_pixel_color, gwin_test_screen_anchor and gwin_test_report_exception_in_downcall, were
+ * later deleted without a further bump - the last of them with the accessibility JNI it reported for.
  * Every bump from 1 -> 2 to 4 -> 5 was taken at a peer flip - which the rule allows, but does not require.
+ * ABI 6 = the accessibility section: its thirteen exports (gwin_sizeof_accessible_callbacks,
+ * gwin_sizeof_text_range_callbacks, gwin_sizeof_variant, gwin_a11y_set_callbacks,
+ * gwin_a11y_text_range_set_callbacks, gwin_a11y_create, gwin_a11y_destroy, gwin_a11y_text_range_create,
+ * gwin_a11y_text_range_destroy, gwin_a11y_raise_property_changed, gwin_test_fire_accessible_callback,
+ * gwin_test_fire_text_range_callback, gwin_test_variant_offsets), the two callback tables
+ * GwinAccessibleCallbacks and GwinTextRangeCallbacks, and GwinVariant. They landed ADDITIVE under 5 -
+ * nothing the facade already bound changed its prototype, layout or value - and the bump 5 -> 6 was
+ * taken in the change set that flipped WinAccessible.java and WinTextRangeProvider.java onto the two
+ * tables, deleted the nine Java_* arms and this library's JNI_OnLoad, and moved
+ * WinGlassNative.ABI_VERSION 5 -> 6 with it.
  * SHIM-ONLY TEST HOOKS - exported, bound by WinGlassNativeShim and NOWHERE in WinGlassNative:
- * gwin_test_fire_window_callback, gwin_test_string_block, gwin_test_fire_screen_callback and
- * gwin_test_report_exception_in_downcall. The other three hooks are bound by the facade, so a removal
- * or a prototype change of theirs bumps the version. */
+ * gwin_test_fire_window_callback, gwin_test_string_block, gwin_test_fire_screen_callback,
+ * gwin_test_fire_accessible_callback, gwin_test_fire_text_range_callback and
+ * gwin_test_variant_offsets. The other three hooks are bound by
+ * the facade, so a removal or a prototype change of theirs bumps the version. */
 
 GLASS_WIN_EXPORT int32_t gwin_abi_version(void);
 
@@ -1658,37 +1694,6 @@ GLASS_WIN_EXPORT int32_t gwin_screen_set_callbacks(const GwinScreenCallbacks* cb
 GLASS_WIN_EXPORT int64_t gwin_test_fire_screen_callback(int32_t slot);
 
 /*
- * ---- The JNI exception sink under an FFM downcall (test hook) ----
- *
- * THE PATTERN. What JNI is left in this library (UI Automation's 74 CheckAndClearException sites, whose
- * plumbing is GlassAccessibleJni.cpp) runs INSIDE FFM downcalls - since
- * the ABI 3 run-loop flip the toolkit thread spends its life in gwin_run_loop. JNI FindClass resolves
- * against the loader of the nearest Java frame, and inside a downcall that frame is java.base's hidden
- * DowncallStub: the BOOT loader, which cannot see com.sun.glass.ui.Application. CheckAndClearException
- * looked Application up that way, failed, cleared the NoClassDefFoundError and so LOST every exception it
- * was meant to hand to Application.reportException. The fix: WinAccessible._initIDs - a real JNI native,
- * whose FindClass uses javafx.graphics' loader - caches a global ref to Application and the
- * reportException id (InitExceptionReporting, GlassAccessibleJni.h; idempotent, the first caller wins).
- * WinApplication.initIDs was the other caller until it was deleted under ABI 5.
- * Rule for any JNI code reachable from a downcall: never FindClass a non-java.* class there; resolve it
- * inside a JNI native method and cache a global ref.
- *
- * TEST HOOK, unconditionally exported, never called by production code and never bound by the facade
- * (shim only). Reproduces that frame shape when called from Java through a downcall: GetEnv, ThrowNew
- * (java/lang/RuntimeException, "gwin_test_report_exception_in_downcall") - FindClass of a java.lang class
- * is safe even there, the boot loader sees it - then CheckAndClearException. Returns 1 when an exception
- * was pending and has been handled, 0 when nothing was pending (ThrowNew failed), GWIN_ERR_INVALID_ARG
- * when the library was not loaded through System.loadLibrary (no JavaVM) or the calling thread is not
- * attached. Nothing is pending on return. The return value does NOT say whether the exception was
- * DELIVERED - CheckAndClearException answers JNI_TRUE when it had to drop it too - so the Java test asserts
- * delivery itself: Application.reportException hands it to the CALLING thread's UncaughtExceptionHandler.
- * The cache exists only once WinAccessible is initialised; before that the hook shows the old, losing
- * behaviour. Defined in GlassAccessibleJni.cpp, beside CheckAndClearException. critical(true) FORBIDDEN:
- * it runs Java.
- */
-GLASS_WIN_EXPORT int32_t gwin_test_report_exception_in_downcall(void);
-
-/*
  * ---- Clipboard, drag-and-drop and the common dialogs (ABI 4) ----
  *
  * Three JNI peers share this section. WinSystemClipboard (GlassClipboard.cpp, 12 exports) owns one
@@ -1747,7 +1752,7 @@ GLASS_WIN_EXPORT int32_t gwin_test_report_exception_in_downcall(void);
  * Every target catches Throwable and returns the slot default; the sink differs per slot and each
  * slot below says which: `printStackTrace` where the C used checkJavaException (OleUtils.h: describe,
  * clear, E_JAVAEXCEPTION - no Java code runs), Application.reportException where it used
- * CheckAndClearException (GlassAccessibleJni.cpp: the thread's UncaughtExceptionHandler, i.e. application code -
+ * CheckAndClearException (the thread's UncaughtExceptionHandler, i.e. application code -
  * itself inside a second try/catch). In the other direction every gwin_* body below is wrapped
  * try { } catch (...) and answers its failure value.
  *
@@ -2283,6 +2288,681 @@ GLASS_WIN_EXPORT int32_t gwin_dialog_file(void* owner, const uint16_t* folder,
  */
 GLASS_WIN_EXPORT int32_t gwin_dialog_folder(void* owner, const uint16_t* folder,
                                             const uint16_t* title, uint16_t** out_path);
+
+/*
+ * ---- WinAccessible + WinTextRangeProvider: the two UI Automation provider objects ----
+ *
+ * The providers are GlassAccessible (GlassAccessible.cpp, 19 COM interfaces) and
+ * GlassTextRangeProvider (GlassTextRangeProvider.cpp, ITextRangeProvider). They are the INBOUND edge
+ * of UI Automation: UIAutomationCore hands a GlassAccessible to a client through
+ * UiaReturnRawElementProvider (ViewContainer.cpp, the WM_GETOBJECT reply) and Windows then invokes
+ * their vtables. That is why they stay native - a Java-synthesised COM object would need 19 hand-built
+ * vtables, 87 entries, the IIDs, and refcounts other processes hold references into, none of which any
+ * test in this tree can drive. What moves to Java is only the 87 upcalls their bodies made: each former
+ * jmethodID is one slot of GwinAccessibleCallbacks resp. GwinTextRangeCallbacks below, and the four
+ * entry points that owned the objects' lifetime become gwin_a11y_create / gwin_a11y_destroy /
+ * gwin_a11y_text_range_create / gwin_a11y_text_range_destroy.
+ *
+ * NOT exported, deliberately: WinAccessible.UiaRaiseAutomationEvent and
+ * WinAccessible.UiaClientsAreListening are WRAPPERs - one cast plus one delay-loaded UIAutomationCore
+ * call - so Java binds UIAutomationCore!UiaRaiseAutomationEvent and !UiaClientsAreListening itself, as
+ * it binds shlwapi!AssocQueryStringW. A C wrapper around an OS call is the anti-pattern this migration
+ * exists to remove. UiaRaiseAutomationPropertyChangedEvent is the exception and DOES get an export
+ * (gwin_a11y_raise_property_changed): it takes its two VARIANTs BY VALUE, 24 bytes each, and nothing in
+ * this ABI pins the VARIANT union's layout - unlike GwinVariant, whose size and eleven field offsets
+ * gwin_test_variant_offsets pins one by one against the C compiler - so a VARIANT built in Java and
+ * passed by value would be unverifiable. That building one needs oleaut32!SysAllocStringLen,
+ * SafeArrayCreateVector, SafeArrayPutElement and IUnknown::AddRef is NOT on its own a reason: this
+ * module already calls oleaut32 and COM vtables from Java (com.sun.javafx.font.directwrite.DWNative).
+ * It is, however, the same marshalling GetPropertyValue / GetAttributeValue need in C anyway for the
+ * inbound direction. One export is smaller and checkable; the same code in two languages is neither.
+ *
+ * IDENTITY. Every slot's first parameter is an int64_t id Java assigned to the WinAccessible resp. the
+ * WinTextRangeProvider and handed to gwin_a11y_create / gwin_a11y_text_range_create. The library never
+ * dereferences it and holds no Java reference - GwinViewCallbacks' view_id, exactly. It is NOT
+ * WinAccessible.id, which is part of the UIA runtime id a client can see. Java must never pass 0: 0 is
+ * this library's "no Java peer" value (see the sibling-range guard of compare / compare_endpoints /
+ * move_endpoint_by_range). THE ID MUST STAY VALID UNTIL accessible_disposed / range_disposed, WHICH IS
+ * NOT WinAccessible.dispose(): the COM object routinely outlives the Java peer's dispose() - UIA holds
+ * its own references - and provider methods keep arriving until the last Release. Those two slots stand
+ * exactly where DeleteGlobalRef stood in ~GlassAccessible / ~GlassTextRangeProvider
+ * (GwinWindowCallbacks.notify_dispose is the precedent) and are the only place a registry entry may be
+ * dropped. The handles gwin_a11y_create / gwin_a11y_text_range_create return, and every int64_t a slot
+ * hands back or takes for ANOTHER provider, are raw C++ object pointers, not ids: an accessible handle
+ * is also its IRawElementProviderSimple* (the first base - ViewContainer.cpp reinterpret-casts it into
+ * the WM_GETOBJECT reply, and gwin_a11y_raise_property_changed does the same) and a range handle is its
+ * ITextRangeProvider*.
+ *
+ * THREAD. get_ProviderOptions answers ProviderOptions_ServerSideProvider | ProviderOptions_UseComThreading,
+ * so UIA marshals provider calls into the apartment the provider was handed out from: the OLE STA that
+ * gwin_run_loop entered, i.e. the JavaFX application thread, delivered by its message pump from inside
+ * the gwin_run_loop downcall. TWO DOCUMENTED EXCEPTIONS, both on IRawElementProviderAdviseEvents:
+ * Windows calls AdviseEventRemoved on another thread while Narrator shuts down (the comment in
+ * GlassAccessible::AdviseEventAdded says so), and either destructor runs on whichever thread drops the
+ * last reference, which for a UIA-held reference is a COM/RPC thread. BEHAVIOUR DIFFERENCE, stated
+ * rather than hidden: the JNI arm answered E_FAIL on such a thread, because GetEnv() returns NULL for a
+ * thread the JVM never saw and the JNI bodies gave up rather than attaching. A slot dialled through an
+ * FFM upcall stub does NOT give up - the JVM attaches the calling thread and runs the Java target - so
+ * after the flip those calls REACH Java instead of failing. Measured on JDK 26 and JDK 25, with a
+ * plain CreateThread thread, an MTA CoInitializeEx thread and a Win32 thread-pool thread: the upcall
+ * runs, the thread appears as a daemon Thread in the main ThreadGroup WITH A NULL CONTEXT CLASS
+ * LOADER, its return value arrives intact, and the thread stays attached until it exits. That
+ * attachment is permanent for the life of the thread and is ACCEPTED: the RPC pool is bounded, the four
+ * slots that can arrive there (advise_event_added, advise_event_removed, accessible_disposed,
+ * range_disposed) touch nothing but the id registries, and the cost is one Thread object per RPC thread
+ * that ever entered a provider. REACHING Java is not the same as succeeding, and the sentence above is
+ * scoped to those four slots: a provider method that reaches a REGISTERED peer off the JavaFX
+ * application thread still ends in E_FAIL, one layer further in - WinAccessible.getNativeAccessible()
+ * calls Application.checkEventThread(), the Java stub reports the IllegalStateException and answers
+ * GWIN_ERR_UPCALL, which is the E_FAIL CheckAndClearException produced for the same call in commit
+ * 033187ad90. An out-of-process UIA client's RPC thread could not be probed here and remains
+ * unverified. Keeping the old behaviour would need the toolkit thread id recorded at gwin_run_loop
+ * entry and an E_FAIL for every other thread; that is a decision to take deliberately, not a side
+ * effect.
+ *
+ * EXCEPTIONS. No Throwable may escape a slot into a COM vtable. Every slot returns int32_t GwinStatus
+ * (even the ones whose Java target is void, because the JNI turned a pending Throwable into E_FAIL for
+ * those too): GWIN_OK means the out-parameters are written, GWIN_ERR_UPCALL means the target threw and
+ * the Java stub has already reported it through Application.reportException - where
+ * CheckAndClearException sent it - and the provider method then returns the E_FAIL the JNI returned.
+ * A slot that reports GWIN_ERR_UPCALL must still leave its out-parameters as CallXxxMethod left them
+ * (zero), because the C wrote *pRetVal BEFORE it checked for the exception; this library pre-zeroes
+ * every out-parameter it passes, so a stub that writes nothing produces exactly that.
+ *
+ * NULL SLOTS. Both installers copy the struct by value and replace every NULL slot with an internal
+ * no-op that returns GWIN_OK with zeroed out-parameters, so no upcall site tests a slot. What the sites
+ * test is whether a table was installed at all: while this section was additive, no table meant the JNI
+ * arm each site still had; with the JNI deleted it means the E_FAIL that arm answered without a JNIEnv.
+ *
+ * ABI VERSION. These exports and both tables landed additive under GLASS_WIN_ABI_VERSION 5: nothing
+ * bound by WinGlassNative changed its prototype, layout or value, and a bump on its own would break the
+ * facade immediately - it compares gwin_abi_version() with its own ABI_VERSION for exact equality in
+ * both directions. GLASS_WIN_ABI_VERSION WENT 5 -> 6 IN THE CHANGE SET THAT FLIPPED WinAccessible.java
+ * and WinTextRangeProvider.java ONTO THESE TABLES, together with WinGlassNative.ABI_VERSION 5 -> 6 -
+ * the same pairing the view, window and clipboard sections took at their flips. THAT BUMP WAS TAKEN
+ * WITH THIS SECTION'S FLIP, and the pairing is what it protects: a glass.dll without the deleted Java_*
+ * arms now refuses to link against a Java side that installs no table, instead of meeting it and
+ * answering E_FAIL everywhere.
+ *
+ * critical(true) IS FORBIDDEN on every export of this section: gwin_a11y_raise_property_changed calls
+ * across an apartment into UIAutomationCore and can block; gwin_a11y_destroy and
+ * gwin_a11y_text_range_destroy run a destructor that dials a callback slot and therefore re-enters the
+ * JVM; the two create functions and the two installers publish pointers another thread will dial.
+ */
+
+/* An opaque GlassAccessible*: what gwin_a11y_create returns, and also its IRawElementProviderSimple*. */
+typedef void* gwin_accessible_t;
+
+/* An opaque GlassTextRangeProvider*: what gwin_a11y_text_range_create returns, and also its
+ * ITextRangeProvider*. */
+typedef void* gwin_text_range_t;
+
+/*
+ * ---- GwinVariant: the flat form of com.sun.glass.ui.win.WinVariant ----
+ *
+ * The nine fields GlassAccessible::copyVariant read through cached jfieldIDs, plus the two lengths a
+ * flat ABI needs. vt is the VARTYPE that selects the live field; a vt this library does not know
+ * leaves the VARIANT it builds with that vt and no value, exactly as the JNI's switch did. Only VT_I4,
+ * VT_BSTR, VT_BOOL, VT_R8, VT_R8 | VT_ARRAY and VT_UNKNOWN are produced by Java today; VT_I2 and VT_R4
+ * are carried because the C has always handled them.
+ *
+ * A NULL bstr_val / p_dbl_val is Java's null and is DISTINCT from a zero-length block: the JNI's
+ * copyString(NULL) / copyList(NULL) answered E_FAIL while an empty String or double[] answered S_OK,
+ * and that difference reaches the UIA client. bstr_len / p_dbl_count are read only when their pointer
+ * is non-NULL.
+ *
+ * OWNERSHIP, by direction:
+ *   - Filled BY JAVA into an out-parameter (get_property_value, get_attribute_value): the two blocks
+ *     are gwin_alloc-ed by the Java stub and THIS LIBRARY TAKES OWNERSHIP, releasing them with
+ *     gwin_free once copied into the BSTR / SAFEARRAY, on every path including its own failures -
+ *     GwinClipboardCallbacks.fos_serialize's rule, for the same reason: the stub has returned and can
+ *     free nothing.
+ *   - Passed BY JAVA into a downcall (gwin_a11y_raise_property_changed): the CALLER owns the struct
+ *     and both blocks for the duration of the call and frees nothing of this library's; the call is
+ *     synchronous, so a confined Arena is enough.
+ *   - Passed BY THIS LIBRARY into a slot (find_attribute): this library owns it. It is NULL today,
+ *     reproducing the jobject jVal = NULL of GlassTextRangeProvider::FindAttribute ("//TODO VAL TO
+ *     JVAL"); that defect is carried verbatim, not fixed in a migration.
+ *
+ * The layout is natural x64 alignment and has three padding holes. DO NOT HARD-CODE ITS SIZE OR ITS
+ * OFFSETS FROM THIS COMMENT: gwin_sizeof_variant() and gwin_test_variant_offsets() report them.
+ */
+typedef struct GwinVariant {
+    int16_t         vt;           /* VARTYPE; VT_EMPTY (0) when Java had nothing                */
+    int16_t         i_val;        /* VT_I2                                                      */
+    int32_t         l_val;        /* VT_I4                                                      */
+    float           flt_val;      /* VT_R4                                                      */
+    double          dbl_val;      /* VT_R8                                                      */
+    int32_t         bool_val;     /* VT_BOOL: 0 / 1; the C writes VARIANT_FALSE / VARIANT_TRUE  */
+    int64_t         punk_val;     /* VT_UNKNOWN: an IUnknown*, AddRefed by the C; 0 -> E_FAIL   */
+    const uint16_t* bstr_val;     /* VT_BSTR: UTF-16 code units, not NUL-terminated; NULL= null */
+    int32_t         bstr_len;     /* code units in bstr_val                                     */
+    const double*   p_dbl_val;    /* VT_R8 | VT_ARRAY; NULL = null                              */
+    int32_t         p_dbl_count;  /* doubles in p_dbl_val                                       */
+} GwinVariant;
+
+/*
+ * ---- GwinAccessibleCallbacks: the 69 jmethodIDs of WinAccessible._initIDs, plus one disposal ----
+ *
+ * Declaration order IS the _initIDs order, which is the UIA interface order of GlassAccessible.cpp;
+ * it is also the slot numbering gwin_test_fire_accessible_callback uses. The Java target of each slot
+ * is the WinAccessible method named in its comment - the names are the UIA ones and keep their
+ * original capitalisation on the Java side. Every slot: JavaFX application thread except where the
+ * section comment says otherwise, synchronous, re-entrant (a slot may dispose the provider before it
+ * returns), and int32_t 0 / 1 for booleans.
+ *
+ * Blocks handed BACK by a slot (int64_t** / int32_t** / uint16_t** out-parameters) are gwin_alloc-ed
+ * by the Java stub; this library takes ownership and gwin_frees them once copied into the SAFEARRAY or
+ * BSTR, on every path. A NULL block is Java's null: copyList(NULL) and copyString(NULL) answered
+ * E_FAIL, so the provider method does too.
+ */
+typedef struct GwinAccessibleCallbacks {
+    /* ---- IRawElementProviderSimple ---- */
+
+    /* GetPatternProvider(int)->long. *out is a GlassAccessible*, ADDREFED by this library. */
+    int32_t (*get_pattern_provider)(int64_t accessible_id, int32_t pattern_id, int64_t* out);
+
+    /* get_HostRawElementProvider()->long: an HWND, or 0 for a "lightweight" accessible. It is fed to
+     * UiaHostProviderFromHwnd, WHOSE HRESULT IS DELIBERATELY IGNORED (E_INVALIDARG for a NULL hwnd
+     * would break accessibility on Windows 7 - the comment in get_HostRawElementProvider). */
+    int32_t (*get_host_raw_element_provider)(int64_t accessible_id, int64_t* out_hwnd);
+
+    /* GetPropertyValue(int)->WinVariant. Java's null is GWIN_OK with out->vt = VT_EMPTY, which this
+     * library turns into E_FAIL with VT_EMPTY, as copyVariant(NULL) did; GWIN_ERR_UPCALL leaves the
+     * caller's VARIANT UNTOUCHED, as the JNI's early return did. The two paths differ and a UIA client
+     * can tell them apart. */
+    int32_t (*get_property_value)(int64_t accessible_id, int32_t property_id, GwinVariant* out);
+
+    /* ---- IRawElementProviderFragment ---- */
+
+    /* get_BoundingRectangle()->float[4] = left, top, width, height. *out_written is 0 when Java
+     * answered null, and the provider then returns S_OK with the UiaRect UNTOUCHED - what the JNI did
+     * when the jfloatArray was null. Write all four floats or none. */
+    int32_t (*get_bounding_rectangle)(int64_t accessible_id, float* out4, int32_t* out_written);
+
+    /* get_FragmentRoot()->long: a GlassAccessible*, ADDREFED. */
+    int32_t (*get_fragment_root)(int64_t accessible_id, int64_t* out);
+
+    /* GetEmbeddedFragmentRoots()->long[]: GlassAccessible*s, into a VT_UNKNOWN SAFEARRAY whose
+     * SafeArrayPutElement AddRefs each element. */
+    int32_t (*get_embedded_fragment_roots)(int64_t accessible_id, int64_t** out, int32_t* out_count);
+
+    /* GetRuntimeId()->int[]: into a VT_I4 SAFEARRAY. */
+    int32_t (*get_runtime_id)(int64_t accessible_id, int32_t** out, int32_t* out_count);
+
+    /* Navigate(int)->long: a NavigateDirection in, a GlassAccessible* out, ADDREFED. */
+    int32_t (*navigate)(int64_t accessible_id, int32_t direction, int64_t* out);
+
+    /* SetFocus(). */
+    int32_t (*set_focus)(int64_t accessible_id);
+
+    /* ---- IRawElementProviderFragmentRoot ---- */
+
+    /* ElementProviderFromPoint(double,double)->long: a GlassAccessible*, ADDREFED. */
+    int32_t (*element_provider_from_point)(int64_t accessible_id, double x, double y, int64_t* out);
+
+    /* GetFocus()->long: a GlassAccessible*, ADDREFED. */
+    int32_t (*get_focus)(int64_t accessible_id, int64_t* out);
+
+    /* ---- IRawElementProviderAdviseEvents ---- *
+     * THE TWO SLOTS DOCUMENTED TO ARRIVE ON A COM/RPC THREAD (Narrator shutdown); see THREAD above.
+     * property_ids is the raw SAFEARRAY* UIA passed, which the Java body ignores. */
+
+    /* AdviseEventAdded(int,long). */
+    int32_t (*advise_event_added)(int64_t accessible_id, int32_t event_id, int64_t property_ids);
+
+    /* AdviseEventRemoved(int,long). */
+    int32_t (*advise_event_removed)(int64_t accessible_id, int32_t event_id, int64_t property_ids);
+
+    /* ---- IInvokeProvider ---- */
+
+    /* Invoke(). */
+    int32_t (*invoke)(int64_t accessible_id);
+
+    /* ---- ISelectionProvider ---- */
+
+    /* GetSelection()->long[]: GlassAccessible*s, VT_UNKNOWN. */
+    int32_t (*get_selection)(int64_t accessible_id, int64_t** out, int32_t* out_count);
+
+    /* get_CanSelectMultiple()->boolean. */
+    int32_t (*get_can_select_multiple)(int64_t accessible_id, int32_t* out);
+
+    /* get_IsSelectionRequired()->boolean. */
+    int32_t (*get_is_selection_required)(int64_t accessible_id, int32_t* out);
+
+    /* ---- ISelectionItemProvider ---- */
+
+    /* Select(). */
+    int32_t (*select)(int64_t accessible_id);
+
+    /* AddToSelection(). */
+    int32_t (*add_to_selection)(int64_t accessible_id);
+
+    /* RemoveFromSelection(). */
+    int32_t (*remove_from_selection)(int64_t accessible_id);
+
+    /* get_IsSelected()->boolean. */
+    int32_t (*get_is_selected)(int64_t accessible_id, int32_t* out);
+
+    /* get_SelectionContainer()->long: a GlassAccessible*, ADDREFED. */
+    int32_t (*get_selection_container)(int64_t accessible_id, int64_t* out);
+
+    /* ---- IRangeValueProvider ---- */
+
+    /* SetValue(double). */
+    int32_t (*set_value)(int64_t accessible_id, double value);
+
+    /* get_Value()->double. */
+    int32_t (*get_value)(int64_t accessible_id, double* out);
+
+    /* get_IsReadOnly()->boolean. */
+    int32_t (*get_is_read_only)(int64_t accessible_id, int32_t* out);
+
+    /* get_Maximum()->double. */
+    int32_t (*get_maximum)(int64_t accessible_id, double* out);
+
+    /* get_Minimum()->double. */
+    int32_t (*get_minimum)(int64_t accessible_id, double* out);
+
+    /* get_LargeChange()->double. */
+    int32_t (*get_large_change)(int64_t accessible_id, double* out);
+
+    /* get_SmallChange()->double. */
+    int32_t (*get_small_change)(int64_t accessible_id, double* out);
+
+    /* ---- IValueProvider ---- */
+
+    /* SetValueString(String): UTF-16 code units, NOT NUL-terminated, borrowed for the call. The
+     * provider method still returns S_OK for a NULL BSTR without dialling the slot, as it did. */
+    int32_t (*set_value_string)(int64_t accessible_id, const uint16_t* text, int32_t len);
+
+    /* get_ValueString()->String: a gwin_alloc-ed block this library frees; NULL = null -> E_FAIL. */
+    int32_t (*get_value_string)(int64_t accessible_id, uint16_t** out, int32_t* out_len);
+
+    /* ---- ITextProvider ---- */
+
+    /* GetVisibleRanges()->long[]: GlassTextRangeProvider*s, VT_UNKNOWN. */
+    int32_t (*get_visible_ranges)(int64_t accessible_id, int64_t** out, int32_t* out_count);
+
+    /* RangeFromChild(long)->long. child_element is the raw IRawElementProviderSimple* UIA passed.
+     * *out is a GlassTextRangeProvider* and is NOT AddRefed: JavaFX returns a fresh range each time and
+     * the COM caller owns its only reference (the commented-out AddRef in RangeFromChild). */
+    int32_t (*range_from_child)(int64_t accessible_id, int64_t child_element, int64_t* out);
+
+    /* RangeFromPoint(double,double)->long: a GlassTextRangeProvider*, NOT AddRefed. */
+    int32_t (*range_from_point)(int64_t accessible_id, double x, double y, int64_t* out);
+
+    /* get_DocumentRange()->long: a GlassTextRangeProvider*, and THE ONE RANGE GETTER THAT ADDREFS -
+     * WinAccessible caches its document range. Keep the asymmetry. */
+    int32_t (*get_document_range)(int64_t accessible_id, int64_t* out);
+
+    /* get_SupportedTextSelection()->int: a SupportedTextSelection. */
+    int32_t (*get_supported_text_selection)(int64_t accessible_id, int32_t* out);
+
+    /* ---- IGridProvider ---- */
+
+    /* get_ColumnCount()->int. */
+    int32_t (*get_column_count)(int64_t accessible_id, int32_t* out);
+
+    /* get_RowCount()->int. */
+    int32_t (*get_row_count)(int64_t accessible_id, int32_t* out);
+
+    /* GetItem(int,int)->long: row then column; a GlassAccessible*, ADDREFED. */
+    int32_t (*get_item)(int64_t accessible_id, int32_t row, int32_t column, int64_t* out);
+
+    /* ---- IGridItemProvider ---- */
+
+    /* get_Column()->int. */
+    int32_t (*get_column)(int64_t accessible_id, int32_t* out);
+
+    /* get_ColumnSpan()->int. */
+    int32_t (*get_column_span)(int64_t accessible_id, int32_t* out);
+
+    /* get_ContainingGrid()->long: a GlassAccessible*, ADDREFED. */
+    int32_t (*get_containing_grid)(int64_t accessible_id, int64_t* out);
+
+    /* get_Row()->int. */
+    int32_t (*get_row)(int64_t accessible_id, int32_t* out);
+
+    /* get_RowSpan()->int. */
+    int32_t (*get_row_span)(int64_t accessible_id, int32_t* out);
+
+    /* ---- ITableProvider ---- */
+
+    /* GetColumnHeaders()->long[]: GlassAccessible*s, VT_UNKNOWN. */
+    int32_t (*get_column_headers)(int64_t accessible_id, int64_t** out, int32_t* out_count);
+
+    /* GetRowHeaders()->long[]: GlassAccessible*s, VT_UNKNOWN. */
+    int32_t (*get_row_headers)(int64_t accessible_id, int64_t** out, int32_t* out_count);
+
+    /* get_RowOrColumnMajor()->int: a RowOrColumnMajor. */
+    int32_t (*get_row_or_column_major)(int64_t accessible_id, int32_t* out);
+
+    /* ---- ITableItemProvider ---- */
+
+    /* GetColumnHeaderItems()->long[]: GlassAccessible*s, VT_UNKNOWN. */
+    int32_t (*get_column_header_items)(int64_t accessible_id, int64_t** out, int32_t* out_count);
+
+    /* GetRowHeaderItems()->long[]: GlassAccessible*s, VT_UNKNOWN. */
+    int32_t (*get_row_header_items)(int64_t accessible_id, int64_t** out, int32_t* out_count);
+
+    /* ---- IToggleProvider ---- */
+
+    /* Toggle(). */
+    int32_t (*toggle)(int64_t accessible_id);
+
+    /* get_ToggleState()->int: a ToggleState. */
+    int32_t (*get_toggle_state)(int64_t accessible_id, int32_t* out);
+
+    /* ---- IExpandCollapseProvider ---- */
+
+    /* Collapse(). */
+    int32_t (*collapse)(int64_t accessible_id);
+
+    /* Expand(). */
+    int32_t (*expand)(int64_t accessible_id);
+
+    /* get_ExpandCollapseState()->int: an ExpandCollapseState. */
+    int32_t (*get_expand_collapse_state)(int64_t accessible_id, int32_t* out);
+
+    /* ---- ITransformProvider ---- */
+
+    /* get_CanMove()->boolean. */
+    int32_t (*get_can_move)(int64_t accessible_id, int32_t* out);
+
+    /* get_CanResize()->boolean. */
+    int32_t (*get_can_resize)(int64_t accessible_id, int32_t* out);
+
+    /* get_CanRotate()->boolean. */
+    int32_t (*get_can_rotate)(int64_t accessible_id, int32_t* out);
+
+    /* Move(double,double). */
+    int32_t (*move)(int64_t accessible_id, double x, double y);
+
+    /* Resize(double,double). */
+    int32_t (*resize)(int64_t accessible_id, double width, double height);
+
+    /* Rotate(double). */
+    int32_t (*rotate)(int64_t accessible_id, double degrees);
+
+    /* ---- IScrollProvider ---- */
+
+    /* Scroll(int,int): two ScrollAmounts. */
+    int32_t (*scroll)(int64_t accessible_id, int32_t horizontal_amount, int32_t vertical_amount);
+
+    /* SetScrollPercent(double,double). */
+    int32_t (*set_scroll_percent)(int64_t accessible_id, double horizontal_percent,
+                                  double vertical_percent);
+
+    /* get_HorizontallyScrollable()->boolean. */
+    int32_t (*get_horizontally_scrollable)(int64_t accessible_id, int32_t* out);
+
+    /* get_HorizontalScrollPercent()->double. */
+    int32_t (*get_horizontal_scroll_percent)(int64_t accessible_id, double* out);
+
+    /* get_HorizontalViewSize()->double. */
+    int32_t (*get_horizontal_view_size)(int64_t accessible_id, double* out);
+
+    /* get_VerticallyScrollable()->boolean. */
+    int32_t (*get_vertically_scrollable)(int64_t accessible_id, int32_t* out);
+
+    /* get_VerticalScrollPercent()->double. */
+    int32_t (*get_vertical_scroll_percent)(int64_t accessible_id, double* out);
+
+    /* get_VerticalViewSize()->double. */
+    int32_t (*get_vertical_view_size)(int64_t accessible_id, double* out);
+
+    /* ---- IScrollItemProvider ---- */
+
+    /* ScrollIntoView(). */
+    int32_t (*scroll_into_view)(int64_t accessible_id);
+
+    /* ---- Lifetime ---- *
+     * No jmethodID behind this one: it fires from ~GlassAccessible, exactly where DeleteGlobalRef
+     * stood, i.e. when the LAST COM reference went - not at WinAccessible.dispose(). It is the only
+     * place Java may drop the registry entry for accessible_id (see IDENTITY), and it can arrive on
+     * the COM/RPC thread that dropped that reference. void, and it must not throw. */
+    void (*accessible_disposed)(int64_t accessible_id);
+} GwinAccessibleCallbacks;   /* 70 pointers */
+
+#if defined(__cplusplus)
+static_assert(sizeof(GwinAccessibleCallbacks) == 70 * sizeof(void*),
+              "GwinAccessibleCallbacks must be 70 pointers");
+#elif defined(__STDC_VERSION__) && __STDC_VERSION__ >= 201112L
+_Static_assert(sizeof(GwinAccessibleCallbacks) == 70 * sizeof(void*),
+               "GwinAccessibleCallbacks must be 70 pointers");
+#else
+typedef char gwin_accessible_callbacks_size_check[(sizeof(GwinAccessibleCallbacks)
+                                                   == 70 * sizeof(void*)) ? 1 : -1];
+#endif
+
+/*
+ * ---- GwinTextRangeCallbacks: the 18 jmethodIDs of WinTextRangeProvider._initIDs, plus one disposal ----
+ *
+ * Declaration order IS the _initIDs order and the slot numbering of
+ * gwin_test_fire_text_range_callback. Same thread, NULL-slot, ownership and exception rules as
+ * GwinAccessibleCallbacks.
+ *
+ * THE THREE SIBLING-RANGE SLOTS (compare, compare_endpoints, move_endpoint_by_range) carry the id of
+ * ANOTHER range. This library keeps the guard it had: when UIA passes a NULL range, or one with no
+ * Java peer (id 0), it answers *pRetVal = FALSE resp. nothing, S_OK, WITHOUT dialling the slot. It
+ * still reinterpret-casts the ITextRangeProvider* it was given WITHOUT a QueryInterface check, so a
+ * foreign range would be type-confused - pre-existing, carried verbatim, not fixed here.
+ */
+typedef struct GwinTextRangeCallbacks {
+    /* Clone()->long: a GlassTextRangeProvider*, NOT AddRefed (the caller owns the only reference). */
+    int32_t (*clone)(int64_t range_id, int64_t* out);
+
+    /* Compare(WinTextRangeProvider)->boolean. */
+    int32_t (*compare)(int64_t range_id, int64_t other_range_id, int32_t* out);
+
+    /* CompareEndpoints(int,WinTextRangeProvider,int)->int. */
+    int32_t (*compare_endpoints)(int64_t range_id, int32_t endpoint, int64_t other_range_id,
+                                 int32_t target_endpoint, int32_t* out);
+
+    /* ExpandToEnclosingUnit(int): a TextUnit. */
+    int32_t (*expand_to_enclosing_unit)(int64_t range_id, int32_t unit);
+
+    /* FindAttribute(int,WinVariant,boolean)->long. val IS ALWAYS NULL - the C never converted the
+     * VARIANT UIA passed ("//TODO VAL TO JVAL"), and a migration carries that verbatim. *out is a
+     * GlassTextRangeProvider*, NOT AddRefed. backward is UIA's BOOL widened - see the BOOL note on
+     * find_text. */
+    int32_t (*find_attribute)(int64_t range_id, int32_t attribute_id, const GwinVariant* val,
+                              int32_t backward, int64_t* out);
+
+    /* FindText(String,boolean,boolean)->long. text is the BSTR's SysStringLen code units, borrowed
+     * for the call and not NUL-terminated. *out is a GlassTextRangeProvider*, NOT AddRefed.
+     * BOOL, the note for backward / ignore_case here and for find_attribute's backward and
+     * scroll_into_view's align_to_top: the BOOL crosses as the full int32_t and the Java stub tests
+     * != 0; the JNI of commit 033187ad90 passed a jboolean through CallVoidMethod varargs, where only
+     * the low byte is read, so a non-canonical BOOL such as 0x100 was false under JNI and is true here.
+     * UIA canonicalises BOOL to 0/1 and only find_text's ignore_case has its value used, so no input
+     * can distinguish the two. */
+    int32_t (*find_text)(int64_t range_id, const uint16_t* text, int32_t len, int32_t backward,
+                         int32_t ignore_case, int64_t* out);
+
+    /* GetAttributeValue(int)->WinVariant. Same null / throw rules as get_property_value. */
+    int32_t (*get_attribute_value)(int64_t range_id, int32_t attribute_id, GwinVariant* out);
+
+    /* GetBoundingRectangles()->double[]: into a VT_R8 SAFEARRAY. */
+    int32_t (*get_bounding_rectangles)(int64_t range_id, double** out, int32_t* out_count);
+
+    /* GetEnclosingElement()->long: a GlassAccessible*, ADDREFED. */
+    int32_t (*get_enclosing_element)(int64_t range_id, int64_t* out);
+
+    /* GetText(int)->String: a gwin_alloc-ed block this library frees; NULL = null -> E_FAIL. */
+    int32_t (*get_text)(int64_t range_id, int32_t max_length, uint16_t** out, int32_t* out_len);
+
+    /* Move(int,int)->int: a TextUnit and a count. */
+    int32_t (*move)(int64_t range_id, int32_t unit, int32_t count, int32_t* out);
+
+    /* MoveEndpointByUnit(int,int,int)->int. */
+    int32_t (*move_endpoint_by_unit)(int64_t range_id, int32_t endpoint, int32_t unit, int32_t count,
+                                     int32_t* out);
+
+    /* MoveEndpointByRange(int,WinTextRangeProvider,int). */
+    int32_t (*move_endpoint_by_range)(int64_t range_id, int32_t endpoint, int64_t other_range_id,
+                                      int32_t target_endpoint);
+
+    /* Select(). */
+    int32_t (*select)(int64_t range_id);
+
+    /* AddToSelection(). */
+    int32_t (*add_to_selection)(int64_t range_id);
+
+    /* RemoveFromSelection(). */
+    int32_t (*remove_from_selection)(int64_t range_id);
+
+    /* ScrollIntoView(boolean). align_to_top is UIA's BOOL widened - see the BOOL note on find_text;
+     * the Java target does not read its value. */
+    int32_t (*scroll_into_view)(int64_t range_id, int32_t align_to_top);
+
+    /* GetChildren()->long[]: GlassAccessible*s, VT_UNKNOWN. */
+    int32_t (*get_children)(int64_t range_id, int64_t** out, int32_t* out_count);
+
+    /* From ~GlassTextRangeProvider, where DeleteGlobalRef stood - the accessible_disposed rules, for
+     * the range registry. */
+    void (*range_disposed)(int64_t range_id);
+} GwinTextRangeCallbacks;   /* 19 pointers */
+
+#if defined(__cplusplus)
+static_assert(sizeof(GwinTextRangeCallbacks) == 19 * sizeof(void*),
+              "GwinTextRangeCallbacks must be 19 pointers");
+#elif defined(__STDC_VERSION__) && __STDC_VERSION__ >= 201112L
+_Static_assert(sizeof(GwinTextRangeCallbacks) == 19 * sizeof(void*),
+               "GwinTextRangeCallbacks must be 19 pointers");
+#else
+typedef char gwin_text_range_callbacks_size_check[(sizeof(GwinTextRangeCallbacks)
+                                                   == 19 * sizeof(void*)) ? 1 : -1];
+#endif
+
+/*
+ * sizeof probes, beside gwin_sizeof_view_callbacks: they return the real sizeof and only DOCUMENT
+ * today's value, so appending a slot or a GwinVariant field fails a test instead of shifting a layout
+ * silently.
+ */
+GLASS_WIN_EXPORT int32_t gwin_sizeof_accessible_callbacks(void);   /* == 70 * sizeof(void*) today */
+GLASS_WIN_EXPORT int32_t gwin_sizeof_text_range_callbacks(void);   /* == 19 * sizeof(void*) today */
+GLASS_WIN_EXPORT int32_t gwin_sizeof_variant(void);                /* == 72 on x64 today          */
+
+/*
+ * Install (cb == NULL clears) the accessible resp. text-range callback table. Copied by value, NULL
+ * slots replaced by no-ops (see NULL SLOTS), so the caller may free the struct; the stubs in it must
+ * outlive the process - Arena.global() - because there is no point at which this library can promise
+ * that no further UIA call will arrive, and a call can arrive on a thread the JVM has never seen.
+ * Last call wins, no lock. NO void* user: the identity is per provider, not per table. Always GWIN_OK.
+ *
+ * Install both BEFORE the first gwin_a11y_create. While neither is installed every upcall site answers
+ * E_FAIL - the JNI arm it had before this section existed answered that without a JNIEnv, and the arm
+ * itself is gone. Both tables go in together, so the two halves can never disagree.
+ */
+GLASS_WIN_EXPORT int32_t gwin_a11y_set_callbacks(const GwinAccessibleCallbacks* cb);
+GLASS_WIN_EXPORT int32_t gwin_a11y_text_range_set_callbacks(const GwinTextRangeCallbacks* cb);
+
+/*
+ * new GlassAccessible(accessible_id): the body of Java_com_sun_glass_ui_win_WinAccessible__1createGlassAccessible
+ * without its jobject. The object starts at refcount 1 - that one reference belongs to the Java peer
+ * and gwin_a11y_destroy releases it - and bumps GlassApplication's live-accessible count, which the
+ * Windows 7 + Narrator extra-pump workaround in gwin_run_loop reads. No OS call and no thread marshal,
+ * so it works without a toolkit, exactly as gwin_view_create does. NULL only when the allocation
+ * failed; WinAccessible turned that into RuntimeException("could not create platform accessible").
+ * accessible_id must be non-zero (see IDENTITY) and must stay valid until accessible_disposed.
+ *
+ * THE RETURNED POINTER IS ALSO THE PROVIDER'S IRawElementProviderSimple* - the first base class - and
+ * that is the value View.getAccessible() hands to UiaReturnRawElementProvider. Pre-existing fragility
+ * of this library, recorded here, not introduced here.
+ */
+GLASS_WIN_EXPORT gwin_accessible_t gwin_a11y_create(int64_t accessible_id);
+
+/*
+ * GlassAccessible::Release: drops the Java peer's reference. NOT a delete - UIA, a live range, a
+ * SAFEARRAY element or a VARIANT may still hold references, and the object stays alive, keeps serving
+ * provider calls (WinAccessible's isDisposed() guards answer them) and fires accessible_disposed only
+ * when the LAST one goes. `acc` MUST NOT BE NULL: the JNI entry point this replaces dereferenced it
+ * unconditionally and WinAccessible guarded with `if (peer != 0L)`; that split stays as it is.
+ */
+GLASS_WIN_EXPORT void gwin_a11y_destroy(gwin_accessible_t acc);
+
+/*
+ * new GlassTextRangeProvider(range_id) owned by `acc`: the body of
+ * Java_com_sun_glass_ui_win_WinTextRangeProvider__1createTextRangeProvider without its jobject. The
+ * range AddRefs its accessible, so a live range pins it. Refcount 1, released by
+ * gwin_a11y_text_range_destroy. NULL when acc is NULL (as the JNI answered) or the allocation failed -
+ * WinTextRangeProvider does not check for 0 today. range_id must be non-zero and must stay valid until
+ * range_disposed. The returned pointer is also the range's ITextRangeProvider*.
+ */
+GLASS_WIN_EXPORT gwin_text_range_t gwin_a11y_text_range_create(gwin_accessible_t acc,
+                                                               int64_t range_id);
+
+/*
+ * GlassTextRangeProvider::Release, with gwin_a11y_destroy's rules: not a delete, range_disposed fires
+ * when the last reference goes, and the accessible it pinned is released then. `range` MUST NOT BE
+ * NULL - neither the JNI entry point nor WinTextRangeProvider.dispose() checks, and a range that
+ * failed to be created crashes here today. Carried as it is; fixing it is a separate change.
+ */
+GLASS_WIN_EXPORT void gwin_a11y_text_range_destroy(gwin_text_range_t range);
+
+/*
+ * UiaRaiseAutomationPropertyChangedEvent(acc, property_id, old_value, new_value), the one UIA entry
+ * point of this section that keeps a C body: it builds the two VARIANTs with the same copyVariant
+ * marshalling the inbound direction needs anyway (see the section comment). `acc` is reinterpret-cast
+ * to its IRawElementProviderSimple*, as the JNI did. Returns the HRESULT, sign-extended to int64_t;
+ * the first VARIANT that cannot be built short-circuits with ITS HRESULT AND NO OS CALL IS MADE, which
+ * is what the JNI returned. Both GwinVariants are owned by the caller (see OWNERSHIP) and are read
+ * only during the call.
+ *
+ * Carried verbatim from the JNI body, deliberately: neither VARIANT is VariantClear-ed, so a VT_BSTR
+ * property change leaks its BSTR and a failing second conversion leaks the first. Behaviour-neutral
+ * beats tidy in a migration; fix it in its own change with its own test.
+ */
+GLASS_WIN_EXPORT int64_t gwin_a11y_raise_property_changed(gwin_accessible_t acc, int32_t property_id,
+                                                          const GwinVariant* old_value,
+                                                          const GwinVariant* new_value);
+
+/*
+ * TEST HOOKS, unconditionally exported, never called by production code and never bound by
+ * WinGlassNative - gwin_test_fire_callback for the two tables of this section. With 89 slots they are
+ * the only automated check that a FunctionDescriptor agrees with its prototype: the sizeof probes see
+ * only pointers, and a descriptor with one parameter too many silently shifts every following argument
+ * by a stack slot on x64 - no crash, no exception, a wrong number in a screen reader.
+ *
+ * Each fires slot `slot` of ITS table, numbered in declaration order, with a fixed pattern: the int32
+ * in-parameters take 1001, 1002, ... in order, the doubles 1.5 and 2.5, a text in-parameter the two
+ * code units { 0x0041, 0x0042 } with len 2, a SAFEARRAY* in-parameter 0x100000002 (bits above 32 set,
+ * never dereferenced), find_attribute's GwinVariant* NULL as production passes it, and every boolean 1.
+ * Returns what the slot returned - the int32 status, widened; 0 for the void disposal slots and for a
+ * slot installed as NULL. GWIN_ERR_INVALID_ARG for an unknown slot, when that table is not installed,
+ * or when `out` is NULL for a slot that has an out-parameter.
+ *
+ * `out` is a caller-owned block of at least gwin_sizeof_variant() bytes, 8-byte aligned, pre-filled by
+ * the test with a sentinel. It receives the slot's out-parameters:
+ *     - one scalar out-parameter (int64_t, double or int32_t): at offset 0, in its own type;
+ *     - a block out-parameter: the POINTER as int64_t at offset 0 and the count as int32_t at offset
+ *       8. THE BLOCK IS NOT FREED BY THE HOOK - the caller owns it and must gwin_free it, unlike
+ *       gwin_test_fire_clipboard_callback, whose production path frees;
+ *     - get_property_value / get_attribute_value: the GwinVariant at offset 0, and its two blocks are
+ *       likewise the caller's to gwin_free;
+ *     - get_bounding_rectangle: four floats at offset 0 and *out_written as int32_t at offset 16.
+ * Slots without an out-parameter ignore `out` and accept NULL.
+ *
+ * WITH THE PRODUCTION TABLE INSTALLED both hooks reach the WinAccessible / WinTextRangeProvider that
+ * the id resolves to and will run real code on it - fire them at an id no registry holds, or through a
+ * recording table.
+ */
+GLASS_WIN_EXPORT int64_t gwin_test_fire_accessible_callback(int32_t slot, int64_t accessible_id,
+                                                            void* out);
+GLASS_WIN_EXPORT int64_t gwin_test_fire_text_range_callback(int32_t slot, int64_t range_id,
+                                                            void* out);
+
+/*
+ * TEST HOOK, unconditionally exported, never called by production code. Writes the offsetof of the
+ * ELEVEN GwinVariant fields, in declaration order (vt, i_val, l_val, flt_val, dbl_val, bool_val,
+ * punk_val, bstr_val, bstr_len, p_dbl_val, p_dbl_count), so that a Java StructLayout is asserted
+ * against the compiler's real layout instead of against a comment. Eleven, not the nine WinVariant
+ * fields of the inventory: the two lengths are part of the struct and a probe that skipped them would
+ * not pin it. Returns GWIN_OK, or GWIN_ERR_INVALID_ARG when out11 is NULL (nothing written).
+ */
+GLASS_WIN_EXPORT int32_t gwin_test_variant_offsets(int32_t* out11);
 
 #ifdef __cplusplus
 }

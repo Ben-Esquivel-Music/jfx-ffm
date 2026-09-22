@@ -412,31 +412,9 @@ public final class WinGlassNativeShim {
         }
     }
 
-    /* The JNI exception sink under an FFM downcall (CheckAndClearException, GlassAccessibleJni.cpp). */
-
     /**
-     * {@code gwin_test_report_exception_in_downcall()}, called through an FFM downcall - the frame shape
-     * the bug needed: the nearest Java frame below the native code is {@code java.base}'s boot-loaded
-     * downcall stub, so a JNI {@code FindClass} of a javafx.graphics class fails there. The hook throws a
-     * {@code RuntimeException} with its own name as the message and runs {@code CheckAndClearException},
-     * which must hand it to {@code Application.reportException} - the calling thread's
-     * {@code UncaughtExceptionHandler} - and leave nothing pending.
-     *
-     * @return 1 when an exception was pending and handled (which does not say it was delivered), 0 when
-     *         nothing was pending, {@code GWIN_ERR_INVALID_ARG} without a {@code JavaVM} or an attached thread
-     */
-    public static int reportExceptionInDowncall() {
-        try {
-            return (int) ExceptionSinkHook.REPORT.invokeExact();
-        } catch (Throwable t) {
-            throw new AssertionError("gwin_test_report_exception_in_downcall could not be called", t);
-        }
-    }
-
-    /**
-     * Initializes {@code WinAccessible}, whose static initializer's {@code _initIDs} - a real JNI native
-     * method, where {@code FindClass} sees javafx.graphics - caches {@code Application} and its
-     * {@code reportException} id for {@code CheckAndClearException}.
+     * Initializes {@code WinAccessible}, whose static initializer installs the two accessibility callback
+     * tables - where {@code _initIDs} stood until the nine accessibility natives became downcalls.
      *
      * @return {@code null}, or what prevented the initialization
      */
@@ -446,24 +424,6 @@ public final class WinGlassNativeShim {
             return null;
         } catch (ClassNotFoundException | LinkageError e) {
             return e;
-        }
-    }
-
-    /** The hook of {@link #reportExceptionInDowncall()}; shim-only, never bound by the facade. */
-    private static final class ExceptionSinkHook {
-
-        /** {@code int32_t gwin_test_report_exception_in_downcall(void)}. */
-        private static final MethodHandle REPORT = bind();
-
-        private ExceptionSinkHook() {
-        }
-
-        @SuppressWarnings("restricted")
-        private static MethodHandle bind() {
-            String name = "gwin_test_report_exception_in_downcall";
-            MemorySegment symbol = SymbolLookup.loaderLookup().find(name).orElseThrow(
-                    () -> new UnsatisfiedLinkError("missing native symbol: " + name + " in glass"));
-            return Linker.nativeLinker().downcallHandle(symbol, FunctionDescriptor.of(JAVA_INT));
         }
     }
 
@@ -3888,5 +3848,617 @@ public final class WinGlassNativeShim {
             bounded(out, JAVA_INT.byteSize()).set(JAVA_INT, 0, RECORDING_BUTTON);
             return RECORDING_STATUS;
         }
+    }
+
+    /* ==== Accessibility: the two UI Automation provider tables ======================================= */
+
+
+    /** Forces {@code WinTextRangeProvider}'s initializer, which installs both accessibility tables. */
+    public static Throwable initializeWinTextRangeProvider() {
+        try {
+            Class.forName("com.sun.glass.ui.win.WinTextRangeProvider", true,
+                    WinGlassNativeShim.class.getClassLoader());
+            return null;
+        } catch (ClassNotFoundException | LinkageError e) {
+            return e;
+        }
+    }
+
+    /** Whether {@code WinGlassNative.installAccessibilityCallbacks} has run in this JVM. */
+    public static boolean accessibilityCallbacksInstalled() {
+        return WinGlassNative.accessibilityCallbacksInstalled();
+    }
+
+    /** The 89 installed stubs, accessible slots then text-range slots. */
+    public static List<MemorySegment> installedAccessibilityCallbackStubs() {
+        return WinGlassNative.installedAccessibilityCallbackStubs();
+    }
+
+    /**
+     * Binds the two {@code UIAutomationCore} functions, so that a test class which asserts
+     * {@link #boundSymbols()} sees them in a position that does not depend on which test class ran
+     * first: every class that forces this one forces the four older lazy holders before it.
+     */
+    public static void bindAccessibilitySymbols() {
+        WinGlassNative.uiaClientsAreListening();
+    }
+
+    /** Whether the {@code UIAutomationCore} holder has been forced in this JVM. */
+    public static boolean uiaSymbolsBound() {
+        return boundSymbols().contains("UIAutomationCore!UiaClientsAreListening");
+    }
+
+    /** {@code gwin_sizeof_accessible_callbacks()}. */
+    public static int sizeOfAccessibleCallbacks() {
+        return WinGlassNative.sizeOfAccessibleCallbacks();
+    }
+
+    /** {@code gwin_sizeof_text_range_callbacks()}. */
+    public static int sizeOfTextRangeCallbacks() {
+        return WinGlassNative.sizeOfTextRangeCallbacks();
+    }
+
+    /** {@code gwin_sizeof_variant()}. */
+    public static int sizeOfVariant() {
+        return WinGlassNative.sizeOfVariant();
+    }
+
+    /** {@code GWIN_VARIANT_LAYOUT.byteSize()} - what the Java side believes {@code GwinVariant} is. */
+    public static long variantLayoutSize() {
+        return WinGlassNative.GWIN_VARIANT_LAYOUT.byteSize();
+    }
+
+    /** The eleven {@code GwinVariant} field names, in declaration order. */
+    public static final List<String> VARIANT_FIELDS = List.of("vt", "i_val", "l_val", "flt_val", "dbl_val",
+            "bool_val", "punk_val", "bstr_val", "bstr_len", "p_dbl_val", "p_dbl_count");
+
+    /** The offset of every {@link #VARIANT_FIELDS} entry in {@code GWIN_VARIANT_LAYOUT}. */
+    public static int[] variantLayoutOffsets() {
+        int[] offsets = new int[VARIANT_FIELDS.size()];
+        for (int i = 0; i < offsets.length; i++) {
+            offsets[i] = (int) WinGlassNative.GWIN_VARIANT_LAYOUT.byteOffset(
+                    PathElement.groupElement(VARIANT_FIELDS.get(i)));
+        }
+        return offsets;
+    }
+
+    /** {@code gwin_test_variant_offsets}: the eleven offsets the C compiler gave the struct. */
+    public static int[] variantOffsetsFromC() {
+        try (Arena arena = Arena.ofConfined()) {
+            MemorySegment out = arena.allocate(JAVA_INT, VARIANT_FIELDS.size());
+            int status = (int) Accessibility.VARIANT_OFFSETS.invokeExact(out);
+            if (status != WinGlassNative.GWIN_OK) {
+                throw new AssertionError("gwin_test_variant_offsets answered " + status);
+            }
+            return out.toArray(JAVA_INT);
+        } catch (Throwable t) {
+            throw new AssertionError("gwin_test_variant_offsets could not be called", t);
+        }
+    }
+
+    /** The slot names of {@code GwinAccessibleCallbacks}, in declaration order. */
+    public static List<String> accessibleSlotNames() {
+        return WinGlassNative.ACCESSIBLE_SLOT_NAMES;
+    }
+
+    /** The slot names of {@code GwinTextRangeCallbacks}, in declaration order. */
+    public static List<String> textRangeSlotNames() {
+        return WinGlassNative.TEXT_RANGE_SLOT_NAMES;
+    }
+
+    /** How many accessibles the {@code WinAccessible} registry holds. */
+    public static int accessibleRegistrySize() {
+        return WinAccessible.accessibleRegistrySize();
+    }
+
+    /** How many ranges the {@code WinTextRangeProvider} registry holds. */
+    public static int rangeRegistrySize() {
+        return WinTextRangeProvider.rangeRegistrySize();
+    }
+
+    /*
+     * Real registered peers, built with no toolkit. Both constructors publish their registry entry and
+     * then call gwin_a11y_create / gwin_a11y_text_range_create, which only allocate a COM object with
+     * that id - no window, no message pump - so the id registries that replaced NewGlobalRef and
+     * DeleteGlobalRef can be driven end to end here. The types are package-private, so they cross as
+     * Object, exactly as variant() does. WinAccessible's constructor, dispose() and
+     * getNativeAccessible() all call Application.checkEventThread(), so everything that can reach one
+     * runs through asEventThread - the rule fireCallback already follows for the view table.
+     */
+
+    /** A real {@code WinAccessible}. The caller must {@link #disposeAccessible} it. */
+    public static Object createRegisteredAccessible() {
+        return asEventThread(WinAccessible::new);
+    }
+
+    /** The id {@link #createRegisteredAccessible}'s peer is registered under; 0 if it never was. */
+    public static long accessibleIdOf(Object accessible) {
+        return ((WinAccessible) accessible).accessibleId();
+    }
+
+    /**
+     * {@code WinAccessible.dispose()}: a COM {@code Release}, not a delete - the registry entry goes
+     * when the library fires {@code accessible_disposed}, which a live range can defer.
+     */
+    public static void disposeAccessible(Object accessible) {
+        asEventThread(() -> {
+            ((WinAccessible) accessible).dispose();
+            return null;
+        });
+    }
+
+    /** A real {@code WinTextRangeProvider} on {@code accessible}, which it pins. */
+    public static Object createRegisteredRange(Object accessible) {
+        return asEventThread(() -> new WinTextRangeProvider((WinAccessible) accessible));
+    }
+
+    /** The id {@link #createRegisteredRange}'s peer is registered under; 0 if it never was. */
+    public static long rangeIdOf(Object range) {
+        return ((WinTextRangeProvider) range).rangeId();
+    }
+
+    /** {@code WinTextRangeProvider.dispose()}: the {@code Release} that lets {@code range_disposed} fire. */
+    public static void disposeRange(Object range) {
+        ((WinTextRangeProvider) range).dispose();
+    }
+
+    /** {@code gwin_a11y_create}: a {@code GlassAccessible} with no toolkit and no Java peer behind the id. */
+    public static long createAccessible(long accessibleId) {
+        return WinGlassNative.createAccessible(accessibleId);
+    }
+
+    /** {@code gwin_a11y_destroy}. */
+    public static void destroyAccessible(long accessible) {
+        WinGlassNative.destroyAccessible(accessible);
+    }
+
+    /** {@code gwin_a11y_text_range_create}. */
+    public static long createTextRange(long accessible, long rangeId) {
+        return WinGlassNative.createTextRange(accessible, rangeId);
+    }
+
+    /** {@code gwin_a11y_text_range_destroy}. */
+    public static void destroyTextRange(long range) {
+        WinGlassNative.destroyTextRange(range);
+    }
+
+    /** {@code UIAutomationCore!UiaClientsAreListening}. */
+    public static boolean uiaClientsAreListening() {
+        return WinGlassNative.uiaClientsAreListening();
+    }
+
+    /** {@code UIAutomationCore!UiaRaiseAutomationEvent}, the {@code HRESULT} sign-extended. */
+    public static long raiseAutomationEvent(long provider, int eventId) {
+        return WinGlassNative.raiseAutomationEvent(provider, eventId);
+    }
+
+    /** {@code gwin_a11y_raise_property_changed}, the {@code HRESULT} sign-extended. */
+    public static long raiseAutomationPropertyChangedEvent(long provider, int propertyId, Object oldValue,
+                                                           Object newValue) {
+        return WinGlassNative.raiseAutomationPropertyChangedEvent(provider, propertyId,
+                (WinVariant) oldValue, (WinVariant) newValue);
+    }
+
+    /** A {@code WinVariant} built out of the test's own values, so that a test need not see the class. */
+    public static Object variant(short vt, int lVal, String bstrVal, boolean boolVal, double dblVal,
+                                 double[] pDblVal, long punkVal) {
+        WinVariant variant = new WinVariant();
+        variant.vt = vt;
+        variant.lVal = lVal;
+        variant.bstrVal = bstrVal;
+        variant.boolVal = boolVal;
+        variant.dblVal = dblVal;
+        variant.pDblVal = pDblVal;
+        variant.punkVal = punkVal;
+        return variant;
+    }
+
+    /** What firing an accessibility slot recorded: the status it answered and every argument it saw. */
+    public record RecordedSlot(long returned, List<Object> arguments) {
+    }
+
+    /**
+     * Installs a table of <em>recording</em> stubs - one per {@code FunctionDescriptor} of the facade, so
+     * what is proved is those descriptors and not a copy - fires {@code slot} of the accessible table
+     * through {@code gwin_test_fire_accessible_callback}, and restores the production tables in a
+     * {@code finally}. With 89 slots this is the only automated check that a descriptor agrees with its
+     * prototype: a {@code sizeof} probe sees only pointers, and one parameter too many silently shifts
+     * every following argument by a stack slot on x64.
+     */
+    public static synchronized RecordedSlot fireAccessibleIntoRecordingTable(int slot, long accessibleId,
+                                                                             MemorySegment out) {
+        return Accessibility.fireIntoRecordingTable(true, slot, accessibleId, out);
+    }
+
+    /** {@link #fireAccessibleIntoRecordingTable} for {@code gwin_test_fire_text_range_callback}. */
+    public static synchronized RecordedSlot fireTextRangeIntoRecordingTable(int slot, long rangeId,
+                                                                            MemorySegment out) {
+        return Accessibility.fireIntoRecordingTable(false, slot, rangeId, out);
+    }
+
+    /**
+     * Fires {@code slot} against the <em>production</em> table, which reaches the registry and runs real
+     * {@code WinAccessible} code - so a test must fire at an id no registry holds, or accept what the
+     * peer does.
+     */
+    public static long fireAccessibleCallback(int slot, long accessibleId, MemorySegment out) {
+        try {
+            return (long) Accessibility.FIRE_ACCESSIBLE.invokeExact(slot, accessibleId, out);
+        } catch (Throwable t) {
+            throw new AssertionError("gwin_test_fire_accessible_callback could not be called", t);
+        }
+    }
+
+    /**
+     * {@link #fireAccessibleCallback} with the calling thread made the event thread for the duration,
+     * as {@link #fireCallback} is for the view table: a slot that resolves to a registered peer runs
+     * real {@code WinAccessible} code, and {@code getNativeAccessible()} - which {@code isDisposed()}
+     * calls, so almost every provider method reaches it - calls {@code Application.checkEventThread()}.
+     */
+    public static long fireAccessibleCallbackAsEventThread(int slot, long accessibleId, MemorySegment out) {
+        return asEventThread(() -> fireAccessibleCallback(slot, accessibleId, out));
+    }
+
+    /** {@link #fireAccessibleCallback} for the text-range table. */
+    public static long fireTextRangeCallback(int slot, long rangeId, MemorySegment out) {
+        try {
+            return (long) Accessibility.FIRE_TEXT_RANGE.invokeExact(slot, rangeId, out);
+        } catch (Throwable t) {
+            throw new AssertionError("gwin_test_fire_text_range_callback could not be called", t);
+        }
+    }
+
+    /**
+     * Installs a table whose every slot throws, fires {@code slot}, and restores the production tables.
+     * The status the library reports back is what a provider method turns into {@code E_FAIL}, and the
+     * {@code Throwable} must have reached {@code Application.reportException} - the calling thread's
+     * uncaught-exception handler - exactly as {@code CheckAndClearException} delivered it.
+     */
+    public static synchronized long fireAccessibleIntoThrowingTable(int slot, long accessibleId,
+                                                                    MemorySegment out) {
+        return Accessibility.fireIntoThrowingTable(slot, accessibleId, out);
+    }
+
+    /** The message the throwing table's targets give their {@code RuntimeException}. */
+    public static final String THROWING_SLOT_MESSAGE = "accessibility slot target threw";
+
+    /**
+     * Destroys {@code accessible} with the recording tables installed, so that the
+     * {@code accessible_disposed} the destructor fires is observed. Restores the production tables.
+     */
+    public static synchronized List<Object> destroyAccessibleRecordingDisposal(long accessible) {
+        return Accessibility.recordDestroy(() -> WinGlassNative.destroyAccessible(accessible));
+    }
+
+    /** {@link #destroyAccessibleRecordingDisposal} for {@code gwin_a11y_text_range_destroy}. */
+    public static synchronized List<Object> destroyTextRangeRecordingDisposal(long range) {
+        return Accessibility.recordDestroy(() -> WinGlassNative.destroyTextRange(range));
+    }
+
+    /*
+     * Driving the provider in process, through its own COM vtable: the returned gwin_a11y_create handle
+     * IS the object's IRawElementProviderSimple*, so the first machine word is the vtable and slots 3, 4
+     * and 5 are get_ProviderOptions, GetPatternProvider and GetPropertyValue after the three IUnknown
+     * entries. That is the real C body, the real upcall table and the real HRESULT - the only way to see
+     * a provider method run without a UI Automation client. The DWNative precedent for calling a COM
+     * vtable through FFM is in com.sun.javafx.font.directwrite.
+     */
+
+    /** {@code get_ProviderOptions} (vtable slot 3): {@code {HRESULT, options}}. */
+    public static int[] providerGetProviderOptions(long provider) {
+        try (Arena arena = Arena.ofConfined()) {
+            MemorySegment out = arena.allocate(JAVA_INT);
+            out.set(JAVA_INT, 0, -1);
+            int hr = (int) Accessibility.vtableSlot(provider, 3,
+                    FunctionDescriptor.of(JAVA_INT, ADDRESS, ADDRESS))
+                    .invokeExact(MemorySegment.ofAddress(provider), out);
+            return new int[] {hr, out.get(JAVA_INT, 0)};
+        } catch (Throwable t) {
+            throw new AssertionError("get_ProviderOptions could not be called", t);
+        }
+    }
+
+    /** {@code GetPatternProvider(int)} (vtable slot 4): {@code {HRESULT, the IUnknown* it answered}}. */
+    public static long[] providerGetPatternProvider(long provider, int patternId) {
+        try (Arena arena = Arena.ofConfined()) {
+            MemorySegment out = arena.allocate(ADDRESS);
+            out.set(ADDRESS, 0, MemorySegment.ofAddress(0xDEADL));
+            int hr = (int) Accessibility.vtableSlot(provider, 4,
+                    FunctionDescriptor.of(JAVA_INT, ADDRESS, JAVA_INT, ADDRESS))
+                    .invokeExact(MemorySegment.ofAddress(provider), patternId, out);
+            return new long[] {hr, out.get(ADDRESS, 0).address()};
+        } catch (Throwable t) {
+            throw new AssertionError("GetPatternProvider could not be called", t);
+        }
+    }
+
+    /** {@code GetPropertyValue(int)} (vtable slot 5): the {@code HRESULT}. */
+    public static int providerGetPropertyValue(long provider, int propertyId) {
+        try (Arena arena = Arena.ofConfined()) {
+            MemorySegment out = arena.allocate(24);
+            return (int) Accessibility.vtableSlot(provider, 5,
+                    FunctionDescriptor.of(JAVA_INT, ADDRESS, JAVA_INT, ADDRESS))
+                    .invokeExact(MemorySegment.ofAddress(provider), propertyId, out);
+        } catch (Throwable t) {
+            throw new AssertionError("GetPropertyValue could not be called", t);
+        }
+    }
+
+    /**
+     * The three shim-only accessibility hooks and the recording tables. The two installers are bound
+     * here rather than exposed by the product, for the reason {@link Readback} gives: the product's
+     * {@code boundSymbols()} lists the product's own bindings only.
+     */
+    private static final class Accessibility {
+
+        private static final Linker LINKER = Linker.nativeLinker();
+        private static final List<Object> ARGUMENTS = new ArrayList<>();
+        private static boolean throwing;
+
+        private static final MethodHandle VARIANT_OFFSETS = bindGlass("gwin_test_variant_offsets",
+                FunctionDescriptor.of(JAVA_INT, ADDRESS));
+        private static final MethodHandle FIRE_ACCESSIBLE = bindGlass("gwin_test_fire_accessible_callback",
+                FunctionDescriptor.of(JAVA_LONG, JAVA_INT, JAVA_LONG, ADDRESS));
+        private static final MethodHandle FIRE_TEXT_RANGE = bindGlass("gwin_test_fire_text_range_callback",
+                FunctionDescriptor.of(JAVA_LONG, JAVA_INT, JAVA_LONG, ADDRESS));
+        private static final MethodHandle SET_ACCESSIBLE_CALLBACKS = bindGlass("gwin_a11y_set_callbacks",
+                FunctionDescriptor.of(JAVA_INT, ADDRESS));
+        private static final MethodHandle SET_TEXT_RANGE_CALLBACKS =
+                bindGlass("gwin_a11y_text_range_set_callbacks", FunctionDescriptor.of(JAVA_INT, ADDRESS));
+
+        /**
+         * Which recording target each of the facade's 20 accessibility descriptors takes. Declared
+         * before {@link #STUBS}, which reads it: a static field initializer sees only what stands above
+         * it.
+         */
+        private static final Map<FunctionDescriptor, String> RECORDERS = Map.ofEntries(
+                Map.entry(WinGlassNative.A11Y_ACT_FD, "recordAct"),
+                Map.entry(WinGlassNative.A11Y_ACT_I_FD, "recordActI"),
+                Map.entry(WinGlassNative.A11Y_ACT_II_FD, "recordActII"),
+                Map.entry(WinGlassNative.A11Y_ACT_D_FD, "recordActD"),
+                Map.entry(WinGlassNative.A11Y_ACT_DD_FD, "recordActDD"),
+                Map.entry(WinGlassNative.A11Y_ACT_IJ_FD, "recordActIJ"),
+                Map.entry(WinGlassNative.A11Y_ACT_IJI_FD, "recordActIJI"),
+                Map.entry(WinGlassNative.A11Y_ACT_TEXT_FD, "recordActText"),
+                Map.entry(WinGlassNative.A11Y_OUT_FD, "recordOut"),
+                Map.entry(WinGlassNative.A11Y_OUT2_FD, "recordOut2"),
+                Map.entry(WinGlassNative.A11Y_I_OUT_FD, "recordIOut"),
+                Map.entry(WinGlassNative.A11Y_I_OUT2_FD, "recordIOut2"),
+                Map.entry(WinGlassNative.A11Y_J_OUT_FD, "recordJOut"),
+                Map.entry(WinGlassNative.A11Y_DD_OUT_FD, "recordDDOut"),
+                Map.entry(WinGlassNative.A11Y_II_OUT_FD, "recordIIOut"),
+                Map.entry(WinGlassNative.A11Y_III_OUT_FD, "recordIIIOut"),
+                Map.entry(WinGlassNative.A11Y_IJI_OUT_FD, "recordIJIOut"),
+                Map.entry(WinGlassNative.A11Y_IVB_OUT_FD, "recordIVBOut"),
+                Map.entry(WinGlassNative.A11Y_FIND_TEXT_FD, "recordFindText"),
+                Map.entry(WinGlassNative.A11Y_DISPOSED_FD, "recordDisposed"));
+
+        /** One stub per distinct descriptor: a fire drives one slot at a time, so the target is unambiguous. */
+        private static final Map<FunctionDescriptor, MemorySegment> STUBS = buildStubs();
+
+        private Accessibility() {
+        }
+
+        @SuppressWarnings("restricted")
+        private static MethodHandle bindGlass(String name, FunctionDescriptor fd) {
+            MemorySegment symbol = SymbolLookup.loaderLookup().find(name).orElseThrow(
+                    () -> new UnsatisfiedLinkError("missing native symbol: " + name + " in glass"));
+            return LINKER.downcallHandle(symbol, fd);
+        }
+
+        @SuppressWarnings("restricted")
+        private static Map<FunctionDescriptor, MemorySegment> buildStubs() {
+            Map<FunctionDescriptor, MemorySegment> stubs = new HashMap<>();
+            List<FunctionDescriptor> descriptors = new ArrayList<>(WinGlassNative.ACCESSIBLE_SLOT_DESCRIPTORS);
+            descriptors.addAll(WinGlassNative.TEXT_RANGE_SLOT_DESCRIPTORS);
+            for (FunctionDescriptor descriptor : descriptors) {
+                if (stubs.containsKey(descriptor)) {
+                    continue;
+                }
+                String target = RECORDERS.get(descriptor);
+                if (target == null) {
+                    throw new AssertionError("no recording target for descriptor " + descriptor);
+                }
+                try {
+                    MethodHandle handle = MethodHandles.lookup().findStatic(Accessibility.class, target,
+                            descriptor.toMethodType());
+                    stubs.put(descriptor, LINKER.upcallStub(handle, descriptor, Arena.global()));
+                } catch (ReflectiveOperationException e) {
+                    throw new AssertionError("no recording target " + target, e);
+                }
+            }
+            return stubs;
+        }
+
+        private static void writeTables() {
+            try (Arena arena = Arena.ofConfined()) {
+                MemorySegment accessibleTable =
+                        arena.allocate(WinGlassNative.GWIN_ACCESSIBLE_CALLBACKS_LAYOUT);
+                fill(accessibleTable, WinGlassNative.GWIN_ACCESSIBLE_CALLBACKS_LAYOUT,
+                        WinGlassNative.ACCESSIBLE_SLOT_NAMES, WinGlassNative.ACCESSIBLE_SLOT_DESCRIPTORS);
+                int accessibleStatus = (int) SET_ACCESSIBLE_CALLBACKS.invokeExact(accessibleTable);
+                MemorySegment textRangeTable =
+                        arena.allocate(WinGlassNative.GWIN_TEXT_RANGE_CALLBACKS_LAYOUT);
+                fill(textRangeTable, WinGlassNative.GWIN_TEXT_RANGE_CALLBACKS_LAYOUT,
+                        WinGlassNative.TEXT_RANGE_SLOT_NAMES, WinGlassNative.TEXT_RANGE_SLOT_DESCRIPTORS);
+                int textRangeStatus = (int) SET_TEXT_RANGE_CALLBACKS.invokeExact(textRangeTable);
+                if (accessibleStatus != WinGlassNative.GWIN_OK || textRangeStatus != WinGlassNative.GWIN_OK) {
+                    throw new AssertionError("gwin_a11y_*_set_callbacks answered " + accessibleStatus + " / "
+                            + textRangeStatus);
+                }
+            } catch (Throwable t) {
+                throw new AssertionError("the recording accessibility tables could not be installed", t);
+            }
+        }
+
+        private static void fill(MemorySegment table, StructLayout layout, List<String> names,
+                                 List<FunctionDescriptor> descriptors) {
+            MemorySegment[] stubs = new MemorySegment[names.size()];
+            for (int i = 0; i < stubs.length; i++) {
+                stubs[i] = STUBS.get(descriptors.get(i));
+            }
+            WinGlassNative.fillCallbackTable(table, layout, names, stubs);
+        }
+
+        static RecordedSlot fireIntoRecordingTable(boolean accessible, int slot, long id, MemorySegment out) {
+            ARGUMENTS.clear();
+            throwing = false;
+            writeTables();
+            try {
+                long returned = accessible ? (long) FIRE_ACCESSIBLE.invokeExact(slot, id, out)
+                        : (long) FIRE_TEXT_RANGE.invokeExact(slot, id, out);
+                return new RecordedSlot(returned, List.copyOf(ARGUMENTS));
+            } catch (Throwable t) {
+                throw new AssertionError("the recording accessibility table could not be fired", t);
+            } finally {
+                WinGlassNative.reinstallAccessibilityCallbacks();
+            }
+        }
+
+        /** The {@code slot}-th entry of {@code provider}'s vtable, bound as a {@code __stdcall} method. */
+        @SuppressWarnings("restricted")
+        static MethodHandle vtableSlot(long provider, int slot, FunctionDescriptor descriptor) {
+            MemorySegment object = MemorySegment.ofAddress(provider).reinterpret(ADDRESS.byteSize());
+            MemorySegment vtable = object.get(ADDRESS, 0)
+                    .reinterpret((slot + 1L) * ADDRESS.byteSize());
+            return LINKER.downcallHandle(vtable.getAtIndex(ADDRESS, slot), descriptor);
+        }
+
+        static List<Object> recordDestroy(Runnable destroy) {
+            ARGUMENTS.clear();
+            throwing = false;
+            writeTables();
+            try {
+                destroy.run();
+                return List.copyOf(ARGUMENTS);
+            } finally {
+                WinGlassNative.reinstallAccessibilityCallbacks();
+            }
+        }
+
+        static long fireIntoThrowingTable(int slot, long id, MemorySegment out) {
+            ARGUMENTS.clear();
+            throwing = true;
+            writeTables();
+            try {
+                return (long) FIRE_ACCESSIBLE.invokeExact(slot, id, out);
+            } catch (Throwable t) {
+                throw new AssertionError("the throwing accessibility table could not be fired", t);
+            } finally {
+                throwing = false;
+                WinGlassNative.reinstallAccessibilityCallbacks();
+            }
+        }
+
+        private static int record(Object... values) {
+            ARGUMENTS.addAll(Arrays.asList(values));
+            if (!throwing) {
+                return WinGlassNative.GWIN_OK;
+            }
+            // What every production stub does with a Throwable from its target, in the same two steps:
+            // report it where CheckAndClearException sent it, then answer GWIN_ERR_UPCALL. Letting it out
+            // of an upcall stub terminates the JVM - measured, not feared.
+            try {
+                Application.reportException(new RuntimeException(THROWING_SLOT_MESSAGE));
+            } catch (Throwable ignored) {
+                // Nothing left to try: this is an upcall.
+            }
+            return WinGlassNative.GWIN_ERR_UPCALL;
+        }
+
+        static int recordAct(long id) {
+            return record(id);
+        }
+
+        static int recordActI(long id, int a) {
+            return record(id, a);
+        }
+
+        static int recordActII(long id, int a, int b) {
+            return record(id, a, b);
+        }
+
+        static int recordActD(long id, double a) {
+            return record(id, a);
+        }
+
+        static int recordActDD(long id, double a, double b) {
+            return record(id, a, b);
+        }
+
+        static int recordActIJ(long id, int a, long b) {
+            return record(id, a, b);
+        }
+
+        static int recordActIJI(long id, int a, long b, int c) {
+            return record(id, a, b, c);
+        }
+
+        static int recordActText(long id, MemorySegment text, int length) {
+            return record(id, text(text, length), length);
+        }
+
+        static int recordOut(long id, MemorySegment out) {
+            return record(id, pointer(out));
+        }
+
+        static int recordOut2(long id, MemorySegment out, MemorySegment outCount) {
+            return record(id, pointer(out), pointer(outCount));
+        }
+
+        static int recordIOut(long id, int a, MemorySegment out) {
+            return record(id, a, pointer(out));
+        }
+
+        static int recordIOut2(long id, int a, MemorySegment out, MemorySegment outCount) {
+            return record(id, a, pointer(out), pointer(outCount));
+        }
+
+        static int recordJOut(long id, long a, MemorySegment out) {
+            return record(id, a, pointer(out));
+        }
+
+        static int recordDDOut(long id, double a, double b, MemorySegment out) {
+            return record(id, a, b, pointer(out));
+        }
+
+        static int recordIIOut(long id, int a, int b, MemorySegment out) {
+            return record(id, a, b, pointer(out));
+        }
+
+        static int recordIIIOut(long id, int a, int b, int c, MemorySegment out) {
+            return record(id, a, b, c, pointer(out));
+        }
+
+        static int recordIJIOut(long id, int a, long b, int c, MemorySegment out) {
+            return record(id, a, b, c, pointer(out));
+        }
+
+        static int recordIVBOut(long id, int a, MemorySegment value, int b, MemorySegment out) {
+            return record(id, a, pointer(value), b, pointer(out));
+        }
+
+        static int recordFindText(long id, MemorySegment text, int length, int backward, int ignoreCase,
+                                  MemorySegment out) {
+            return record(id, text(text, length), length, backward, ignoreCase, pointer(out));
+        }
+
+        static void recordDisposed(long id) {
+            ARGUMENTS.add(id);
+        }
+
+        /** A pointer argument as a {@code Boolean}: whether it was {@code NULL}. Addresses are not stable. */
+        private static Object pointer(MemorySegment segment) {
+            return !segment.equals(MemorySegment.NULL);
+        }
+
+        @SuppressWarnings("restricted")
+        private static String text(MemorySegment pointer, int length) {
+            if (pointer.equals(MemorySegment.NULL) || length <= 0) {
+                return "";
+            }
+            return new String(pointer.reinterpret(length * 2L).toArray(JAVA_CHAR));
+        }
+
     }
 }

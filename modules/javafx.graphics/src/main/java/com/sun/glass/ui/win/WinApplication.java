@@ -43,20 +43,19 @@ import java.util.Map;
 /**
  * The Windows Glass application peer. It declares no {@code native} method: every call into
  * {@code glass.dll} is an FFM downcall of {@link WinGlassNative}, and every event comes back through the
- * callback tables the static initializer installs. The library is still loaded through
- * {@code Application.loadNativeLibrary()} for the accessibility peers, whose JNI needs its
- * {@code JNI_OnLoad}.
+ * callback tables the static initializer installs. Since the accessibility flip no class of this package
+ * declares one either, so the library is loaded through {@code Application.loadNativeLibrary()} only
+ * because that is how a Glass library is loaded - nothing in it is reached by name any more.
  * <p>
- * <b>Exceptions reported by that remaining JNI.</b> {@code CheckAndClearException} ({@code GlassAccessibleJni.cpp})
- * hands a pending Java exception to {@code Application.reportException} through a class and a method id
- * that must have been cached from inside a real JNI native method: {@code FindClass} cannot see
- * javafx.graphics from inside an FFM downcall, and the toolkit thread spends its whole life inside the
- * {@code gwin_run_loop} downcall. {@code initIDs} was one of the two natives that cached them; the only one
- * left is {@code WinAccessible._initIDs}. An exception reported through that JNI before
- * {@code WinAccessible} has been initialized therefore has no path left that can deliver it, and is cleared
- * and lost. No such report exists: the only reporting sites left are accessibility's, and they run only for a
- * {@code WinAccessible}; the ones that were in {@code PlatformSupport.cpp}, {@code GlassScreen.cpp} and
- * {@code GlassApplication.cpp} sat on JNI paths nothing reached any more, and have been deleted.
+ * <b>Exceptions reported from the library.</b> They no longer travel through JNI at all. The sink used to
+ * be {@code CheckAndClearException} ({@code GlassAccessibleJni.cpp}), which needed
+ * {@code com.sun.glass.ui.Application} cached from inside a real JNI native method, because
+ * {@code FindClass} cannot see a javafx.graphics class from inside an FFM downcall and the toolkit thread
+ * spends its whole life inside the {@code gwin_run_loop} downcall. The last native that did that caching
+ * was {@code WinAccessible._initIDs}, and it is gone with the other eight: an accessibility slot that
+ * throws is caught in its upcall stub and reported from Java, where the lookup cannot fail, and the
+ * library is told {@code GWIN_ERR_UPCALL}. {@code WinDowncallExceptionReportingTest} is the regression
+ * net for that delivery.
  * <p>
  * Line numbers into the {@code native-glass/win} C++ sources refer to those files at commit {@code 8492cb03b0}
  * ({@code git show 8492cb03b0:modules/javafx.graphics/src/main/native-glass/win/<file>}).

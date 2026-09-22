@@ -276,6 +276,22 @@ import static java.lang.foreign.ValueLayout.JAVA_SHORT;
  * the two constructors {@code _init} and {@code WinView._create} ran, now {@link #appCreate()} and
  * {@link #viewCreate}.
  * <p>
+ * <b>The last JNI of {@code glass.dll}: the two UI Automation providers</b> (ABI 6). The nine native
+ * methods of {@code WinAccessible} and {@code WinTextRangeProvider} are the ten exports and the two
+ * callback tables of {@link #installAccessibilityCallbacks}. The provider objects themselves stay in C,
+ * because they are the <em>inbound</em> edge of UI Automation - 19 COM interfaces whose vtables Windows
+ * invokes, plus {@code oleaut32} {@code BSTR} and {@code SAFEARRAY} marshalling - but the 87
+ * {@code Call*Method} sites in their bodies become slots keyed by an {@code int64_t} id, and the two
+ * {@code _initIDs} disappear with everything they cached. That is not a preference: {@code FindClass}
+ * inside a downcall cannot see a javafx.graphics class on JDK 26, so the only safe design is one in
+ * which {@code glass.dll} looks nothing up. Two of the nine get no export at all -
+ * {@code UiaRaiseAutomationEvent} and {@code UiaClientsAreListening} were one-line {@code WRAPPER}s, and
+ * Java binds {@code UIAutomationCore} itself, as it binds {@code shlwapi!AssocQueryStringW}. Stated
+ * behaviour difference: a slot dialled on a thread the JVM has never seen - which Windows does for the
+ * two advise slots during a Narrator shutdown, and for either disposal slot - answered {@code E_FAIL}
+ * under JNI, because {@code GetEnv()} returned {@code NULL} and the bodies gave up rather than
+ * attaching; an FFM upcall stub attaches the caller and runs the Java target.
+ * <p>
  * <b>No {@link Linker.Option#critical critical} downcalls.</b> {@code gwin_robot_capture} is a
  * multi-step GDI sequence ({@code CreateDC}, {@code BitBlt}, {@code GetDIBits}) that can block on the
  * compositor for tens of milliseconds; pinning a Java {@code int[]} across it with
@@ -304,8 +320,18 @@ final class WinGlassNative {
      * The {@code gwin_*} ABI revision this class is written against ({@code GLASS_WIN_ABI_VERSION}). 5 adds
      * six exports, with {@code gwin_robot_pixel_color} and {@code gwin_test_screen_anchor} defined as
      * test-only - this class never bound either, and both have since been deleted without a bump.
+     * <p>
+     * 6 is the accessibility section: thirteen exports and two callback tables, of which this class binds
+     * ten - {@code gwin_test_fire_accessible_callback}, {@code gwin_test_fire_text_range_callback} and
+     * {@code gwin_test_variant_offsets} are test hooks the shim binds and this class does not. They landed
+     * additive under 5, and this class binding them changed nothing a mismatched pair could not already
+     * detect: a {@code glass.dll} without those exports fails in {@link #bindGlass} by name. What the bump
+     * to 6 protects is the other direction, a {@code glass.dll} whose {@code Java_*} arms are gone meeting
+     * a Java side that installs no tables, and that shape first existed when those arms were deleted. The
+     * bump therefore travelled with that deletion: this literal and {@code GLASS_WIN_ABI_VERSION} moved in
+     * one change set, because the check below is an exact equality in both directions.
      */
-    static final int ABI_VERSION = 5;
+    static final int ABI_VERSION = 6;
 
     /** {@code enum GwinStatus} of {@code glass_win_api.h}. */
     static final int GWIN_OK = 0;
@@ -830,6 +856,146 @@ final class WinGlassNative {
      */
     static final StructLayout SCREEN_CALLBACKS_LAYOUT = MemoryLayout.structLayout(
             ADDRESS.withName("settings_changed"));
+
+    /**
+     * {@code GwinVariant} ({@code glass_win_api.h}): the flat form of {@link WinVariant}, the nine
+     * fields {@code GlassAccessible::copyVariant} read through cached {@code jfieldID}s plus the two
+     * lengths a flat ABI needs. Natural x64 alignment, so it has three padding holes and the size the
+     * C compiler gives it is 72 bytes - {@code gwin_sizeof_variant} and {@code gwin_test_variant_offsets}
+     * are what pin that, never this declaration.
+     * <p>
+     * {@code boolVal} crosses as an {@code int32_t} 0 / 1, because {@code java.lang.foreign} has no
+     * boolean layout and the C turns it into {@code VARIANT_FALSE} / {@code VARIANT_TRUE} itself. A
+     * {@code NULL} {@code bstr_val} / {@code p_dbl_val} is Java's {@code null} and is distinct from a
+     * zero-length block: {@code copyString(NULL)} and {@code copyList(NULL)} answered {@code E_FAIL}
+     * where an empty {@code String} or {@code double[]} answered {@code S_OK}.
+     */
+    static final StructLayout GWIN_VARIANT_LAYOUT = MemoryLayout.structLayout(
+            JAVA_SHORT.withName("vt"),
+            JAVA_SHORT.withName("i_val"),
+            JAVA_INT.withName("l_val"),
+            JAVA_FLOAT.withName("flt_val"),
+            MemoryLayout.paddingLayout(4),
+            JAVA_DOUBLE.withName("dbl_val"),
+            JAVA_INT.withName("bool_val"),
+            MemoryLayout.paddingLayout(4),
+            JAVA_LONG.withName("punk_val"),
+            ADDRESS.withName("bstr_val"),
+            JAVA_INT.withName("bstr_len"),
+            MemoryLayout.paddingLayout(4),
+            ADDRESS.withName("p_dbl_val"),
+            JAVA_INT.withName("p_dbl_count"),
+            MemoryLayout.paddingLayout(4));
+
+    /**
+     * {@code GwinAccessibleCallbacks} ({@code glass_win_api.h}): the 69 {@code jmethodID}s of
+     * {@code WinAccessible._initIDs} in that order - which is the UI Automation interface order of
+     * {@code GlassAccessible.cpp} - plus {@code accessible_disposed}, which stands where
+     * {@code DeleteGlobalRef} stood in {@code ~GlassAccessible}. Every slot's first parameter is the
+     * {@code int64_t} id {@code WinAccessible} registered itself under; there is no table-level
+     * {@code void* user}, for the reason {@link #installViewCallbacks} gives.
+     * {@code gwin_sizeof_accessible_callbacks} pins the size; {@link #ACCESSIBLE_SLOT_NAMES} is the
+     * order the installer writes the stubs in, and the order
+     * {@code gwin_test_fire_accessible_callback} numbers them, 0..69.
+     */
+    static final StructLayout GWIN_ACCESSIBLE_CALLBACKS_LAYOUT = MemoryLayout.structLayout(
+            ADDRESS.withName("get_pattern_provider"),
+            ADDRESS.withName("get_host_raw_element_provider"),
+            ADDRESS.withName("get_property_value"),
+            ADDRESS.withName("get_bounding_rectangle"),
+            ADDRESS.withName("get_fragment_root"),
+            ADDRESS.withName("get_embedded_fragment_roots"),
+            ADDRESS.withName("get_runtime_id"),
+            ADDRESS.withName("navigate"),
+            ADDRESS.withName("set_focus"),
+            ADDRESS.withName("element_provider_from_point"),
+            ADDRESS.withName("get_focus"),
+            ADDRESS.withName("advise_event_added"),
+            ADDRESS.withName("advise_event_removed"),
+            ADDRESS.withName("invoke"),
+            ADDRESS.withName("get_selection"),
+            ADDRESS.withName("get_can_select_multiple"),
+            ADDRESS.withName("get_is_selection_required"),
+            ADDRESS.withName("select"),
+            ADDRESS.withName("add_to_selection"),
+            ADDRESS.withName("remove_from_selection"),
+            ADDRESS.withName("get_is_selected"),
+            ADDRESS.withName("get_selection_container"),
+            ADDRESS.withName("set_value"),
+            ADDRESS.withName("get_value"),
+            ADDRESS.withName("get_is_read_only"),
+            ADDRESS.withName("get_maximum"),
+            ADDRESS.withName("get_minimum"),
+            ADDRESS.withName("get_large_change"),
+            ADDRESS.withName("get_small_change"),
+            ADDRESS.withName("set_value_string"),
+            ADDRESS.withName("get_value_string"),
+            ADDRESS.withName("get_visible_ranges"),
+            ADDRESS.withName("range_from_child"),
+            ADDRESS.withName("range_from_point"),
+            ADDRESS.withName("get_document_range"),
+            ADDRESS.withName("get_supported_text_selection"),
+            ADDRESS.withName("get_column_count"),
+            ADDRESS.withName("get_row_count"),
+            ADDRESS.withName("get_item"),
+            ADDRESS.withName("get_column"),
+            ADDRESS.withName("get_column_span"),
+            ADDRESS.withName("get_containing_grid"),
+            ADDRESS.withName("get_row"),
+            ADDRESS.withName("get_row_span"),
+            ADDRESS.withName("get_column_headers"),
+            ADDRESS.withName("get_row_headers"),
+            ADDRESS.withName("get_row_or_column_major"),
+            ADDRESS.withName("get_column_header_items"),
+            ADDRESS.withName("get_row_header_items"),
+            ADDRESS.withName("toggle"),
+            ADDRESS.withName("get_toggle_state"),
+            ADDRESS.withName("collapse"),
+            ADDRESS.withName("expand"),
+            ADDRESS.withName("get_expand_collapse_state"),
+            ADDRESS.withName("get_can_move"),
+            ADDRESS.withName("get_can_resize"),
+            ADDRESS.withName("get_can_rotate"),
+            ADDRESS.withName("move"),
+            ADDRESS.withName("resize"),
+            ADDRESS.withName("rotate"),
+            ADDRESS.withName("scroll"),
+            ADDRESS.withName("set_scroll_percent"),
+            ADDRESS.withName("get_horizontally_scrollable"),
+            ADDRESS.withName("get_horizontal_scroll_percent"),
+            ADDRESS.withName("get_horizontal_view_size"),
+            ADDRESS.withName("get_vertically_scrollable"),
+            ADDRESS.withName("get_vertical_scroll_percent"),
+            ADDRESS.withName("get_vertical_view_size"),
+            ADDRESS.withName("scroll_into_view"),
+            ADDRESS.withName("accessible_disposed"));
+
+    /**
+     * {@code GwinTextRangeCallbacks} ({@code glass_win_api.h}): the 18 {@code jmethodID}s of
+     * {@code WinTextRangeProvider._initIDs} plus {@code range_disposed}, with
+     * {@link #GWIN_ACCESSIBLE_CALLBACKS_LAYOUT}'s rules. {@code gwin_sizeof_text_range_callbacks} pins
+     * the size; {@code gwin_test_fire_text_range_callback} numbers the slots 0..18.
+     */
+    static final StructLayout GWIN_TEXT_RANGE_CALLBACKS_LAYOUT = MemoryLayout.structLayout(
+            ADDRESS.withName("clone"),
+            ADDRESS.withName("compare"),
+            ADDRESS.withName("compare_endpoints"),
+            ADDRESS.withName("expand_to_enclosing_unit"),
+            ADDRESS.withName("find_attribute"),
+            ADDRESS.withName("find_text"),
+            ADDRESS.withName("get_attribute_value"),
+            ADDRESS.withName("get_bounding_rectangles"),
+            ADDRESS.withName("get_enclosing_element"),
+            ADDRESS.withName("get_text"),
+            ADDRESS.withName("move"),
+            ADDRESS.withName("move_endpoint_by_unit"),
+            ADDRESS.withName("move_endpoint_by_range"),
+            ADDRESS.withName("select"),
+            ADDRESS.withName("add_to_selection"),
+            ADDRESS.withName("remove_from_selection"),
+            ADDRESS.withName("scroll_into_view"),
+            ADDRESS.withName("get_children"),
+            ADDRESS.withName("range_disposed"));
 
     /**
      * {@code GwinFileFilter} ({@code glass_win_api.h}): one
@@ -1468,6 +1634,55 @@ final class WinGlassNative {
      */
     private static final MethodHandle GWIN_DIALOG_FOLDER = bindGlass("gwin_dialog_folder",
             FunctionDescriptor.of(JAVA_INT, ADDRESS, ADDRESS, ADDRESS, ADDRESS));
+
+    /** {@code int32_t gwin_sizeof_accessible_callbacks(void)}; {@link #GWIN_ACCESSIBLE_CALLBACKS_LAYOUT} must agree. */
+    private static final MethodHandle GWIN_SIZEOF_ACCESSIBLE_CALLBACKS =
+            bindGlass("gwin_sizeof_accessible_callbacks", FunctionDescriptor.of(JAVA_INT));
+
+    /** {@code int32_t gwin_sizeof_text_range_callbacks(void)}; {@link #GWIN_TEXT_RANGE_CALLBACKS_LAYOUT} must agree. */
+    private static final MethodHandle GWIN_SIZEOF_TEXT_RANGE_CALLBACKS =
+            bindGlass("gwin_sizeof_text_range_callbacks", FunctionDescriptor.of(JAVA_INT));
+
+    /** {@code int32_t gwin_sizeof_variant(void)}; {@link #GWIN_VARIANT_LAYOUT} must agree, field for field. */
+    private static final MethodHandle GWIN_SIZEOF_VARIANT =
+            bindGlass("gwin_sizeof_variant", FunctionDescriptor.of(JAVA_INT));
+
+    /** {@code int32_t gwin_a11y_set_callbacks(const GwinAccessibleCallbacks* cb)} - no {@code void* user}. */
+    private static final MethodHandle GWIN_A11Y_SET_CALLBACKS =
+            bindGlass("gwin_a11y_set_callbacks", FunctionDescriptor.of(JAVA_INT, ADDRESS));
+
+    /** {@code int32_t gwin_a11y_text_range_set_callbacks(const GwinTextRangeCallbacks* cb)}. */
+    private static final MethodHandle GWIN_A11Y_TEXT_RANGE_SET_CALLBACKS =
+            bindGlass("gwin_a11y_text_range_set_callbacks", FunctionDescriptor.of(JAVA_INT, ADDRESS));
+
+    /**
+     * {@code gwin_accessible_t gwin_a11y_create(int64_t accessible_id)}. Not
+     * {@link Linker.Option#critical}, as nothing in this section is: the destroy calls re-enter the JVM
+     * from a destructor and the raise call blocks in UIAutomationCore.
+     */
+    private static final MethodHandle GWIN_A11Y_CREATE =
+            bindGlass("gwin_a11y_create", FunctionDescriptor.of(ADDRESS, JAVA_LONG));
+
+    /** {@code void gwin_a11y_destroy(gwin_accessible_t acc)}: {@code Release}, not {@code delete}. */
+    private static final MethodHandle GWIN_A11Y_DESTROY =
+            bindGlass("gwin_a11y_destroy", FunctionDescriptor.ofVoid(ADDRESS));
+
+    /** {@code gwin_text_range_t gwin_a11y_text_range_create(gwin_accessible_t acc, int64_t range_id)}. */
+    private static final MethodHandle GWIN_A11Y_TEXT_RANGE_CREATE = bindGlass("gwin_a11y_text_range_create",
+            FunctionDescriptor.of(ADDRESS, ADDRESS, JAVA_LONG));
+
+    /** {@code void gwin_a11y_text_range_destroy(gwin_text_range_t range)}. */
+    private static final MethodHandle GWIN_A11Y_TEXT_RANGE_DESTROY =
+            bindGlass("gwin_a11y_text_range_destroy", FunctionDescriptor.ofVoid(ADDRESS));
+
+    /**
+     * {@code int64_t gwin_a11y_raise_property_changed(gwin_accessible_t acc, int32_t property_id,
+     * const GwinVariant* old_value, const GwinVariant* new_value)}: the {@code HRESULT},
+     * sign-extended.
+     */
+    private static final MethodHandle GWIN_A11Y_RAISE_PROPERTY_CHANGED =
+            bindGlass("gwin_a11y_raise_property_changed",
+                    FunctionDescriptor.of(JAVA_LONG, ADDRESS, JAVA_INT, ADDRESS, ADDRESS));
 
     /** {@code UINT SendInput(UINT cInputs, LPINPUT pInputs, int cbSize)}. */
     private static final MethodHandle SEND_INPUT = bindUser32("SendInput",
@@ -2112,6 +2327,7 @@ final class WinGlassNative {
             case Gdi32.NAME -> Gdi32.LOOKUP;
             case Shlwapi.NAME -> Shlwapi.LOOKUP;
             case Shcore.NAME -> Shcore.LOOKUP;
+            case UiaCore.NAME -> UiaCore.LOOKUP;
             default -> throw new IllegalArgumentException("not a library this class binds: " + library);
         };
         return lookup.find(name).isPresent();
@@ -7251,5 +7467,1682 @@ final class WinGlassNative {
     static {
         installClipboardCallbacks();
         installDndCallbacks();
+    }
+
+    /* ==== Accessibility: the two UI Automation provider objects ====================================== */
+
+    /*
+     * The 87 Call*Method sites of GlassAccessible.cpp and GlassTextRangeProvider.cpp, plus the two
+     * DeleteGlobalRef points of their destructors, as two callback tables; the four entry points that
+     * owned the COM objects' lifetime as four downcalls; UiaRaiseAutomationPropertyChangedEvent as one
+     * more, because its two VARIANTs need the copyVariant marshalling the inbound direction keeps in C
+     * anyway; and UiaRaiseAutomationEvent / UiaClientsAreListening bound straight from
+     * UIAutomationCore.dll, because a C wrapper around a one-line OS call is what this migration removes.
+     * WinAccessible._initIDs and WinTextRangeProvider._initIDs are gone: everything they cached is a
+     * table slot or an argument now, and the library looks nothing up - which is the point, since
+     * FindClass cannot see a javafx.graphics class from inside a downcall (WinDowncallExceptionReporting-
+     * Test names that regression).
+     *
+     * Identity is the int64_t id the peer registered itself under, never WinAccessible.id or
+     * WinTextRangeProvider.id - those two are part of the UIA runtime id a client can see. The handles
+     * that cross as long are raw C++ object pointers, not ids.
+     *
+     * Every slot returns int32_t GwinStatus even where its Java target is void, because the JNI turned a
+     * pending Throwable into E_FAIL for those too. GWIN_ERR_UPCALL is that E_FAIL, and a stub that
+     * reports it writes no out-parameter: the library pre-zeroes them, which is exactly what
+     * CallXxxMethod left behind when it returned with an exception pending.
+     *
+     * Thread: the JavaFX application thread, inside the gwin_run_loop downcall's message pump, except
+     * advise_event_added / advise_event_removed and the two disposal slots, which Windows can dial on a
+     * COM/RPC thread. That is a stated behaviour difference of this flip: the JNI arm answered E_FAIL on
+     * a thread the JVM had never seen, because GetEnv() returned NULL and the bodies gave up rather than
+     * attaching; an FFM upcall stub attaches the caller and runs the Java target.
+     *
+     * No Linker.Option#critical anywhere here: gwin_a11y_raise_property_changed calls across an
+     * apartment into UIAutomationCore and can block, and both destroy calls run a destructor that dials a
+     * callback slot and therefore re-enters the JVM.
+     */
+
+    /** {@code int32_t (*)(int64_t id)} - a slot whose Java target takes nothing and returns nothing. */
+    static final FunctionDescriptor A11Y_ACT_FD = FunctionDescriptor.of(JAVA_INT, JAVA_LONG);
+
+    /** {@code int32_t (*)(int64_t id, int32_t)}. */
+    static final FunctionDescriptor A11Y_ACT_I_FD = FunctionDescriptor.of(JAVA_INT, JAVA_LONG, JAVA_INT);
+
+    /** {@code int32_t (*)(int64_t id, int32_t, int32_t)}. */
+    static final FunctionDescriptor A11Y_ACT_II_FD =
+            FunctionDescriptor.of(JAVA_INT, JAVA_LONG, JAVA_INT, JAVA_INT);
+
+    /** {@code int32_t (*)(int64_t id, double)}. */
+    static final FunctionDescriptor A11Y_ACT_D_FD = FunctionDescriptor.of(JAVA_INT, JAVA_LONG, JAVA_DOUBLE);
+
+    /** {@code int32_t (*)(int64_t id, double, double)}. */
+    static final FunctionDescriptor A11Y_ACT_DD_FD =
+            FunctionDescriptor.of(JAVA_INT, JAVA_LONG, JAVA_DOUBLE, JAVA_DOUBLE);
+
+    /** {@code int32_t (*)(int64_t id, int32_t, int64_t)} - the two advise slots' raw {@code SAFEARRAY*}. */
+    static final FunctionDescriptor A11Y_ACT_IJ_FD =
+            FunctionDescriptor.of(JAVA_INT, JAVA_LONG, JAVA_INT, JAVA_LONG);
+
+    /** {@code int32_t (*)(int64_t id, int32_t, int64_t other_id, int32_t)} - {@code move_endpoint_by_range}. */
+    static final FunctionDescriptor A11Y_ACT_IJI_FD =
+            FunctionDescriptor.of(JAVA_INT, JAVA_LONG, JAVA_INT, JAVA_LONG, JAVA_INT);
+
+    /** {@code int32_t (*)(int64_t id, const uint16_t* text, int32_t len)} - borrowed UTF-16 code units. */
+    static final FunctionDescriptor A11Y_ACT_TEXT_FD =
+            FunctionDescriptor.of(JAVA_INT, JAVA_LONG, ADDRESS, JAVA_INT);
+
+    /** {@code int32_t (*)(int64_t id, T* out)} - one scalar or one {@code GwinVariant} out-parameter. */
+    static final FunctionDescriptor A11Y_OUT_FD = FunctionDescriptor.of(JAVA_INT, JAVA_LONG, ADDRESS);
+
+    /** {@code int32_t (*)(int64_t id, T** out, int32_t* out_count)} - a block and its count. */
+    static final FunctionDescriptor A11Y_OUT2_FD =
+            FunctionDescriptor.of(JAVA_INT, JAVA_LONG, ADDRESS, ADDRESS);
+
+    /** {@code int32_t (*)(int64_t id, int32_t, T* out)}. */
+    static final FunctionDescriptor A11Y_I_OUT_FD =
+            FunctionDescriptor.of(JAVA_INT, JAVA_LONG, JAVA_INT, ADDRESS);
+
+    /** {@code int32_t (*)(int64_t id, int32_t, T** out, int32_t* out_count)} - {@code get_text}. */
+    static final FunctionDescriptor A11Y_I_OUT2_FD =
+            FunctionDescriptor.of(JAVA_INT, JAVA_LONG, JAVA_INT, ADDRESS, ADDRESS);
+
+    /** {@code int32_t (*)(int64_t id, int64_t, T* out)} - a raw pointer or another provider's id in. */
+    static final FunctionDescriptor A11Y_J_OUT_FD =
+            FunctionDescriptor.of(JAVA_INT, JAVA_LONG, JAVA_LONG, ADDRESS);
+
+    /** {@code int32_t (*)(int64_t id, double, double, T* out)}. */
+    static final FunctionDescriptor A11Y_DD_OUT_FD =
+            FunctionDescriptor.of(JAVA_INT, JAVA_LONG, JAVA_DOUBLE, JAVA_DOUBLE, ADDRESS);
+
+    /** {@code int32_t (*)(int64_t id, int32_t, int32_t, T* out)}. */
+    static final FunctionDescriptor A11Y_II_OUT_FD =
+            FunctionDescriptor.of(JAVA_INT, JAVA_LONG, JAVA_INT, JAVA_INT, ADDRESS);
+
+    /** {@code int32_t (*)(int64_t id, int32_t, int32_t, int32_t, T* out)} - {@code move_endpoint_by_unit}. */
+    static final FunctionDescriptor A11Y_III_OUT_FD =
+            FunctionDescriptor.of(JAVA_INT, JAVA_LONG, JAVA_INT, JAVA_INT, JAVA_INT, ADDRESS);
+
+    /** {@code int32_t (*)(int64_t id, int32_t, int64_t other_id, int32_t, T* out)} - {@code compare_endpoints}. */
+    static final FunctionDescriptor A11Y_IJI_OUT_FD =
+            FunctionDescriptor.of(JAVA_INT, JAVA_LONG, JAVA_INT, JAVA_LONG, JAVA_INT, ADDRESS);
+
+    /**
+     * {@code int32_t (*)(int64_t id, int32_t, const GwinVariant*, int32_t, int64_t* out)} -
+     * {@code find_attribute}, whose {@code GwinVariant*} the library always passes as {@code NULL}.
+     */
+    static final FunctionDescriptor A11Y_IVB_OUT_FD =
+            FunctionDescriptor.of(JAVA_INT, JAVA_LONG, JAVA_INT, ADDRESS, JAVA_INT, ADDRESS);
+
+    /**
+     * {@code int32_t (*)(int64_t id, const uint16_t* text, int32_t len, int32_t, int32_t, int64_t* out)} -
+     * {@code find_text}.
+     */
+    static final FunctionDescriptor A11Y_FIND_TEXT_FD =
+            FunctionDescriptor.of(JAVA_INT, JAVA_LONG, ADDRESS, JAVA_INT, JAVA_INT, JAVA_INT, ADDRESS);
+
+    /**
+     * {@code void (*)(int64_t id)} - the two disposal slots, which stand where {@code DeleteGlobalRef}
+     * stood and are the only place a registry entry may be dropped. Void, and they must not throw.
+     */
+    static final FunctionDescriptor A11Y_DISPOSED_FD = FunctionDescriptor.ofVoid(JAVA_LONG);
+
+    /**
+     * The slot order of {@link #GWIN_ACCESSIBLE_CALLBACKS_LAYOUT}: the declaration order of
+     * {@code GwinAccessibleCallbacks}, and the numbering {@code gwin_test_fire_accessible_callback}
+     * uses.
+     */
+    static final List<String> ACCESSIBLE_SLOT_NAMES = List.of("get_pattern_provider",
+            "get_host_raw_element_provider", "get_property_value", "get_bounding_rectangle", "get_fragment_root",
+            "get_embedded_fragment_roots", "get_runtime_id", "navigate", "set_focus", "element_provider_from_point",
+            "get_focus", "advise_event_added", "advise_event_removed", "invoke", "get_selection",
+            "get_can_select_multiple", "get_is_selection_required", "select", "add_to_selection",
+            "remove_from_selection", "get_is_selected", "get_selection_container", "set_value", "get_value",
+            "get_is_read_only", "get_maximum", "get_minimum", "get_large_change", "get_small_change",
+            "set_value_string", "get_value_string", "get_visible_ranges", "range_from_child", "range_from_point",
+            "get_document_range", "get_supported_text_selection", "get_column_count", "get_row_count", "get_item",
+            "get_column", "get_column_span", "get_containing_grid", "get_row", "get_row_span", "get_column_headers",
+            "get_row_headers", "get_row_or_column_major", "get_column_header_items", "get_row_header_items",
+            "toggle", "get_toggle_state", "collapse", "expand", "get_expand_collapse_state", "get_can_move",
+            "get_can_resize", "get_can_rotate", "move", "resize", "rotate", "scroll", "set_scroll_percent",
+            "get_horizontally_scrollable", "get_horizontal_scroll_percent", "get_horizontal_view_size",
+            "get_vertically_scrollable", "get_vertical_scroll_percent", "get_vertical_view_size",
+            "scroll_into_view", "accessible_disposed");
+
+    /** The target methods of this class, parallel to {@link #ACCESSIBLE_SLOT_NAMES}. */
+    private static final List<String> ACCESSIBLE_SLOT_TARGETS = List.of("onGetPatternProvider",
+            "onGetHostRawElementProvider", "onGetPropertyValue", "onGetBoundingRectangle", "onGetFragmentRoot",
+            "onGetEmbeddedFragmentRoots", "onGetRuntimeId", "onNavigate", "onSetFocus",
+            "onElementProviderFromPoint", "onGetFocus", "onAdviseEventAdded", "onAdviseEventRemoved", "onInvoke",
+            "onGetSelection", "onGetCanSelectMultiple", "onGetIsSelectionRequired", "onSelect", "onAddToSelection",
+            "onRemoveFromSelection", "onGetIsSelected", "onGetSelectionContainer", "onSetValue", "onGetValue",
+            "onGetIsReadOnly", "onGetMaximum", "onGetMinimum", "onGetLargeChange", "onGetSmallChange",
+            "onSetValueString", "onGetValueString", "onGetVisibleRanges", "onRangeFromChild", "onRangeFromPoint",
+            "onGetDocumentRange", "onGetSupportedTextSelection", "onGetColumnCount", "onGetRowCount", "onGetItem",
+            "onGetColumn", "onGetColumnSpan", "onGetContainingGrid", "onGetRow", "onGetRowSpan",
+            "onGetColumnHeaders", "onGetRowHeaders", "onGetRowOrColumnMajor", "onGetColumnHeaderItems",
+            "onGetRowHeaderItems", "onToggle", "onGetToggleState", "onCollapse", "onExpand",
+            "onGetExpandCollapseState", "onGetCanMove", "onGetCanResize", "onGetCanRotate", "onMove", "onResize",
+            "onRotate", "onScroll", "onSetScrollPercent", "onGetHorizontallyScrollable",
+            "onGetHorizontalScrollPercent", "onGetHorizontalViewSize", "onGetVerticallyScrollable",
+            "onGetVerticalScrollPercent", "onGetVerticalViewSize", "onScrollIntoView", "onAccessibleDisposed");
+
+    /**
+     * The descriptors, parallel to {@link #ACCESSIBLE_SLOT_NAMES}. Package-private because
+     * {@code WinGlassNativeShim} builds its recording table from these very constants, so that what a
+     * fire hook proves is the production descriptor and not a copy of it.
+     */
+    static final List<FunctionDescriptor> ACCESSIBLE_SLOT_DESCRIPTORS = List.of(A11Y_I_OUT_FD, A11Y_OUT_FD,
+            A11Y_I_OUT_FD, A11Y_OUT2_FD, A11Y_OUT_FD, A11Y_OUT2_FD, A11Y_OUT2_FD, A11Y_I_OUT_FD, A11Y_ACT_FD,
+            A11Y_DD_OUT_FD, A11Y_OUT_FD, A11Y_ACT_IJ_FD, A11Y_ACT_IJ_FD, A11Y_ACT_FD, A11Y_OUT2_FD, A11Y_OUT_FD,
+            A11Y_OUT_FD, A11Y_ACT_FD, A11Y_ACT_FD, A11Y_ACT_FD, A11Y_OUT_FD, A11Y_OUT_FD, A11Y_ACT_D_FD,
+            A11Y_OUT_FD, A11Y_OUT_FD, A11Y_OUT_FD, A11Y_OUT_FD, A11Y_OUT_FD, A11Y_OUT_FD, A11Y_ACT_TEXT_FD,
+            A11Y_OUT2_FD, A11Y_OUT2_FD, A11Y_J_OUT_FD, A11Y_DD_OUT_FD, A11Y_OUT_FD, A11Y_OUT_FD, A11Y_OUT_FD,
+            A11Y_OUT_FD, A11Y_II_OUT_FD, A11Y_OUT_FD, A11Y_OUT_FD, A11Y_OUT_FD, A11Y_OUT_FD, A11Y_OUT_FD,
+            A11Y_OUT2_FD, A11Y_OUT2_FD, A11Y_OUT_FD, A11Y_OUT2_FD, A11Y_OUT2_FD, A11Y_ACT_FD, A11Y_OUT_FD,
+            A11Y_ACT_FD, A11Y_ACT_FD, A11Y_OUT_FD, A11Y_OUT_FD, A11Y_OUT_FD, A11Y_OUT_FD, A11Y_ACT_DD_FD,
+            A11Y_ACT_DD_FD, A11Y_ACT_D_FD, A11Y_ACT_II_FD, A11Y_ACT_DD_FD, A11Y_OUT_FD, A11Y_OUT_FD, A11Y_OUT_FD,
+            A11Y_OUT_FD, A11Y_OUT_FD, A11Y_OUT_FD, A11Y_ACT_FD, A11Y_DISPOSED_FD);
+
+    /**
+     * The slot order of {@link #GWIN_TEXT_RANGE_CALLBACKS_LAYOUT}: the declaration order of
+     * {@code GwinTextRangeCallbacks}, and the numbering {@code gwin_test_fire_text_range_callback}
+     * uses.
+     */
+    static final List<String> TEXT_RANGE_SLOT_NAMES = List.of("clone", "compare", "compare_endpoints",
+            "expand_to_enclosing_unit", "find_attribute", "find_text", "get_attribute_value",
+            "get_bounding_rectangles", "get_enclosing_element", "get_text", "move", "move_endpoint_by_unit",
+            "move_endpoint_by_range", "select", "add_to_selection", "remove_from_selection", "scroll_into_view",
+            "get_children", "range_disposed");
+
+    /** The target methods of this class, parallel to {@link #TEXT_RANGE_SLOT_NAMES}. */
+    private static final List<String> TEXT_RANGE_SLOT_TARGETS = List.of("onRangeClone", "onRangeCompare",
+            "onRangeCompareEndpoints", "onRangeExpandToEnclosingUnit", "onRangeFindAttribute", "onRangeFindText",
+            "onRangeGetAttributeValue", "onRangeGetBoundingRectangles", "onRangeGetEnclosingElement",
+            "onRangeGetText", "onRangeMove", "onRangeMoveEndpointByUnit", "onRangeMoveEndpointByRange",
+            "onRangeSelect", "onRangeAddToSelection", "onRangeRemoveFromSelection", "onRangeScrollIntoView",
+            "onRangeGetChildren", "onRangeDisposed");
+
+    /**
+     * The descriptors, parallel to {@link #TEXT_RANGE_SLOT_NAMES}. Package-private because
+     * {@code WinGlassNativeShim} builds its recording table from these very constants, so that what a
+     * fire hook proves is the production descriptor and not a copy of it.
+     */
+    static final List<FunctionDescriptor> TEXT_RANGE_SLOT_DESCRIPTORS = List.of(A11Y_OUT_FD, A11Y_J_OUT_FD,
+            A11Y_IJI_OUT_FD, A11Y_ACT_I_FD, A11Y_IVB_OUT_FD, A11Y_FIND_TEXT_FD, A11Y_I_OUT_FD, A11Y_OUT2_FD,
+            A11Y_OUT_FD, A11Y_I_OUT2_FD, A11Y_II_OUT_FD, A11Y_III_OUT_FD, A11Y_ACT_IJI_FD, A11Y_ACT_FD, A11Y_ACT_FD,
+            A11Y_ACT_FD, A11Y_ACT_I_FD, A11Y_OUT2_FD, A11Y_DISPOSED_FD);
+
+    private static final long VARIANT_VT_OFFSET = variantOffset("vt");
+    private static final long VARIANT_I_VAL_OFFSET = variantOffset("i_val");
+    private static final long VARIANT_L_VAL_OFFSET = variantOffset("l_val");
+    private static final long VARIANT_FLT_VAL_OFFSET = variantOffset("flt_val");
+    private static final long VARIANT_DBL_VAL_OFFSET = variantOffset("dbl_val");
+    private static final long VARIANT_BOOL_VAL_OFFSET = variantOffset("bool_val");
+    private static final long VARIANT_PUNK_VAL_OFFSET = variantOffset("punk_val");
+    private static final long VARIANT_BSTR_VAL_OFFSET = variantOffset("bstr_val");
+    private static final long VARIANT_BSTR_LEN_OFFSET = variantOffset("bstr_len");
+    private static final long VARIANT_P_DBL_VAL_OFFSET = variantOffset("p_dbl_val");
+    private static final long VARIANT_P_DBL_COUNT_OFFSET = variantOffset("p_dbl_count");
+
+    private static long variantOffset(String field) {
+        return GWIN_VARIANT_LAYOUT.byteOffset(PathElement.groupElement(field));
+    }
+
+    private static boolean accessibilityCallbacksInstalled;
+
+    /**
+     * The 70 and the 19 stubs, created once by {@link #installAccessibilityCallbacks} in
+     * {@link Arena#global()} and kept so that {@link #reinstallAccessibilityCallbacks} can write the same
+     * addresses again. Never replaced: a stub the library has been given must outlive the process,
+     * because there is no point at which {@code glass.dll} can promise that no further UI Automation
+     * call will arrive, and one can arrive on a thread the JVM has never seen.
+     */
+    private static MemorySegment[] accessibleCallbackStubs;
+    private static MemorySegment[] textRangeCallbackStubs;
+
+    /** {@code sizeof(GwinAccessibleCallbacks)}; {@link #GWIN_ACCESSIBLE_CALLBACKS_LAYOUT} must agree. */
+    static int sizeOfAccessibleCallbacks() {
+        try {
+            return (int) GWIN_SIZEOF_ACCESSIBLE_CALLBACKS.invokeExact();
+        } catch (Throwable t) {
+            throw unexpected(t);
+        }
+    }
+
+    /** {@code sizeof(GwinTextRangeCallbacks)}; {@link #GWIN_TEXT_RANGE_CALLBACKS_LAYOUT} must agree. */
+    static int sizeOfTextRangeCallbacks() {
+        try {
+            return (int) GWIN_SIZEOF_TEXT_RANGE_CALLBACKS.invokeExact();
+        } catch (Throwable t) {
+            throw unexpected(t);
+        }
+    }
+
+    /** {@code sizeof(GwinVariant)}; {@link #GWIN_VARIANT_LAYOUT} must agree, field for field. */
+    static int sizeOfVariant() {
+        try {
+            return (int) GWIN_SIZEOF_VARIANT.invokeExact();
+        } catch (Throwable t) {
+            throw unexpected(t);
+        }
+    }
+
+    /**
+     * Hands {@code glass.dll} the two tables that replaced the 87 {@code Call*Method} sites of
+     * {@code GlassAccessible.cpp} and {@code GlassTextRangeProvider.cpp} and the {@code DeleteGlobalRef}
+     * of their two destructors.
+     * <p>
+     * <b>Called from the static initializer of {@code WinAccessible} and of
+     * {@code WinTextRangeProvider}</b> - where {@code _initIDs} stood, and the only two places a provider
+     * can come into existence, so both tables are installed before the first {@code gwin_a11y_create}
+     * whichever class initializes first. Both go in together because the library chooses its arm per
+     * table: the install is the flip that starts passing ids, and the two arms must never be mixed.
+     * Idempotent and synchronized, because these two initializers can run on different threads.
+     * <p>
+     * No table-level {@code void* user}: the identity is per provider, not per table - every slot's
+     * first parameter is the {@code int64_t} id the peer registered itself under. The tables are copied
+     * by the library, so the confined arena that holds them is closed here; the stubs are in
+     * {@link Arena#global()}.
+     */
+    static synchronized void installAccessibilityCallbacks() {
+        if (accessibilityCallbacksInstalled) {
+            return;
+        }
+        accessibleCallbackStubs = stubsFor(ACCESSIBLE_SLOT_TARGETS, ACCESSIBLE_SLOT_DESCRIPTORS);
+        textRangeCallbackStubs = stubsFor(TEXT_RANGE_SLOT_TARGETS, TEXT_RANGE_SLOT_DESCRIPTORS);
+        writeAccessibilityTables();
+        accessibilityCallbacksInstalled = true;
+    }
+
+    /** Whether {@link #installAccessibilityCallbacks} has run in this JVM. */
+    static synchronized boolean accessibilityCallbacksInstalled() {
+        return accessibilityCallbacksInstalled;
+    }
+
+    /**
+     * Writes the production tables again, with the stubs {@link #installAccessibilityCallbacks} created.
+     * The one caller is {@code WinGlassNativeShim}, after it has installed a recording table to drive the
+     * two fire hooks through the facade's own descriptors: both installers copy by value and the last
+     * call wins, so this is the restore. Installs first if nothing has been installed yet; never creates
+     * a second set of stubs.
+     */
+    static synchronized void reinstallAccessibilityCallbacks() {
+        if (!accessibilityCallbacksInstalled) {
+            installAccessibilityCallbacks();
+            return;
+        }
+        writeAccessibilityTables();
+    }
+
+    /** The 89 installed stubs, accessible slots then text-range slots, for the test that reads them back. */
+    static synchronized List<MemorySegment> installedAccessibilityCallbackStubs() {
+        List<MemorySegment> stubs = new ArrayList<>(ACCESSIBLE_SLOT_NAMES.size() + TEXT_RANGE_SLOT_NAMES.size());
+        if (accessibilityCallbacksInstalled) {
+            Collections.addAll(stubs, accessibleCallbackStubs);
+            Collections.addAll(stubs, textRangeCallbackStubs);
+        }
+        return Collections.unmodifiableList(stubs);
+    }
+
+    private static void writeAccessibilityTables() {
+        try (Arena arena = Arena.ofConfined()) {
+            MemorySegment accessibleTable = arena.allocate(GWIN_ACCESSIBLE_CALLBACKS_LAYOUT);
+            fillCallbackTable(accessibleTable, GWIN_ACCESSIBLE_CALLBACKS_LAYOUT, ACCESSIBLE_SLOT_NAMES,
+                    accessibleCallbackStubs);
+            requireOk((int) GWIN_A11Y_SET_CALLBACKS.invokeExact(accessibleTable), "gwin_a11y_set_callbacks");
+            MemorySegment textRangeTable = arena.allocate(GWIN_TEXT_RANGE_CALLBACKS_LAYOUT);
+            fillCallbackTable(textRangeTable, GWIN_TEXT_RANGE_CALLBACKS_LAYOUT, TEXT_RANGE_SLOT_NAMES,
+                    textRangeCallbackStubs);
+            requireOk((int) GWIN_A11Y_TEXT_RANGE_SET_CALLBACKS.invokeExact(textRangeTable),
+                    "gwin_a11y_text_range_set_callbacks");
+        } catch (Throwable t) {
+            throw unexpected(t);
+        }
+    }
+
+    /** {@link #stubsFor(String[], FunctionDescriptor[])} over the two {@code List}-shaped slot tables. */
+    private static MemorySegment[] stubsFor(List<String> targets, List<FunctionDescriptor> descriptors) {
+        MemorySegment[] stubs = new MemorySegment[targets.size()];
+        for (int i = 0; i < stubs.length; i++) {
+            FunctionDescriptor descriptor = descriptors.get(i);
+            stubs[i] = upcallStub(upcallTarget(targets.get(i), descriptor), descriptor, Arena.global());
+        }
+        return stubs;
+    }
+
+    /*
+     * The 89 targets. Each does the marshalling its slot needs and nothing else - the registry lookup
+     * and the call are WinAccessible's resp. WinTextRangeProvider's - and each catches Throwable,
+     * because letting anything out of an upcall stub terminates the JVM (measured on JDK 26 and JDK 25:
+     * "Unrecoverable uncaught exception encountered. The VM will now exit"). Reporting through
+     * reportUpcallFailure is CheckAndClearException (the former GlassAccessibleJni.cpp:90-129): report to
+     * Application.reportException on this thread, swallow, carry on - and a reported Throwable becomes
+     * GWIN_ERR_UPCALL, which the provider method turns into the E_FAIL the JNI returned. A stub that
+     * reports writes no out-parameter: the library pre-zeroes them, which is what CallXxxMethod left
+     * behind when it returned with an exception pending. Booleans cross as int32_t 0 / 1 and are tested
+     * with != 0, never == 1. Package-private so that WinGlassNativeShim can drive every arm without a
+     * table.
+     */
+
+    /** {@code get_pattern_provider}: {@code GetPatternProvider(int)}. */
+    static int onGetPatternProvider(long accessibleId, int patternId, MemorySegment out) {
+        try {
+            return outLong(out, WinAccessible.dispatchGetPatternProvider(accessibleId, patternId));
+        } catch (Throwable t) {
+            reportUpcallFailure(t);
+            return GWIN_ERR_UPCALL;
+        }
+    }
+
+    /** {@code get_host_raw_element_provider}: {@code get_HostRawElementProvider()}. */
+    static int onGetHostRawElementProvider(long accessibleId, MemorySegment outHwnd) {
+        try {
+            return outLong(outHwnd, WinAccessible.dispatchGetHostRawElementProvider(accessibleId));
+        } catch (Throwable t) {
+            reportUpcallFailure(t);
+            return GWIN_ERR_UPCALL;
+        }
+    }
+
+    /** {@code get_property_value}: {@code GetPropertyValue(int)}. */
+    static int onGetPropertyValue(long accessibleId, int propertyId, MemorySegment out) {
+        try {
+            return outVariant(out, WinAccessible.dispatchGetPropertyValue(accessibleId, propertyId));
+        } catch (Throwable t) {
+            reportUpcallFailure(t);
+            return GWIN_ERR_UPCALL;
+        }
+    }
+
+    /** {@code get_bounding_rectangle}: {@code get_BoundingRectangle()}. */
+    static int onGetBoundingRectangle(long accessibleId, MemorySegment out4, MemorySegment outWritten) {
+        try {
+            return outRectangle(out4, outWritten, WinAccessible.dispatchGetBoundingRectangle(accessibleId));
+        } catch (Throwable t) {
+            reportUpcallFailure(t);
+            return GWIN_ERR_UPCALL;
+        }
+    }
+
+    /** {@code get_fragment_root}: {@code get_FragmentRoot()}. */
+    static int onGetFragmentRoot(long accessibleId, MemorySegment out) {
+        try {
+            return outLong(out, WinAccessible.dispatchGetFragmentRoot(accessibleId));
+        } catch (Throwable t) {
+            reportUpcallFailure(t);
+            return GWIN_ERR_UPCALL;
+        }
+    }
+
+    /** {@code get_embedded_fragment_roots}: {@code GetEmbeddedFragmentRoots()}. */
+    static int onGetEmbeddedFragmentRoots(long accessibleId, MemorySegment out, MemorySegment outCount) {
+        try {
+            return outLongBlock(out, outCount, WinAccessible.dispatchGetEmbeddedFragmentRoots(accessibleId));
+        } catch (Throwable t) {
+            reportUpcallFailure(t);
+            return GWIN_ERR_UPCALL;
+        }
+    }
+
+    /** {@code get_runtime_id}: {@code GetRuntimeId()}. */
+    static int onGetRuntimeId(long accessibleId, MemorySegment out, MemorySegment outCount) {
+        try {
+            return outIntBlock(out, outCount, WinAccessible.dispatchGetRuntimeId(accessibleId));
+        } catch (Throwable t) {
+            reportUpcallFailure(t);
+            return GWIN_ERR_UPCALL;
+        }
+    }
+
+    /** {@code navigate}: {@code Navigate(int)}. */
+    static int onNavigate(long accessibleId, int direction, MemorySegment out) {
+        try {
+            return outLong(out, WinAccessible.dispatchNavigate(accessibleId, direction));
+        } catch (Throwable t) {
+            reportUpcallFailure(t);
+            return GWIN_ERR_UPCALL;
+        }
+    }
+
+    /** {@code set_focus}: {@code SetFocus()}. */
+    static int onSetFocus(long accessibleId) {
+        try {
+            WinAccessible.dispatchSetFocus(accessibleId);
+            return GWIN_OK;
+        } catch (Throwable t) {
+            reportUpcallFailure(t);
+            return GWIN_ERR_UPCALL;
+        }
+    }
+
+    /** {@code element_provider_from_point}: {@code ElementProviderFromPoint(double,double)}. */
+    static int onElementProviderFromPoint(long accessibleId, double x, double y, MemorySegment out) {
+        try {
+            return outLong(out, WinAccessible.dispatchElementProviderFromPoint(accessibleId, x, y));
+        } catch (Throwable t) {
+            reportUpcallFailure(t);
+            return GWIN_ERR_UPCALL;
+        }
+    }
+
+    /** {@code get_focus}: {@code GetFocus()}. */
+    static int onGetFocus(long accessibleId, MemorySegment out) {
+        try {
+            return outLong(out, WinAccessible.dispatchGetFocus(accessibleId));
+        } catch (Throwable t) {
+            reportUpcallFailure(t);
+            return GWIN_ERR_UPCALL;
+        }
+    }
+
+    /** {@code advise_event_added}: {@code AdviseEventAdded(int,long)}. */
+    static int onAdviseEventAdded(long accessibleId, int eventId, long propertyIds) {
+        try {
+            WinAccessible.dispatchAdviseEventAdded(accessibleId, eventId, propertyIds);
+            return GWIN_OK;
+        } catch (Throwable t) {
+            reportUpcallFailure(t);
+            return GWIN_ERR_UPCALL;
+        }
+    }
+
+    /** {@code advise_event_removed}: {@code AdviseEventRemoved(int,long)}. */
+    static int onAdviseEventRemoved(long accessibleId, int eventId, long propertyIds) {
+        try {
+            WinAccessible.dispatchAdviseEventRemoved(accessibleId, eventId, propertyIds);
+            return GWIN_OK;
+        } catch (Throwable t) {
+            reportUpcallFailure(t);
+            return GWIN_ERR_UPCALL;
+        }
+    }
+
+    /** {@code invoke}: {@code Invoke()}. */
+    static int onInvoke(long accessibleId) {
+        try {
+            WinAccessible.dispatchInvoke(accessibleId);
+            return GWIN_OK;
+        } catch (Throwable t) {
+            reportUpcallFailure(t);
+            return GWIN_ERR_UPCALL;
+        }
+    }
+
+    /** {@code get_selection}: {@code GetSelection()}. */
+    static int onGetSelection(long accessibleId, MemorySegment out, MemorySegment outCount) {
+        try {
+            return outLongBlock(out, outCount, WinAccessible.dispatchGetSelection(accessibleId));
+        } catch (Throwable t) {
+            reportUpcallFailure(t);
+            return GWIN_ERR_UPCALL;
+        }
+    }
+
+    /** {@code get_can_select_multiple}: {@code get_CanSelectMultiple()}. */
+    static int onGetCanSelectMultiple(long accessibleId, MemorySegment out) {
+        try {
+            return outBoolean(out, WinAccessible.dispatchGetCanSelectMultiple(accessibleId));
+        } catch (Throwable t) {
+            reportUpcallFailure(t);
+            return GWIN_ERR_UPCALL;
+        }
+    }
+
+    /** {@code get_is_selection_required}: {@code get_IsSelectionRequired()}. */
+    static int onGetIsSelectionRequired(long accessibleId, MemorySegment out) {
+        try {
+            return outBoolean(out, WinAccessible.dispatchGetIsSelectionRequired(accessibleId));
+        } catch (Throwable t) {
+            reportUpcallFailure(t);
+            return GWIN_ERR_UPCALL;
+        }
+    }
+
+    /** {@code select}: {@code Select()}. */
+    static int onSelect(long accessibleId) {
+        try {
+            WinAccessible.dispatchSelect(accessibleId);
+            return GWIN_OK;
+        } catch (Throwable t) {
+            reportUpcallFailure(t);
+            return GWIN_ERR_UPCALL;
+        }
+    }
+
+    /** {@code add_to_selection}: {@code AddToSelection()}. */
+    static int onAddToSelection(long accessibleId) {
+        try {
+            WinAccessible.dispatchAddToSelection(accessibleId);
+            return GWIN_OK;
+        } catch (Throwable t) {
+            reportUpcallFailure(t);
+            return GWIN_ERR_UPCALL;
+        }
+    }
+
+    /** {@code remove_from_selection}: {@code RemoveFromSelection()}. */
+    static int onRemoveFromSelection(long accessibleId) {
+        try {
+            WinAccessible.dispatchRemoveFromSelection(accessibleId);
+            return GWIN_OK;
+        } catch (Throwable t) {
+            reportUpcallFailure(t);
+            return GWIN_ERR_UPCALL;
+        }
+    }
+
+    /** {@code get_is_selected}: {@code get_IsSelected()}. */
+    static int onGetIsSelected(long accessibleId, MemorySegment out) {
+        try {
+            return outBoolean(out, WinAccessible.dispatchGetIsSelected(accessibleId));
+        } catch (Throwable t) {
+            reportUpcallFailure(t);
+            return GWIN_ERR_UPCALL;
+        }
+    }
+
+    /** {@code get_selection_container}: {@code get_SelectionContainer()}. */
+    static int onGetSelectionContainer(long accessibleId, MemorySegment out) {
+        try {
+            return outLong(out, WinAccessible.dispatchGetSelectionContainer(accessibleId));
+        } catch (Throwable t) {
+            reportUpcallFailure(t);
+            return GWIN_ERR_UPCALL;
+        }
+    }
+
+    /** {@code set_value}: {@code SetValue(double)}. */
+    static int onSetValue(long accessibleId, double value) {
+        try {
+            WinAccessible.dispatchSetValue(accessibleId, value);
+            return GWIN_OK;
+        } catch (Throwable t) {
+            reportUpcallFailure(t);
+            return GWIN_ERR_UPCALL;
+        }
+    }
+
+    /** {@code get_value}: {@code get_Value()}. */
+    static int onGetValue(long accessibleId, MemorySegment out) {
+        try {
+            return outDouble(out, WinAccessible.dispatchGetValue(accessibleId));
+        } catch (Throwable t) {
+            reportUpcallFailure(t);
+            return GWIN_ERR_UPCALL;
+        }
+    }
+
+    /** {@code get_is_read_only}: {@code get_IsReadOnly()}. */
+    static int onGetIsReadOnly(long accessibleId, MemorySegment out) {
+        try {
+            return outBoolean(out, WinAccessible.dispatchGetIsReadOnly(accessibleId));
+        } catch (Throwable t) {
+            reportUpcallFailure(t);
+            return GWIN_ERR_UPCALL;
+        }
+    }
+
+    /** {@code get_maximum}: {@code get_Maximum()}. */
+    static int onGetMaximum(long accessibleId, MemorySegment out) {
+        try {
+            return outDouble(out, WinAccessible.dispatchGetMaximum(accessibleId));
+        } catch (Throwable t) {
+            reportUpcallFailure(t);
+            return GWIN_ERR_UPCALL;
+        }
+    }
+
+    /** {@code get_minimum}: {@code get_Minimum()}. */
+    static int onGetMinimum(long accessibleId, MemorySegment out) {
+        try {
+            return outDouble(out, WinAccessible.dispatchGetMinimum(accessibleId));
+        } catch (Throwable t) {
+            reportUpcallFailure(t);
+            return GWIN_ERR_UPCALL;
+        }
+    }
+
+    /** {@code get_large_change}: {@code get_LargeChange()}. */
+    static int onGetLargeChange(long accessibleId, MemorySegment out) {
+        try {
+            return outDouble(out, WinAccessible.dispatchGetLargeChange(accessibleId));
+        } catch (Throwable t) {
+            reportUpcallFailure(t);
+            return GWIN_ERR_UPCALL;
+        }
+    }
+
+    /** {@code get_small_change}: {@code get_SmallChange()}. */
+    static int onGetSmallChange(long accessibleId, MemorySegment out) {
+        try {
+            return outDouble(out, WinAccessible.dispatchGetSmallChange(accessibleId));
+        } catch (Throwable t) {
+            reportUpcallFailure(t);
+            return GWIN_ERR_UPCALL;
+        }
+    }
+
+    /** {@code set_value_string}: {@code SetValueString(String)}. */
+    static int onSetValueString(long accessibleId, MemorySegment text, int length) {
+        try {
+            WinAccessible.dispatchSetValueString(accessibleId, utf16String(text, length));
+            return GWIN_OK;
+        } catch (Throwable t) {
+            reportUpcallFailure(t);
+            return GWIN_ERR_UPCALL;
+        }
+    }
+
+    /** {@code get_value_string}: {@code get_ValueString()}. */
+    static int onGetValueString(long accessibleId, MemorySegment out, MemorySegment outLength) {
+        try {
+            return outString(out, outLength, WinAccessible.dispatchGetValueString(accessibleId));
+        } catch (Throwable t) {
+            reportUpcallFailure(t);
+            return GWIN_ERR_UPCALL;
+        }
+    }
+
+    /** {@code get_visible_ranges}: {@code GetVisibleRanges()}. */
+    static int onGetVisibleRanges(long accessibleId, MemorySegment out, MemorySegment outCount) {
+        try {
+            return outLongBlock(out, outCount, WinAccessible.dispatchGetVisibleRanges(accessibleId));
+        } catch (Throwable t) {
+            reportUpcallFailure(t);
+            return GWIN_ERR_UPCALL;
+        }
+    }
+
+    /** {@code range_from_child}: {@code RangeFromChild(long)}. */
+    static int onRangeFromChild(long accessibleId, long childElement, MemorySegment out) {
+        try {
+            return outLong(out, WinAccessible.dispatchRangeFromChild(accessibleId, childElement));
+        } catch (Throwable t) {
+            reportUpcallFailure(t);
+            return GWIN_ERR_UPCALL;
+        }
+    }
+
+    /** {@code range_from_point}: {@code RangeFromPoint(double,double)}. */
+    static int onRangeFromPoint(long accessibleId, double x, double y, MemorySegment out) {
+        try {
+            return outLong(out, WinAccessible.dispatchRangeFromPoint(accessibleId, x, y));
+        } catch (Throwable t) {
+            reportUpcallFailure(t);
+            return GWIN_ERR_UPCALL;
+        }
+    }
+
+    /** {@code get_document_range}: {@code get_DocumentRange()}. */
+    static int onGetDocumentRange(long accessibleId, MemorySegment out) {
+        try {
+            return outLong(out, WinAccessible.dispatchGetDocumentRange(accessibleId));
+        } catch (Throwable t) {
+            reportUpcallFailure(t);
+            return GWIN_ERR_UPCALL;
+        }
+    }
+
+    /** {@code get_supported_text_selection}: {@code get_SupportedTextSelection()}. */
+    static int onGetSupportedTextSelection(long accessibleId, MemorySegment out) {
+        try {
+            return outInt(out, WinAccessible.dispatchGetSupportedTextSelection(accessibleId));
+        } catch (Throwable t) {
+            reportUpcallFailure(t);
+            return GWIN_ERR_UPCALL;
+        }
+    }
+
+    /** {@code get_column_count}: {@code get_ColumnCount()}. */
+    static int onGetColumnCount(long accessibleId, MemorySegment out) {
+        try {
+            return outInt(out, WinAccessible.dispatchGetColumnCount(accessibleId));
+        } catch (Throwable t) {
+            reportUpcallFailure(t);
+            return GWIN_ERR_UPCALL;
+        }
+    }
+
+    /** {@code get_row_count}: {@code get_RowCount()}. */
+    static int onGetRowCount(long accessibleId, MemorySegment out) {
+        try {
+            return outInt(out, WinAccessible.dispatchGetRowCount(accessibleId));
+        } catch (Throwable t) {
+            reportUpcallFailure(t);
+            return GWIN_ERR_UPCALL;
+        }
+    }
+
+    /** {@code get_item}: {@code GetItem(int,int)}. */
+    static int onGetItem(long accessibleId, int row, int column, MemorySegment out) {
+        try {
+            return outLong(out, WinAccessible.dispatchGetItem(accessibleId, row, column));
+        } catch (Throwable t) {
+            reportUpcallFailure(t);
+            return GWIN_ERR_UPCALL;
+        }
+    }
+
+    /** {@code get_column}: {@code get_Column()}. */
+    static int onGetColumn(long accessibleId, MemorySegment out) {
+        try {
+            return outInt(out, WinAccessible.dispatchGetColumn(accessibleId));
+        } catch (Throwable t) {
+            reportUpcallFailure(t);
+            return GWIN_ERR_UPCALL;
+        }
+    }
+
+    /** {@code get_column_span}: {@code get_ColumnSpan()}. */
+    static int onGetColumnSpan(long accessibleId, MemorySegment out) {
+        try {
+            return outInt(out, WinAccessible.dispatchGetColumnSpan(accessibleId));
+        } catch (Throwable t) {
+            reportUpcallFailure(t);
+            return GWIN_ERR_UPCALL;
+        }
+    }
+
+    /** {@code get_containing_grid}: {@code get_ContainingGrid()}. */
+    static int onGetContainingGrid(long accessibleId, MemorySegment out) {
+        try {
+            return outLong(out, WinAccessible.dispatchGetContainingGrid(accessibleId));
+        } catch (Throwable t) {
+            reportUpcallFailure(t);
+            return GWIN_ERR_UPCALL;
+        }
+    }
+
+    /** {@code get_row}: {@code get_Row()}. */
+    static int onGetRow(long accessibleId, MemorySegment out) {
+        try {
+            return outInt(out, WinAccessible.dispatchGetRow(accessibleId));
+        } catch (Throwable t) {
+            reportUpcallFailure(t);
+            return GWIN_ERR_UPCALL;
+        }
+    }
+
+    /** {@code get_row_span}: {@code get_RowSpan()}. */
+    static int onGetRowSpan(long accessibleId, MemorySegment out) {
+        try {
+            return outInt(out, WinAccessible.dispatchGetRowSpan(accessibleId));
+        } catch (Throwable t) {
+            reportUpcallFailure(t);
+            return GWIN_ERR_UPCALL;
+        }
+    }
+
+    /** {@code get_column_headers}: {@code GetColumnHeaders()}. */
+    static int onGetColumnHeaders(long accessibleId, MemorySegment out, MemorySegment outCount) {
+        try {
+            return outLongBlock(out, outCount, WinAccessible.dispatchGetColumnHeaders(accessibleId));
+        } catch (Throwable t) {
+            reportUpcallFailure(t);
+            return GWIN_ERR_UPCALL;
+        }
+    }
+
+    /** {@code get_row_headers}: {@code GetRowHeaders()}. */
+    static int onGetRowHeaders(long accessibleId, MemorySegment out, MemorySegment outCount) {
+        try {
+            return outLongBlock(out, outCount, WinAccessible.dispatchGetRowHeaders(accessibleId));
+        } catch (Throwable t) {
+            reportUpcallFailure(t);
+            return GWIN_ERR_UPCALL;
+        }
+    }
+
+    /** {@code get_row_or_column_major}: {@code get_RowOrColumnMajor()}. */
+    static int onGetRowOrColumnMajor(long accessibleId, MemorySegment out) {
+        try {
+            return outInt(out, WinAccessible.dispatchGetRowOrColumnMajor(accessibleId));
+        } catch (Throwable t) {
+            reportUpcallFailure(t);
+            return GWIN_ERR_UPCALL;
+        }
+    }
+
+    /** {@code get_column_header_items}: {@code GetColumnHeaderItems()}. */
+    static int onGetColumnHeaderItems(long accessibleId, MemorySegment out, MemorySegment outCount) {
+        try {
+            return outLongBlock(out, outCount, WinAccessible.dispatchGetColumnHeaderItems(accessibleId));
+        } catch (Throwable t) {
+            reportUpcallFailure(t);
+            return GWIN_ERR_UPCALL;
+        }
+    }
+
+    /** {@code get_row_header_items}: {@code GetRowHeaderItems()}. */
+    static int onGetRowHeaderItems(long accessibleId, MemorySegment out, MemorySegment outCount) {
+        try {
+            return outLongBlock(out, outCount, WinAccessible.dispatchGetRowHeaderItems(accessibleId));
+        } catch (Throwable t) {
+            reportUpcallFailure(t);
+            return GWIN_ERR_UPCALL;
+        }
+    }
+
+    /** {@code toggle}: {@code Toggle()}. */
+    static int onToggle(long accessibleId) {
+        try {
+            WinAccessible.dispatchToggle(accessibleId);
+            return GWIN_OK;
+        } catch (Throwable t) {
+            reportUpcallFailure(t);
+            return GWIN_ERR_UPCALL;
+        }
+    }
+
+    /** {@code get_toggle_state}: {@code get_ToggleState()}. */
+    static int onGetToggleState(long accessibleId, MemorySegment out) {
+        try {
+            return outInt(out, WinAccessible.dispatchGetToggleState(accessibleId));
+        } catch (Throwable t) {
+            reportUpcallFailure(t);
+            return GWIN_ERR_UPCALL;
+        }
+    }
+
+    /** {@code collapse}: {@code Collapse()}. */
+    static int onCollapse(long accessibleId) {
+        try {
+            WinAccessible.dispatchCollapse(accessibleId);
+            return GWIN_OK;
+        } catch (Throwable t) {
+            reportUpcallFailure(t);
+            return GWIN_ERR_UPCALL;
+        }
+    }
+
+    /** {@code expand}: {@code Expand()}. */
+    static int onExpand(long accessibleId) {
+        try {
+            WinAccessible.dispatchExpand(accessibleId);
+            return GWIN_OK;
+        } catch (Throwable t) {
+            reportUpcallFailure(t);
+            return GWIN_ERR_UPCALL;
+        }
+    }
+
+    /** {@code get_expand_collapse_state}: {@code get_ExpandCollapseState()}. */
+    static int onGetExpandCollapseState(long accessibleId, MemorySegment out) {
+        try {
+            return outInt(out, WinAccessible.dispatchGetExpandCollapseState(accessibleId));
+        } catch (Throwable t) {
+            reportUpcallFailure(t);
+            return GWIN_ERR_UPCALL;
+        }
+    }
+
+    /** {@code get_can_move}: {@code get_CanMove()}. */
+    static int onGetCanMove(long accessibleId, MemorySegment out) {
+        try {
+            return outBoolean(out, WinAccessible.dispatchGetCanMove(accessibleId));
+        } catch (Throwable t) {
+            reportUpcallFailure(t);
+            return GWIN_ERR_UPCALL;
+        }
+    }
+
+    /** {@code get_can_resize}: {@code get_CanResize()}. */
+    static int onGetCanResize(long accessibleId, MemorySegment out) {
+        try {
+            return outBoolean(out, WinAccessible.dispatchGetCanResize(accessibleId));
+        } catch (Throwable t) {
+            reportUpcallFailure(t);
+            return GWIN_ERR_UPCALL;
+        }
+    }
+
+    /** {@code get_can_rotate}: {@code get_CanRotate()}. */
+    static int onGetCanRotate(long accessibleId, MemorySegment out) {
+        try {
+            return outBoolean(out, WinAccessible.dispatchGetCanRotate(accessibleId));
+        } catch (Throwable t) {
+            reportUpcallFailure(t);
+            return GWIN_ERR_UPCALL;
+        }
+    }
+
+    /** {@code move}: {@code Move(double,double)}. */
+    static int onMove(long accessibleId, double x, double y) {
+        try {
+            WinAccessible.dispatchMove(accessibleId, x, y);
+            return GWIN_OK;
+        } catch (Throwable t) {
+            reportUpcallFailure(t);
+            return GWIN_ERR_UPCALL;
+        }
+    }
+
+    /** {@code resize}: {@code Resize(double,double)}. */
+    static int onResize(long accessibleId, double width, double height) {
+        try {
+            WinAccessible.dispatchResize(accessibleId, width, height);
+            return GWIN_OK;
+        } catch (Throwable t) {
+            reportUpcallFailure(t);
+            return GWIN_ERR_UPCALL;
+        }
+    }
+
+    /** {@code rotate}: {@code Rotate(double)}. */
+    static int onRotate(long accessibleId, double degrees) {
+        try {
+            WinAccessible.dispatchRotate(accessibleId, degrees);
+            return GWIN_OK;
+        } catch (Throwable t) {
+            reportUpcallFailure(t);
+            return GWIN_ERR_UPCALL;
+        }
+    }
+
+    /** {@code scroll}: {@code Scroll(int,int)}. */
+    static int onScroll(long accessibleId, int horizontalAmount, int verticalAmount) {
+        try {
+            WinAccessible.dispatchScroll(accessibleId, horizontalAmount, verticalAmount);
+            return GWIN_OK;
+        } catch (Throwable t) {
+            reportUpcallFailure(t);
+            return GWIN_ERR_UPCALL;
+        }
+    }
+
+    /** {@code set_scroll_percent}: {@code SetScrollPercent(double,double)}. */
+    static int onSetScrollPercent(long accessibleId, double horizontalPercent, double verticalPercent) {
+        try {
+            WinAccessible.dispatchSetScrollPercent(accessibleId, horizontalPercent, verticalPercent);
+            return GWIN_OK;
+        } catch (Throwable t) {
+            reportUpcallFailure(t);
+            return GWIN_ERR_UPCALL;
+        }
+    }
+
+    /** {@code get_horizontally_scrollable}: {@code get_HorizontallyScrollable()}. */
+    static int onGetHorizontallyScrollable(long accessibleId, MemorySegment out) {
+        try {
+            return outBoolean(out, WinAccessible.dispatchGetHorizontallyScrollable(accessibleId));
+        } catch (Throwable t) {
+            reportUpcallFailure(t);
+            return GWIN_ERR_UPCALL;
+        }
+    }
+
+    /** {@code get_horizontal_scroll_percent}: {@code get_HorizontalScrollPercent()}. */
+    static int onGetHorizontalScrollPercent(long accessibleId, MemorySegment out) {
+        try {
+            return outDouble(out, WinAccessible.dispatchGetHorizontalScrollPercent(accessibleId));
+        } catch (Throwable t) {
+            reportUpcallFailure(t);
+            return GWIN_ERR_UPCALL;
+        }
+    }
+
+    /** {@code get_horizontal_view_size}: {@code get_HorizontalViewSize()}. */
+    static int onGetHorizontalViewSize(long accessibleId, MemorySegment out) {
+        try {
+            return outDouble(out, WinAccessible.dispatchGetHorizontalViewSize(accessibleId));
+        } catch (Throwable t) {
+            reportUpcallFailure(t);
+            return GWIN_ERR_UPCALL;
+        }
+    }
+
+    /** {@code get_vertically_scrollable}: {@code get_VerticallyScrollable()}. */
+    static int onGetVerticallyScrollable(long accessibleId, MemorySegment out) {
+        try {
+            return outBoolean(out, WinAccessible.dispatchGetVerticallyScrollable(accessibleId));
+        } catch (Throwable t) {
+            reportUpcallFailure(t);
+            return GWIN_ERR_UPCALL;
+        }
+    }
+
+    /** {@code get_vertical_scroll_percent}: {@code get_VerticalScrollPercent()}. */
+    static int onGetVerticalScrollPercent(long accessibleId, MemorySegment out) {
+        try {
+            return outDouble(out, WinAccessible.dispatchGetVerticalScrollPercent(accessibleId));
+        } catch (Throwable t) {
+            reportUpcallFailure(t);
+            return GWIN_ERR_UPCALL;
+        }
+    }
+
+    /** {@code get_vertical_view_size}: {@code get_VerticalViewSize()}. */
+    static int onGetVerticalViewSize(long accessibleId, MemorySegment out) {
+        try {
+            return outDouble(out, WinAccessible.dispatchGetVerticalViewSize(accessibleId));
+        } catch (Throwable t) {
+            reportUpcallFailure(t);
+            return GWIN_ERR_UPCALL;
+        }
+    }
+
+    /** {@code scroll_into_view}: {@code ScrollIntoView()}. */
+    static int onScrollIntoView(long accessibleId) {
+        try {
+            WinAccessible.dispatchScrollIntoView(accessibleId);
+            return GWIN_OK;
+        } catch (Throwable t) {
+            reportUpcallFailure(t);
+            return GWIN_ERR_UPCALL;
+        }
+    }
+
+    /** {@code clone}: {@code Clone()}. */
+    static int onRangeClone(long rangeId, MemorySegment out) {
+        try {
+            return outLong(out, WinTextRangeProvider.dispatchClone(rangeId));
+        } catch (Throwable t) {
+            reportUpcallFailure(t);
+            return GWIN_ERR_UPCALL;
+        }
+    }
+
+    /** {@code compare}: {@code Compare(WinTextRangeProvider)}. */
+    static int onRangeCompare(long rangeId, long otherRangeId, MemorySegment out) {
+        try {
+            return outBoolean(out, WinTextRangeProvider.dispatchCompare(rangeId, otherRangeId));
+        } catch (Throwable t) {
+            reportUpcallFailure(t);
+            return GWIN_ERR_UPCALL;
+        }
+    }
+
+    /** {@code compare_endpoints}: {@code CompareEndpoints(int,WinTextRangeProvider,int)}. */
+    static int onRangeCompareEndpoints(long rangeId, int endpoint, long otherRangeId, int targetEndpoint,
+            MemorySegment out) {
+        try {
+            return outInt(out, WinTextRangeProvider.dispatchCompareEndpoints(rangeId, endpoint, otherRangeId,
+                    targetEndpoint));
+        } catch (Throwable t) {
+            reportUpcallFailure(t);
+            return GWIN_ERR_UPCALL;
+        }
+    }
+
+    /** {@code expand_to_enclosing_unit}: {@code ExpandToEnclosingUnit(int)}. */
+    static int onRangeExpandToEnclosingUnit(long rangeId, int unit) {
+        try {
+            WinTextRangeProvider.dispatchExpandToEnclosingUnit(rangeId, unit);
+            return GWIN_OK;
+        } catch (Throwable t) {
+            reportUpcallFailure(t);
+            return GWIN_ERR_UPCALL;
+        }
+    }
+
+    /** {@code find_attribute}: {@code FindAttribute(int,WinVariant,boolean)}. */
+    static int onRangeFindAttribute(long rangeId, int attributeId, MemorySegment value, int backward,
+            MemorySegment out) {
+        try {
+            return outLong(out, WinTextRangeProvider.dispatchFindAttribute(rangeId, attributeId, readVariant(value),
+                    backward != 0));
+        } catch (Throwable t) {
+            reportUpcallFailure(t);
+            return GWIN_ERR_UPCALL;
+        }
+    }
+
+    /** {@code find_text}: {@code FindText(String,boolean,boolean)}. */
+    static int onRangeFindText(long rangeId, MemorySegment text, int length, int backward, int ignoreCase,
+            MemorySegment out) {
+        try {
+            return outLong(out, WinTextRangeProvider.dispatchFindText(rangeId, utf16String(text, length),
+                    backward != 0, ignoreCase != 0));
+        } catch (Throwable t) {
+            reportUpcallFailure(t);
+            return GWIN_ERR_UPCALL;
+        }
+    }
+
+    /** {@code get_attribute_value}: {@code GetAttributeValue(int)}. */
+    static int onRangeGetAttributeValue(long rangeId, int attributeId, MemorySegment out) {
+        try {
+            return outVariant(out, WinTextRangeProvider.dispatchGetAttributeValue(rangeId, attributeId));
+        } catch (Throwable t) {
+            reportUpcallFailure(t);
+            return GWIN_ERR_UPCALL;
+        }
+    }
+
+    /** {@code get_bounding_rectangles}: {@code GetBoundingRectangles()}. */
+    static int onRangeGetBoundingRectangles(long rangeId, MemorySegment out, MemorySegment outCount) {
+        try {
+            return outDoubleBlock(out, outCount, WinTextRangeProvider.dispatchGetBoundingRectangles(rangeId));
+        } catch (Throwable t) {
+            reportUpcallFailure(t);
+            return GWIN_ERR_UPCALL;
+        }
+    }
+
+    /** {@code get_enclosing_element}: {@code GetEnclosingElement()}. */
+    static int onRangeGetEnclosingElement(long rangeId, MemorySegment out) {
+        try {
+            return outLong(out, WinTextRangeProvider.dispatchGetEnclosingElement(rangeId));
+        } catch (Throwable t) {
+            reportUpcallFailure(t);
+            return GWIN_ERR_UPCALL;
+        }
+    }
+
+    /** {@code get_text}: {@code GetText(int)}. */
+    static int onRangeGetText(long rangeId, int maxLength, MemorySegment out, MemorySegment outLength) {
+        try {
+            return outString(out, outLength, WinTextRangeProvider.dispatchGetText(rangeId, maxLength));
+        } catch (Throwable t) {
+            reportUpcallFailure(t);
+            return GWIN_ERR_UPCALL;
+        }
+    }
+
+    /** {@code move}: {@code Move(int,int)}. */
+    static int onRangeMove(long rangeId, int unit, int count, MemorySegment out) {
+        try {
+            return outInt(out, WinTextRangeProvider.dispatchMove(rangeId, unit, count));
+        } catch (Throwable t) {
+            reportUpcallFailure(t);
+            return GWIN_ERR_UPCALL;
+        }
+    }
+
+    /** {@code move_endpoint_by_unit}: {@code MoveEndpointByUnit(int,int,int)}. */
+    static int onRangeMoveEndpointByUnit(long rangeId, int endpoint, int unit, int count, MemorySegment out) {
+        try {
+            return outInt(out, WinTextRangeProvider.dispatchMoveEndpointByUnit(rangeId, endpoint, unit, count));
+        } catch (Throwable t) {
+            reportUpcallFailure(t);
+            return GWIN_ERR_UPCALL;
+        }
+    }
+
+    /** {@code move_endpoint_by_range}: {@code MoveEndpointByRange(int,WinTextRangeProvider,int)}. */
+    static int onRangeMoveEndpointByRange(long rangeId, int endpoint, long otherRangeId, int targetEndpoint) {
+        try {
+            WinTextRangeProvider.dispatchMoveEndpointByRange(rangeId, endpoint, otherRangeId, targetEndpoint);
+            return GWIN_OK;
+        } catch (Throwable t) {
+            reportUpcallFailure(t);
+            return GWIN_ERR_UPCALL;
+        }
+    }
+
+    /** {@code select}: {@code Select()}. */
+    static int onRangeSelect(long rangeId) {
+        try {
+            WinTextRangeProvider.dispatchSelect(rangeId);
+            return GWIN_OK;
+        } catch (Throwable t) {
+            reportUpcallFailure(t);
+            return GWIN_ERR_UPCALL;
+        }
+    }
+
+    /** {@code add_to_selection}: {@code AddToSelection()}. */
+    static int onRangeAddToSelection(long rangeId) {
+        try {
+            WinTextRangeProvider.dispatchAddToSelection(rangeId);
+            return GWIN_OK;
+        } catch (Throwable t) {
+            reportUpcallFailure(t);
+            return GWIN_ERR_UPCALL;
+        }
+    }
+
+    /** {@code remove_from_selection}: {@code RemoveFromSelection()}. */
+    static int onRangeRemoveFromSelection(long rangeId) {
+        try {
+            WinTextRangeProvider.dispatchRemoveFromSelection(rangeId);
+            return GWIN_OK;
+        } catch (Throwable t) {
+            reportUpcallFailure(t);
+            return GWIN_ERR_UPCALL;
+        }
+    }
+
+    /** {@code scroll_into_view}: {@code ScrollIntoView(boolean)}. */
+    static int onRangeScrollIntoView(long rangeId, int alignToTop) {
+        try {
+            WinTextRangeProvider.dispatchScrollIntoView(rangeId, alignToTop != 0);
+            return GWIN_OK;
+        } catch (Throwable t) {
+            reportUpcallFailure(t);
+            return GWIN_ERR_UPCALL;
+        }
+    }
+
+    /** {@code get_children}: {@code GetChildren()}. */
+    static int onRangeGetChildren(long rangeId, MemorySegment out, MemorySegment outCount) {
+        try {
+            return outLongBlock(out, outCount, WinTextRangeProvider.dispatchGetChildren(rangeId));
+        } catch (Throwable t) {
+            reportUpcallFailure(t);
+            return GWIN_ERR_UPCALL;
+        }
+    }
+
+    /**
+     * {@code accessible_disposed}: the last COM reference on the {@code GlassAccessible} is gone, so the
+     * registry entry may go. It stands exactly where {@code DeleteGlobalRef} stood in
+     * {@code ~GlassAccessible}, which is <em>not</em> {@code WinAccessible.dispose()} - UI Automation
+     * holds its own references and keeps calling provider methods on a disposed peer, which the
+     * {@code isDisposed()} guards in {@code WinAccessible} answer. Can arrive on the COM/RPC thread that
+     * dropped that reference, and must not throw.
+     */
+    static void onAccessibleDisposed(long accessibleId) {
+        try {
+            WinAccessible.dispatchDisposed(accessibleId);
+        } catch (Throwable t) {
+            reportUpcallFailure(t);
+        }
+    }
+
+    /** {@code range_disposed}: {@link #onAccessibleDisposed}'s rules, for the range registry. */
+    static void onRangeDisposed(long rangeId) {
+        try {
+            WinTextRangeProvider.dispatchDisposed(rangeId);
+        } catch (Throwable t) {
+            reportUpcallFailure(t);
+        }
+    }
+
+    /* -- the out-parameters the 89 slots write ------------------------------------------------------ */
+
+    /** One {@code int64_t} out-parameter, always {@link #GWIN_OK}. */
+    private static int outLong(MemorySegment out, long value) {
+        bounded(out, JAVA_LONG.byteSize()).set(JAVA_LONG, 0, value);
+        return GWIN_OK;
+    }
+
+    /** One {@code int32_t} out-parameter. */
+    private static int outInt(MemorySegment out, int value) {
+        bounded(out, JAVA_INT.byteSize()).set(JAVA_INT, 0, value);
+        return GWIN_OK;
+    }
+
+    /** One {@code int32_t} out-parameter carrying a boolean, as 0 or 1; the C writes the VARIANT form. */
+    private static int outBoolean(MemorySegment out, boolean value) {
+        return outInt(out, value ? 1 : 0);
+    }
+
+    /** One {@code double} out-parameter. */
+    private static int outDouble(MemorySegment out, double value) {
+        bounded(out, JAVA_DOUBLE.byteSize()).set(JAVA_DOUBLE, 0, value);
+        return GWIN_OK;
+    }
+
+    /**
+     * {@code get_bounding_rectangle}: four floats and the flag that says whether they were written.
+     * {@code null} - which is what {@code get_BoundingRectangle} answers for a node with no bounds - is
+     * {@code *out_written == 0} and the provider then returns {@code S_OK} with the {@code UiaRect}
+     * untouched, exactly as the JNI did for a null {@code jfloatArray}.
+     * <p>
+     * An array shorter than four raises {@code ArrayIndexOutOfBoundsException} here, which is reported
+     * and becomes {@code E_FAIL}; the JNI read four floats out of whatever array arrived, through
+     * {@code GetPrimitiveArrayCritical} and with no length check. {@code WinAccessible} produces only
+     * {@code null} or a four-element array, so no caller can tell the two apart - but a garbage read is
+     * not worth reproducing.
+     */
+    private static int outRectangle(MemorySegment out4, MemorySegment outWritten, float[] bounds) {
+        int written = 0;
+        if (bounds != null) {
+            MemorySegment.copy(bounds, 0, bounded(out4, 4L * Float.BYTES), JAVA_FLOAT, 0, 4);
+            written = 1;
+        }
+        return outInt(outWritten, written);
+    }
+
+    /**
+     * A {@code gwin_alloc} block of {@code byteSize} bytes, bounded so that it can be written. Never
+     * {@code NULL}: a heap that cannot give the block is an {@code OutOfMemoryError}, which the stub
+     * catches and reports as {@link #GWIN_ERR_UPCALL}.
+     */
+    private static MemorySegment libraryBlock(long byteSize) {
+        MemorySegment block = gwinAlloc(byteSize);
+        if (block.equals(MemorySegment.NULL)) {
+            throw new OutOfMemoryError("gwin_alloc(" + byteSize + ") returned NULL");
+        }
+        return bounded(block, byteSize);
+    }
+
+    /**
+     * An {@code int64_t*} block and its count, {@code gwin_alloc}-ed and owned by the library from the
+     * moment this returns. A {@code null} array is {@code NULL} with count 0, which the C turns into
+     * {@code E_FAIL} - what {@code copyList(NULL)} answered; an empty array is a real block with count 0,
+     * which is {@code S_OK} and an empty {@code SAFEARRAY}. The difference reaches the UIA client.
+     */
+    private static int outLongBlock(MemorySegment out, MemorySegment outCount, long[] values) {
+        MemorySegment block = MemorySegment.NULL;
+        int count = 0;
+        if (values != null) {
+            block = libraryBlock(Math.max(values.length, 1) * (long) Long.BYTES);
+            MemorySegment.copy(values, 0, block, JAVA_LONG, 0, values.length);
+            count = values.length;
+        }
+        bounded(out, ADDRESS.byteSize()).set(ADDRESS, 0, block);
+        return outInt(outCount, count);
+    }
+
+    /** {@link #outLongBlock}'s rules for an {@code int32_t*} block - {@code get_runtime_id}. */
+    private static int outIntBlock(MemorySegment out, MemorySegment outCount, int[] values) {
+        MemorySegment block = MemorySegment.NULL;
+        int count = 0;
+        if (values != null) {
+            block = libraryBlock(Math.max(values.length, 1) * (long) Integer.BYTES);
+            MemorySegment.copy(values, 0, block, JAVA_INT, 0, values.length);
+            count = values.length;
+        }
+        bounded(out, ADDRESS.byteSize()).set(ADDRESS, 0, block);
+        return outInt(outCount, count);
+    }
+
+    /** {@link #outLongBlock}'s rules for a {@code double*} block - {@code get_bounding_rectangles}. */
+    private static int outDoubleBlock(MemorySegment out, MemorySegment outCount, double[] values) {
+        MemorySegment block = MemorySegment.NULL;
+        int count = 0;
+        if (values != null) {
+            block = libraryBlock(Math.max(values.length, 1) * (long) Double.BYTES);
+            MemorySegment.copy(values, 0, block, JAVA_DOUBLE, 0, values.length);
+            count = values.length;
+        }
+        bounded(out, ADDRESS.byteSize()).set(ADDRESS, 0, block);
+        return outInt(outCount, count);
+    }
+
+    /**
+     * A {@code uint16_t*} block of UTF-16 code units and its length, {@code gwin_alloc}-ed and owned by
+     * the library. Not NUL-terminated - the C wraps it in {@code SysAllocStringLen}. {@code null} is
+     * {@code NULL} with length 0, which is the {@code E_FAIL} of {@code copyString(NULL)}; an empty
+     * {@code String} is a real block with length 0, which is an empty {@code BSTR} and {@code S_OK}.
+     * Code units move, never characters: a lone surrogate survives the crossing.
+     */
+    private static int outString(MemorySegment out, MemorySegment outLength, String text) {
+        MemorySegment block = MemorySegment.NULL;
+        int length = 0;
+        if (text != null) {
+            char[] chars = text.toCharArray();
+            block = libraryBlock(Math.max(chars.length, 1) * (long) Character.BYTES);
+            MemorySegment.copy(chars, 0, block, JAVA_CHAR, 0, chars.length);
+            length = chars.length;
+        }
+        bounded(out, ADDRESS.byteSize()).set(ADDRESS, 0, block);
+        return outInt(outLength, length);
+    }
+
+    /**
+     * {@code count} borrowed UTF-16 code units as a {@code String} - the {@code NewString(text, len)} of
+     * {@code SetValue(LPCWSTR)} and {@code FindText}. A {@code NULL} pointer is the empty string; the
+     * library only dials those two slots with a non-NULL {@code BSTR}.
+     */
+    private static String utf16String(MemorySegment pointer, int count) {
+        return new String(utf16(pointer, count));
+    }
+
+    /* -- GwinVariant -------------------------------------------------------------------------------- */
+
+    /**
+     * Writes {@code variant} into the library's {@code GwinVariant} out-parameter, with both blocks
+     * {@code gwin_alloc}-ed and owned by the library from the moment this returns
+     * ({@code GwinClipboardCallbacks.fos_serialize}'s rule). A {@code null} variant leaves
+     * {@code vt = VT_EMPTY} and no value, which the C turns into {@code E_FAIL} with {@code VT_EMPTY} -
+     * what {@code copyVariant(NULL)} did. Nothing is written until both blocks exist, so a failure
+     * leaves the caller's struct as the library pre-zeroed it.
+     */
+    private static int outVariant(MemorySegment out, WinVariant variant) {
+        MemorySegment target = bounded(out, GWIN_VARIANT_LAYOUT.byteSize());
+        writeVariant(target, variant, WinGlassNative::libraryBlock);
+        return GWIN_OK;
+    }
+
+    /**
+     * Fills a {@code GwinVariant}. {@code allocator} owns the direction: {@link #libraryBlock} when the
+     * library takes the blocks over, an arena when the caller keeps them for the length of a downcall.
+     */
+    private static void writeVariant(MemorySegment target, WinVariant variant, BlockAllocator allocator) {
+        MemorySegment bstr = MemorySegment.NULL;
+        int bstrLength = 0;
+        MemorySegment doubles = MemorySegment.NULL;
+        int doubleCount = 0;
+        if (variant != null) {
+            if (variant.bstrVal != null) {
+                char[] chars = variant.bstrVal.toCharArray();
+                bstr = allocator.allocate(Math.max(chars.length, 1) * (long) Character.BYTES);
+                MemorySegment.copy(chars, 0, bstr, JAVA_CHAR, 0, chars.length);
+                bstrLength = chars.length;
+            }
+            if (variant.pDblVal != null) {
+                double[] values = variant.pDblVal;
+                doubles = allocator.allocate(Math.max(values.length, 1) * (long) Double.BYTES);
+                MemorySegment.copy(values, 0, doubles, JAVA_DOUBLE, 0, values.length);
+                doubleCount = values.length;
+            }
+        }
+        target.fill((byte) 0);
+        if (variant != null) {
+            target.set(JAVA_SHORT, VARIANT_VT_OFFSET, variant.vt);
+            target.set(JAVA_SHORT, VARIANT_I_VAL_OFFSET, variant.iVal);
+            target.set(JAVA_INT, VARIANT_L_VAL_OFFSET, variant.lVal);
+            target.set(JAVA_FLOAT, VARIANT_FLT_VAL_OFFSET, variant.fltVal);
+            target.set(JAVA_DOUBLE, VARIANT_DBL_VAL_OFFSET, variant.dblVal);
+            target.set(JAVA_INT, VARIANT_BOOL_VAL_OFFSET, variant.boolVal ? 1 : 0);
+            target.set(JAVA_LONG, VARIANT_PUNK_VAL_OFFSET, variant.punkVal);
+        }
+        target.set(ADDRESS, VARIANT_BSTR_VAL_OFFSET, bstr);
+        target.set(JAVA_INT, VARIANT_BSTR_LEN_OFFSET, bstrLength);
+        target.set(ADDRESS, VARIANT_P_DBL_VAL_OFFSET, doubles);
+        target.set(JAVA_INT, VARIANT_P_DBL_COUNT_OFFSET, doubleCount);
+    }
+
+    /**
+     * Reads a {@code GwinVariant} the library passed in. The one such parameter is
+     * {@code find_attribute}'s, and the library always passes {@code NULL} there, because
+     * {@code GlassTextRangeProvider::FindAttribute} never converted the {@code VARIANT} UI Automation
+     * gave it ("//TODO VAL TO JVAL") and a migration carries that verbatim - so this normally answers
+     * {@code null}, and decodes only if the library ever starts passing one.
+     */
+    private static WinVariant readVariant(MemorySegment value) {
+        if (value.equals(MemorySegment.NULL)) {
+            return null;
+        }
+        MemorySegment source = bounded(value, GWIN_VARIANT_LAYOUT.byteSize());
+        WinVariant variant = new WinVariant();
+        variant.vt = source.get(JAVA_SHORT, VARIANT_VT_OFFSET);
+        variant.iVal = source.get(JAVA_SHORT, VARIANT_I_VAL_OFFSET);
+        variant.lVal = source.get(JAVA_INT, VARIANT_L_VAL_OFFSET);
+        variant.fltVal = source.get(JAVA_FLOAT, VARIANT_FLT_VAL_OFFSET);
+        variant.dblVal = source.get(JAVA_DOUBLE, VARIANT_DBL_VAL_OFFSET);
+        variant.boolVal = source.get(JAVA_INT, VARIANT_BOOL_VAL_OFFSET) != 0;
+        variant.punkVal = source.get(JAVA_LONG, VARIANT_PUNK_VAL_OFFSET);
+        MemorySegment bstr = source.get(ADDRESS, VARIANT_BSTR_VAL_OFFSET);
+        if (!bstr.equals(MemorySegment.NULL)) {
+            variant.bstrVal = utf16String(bstr, source.get(JAVA_INT, VARIANT_BSTR_LEN_OFFSET));
+        }
+        MemorySegment doubles = source.get(ADDRESS, VARIANT_P_DBL_VAL_OFFSET);
+        if (!doubles.equals(MemorySegment.NULL)) {
+            int count = source.get(JAVA_INT, VARIANT_P_DBL_COUNT_OFFSET);
+            variant.pDblVal = bounded(doubles, count * JAVA_DOUBLE.byteSize()).toArray(JAVA_DOUBLE);
+        }
+        return variant;
+    }
+
+    /**
+     * One {@code const GwinVariant*} argument of {@link #raiseAutomationPropertyChangedEvent}:
+     * {@code NULL} for a {@code null} {@code WinVariant}, because that is the {@code jobject} the JNI
+     * handed {@code copyVariant}, which answered {@code E_FAIL} and short-circuited before the OS call.
+     */
+    private static MemorySegment variantArgument(Arena arena, WinVariant variant, BlockAllocator allocator) {
+        if (variant == null) {
+            return MemorySegment.NULL;
+        }
+        MemorySegment target = arena.allocate(GWIN_VARIANT_LAYOUT);
+        writeVariant(target, variant, allocator);
+        return target;
+    }
+
+    /** Where a {@code GwinVariant}'s two blocks come from; see {@link #writeVariant}. */
+    private interface BlockAllocator {
+
+        /** A block of {@code byteSize} bytes, aligned for a {@code double} and writable. */
+        MemorySegment allocate(long byteSize);
+    }
+
+    /* -- the downcalls ------------------------------------------------------------------------------ */
+
+    /**
+     * {@code gwin_a11y_create(accessible_id)}: {@code new GlassAccessible}, the body of
+     * {@code Java_com_sun_glass_ui_win_WinAccessible__1createGlassAccessible} without its
+     * {@code jobject}. No OS call and no thread marshal, so it works without a toolkit. 0 only when the
+     * allocation failed, which {@code WinAccessible} turns into
+     * {@code RuntimeException("could not create platform accessible")}.
+     *
+     * @return the {@code GlassAccessible*}, which is also its {@code IRawElementProviderSimple*}
+     */
+    static long createAccessible(long accessibleId) {
+        try {
+            return ((MemorySegment) GWIN_A11Y_CREATE.invokeExact(accessibleId)).address();
+        } catch (Throwable t) {
+            throw unexpected(t);
+        }
+    }
+
+    /**
+     * {@code gwin_a11y_destroy(acc)}: {@code GlassAccessible::Release}, which drops the Java peer's
+     * reference and deletes only when the last one goes. {@code acc} must not be 0 - the JNI entry point
+     * dereferenced it unconditionally and {@code WinAccessible} guards with {@code if (peer != 0L)};
+     * that split stays as it is.
+     */
+    static void destroyAccessible(long accessible) {
+        try {
+            GWIN_A11Y_DESTROY.invokeExact(MemorySegment.ofAddress(accessible));
+        } catch (Throwable t) {
+            throw unexpected(t);
+        }
+    }
+
+    /**
+     * {@code gwin_a11y_text_range_create(acc, range_id)}: {@code new GlassTextRangeProvider} owned by
+     * {@code acc}, which it AddRefs, so a live range pins its accessible. 0 when {@code accessible} is 0
+     * or the allocation failed - and {@code WinTextRangeProvider} does not check, as it never did.
+     *
+     * @return the {@code GlassTextRangeProvider*}, which is also its {@code ITextRangeProvider*}
+     */
+    static long createTextRange(long accessible, long rangeId) {
+        try {
+            MemorySegment range = (MemorySegment) GWIN_A11Y_TEXT_RANGE_CREATE.invokeExact(
+                    MemorySegment.ofAddress(accessible), rangeId);
+            return range.address();
+        } catch (Throwable t) {
+            throw unexpected(t);
+        }
+    }
+
+    /**
+     * {@code gwin_a11y_text_range_destroy(range)}: {@code GlassTextRangeProvider::Release}, with
+     * {@link #destroyAccessible}'s rules. {@code range} must not be 0: neither the JNI entry point nor
+     * {@code WinTextRangeProvider.dispose()} checks, and a range that failed to be created crashes here
+     * today. Carried as it is; fixing it is a separate change.
+     */
+    static void destroyTextRange(long range) {
+        try {
+            GWIN_A11Y_TEXT_RANGE_DESTROY.invokeExact(MemorySegment.ofAddress(range));
+        } catch (Throwable t) {
+            throw unexpected(t);
+        }
+    }
+
+    /**
+     * {@code gwin_a11y_raise_property_changed(acc, property_id, old_value, new_value)}: the one UI
+     * Automation entry point of this section that keeps a C body, because building the two
+     * {@code VARIANT}s means {@code oleaut32!SysAllocStringLen}, {@code SafeArrayCreateVector},
+     * {@code SafeArrayPutElement} and an {@code IUnknown::AddRef} through a vtable slot - the
+     * {@code copyVariant} marshalling the inbound direction needs in C anyway.
+     * <p>
+     * Both structs and both of their blocks live in a confined arena for the length of the call, which
+     * is all the library asks: it reads them and frees nothing. The first variant that cannot be built
+     * short-circuits with its own {@code HRESULT} and no OS call is made, which is what the JNI
+     * returned.
+     *
+     * @return the {@code HRESULT}, sign-extended, as the JNI's {@code jlong} was
+     */
+    static long raiseAutomationPropertyChangedEvent(long provider, int propertyId, WinVariant oldValue,
+                                                    WinVariant newValue) {
+        try (Arena arena = Arena.ofConfined()) {
+            BlockAllocator allocator = byteSize -> arena.allocate(byteSize, JAVA_DOUBLE.byteAlignment());
+            // A null WinVariant crosses as a NULL pointer, not as a VT_EMPTY struct: copyVariant(NULL)
+            // answered E_FAIL and made no OS call, and a VT_EMPTY struct is a value the OS accepts.
+            MemorySegment previous = variantArgument(arena, oldValue, allocator);
+            MemorySegment current = variantArgument(arena, newValue, allocator);
+            return (long) GWIN_A11Y_RAISE_PROPERTY_CHANGED.invokeExact(MemorySegment.ofAddress(provider),
+                    propertyId, previous, current);
+        } catch (Throwable t) {
+            throw unexpected(t);
+        }
+    }
+
+    /**
+     * {@code UIAutomationCore!UiaRaiseAutomationEvent(pProvider, id)} - bound straight from the OS,
+     * because the JNI body was one {@code reinterpret_cast}, one {@code static_cast} and that call.
+     * {@code pProvider} is a {@code GlassAccessible*}, whose first base <em>is</em> the
+     * {@code IRawElementProviderSimple*} the function wants; that identity is the library's, recorded in
+     * {@code glass_win_api.h}, and this crossing relies on it exactly as the JNI did.
+     *
+     * @return the {@code HRESULT}, sign-extended, as the JNI's {@code jlong} was
+     */
+    static long raiseAutomationEvent(long provider, int eventId) {
+        try {
+            return (int) UiaCore.RAISE_AUTOMATION_EVENT.invokeExact(MemorySegment.ofAddress(provider), eventId);
+        } catch (Throwable t) {
+            throw unexpected(t);
+        }
+    }
+
+    /** {@code UIAutomationCore!UiaClientsAreListening()} - the whole of the former JNI body. */
+    static boolean uiaClientsAreListening() {
+        try {
+            return ((int) UiaCore.CLIENTS_ARE_LISTENING.invokeExact()) != 0;
+        } catch (Throwable t) {
+            throw unexpected(t);
+        }
+    }
+
+    /**
+     * {@code UIAutomationCore.dll} and the two functions of it this package needs, bound on first use
+     * rather than in this class's initializer.
+     * <p>
+     * The laziness is behaviour parity, not taste: {@code glass.dll} delay-loads
+     * {@code UIAutomationCore} ({@code win.cmake}, {@code /DELAYLOAD:Uiautomationcore.dll}), so a
+     * process that never reaches accessibility never loads it, and a machine on which it could not be
+     * resolved lost accessibility only. Binding it in {@link WinGlassNative}'s own initializer would
+     * turn that into a failed initializer for this whole class - every Glass call would then die with
+     * {@code NoClassDefFoundError} for a library it does not use. A holder class keeps both the load
+     * point and the blast radius where the JNI had them, exactly as {@code Winmm} does for the timer.
+     * <p>
+     * The cost is that {@link WinGlassNative#boundSymbols()} grows when accessibility is first used;
+     * the tests that assert that list force this holder first.
+     */
+    private static final class UiaCore {
+
+        private static final String NAME = "UIAutomationCore";
+
+        private static final SymbolLookup LOOKUP = systemLibrary(NAME + ".dll");
+
+        /** {@code HRESULT UiaRaiseAutomationEvent(IRawElementProviderSimple* pProvider, EVENTID id)}. */
+        static final MethodHandle RAISE_AUTOMATION_EVENT = bindUiaCore("UiaRaiseAutomationEvent",
+                FunctionDescriptor.of(JAVA_INT, ADDRESS, JAVA_INT));
+
+        /** {@code BOOL UiaClientsAreListening(void)}. */
+        static final MethodHandle CLIENTS_ARE_LISTENING = bindUiaCore("UiaClientsAreListening",
+                FunctionDescriptor.of(JAVA_INT));
+
+        private UiaCore() {
+        }
+
+        private static MethodHandle bindUiaCore(String name, FunctionDescriptor descriptor) {
+            return bind(LOOKUP, NAME, name, descriptor);
+        }
     }
 }

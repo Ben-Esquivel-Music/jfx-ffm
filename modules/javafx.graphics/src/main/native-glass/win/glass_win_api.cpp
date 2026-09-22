@@ -68,8 +68,8 @@
  * static). Under ABI 5 the JNI twins, gwin_robot_pixel_color and the anchoring test hook
  * gwin_test_screen_anchor were then deleted with the GlassScreen.cpp code it ran; with no table installed
  * HandleDisplayChange delivers nothing. gwin_test_report_exception_in_downcall, the test hook of the
- * CheckAndClearException fix, moved with CheckAndClearException into GlassAccessibleJni.cpp, so no
- * export here calls into the JVM.
+ * CheckAndClearException fix, moved with CheckAndClearException into GlassAccessibleJni.cpp and went
+ * with that file when the accessibility JNI was deleted, so no export here calls into the JVM.
  *
  * No local header this file includes spells a JNI type any more, and common.h no longer includes jni.h. It
  * still reaches this TU through line 2 of the javac -h constants headers below (Window_Level, Clipboard,

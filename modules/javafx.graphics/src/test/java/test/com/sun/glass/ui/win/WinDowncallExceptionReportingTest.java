@@ -26,6 +26,8 @@
 package test.com.sun.glass.ui.win;
 
 import com.sun.glass.ui.win.WinGlassNativeShim;
+import java.lang.foreign.Arena;
+import java.lang.foreign.MemorySegment;
 import java.util.ArrayList;
 import java.util.List;
 import org.junit.jupiter.api.BeforeAll;
@@ -63,39 +65,52 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * exception that is not printed. Nothing reached {@code CheckAndClearException} from a downcall at all
  * until {@code gwin_test_report_exception_in_downcall} existed.
  * <p>
- * <b>What is asserted.</b> The hook is called through an FFM downcall (the failing frame shape): it throws
- * a {@code RuntimeException} named after itself and runs {@code CheckAndClearException}. Its return value
- * cannot tell a delivered exception from a dropped one, so delivery is observed where
- * {@code Application.reportException} delivers - the <em>calling thread's</em>
- * {@code Thread.UncaughtExceptionHandler} ({@code Application.java:448-453}), installed here around the call.
- * That nothing is left pending is observed by the downcall returning normally and by a JNI native method
- * ({@code Runtime.availableProcessors}) completing afterwards: a native method that returns with an
- * exception pending on its thread throws it.
+ * <b>What is asserted, and why the subject moved.</b> The JNI sink this test used to drive -
+ * {@code gwin_test_report_exception_in_downcall} over {@code CheckAndClearException} - had exactly one
+ * writer for its cached {@code Application} class, {@code WinAccessible._initIDs}, and that native method
+ * no longer exists: the accessibility flip turned all nine into downcalls, so {@code glass.dll} looks
+ * nothing up any more and the regression is structurally impossible rather than fixed. What replaced the
+ * reporting is the Java side of an accessibility upcall stub, so that is what this test drives now: a
+ * table whose target throws is installed, a slot is fired from inside a downcall (the same failing frame
+ * shape), and delivery is observed where {@code Application.reportException} delivers - the <em>calling
+ * thread's</em> {@code Thread.UncaughtExceptionHandler} ({@code Application.java:448-453}), installed here
+ * around the call. The library must see {@code GWIN_ERR_UPCALL} and not a {@code Throwable}: one escaping
+ * an upcall stub terminates the JVM. That nothing is left pending is observed by a JNI native method
+ * ({@code Runtime.availableProcessors}) completing afterwards.
  */
 @EnabledOnOs(OS.WINDOWS)
 public class WinDowncallExceptionReportingTest {
 
-    /** The message the hook gives its {@code RuntimeException}: its own name. */
-    static final String MESSAGE = "gwin_test_report_exception_in_downcall";
+    /** The message the throwing slot's target gives its {@code RuntimeException}. */
+    static final String MESSAGE = WinGlassNativeShim.THROWING_SLOT_MESSAGE;
 
-    /** How often the hook is called in a row, so a state left behind by one call would show in the next. */
+    /** How often the path is driven in a row, so a state left behind by one call would show in the next. */
     static final int CALLS = 3;
 
-    private static final String WRITER = "WinAccessible._initIDs";
+    /** The accessible slot the throwing table is fired at; any one would do, slot 0 is the first. */
+    private static final int SLOT = 0;
+
+    /** An id no registry holds: the throwing table answers before any peer is looked up. */
+    private static final long UNKNOWN_ID = 0x7FFF_0000_0002L;
+
+    /** {@code GWIN_ERR_UPCALL} - what a provider method turns into {@code E_FAIL}. */
+    private static final long GWIN_ERR_UPCALL = -3L;
 
     @BeforeAll
     static void requireNatives() {
         WinGlassNatives.require();
-        // The cache is written by the first JNI native that runs InitExceptionReporting, and since ABI 5
-        // deleted WinApplication.initIDs the only one is WinAccessible's: the class whose UIA callbacks
-        // report through it. If it cannot initialize here nothing can write the cache, and the test below
-        // would fail for that reason instead of for the regression it exists to catch - so fail here, naming it.
         Throwable accessibleFailure = WinGlassNativeShim.initializeWinAccessible();
-        assertNull(accessibleFailure, "WinAccessible could not initialize, so " + WRITER
-                + " - the only writer of CheckAndClearException's cache - never ran: " + accessibleFailure);
-        System.out.println("WinDowncallExceptionReportingTest: cache writer: " + WRITER);
+        assertNull(accessibleFailure, "WinAccessible could not initialize, so the accessibility tables"
+                + " - the path this test drives - were never installed: " + accessibleFailure);
     }
 
+    /**
+     * The same guarantee, on the path the flip left behind: a {@code Throwable} raised inside an
+     * accessibility upcall stub, entered from inside the {@code gwin_test_fire_accessible_callback}
+     * downcall, reaches {@code Application.reportException} - and the library sees
+     * {@code GWIN_ERR_UPCALL} rather than a {@code Throwable} unwinding into a COM vtable, which
+     * terminates the JVM.
+     */
     @Test
     public void anExceptionReportedInsideADowncallReachesTheUncaughtExceptionHandler() {
         Thread current = Thread.currentThread();
@@ -105,23 +120,27 @@ public class WinDowncallExceptionReportingTest {
             Thread.UncaughtExceptionHandler previous = current.getUncaughtExceptionHandler();
             // getUncaughtExceptionHandler() answers the ThreadGroup when the thread has no handler of its own.
             boolean hadOwnHandler = !(previous instanceof ThreadGroup);
-            int result;
-            try {
-                current.setUncaughtExceptionHandler((thread, throwable) -> {
-                    deliveredOn.add(thread);
-                    delivered.add(throwable);
-                });
-                result = WinGlassNativeShim.reportExceptionInDowncall();
-            } finally {
-                current.setUncaughtExceptionHandler(hadOwnHandler ? previous : null);
+            long result;
+            try (Arena arena = Arena.ofConfined()) {
+                // gwin_test_fire_accessible_callback wants at least gwin_sizeof_variant() bytes, and it
+                // guards `out` with a reinterpret, which cannot re-check this arena's real size.
+                MemorySegment out = arena.allocate(Math.max(WinGlassNativeShim.sizeOfVariant(), 64), 8);
+                try {
+                    current.setUncaughtExceptionHandler((thread, throwable) -> {
+                        deliveredOn.add(thread);
+                        delivered.add(throwable);
+                    });
+                    result = WinGlassNativeShim.fireAccessibleIntoThrowingTable(SLOT, UNKNOWN_ID, out);
+                } finally {
+                    current.setUncaughtExceptionHandler(hadOwnHandler ? previous : null);
+                }
             }
-            String which = "call " + call + " (cache writer: " + WRITER + ")";
+            String which = "call " + call;
 
             assertTrue(Runtime.getRuntime().availableProcessors() > 0, which);
-            assertEquals(1, result, which + ": the hook's exception was not pending when CheckAndClearException ran"
-                    + " (0), or the hook could not reach the JVM (-1)");
-            assertEquals(1, delivered.size(), which + ": CheckAndClearException handled the exception but did not"
-                    + " deliver it to Application.reportException - the FindClass-inside-a-downcall regression"
+            assertEquals(GWIN_ERR_UPCALL, result, which + ": the library did not see GWIN_ERR_UPCALL");
+            assertEquals(1, delivered.size(), which + ": the Throwable was not delivered to"
+                    + " Application.reportException - the FindClass-inside-a-downcall regression"
                     + " (delivered: " + delivered + ")");
             Throwable throwable = delivered.get(0);
             assertEquals(RuntimeException.class, throwable.getClass(), which + ": " + throwable);

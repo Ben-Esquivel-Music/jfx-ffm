@@ -84,7 +84,8 @@ GwinGestureCallbacks GlassView::sm_gestureCallbacks = NOOP_GESTURE_CALLBACKS;
 bool GlassView::sm_gestureCallbacksInstalled = false;
 
 /* By value - this library never retains the caller's struct - and a NULL slot keeps its no-op.
- * The slots are written before the flag, so a reader never sees a half-copied table. */
+ * Installed once, before any view can exist; not safe against a concurrent install - the flag is a
+ * plain bool and the table a plain struct assignment, with no release store between them. */
 void GlassView::SetViewCallbacks(const GwinViewCallbacks* cb)
 {
     GwinViewCallbacks t = NOOP_VIEW_CALLBACKS;
