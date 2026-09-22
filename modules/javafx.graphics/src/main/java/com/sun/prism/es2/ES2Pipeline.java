@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2009, 2024, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2009, 2026, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -83,9 +83,8 @@ public class ES2Pipeline extends GraphicsPipeline {
             factories = new ES2ResourceFactory[glFactory.getAdapterCount()];
             msaa = glFactory.isGLExtensionSupported("GL_ARB_multisample");
             npotSupported = glFactory.isNPOTSupported();
-            // 3D requires platform that has non-power of two (NPOT) support, but
-            // also works on iOS with OpenGL ES 2.0 or greater
-            supports3D = npotSupported || PlatformUtil.isIOS();
+            // 3D requires platform that has non-power of two (NPOT) support
+            supports3D = npotSupported;
         } else {
             theInstance = null;
             msaa = false;

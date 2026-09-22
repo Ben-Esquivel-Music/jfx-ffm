@@ -70,10 +70,6 @@ abstract class GLFactory {
             factoryClassName = "com.sun.prism.es2.WinGLFactory";
         } else if (PlatformUtil.isMac()) {
             factoryClassName = "com.sun.prism.es2.MacGLFactory";
-        } else if (PlatformUtil.isIOS()) {
-            factoryClassName = "com.sun.prism.es2.IOSGLFactory";
-        } else if (PlatformUtil.isAndroid()) {
-            factoryClassName = "com.sun.prism.es2.MonocleGLFactory";
         } else {
             factoryClassName = null;
             System.err.println("GLFactory.static - No Platform Factory for: " + System.getProperty("os.name"));

@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2013, 2024, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2013, 2026, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -63,6 +63,13 @@ public abstract class NativePlatformFactory {
     private static final int minorVersion = 0;
 
     /**
+     * The NativePlatformFactory names tried, in order, when the monocle.platform system
+     * property is not set. Every name must have a matching
+     * {@code com.sun.glass.ui.monocle.<name>PlatformFactory} class in this package.
+     */
+    static final String DEFAULT_PLATFORM_ORDER = "MX6,OMAP,Dispman,X11,Linux,Headless";
+
+    /**
      * Obtains a NativePlatform that matches the platform on which we are running.
      *
      * The system property monocle.platform defines a series of cascading
@@ -79,8 +86,7 @@ public abstract class NativePlatformFactory {
     public static synchronized NativePlatform getNativePlatform() {
         if (platform == null) {
             String platformFactoryProperty =
-                    System.getProperty("monocle.platform",
-                                        "MX6,OMAP,Dispman,Android,X11,Linux,Headless");
+                    System.getProperty("monocle.platform", DEFAULT_PLATFORM_ORDER);
             String[] platformFactories = platformFactoryProperty.split(",");
             for (int i = 0; i < platformFactories.length; i++) {
                 String factoryName = platformFactories[i].trim();

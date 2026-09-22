@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2012, 2026, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2026, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -25,45 +25,19 @@
 
 package com.sun.glass.ui.monocle;
 
-import com.sun.glass.ui.Clipboard;
-import com.sun.glass.ui.SystemClipboard;
+import java.util.List;
 
-import java.util.HashMap;
+/** Exposes the package-private default NativePlatformFactory cascade to tests. */
+public final class NativePlatformFactoryShim {
 
-/** There is no system clipboard on embedded Linux systems using a
- * framebuffer. For X11 a different implementation will be needed. */
-final class MonocleSystemClipboard extends SystemClipboard {
-
-    MonocleSystemClipboard() {
-        super(Clipboard.SYSTEM);
+    private NativePlatformFactoryShim() {
     }
 
-    @Override
-    protected boolean isOwner() {
-        return true;
+    /**
+     * @return the NativePlatformFactory names tried, in order, when the
+     *         {@code monocle.platform} system property is not set
+     */
+    public static List<String> defaultPlatformOrder() {
+        return List.of(NativePlatformFactory.DEFAULT_PLATFORM_ORDER.split(","));
     }
-
-    @Override
-    protected void pushToSystem(HashMap<String, Object> cacheData,
-                                int supportedActions) {
-    }
-
-    @Override
-    protected void pushTargetActionToSystem(int actionDone) {
-    }
-    @Override
-    protected Object popFromSystem(String mimeType) {
-        return null;
-    }
-
-    @Override
-    protected int supportedSourceActionsFromSystem() {
-        return Clipboard.ACTION_NONE;
-    }
-
-    @Override
-    protected String[] mimesFromSystem() {
-        return new String[0];
-    }
-
 }

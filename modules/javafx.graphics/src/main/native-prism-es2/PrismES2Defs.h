@@ -28,7 +28,7 @@
 
 #include <stdint.h>
 
-#if defined(SOLARIS) || defined(LINUX) || defined(ANDROID_NDK) /* SOLARIS || LINUX */
+#if defined(SOLARIS) || defined(LINUX) /* SOLARIS || LINUX */
 #define GLX_GLEXT_PROTOTYPES
 #define GLX_GLXEXT_PROTOTYPES
 #define UNIX
@@ -40,12 +40,10 @@
 
 #include <limits.h>
 
-#ifndef ANDROID_NDK
 #include <X11/X.h>
 #include <X11/Xlib.h>
 #include <X11/Xutil.h>
 #include <GL/glx.h>
-#endif
 
 #include <GL/gl.h>
 #include <GL/glext.h>
@@ -68,13 +66,7 @@
 #ifdef __APPLE__
 #include <TargetConditionals.h>
 
-#if TARGET_OS_IPHONE /* iOS */
-#include <GL/gl.h>
-#include <GL/glext.h>
-#include "ios/ios-window-system.h"
-#define IS_EGL
-
-#elif TARGET_OS_MAC /* MacOSX */
+#if TARGET_OS_MAC /* MacOSX */
 /* Include the OpenGL headers */
 #include <GL/gl.h>
 #include <GL/glext.h>
@@ -97,21 +89,6 @@
 #define _WIN32_WINNT 0x0500
 #endif
 #endif /* WIN32 */
-
-#ifdef ANDROID_NDK
-
-typedef EGLNativeDisplayType Display;
-typedef EGLNativeWindowType  Window;
-typedef EGLConfig            GLXFBConfig;
-typedef unsigned long        Colormap;
-typedef unsigned long        PFNGLXSWAPINTERVALSGIPROC;
-
-#include <android/log.h>
-#include <string.h>
-#define TAG "javafx"
-#define printf(...) ((void)__android_log_print(ANDROID_LOG_INFO, TAG, __VA_ARGS__))
-#define fprintf(IGNORE, ...) ((void)__android_log_print(ANDROID_LOG_ERROR, TAG, __VA_ARGS__))
-#endif
 
 /* Typedef for pixelformat properties struct */
 typedef struct PixelFormatInfoRec PixelFormatInfo;

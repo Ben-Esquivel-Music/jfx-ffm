@@ -587,10 +587,10 @@ es2_get_fbo(void *ctx) {
     GLint param;
 
     (void) ctx; /* nGetFBO took no context */
-    /* The caching logic has been done on Java side if
-     * platform isn't MAC or IOS. On these platforms Glass
-     * can change the FBO under us. We should be able to simplify the
-     * logic in Java and remove this method once once Glass stop doing it.
+    /* The caching logic has been done on Java side if platform isn't
+     * MAC. On macOS Glass can change the FBO under us. We should be
+     * able to simplify the logic in Java and remove this method once
+     * Glass stop doing it.
      */
     glGetIntegerv(GL_FRAMEBUFFER_BINDING, &param);
     return (int32_t) param;
