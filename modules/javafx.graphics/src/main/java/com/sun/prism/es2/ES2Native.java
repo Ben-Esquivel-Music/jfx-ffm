@@ -26,6 +26,7 @@
 package com.sun.prism.es2;
 
 import com.sun.glass.utils.NativeLibLoader;
+import com.sun.javafx.PlatformUtil;
 import java.lang.foreign.Arena;
 import java.lang.foreign.FunctionDescriptor;
 import java.lang.foreign.Linker;
@@ -93,12 +94,17 @@ import static java.lang.foreign.ValueLayout.JAVA_LONG;
 final class ES2Native {
 
     /**
-     * The {@code es2_*} ABI revision this class is written against ({@code ES2_ABI_VERSION}): 2 since
-     * {@code es2_gl_enum_count} / {@code es2_gl_enum} were bound.
+     * The {@code es2_*} ABI revision this class is written against ({@code ES2_ABI_VERSION}): 3 since
+     * {@code es2_context_adopt} was bound (2 had added {@code es2_gl_enum_count} / {@code es2_gl_enum}).
      */
-    static final int ABI_VERSION = 2;
+    static final int ABI_VERSION = 3;
 
-    static final String LIBRARY_NAME = "prism_es2";
+    /**
+     * The library of this platform: {@code prism_es2_monocle} (EGL / OpenGL ES 2, the context owned by Java)
+     * when {@code -Dglass.platform=Monocle} selected the Monocle embedded type, {@code prism_es2} otherwise.
+     */
+    static final String LIBRARY_NAME =
+            "monocle".equals(PlatformUtil.getEmbeddedType()) ? "prism_es2_monocle" : "prism_es2";
 
     /** {@code kind} argument of {@code es2_context_get_string}. */
     static final int STR_VENDOR = 0;
@@ -220,6 +226,12 @@ final class ES2Native {
     private static final MethodHandle ES2_CONTEXT_MAKE_CURRENT = bind("es2_context_make_current",
             FunctionDescriptor.ofVoid(ADDRESS, ADDRESS));
     private static final MethodHandle ES2_CONTEXT_GET_PROC_ADDRESS = bind("es2_context_get_proc_address",
+            FunctionDescriptor.of(ADDRESS, ADDRESS, ADDRESS));
+    /**
+     * {@code void *es2_context_adopt(Es2ProcLoader loader, void *user)}: a render context over the GL / GLES
+     * context current on the calling thread, its entry points asked of {@code loader(user, name)}.
+     */
+    private static final MethodHandle ES2_CONTEXT_ADOPT = bind("es2_context_adopt",
             FunctionDescriptor.of(ADDRESS, ADDRESS, ADDRESS));
 
     /* State setters. */
@@ -776,6 +788,76 @@ final class ES2Native {
             } catch (Throwable t) {
                 throw unexpected(t);
             }
+        }
+    }
+
+    /**
+     * Resolves a GL entry point for {@link #contextAdopt}: the {@code dlsym(handle, name)} the JNI performed,
+     * a handle of 0 meaning the global scope of the process ({@code RTLD_DEFAULT}).
+     */
+    interface ProcLoader {
+        long lookup(long handle, String name);
+    }
+
+    /** {@code void *(*Es2ProcLoader)(void *user, const char *name)}. */
+    private static final FunctionDescriptor PROC_LOADER = FunctionDescriptor.of(ADDRESS, ADDRESS, ADDRESS);
+
+    /** {@link #loaderUpcall}, with the {@link ProcLoader} still to be bound as its first argument. */
+    private static final MethodHandle LOADER_UPCALL;
+
+    static {
+        try {
+            LOADER_UPCALL = MethodHandles.lookup().findStatic(ES2Native.class, "loaderUpcall",
+                    MethodType.methodType(MemorySegment.class, ProcLoader.class, MemorySegment.class,
+                            MemorySegment.class));
+        } catch (ReflectiveOperationException e) {
+            throw new ExceptionInInitializerError(e);
+        }
+    }
+
+    /** The loader stub of the last {@link #contextAdopt}; its scope is closed once that call has returned. */
+    static volatile MemorySegment lastLoaderStub;
+
+    /**
+     * {@code es2_context_adopt}: a render context over the GL / GLES context that is current on this thread -
+     * on Monocle, the EGL context AcceleratedScreen created and made current - with every entry point of the
+     * table resolved through {@code loader.lookup(glHandle, name)} during the call, as
+     * {@code nPopulateNativeCtxInfo} of MonocleGLFactory.c of commit 21d5a654f6 resolved them with dlsym.
+     * The loader stub lives in an arena confined to this call: the C stores the resolved pointers and never
+     * the loader. A loader that throws contributes a NULL entry; a null loader, or no current context, is a
+     * 0 result (the C prints one line on stderr for it). Not a critical downcall: it upcalls.
+     *
+     * @return the context handle, or {@code 0L}
+     */
+    @SuppressWarnings("restricted")
+    static long contextAdopt(long glHandle, ProcLoader loader) {
+        if (loader == null) {
+            return adopt(MemorySegment.NULL, glHandle);
+        }
+        try (Arena arena = Arena.ofConfined()) {
+            MemorySegment stub = LINKER.upcallStub(MethodHandles.insertArguments(LOADER_UPCALL, 0, loader),
+                    PROC_LOADER, arena);
+            lastLoaderStub = stub;
+            return adopt(stub, glHandle);
+        }
+    }
+
+    private static long adopt(MemorySegment loaderStub, long user) {
+        try {
+            return ((MemorySegment) ES2_CONTEXT_ADOPT.invokeExact(loaderStub, seg(user))).address();
+        } catch (Throwable t) {
+            throw unexpected(t);
+        }
+    }
+
+    /** The upcall target: never throws, and answers NULL for whatever the loader cannot resolve. */
+    @SuppressWarnings("restricted")
+    private static MemorySegment loaderUpcall(ProcLoader loader, MemorySegment user, MemorySegment name) {
+        try {
+            String symbol = name.reinterpret(Long.MAX_VALUE).getString(0);
+            return MemorySegment.ofAddress(loader.lookup(user.address(), symbol));
+        } catch (Throwable t) {
+            return MemorySegment.NULL;
         }
     }
 

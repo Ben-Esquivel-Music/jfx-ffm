@@ -2,7 +2,7 @@
 
 | Field | Value |
 | --- | --- |
-| **Status** | 📋 **S0 baseline recorded 2026-09-22** — ready for S1 (`LinuxSystem` + `C`); the tree itself still has to be committed by the user (`US-009-S0-commit-notes.md`) |
+| **Status** | ✅ **S1–S8 and D3 landed in the working tree 2026-09-23 (uncommitted)** — no `native` method under `com.sun.glass.ui.monocle` or `com.sun.prism.es2.Monocle*`, `native-glass/monocle` holds only the two EGL headers, `native-prism-es2/monocle` only `prism_es2_api_monocle.c`; gated on Windows (module suite) and WSL Linux (natives rebuilt, module suite, S0 suite, Xvfb boot + ES2 render, aarch64 static-assert probe). The CMake option is spelled `INCLUDE_ES2_MONOCLE` (AUTO/ON/OFF). Remove this file with the commit that closes the story |
 | **Parent epic** | Fully remove JNI from `javafx.graphics` (replaced by a functioning FFM API) |
 | **Branch of record** | `ffm/graphics` |
 | **Repository** | `Ben-Esquivel-Music/jfx-ffm` |
@@ -135,8 +135,9 @@ the Headless suite on an aarch64 JDK, not as a gate.
 ## Acceptance criteria
 
 1. No `native` method remains in `com.sun.glass.ui.monocle` or `com.sun.prism.es2.Monocle*`;
-   `native-glass/monocle` contains no C; `native-prism-es2/monocle` contains only the
-   `es2_context_adopt` source; `native-prism-es2/eglWrapper` is gone.
+   `native-glass/monocle` contains no C (only the `egl/` headers); `es2_context_adopt` lives in the generic
+   `prism_es2_api.c` so every platform library exports it, and `native-prism-es2/monocle` contains only the
+   `IS_EGLFB` lifecycle stubs (`prism_es2_api_monocle.c`); `native-prism-es2/eglWrapper` is gone.
 2. The Monocle-Headless touch suite (S0 baseline) passes with the same per-class results after
    every slice.
 3. X11 Monocle shows a stage and reports geometry on Xvfb with the sw pipe (S3) and the es2 pipe

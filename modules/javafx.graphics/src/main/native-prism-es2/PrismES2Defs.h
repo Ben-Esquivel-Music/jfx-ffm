@@ -40,10 +40,16 @@
 
 #include <limits.h>
 
+/* The Monocle build (IS_EGLFB, libprism_es2_monocle.so) compiles the generic sources against the
+ * GL headers of this directory alone: no X11 / GLX development package, and no EGL - the EGL
+ * include and the eglWrapper of commit 21d5a654f6 are gone; Java owns every EGL object and hands
+ * the current context to es2_context_adopt. */
+#ifndef IS_EGLFB
 #include <X11/X.h>
 #include <X11/Xlib.h>
 #include <X11/Xutil.h>
 #include <GL/glx.h>
+#endif
 
 #include <GL/gl.h>
 #include <GL/glext.h>
@@ -55,11 +61,6 @@
 
 /* Max lenght of value, attr pair plus a None */
 #define  MAX_GLX_ATTRS_LENGTH 50
-
-#ifdef IS_EGL
-#include <EGL/egl.h>
-#include "eglWrapper/eglWrapper.h"
-#endif
 
 #endif /* SOLARIS || LINUX */
 
@@ -103,10 +104,16 @@ struct PixelFormatInfoRec {
 #endif /* WIN32 */
 
 #ifdef UNIX /* LINUX || SOLARIS */
+#ifdef IS_EGLFB
+    /* Monocle creates no pixel format (es2_pixel_format_create is a stub there: Java owns the EGL
+     * config). One member keeps the struct non-empty. */
+    void *unused;
+#else
     Display *display;
     GLXFBConfig fbConfig;
     Window dummyWin;
     Colormap dummyCmap;
+#endif
 #endif
 
 #ifdef MACOSX /* MACOSX */
@@ -128,8 +135,10 @@ struct DrawableInfoRec {
 
 #ifdef UNIX /* LINUX || SOLARIS */
 #ifdef IS_EGL
-    EGLDisplay *egldisplay;
-    EGLSurface eglsurface;
+    /* EGLDisplay / EGLSurface as opaque pointers: no EGL header is included any more (Java owns
+     * every EGL object) and nothing in the Monocle build ever sets them. */
+    void *egldisplay;
+    void *eglsurface;
 #endif
 #ifndef IS_EGLFB
     Display *display;
@@ -172,11 +181,15 @@ struct ContextInfoRec {
 #endif /* WIN32 */
 
 #ifdef UNIX /* LINUX || SOLARIS */
+#ifndef IS_EGLFB
     Display *display;
+#endif
 #ifdef IS_EGL
-    EGLContext context;
-    EGLDisplay *egldisplay;
-    EGLSurface eglsurface;
+    /* EGLContext / EGLDisplay / EGLSurface as opaque pointers, always NULL on the ContextInfo
+     * es2_context_adopt builds: the caller (Java) owns the context. */
+    void *context;
+    void *egldisplay;
+    void *eglsurface;
 #else
      GLXContext context;
 #endif
@@ -208,10 +221,10 @@ struct ContextInfoRec {
     PFNWGLSWAPINTERVALEXTPROC wglSwapIntervalEXT;
 #endif /* WIN32 */
 
-#ifdef UNIX /* LINUX || SOLARIS */
+#if defined(UNIX) && !defined(IS_EGL) /* LINUX || SOLARIS, GLX only */
     char *glxExtensionStr;
     PFNGLXSWAPINTERVALSGIPROC glXSwapIntervalSGI;
-#endif /* LINUX || SOLARIS */
+#endif /* LINUX || SOLARIS, GLX only */
 
     /* gl function pointers */
     PFNGLACTIVETEXTUREPROC glActiveTexture;

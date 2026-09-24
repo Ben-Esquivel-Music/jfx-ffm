@@ -96,19 +96,17 @@ void deleteCtxInfo(ContextInfo *ctxInfo) {
     }
 #endif
 
-#ifdef UNIX
+#if defined(UNIX) && !defined(IS_EGL)
     if (ctxInfo->glxExtensionStr != NULL) {
         free(ctxInfo->glxExtensionStr);
     }
     if (ctxInfo->context != NULL) {
-#if defined(IS_GLX)
         glXDestroyContext(ctxInfo->display, ctxInfo->context);
-#endif
-#ifdef IS_EGL
-        eglDestroyContext(ctxInfo->display, ctxInfo->context);
-#endif
     }
 #endif
+    /* IS_EGL (Monocle): nothing native to destroy. The eglDestroyContext branch this function had
+     * at commit 21d5a654f6 went with the EGL include: the context behind a ContextInfo of
+     * es2_context_adopt is the caller's (Java's), and the member is always NULL there anyway. */
     // Initialize structure to all zeros
     memset(ctxInfo, 0, sizeof (ContextInfo));
 }

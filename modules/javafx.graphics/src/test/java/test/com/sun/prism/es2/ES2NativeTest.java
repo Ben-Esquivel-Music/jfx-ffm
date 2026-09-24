@@ -53,7 +53,7 @@ public class ES2NativeTest {
             "es2_drawable_create", "es2_drawable_create_dummy", "es2_drawable_release",
             "es2_drawable_swap_buffers",
             "es2_context_create", "es2_context_release", "es2_context_get_native_handle",
-            "es2_context_make_current", "es2_context_get_proc_address",
+            "es2_context_make_current", "es2_context_get_proc_address", "es2_context_adopt",
             "es2_active_texture", "es2_bind_fbo", "es2_bind_texture", "es2_blend_func", "es2_clear_buffers",
             "es2_scissor_test", "es2_set_depth_test", "es2_set_msaa", "es2_update_viewport",
             "es2_tex_params_min_max", "es2_update_filter_state", "es2_update_wrap_state",
@@ -79,7 +79,7 @@ public class ES2NativeTest {
 
     @Test
     public void facadeBindsEveryExportedSymbolAndNothingElse() {
-        assertEquals(76, EXPORTED_SYMBOLS.size(), "the header exports 76 es2_* functions");
+        assertEquals(77, EXPORTED_SYMBOLS.size(), "the header exports 77 es2_* functions");
         List<String> bound = ES2NativeShim.boundSymbols();
         assertEquals(EXPORTED_SYMBOLS.size(), bound.size(), "bound symbols: " + bound);
         for (String name : EXPORTED_SYMBOLS) {
@@ -98,7 +98,7 @@ public class ES2NativeTest {
 
     @Test
     public void abiVersionIsTheOneTheFacadeWasWrittenFor() {
-        assertEquals(2, ES2NativeShim.expectedAbiVersion());
+        assertEquals(3, ES2NativeShim.expectedAbiVersion());
         assertEquals(ES2NativeShim.expectedAbiVersion(), ES2NativeShim.abiVersion());
     }
 

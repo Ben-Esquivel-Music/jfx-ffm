@@ -67,7 +67,7 @@ public abstract class NativePlatformFactory {
      * property is not set. Every name must have a matching
      * {@code com.sun.glass.ui.monocle.<name>PlatformFactory} class in this package.
      */
-    static final String DEFAULT_PLATFORM_ORDER = "MX6,OMAP,Dispman,X11,Linux,Headless";
+    static final String DEFAULT_PLATFORM_ORDER = "X11,Linux,Headless";
 
     /**
      * Obtains a NativePlatform that matches the platform on which we are running.
@@ -75,11 +75,10 @@ public abstract class NativePlatformFactory {
      * The system property monocle.platform defines a series of cascading
      * fallbacks for what NativePlatform types to attempt to create. monocle
      * .platform can be overridden to select a specific platform. For
-     * example, running with -Dmonocle.platform=Dispman,
-     * Linux selects the NativePlatform that works with the dispmanx
-     * libraries on the Raspberry Pi, but falls back to a generic
-     * software-rendered Linux framebuffer implementation if we are not
-     * running on a device with dispmanx libraries.
+     * example, running with -Dmonocle.platform=X11,Linux selects the
+     * NativePlatform that renders into an X11 window when the DISPLAY
+     * environment variable is set, but falls back to a generic
+     * software-rendered Linux framebuffer implementation when it is not.
      *
      * @return a new NativePlatform
      */

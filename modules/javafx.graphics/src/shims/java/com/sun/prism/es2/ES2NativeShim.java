@@ -25,6 +25,7 @@
 
 package com.sun.prism.es2;
 
+import java.lang.foreign.MemorySegment;
 import java.util.List;
 
 /**
@@ -166,5 +167,47 @@ public final class ES2NativeShim {
     /** {@code MacGLFactory.getAdapterOrdinal(nativeScreen)}: the absorbed {@code nGetAdapterOrdinal}. */
     public static int macAdapterOrdinal(long nativeScreen) {
         return new MacGLFactory().getAdapterOrdinal(nativeScreen);
+    }
+
+    /* ---------------------------------------------------------------------------------------------
+     * es2_context_adopt and the context queries the adopt test drives
+     * ------------------------------------------------------------------------------------------- */
+
+    public static final int STR_VENDOR = ES2Native.STR_VENDOR;
+    public static final int STR_RENDERER = ES2Native.STR_RENDERER;
+    public static final int STR_VERSION = ES2Native.STR_VERSION;
+    public static final int STR_EXTENSIONS = ES2Native.STR_EXTENSIONS;
+
+    /** {@code ES2Native.LIBRARY_NAME}: the library the facade loads for the {@code glass.platform} of this JVM. */
+    public static String libraryName() {
+        return ES2Native.LIBRARY_NAME;
+    }
+
+    /** A test's {@code ES2Native.ProcLoader}. */
+    public interface ProcLoader {
+        long lookup(long handle, String name);
+    }
+
+    /** {@code ES2Native.contextAdopt}; a null loader is passed through as NULL. */
+    public static long contextAdopt(long glHandle, ProcLoader loader) {
+        return ES2Native.contextAdopt(glHandle, loader == null ? null : loader::lookup);
+    }
+
+    /** Whether the loader stub of the last adopt is still alive: false once the call has returned. */
+    public static boolean loaderStubAlive() {
+        MemorySegment stub = ES2Native.lastLoaderStub;
+        return stub != null && stub.scope().isAlive();
+    }
+
+    public static String contextGetString(long ctx, int kind) {
+        return ES2Native.contextGetString(ctx, kind);
+    }
+
+    public static long contextGetProcAddress(long ctx, String name) {
+        return ES2Native.contextGetProcAddress(ctx, name);
+    }
+
+    public static void contextRelease(long ctx) {
+        ES2Native.contextRelease(ctx);
     }
 }

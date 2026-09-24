@@ -177,6 +177,63 @@ if(INCLUDE_ES2)
 endif()
 
 # ---------------------------------------------------------------------------
+# libprism_es2_monocle.so (optional): the generic prism_es2 sources compiled
+# for Monocle (-DIS_EGLFB: EGL / OpenGL ES 2, no X11, no GLX) plus the stub
+# lifecycle exports of native-prism-es2/monocle. Java owns the EGL display,
+# surface and context (com.sun.glass.ui.monocle.AcceleratedScreen) and hands
+# the current context over through es2_context_adopt, so the library links
+# neither libEGL nor libX11. Gradle built this library only in the embedded
+# armv6hf target this fork dropped; this is its first desktop build.
+#
+# INCLUDE_ES2_MONOCLE (declared in CMakeLists.txt): AUTO builds it when
+# INCLUDE_ES2 is on and pkg-config finds glesv2 (CI's Linux runner has no
+# libgles-dev and skips it silently; WSL/Ubuntu with libgles-dev builds it);
+# ON insists and fails the configure step when glesv2 is missing; OFF never
+# builds it.
+#
+# Linking -lGLESv2 replaces the JNI-era arrangement, in which the ~25 gl*
+# functions the generic sources call directly (glEnable, glGetString,
+# glTexImage2D, ...) were left undefined in the .so and bound lazily against
+# the libGLESv2.so that AcceleratedScreen had dlopen'ed RTLD_GLOBAL earlier -
+# a load-order dependence SymbolLookup.libraryLookup does not reproduce. With
+# the soname in NEEDED the dynamic loader resolves them itself.
+# ---------------------------------------------------------------------------
+if(INCLUDE_ES2)
+    pkg_check_modules(GLESV2 IMPORTED_TARGET glesv2)
+endif()
+string(TOUPPER "${INCLUDE_ES2_MONOCLE}" JFX_ES2_MONOCLE_MODE)
+if(JFX_ES2_MONOCLE_MODE STREQUAL "AUTO")
+    if(INCLUDE_ES2 AND GLESV2_FOUND)
+        set(JFX_BUILD_ES2_MONOCLE ON)
+    else()
+        set(JFX_BUILD_ES2_MONOCLE OFF)
+    endif()
+elseif(INCLUDE_ES2_MONOCLE)
+    if(NOT INCLUDE_ES2)
+        message(FATAL_ERROR
+            "INCLUDE_ES2_MONOCLE=${INCLUDE_ES2_MONOCLE} needs INCLUDE_ES2 (the generic prism_es2 sources)")
+    endif()
+    if(NOT GLESV2_FOUND)
+        message(FATAL_ERROR
+            "INCLUDE_ES2_MONOCLE=${INCLUDE_ES2_MONOCLE} but pkg-config found no glesv2 (install libgles-dev)")
+    endif()
+    set(JFX_BUILD_ES2_MONOCLE ON)
+else()
+    set(JFX_BUILD_ES2_MONOCLE OFF)
+endif()
+message(STATUS "prism_es2_monocle: ${JFX_BUILD_ES2_MONOCLE} "
+    "(INCLUDE_ES2_MONOCLE=${INCLUDE_ES2_MONOCLE}, glesv2 found: ${GLESV2_FOUND})")
+if(JFX_BUILD_ES2_MONOCLE)
+    add_jfx_library(prismES2Monocle
+        OUTPUT_NAME prism_es2_monocle
+        SOURCE_DIRS "${GRAPHICS_SRC}/native-prism-es2"
+            "${GRAPHICS_SRC}/native-prism-es2/GL"
+            "${GRAPHICS_SRC}/native-prism-es2/monocle"
+        COMPILE_OPTIONS -DLINUX -DIS_EGLFB ${JFX_C_STRICT_OPTIONS}
+        LINK_LIBS PkgConfig::GLESV2)
+endif()
+
+# ---------------------------------------------------------------------------
 # libjavafx_iio.so
 # ---------------------------------------------------------------------------
 add_jfx_library(iio

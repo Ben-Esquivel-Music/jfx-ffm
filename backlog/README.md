@@ -23,7 +23,7 @@ Acceptance criteria / Definition of Done. Supporting evidence shares the story's
 | [US-006](US-006-fix-gaussian-pass0-clip-growth-radiusy.md) | Grow the Gaussian pass-0 clip by the vertical radius | 🔍 Needs a reproducing test first | Write the repro |
 | [US-007](US-007-fix-boxblur-software-peer-drops-input-transform.md) | Keep the input transform in the software BoxBlur peer | 📋 Ready (`JSWBoxBlurPeer:112` still drops it; `JSWBoxShadowPeer:141` has the fix) | Pick up when scheduled; two golden rows change by design |
 | [US-008](US-008-remove-dead-jslc-me-backend-and-simd.md) | Remove the dead jslc ME backend and `AccelType.SIMD` | 📋 Ready (`backend/sw/me` and `AccelType.SIMD` still present) | Pick up when scheduled |
-| [US-009](US-009-migrate-monocle-jni-to-ffm.md) | Keep Monocle (embedded Linux) and migrate it from JNI to FFM | 🔄 S0 baseline recorded; decisions D1–D6 taken; next S1 | Commit the S0 tree, then S1 (`LinuxSystem` + `C`) |
+| [US-009](US-009-migrate-monocle-jni-to-ffm.md) | Keep Monocle (embedded Linux) and migrate it from JNI to FFM | ✅ S1–S8 + D3 in the working tree (2026-09-23, uncommitted); 195 natives → 0, ~3,500 lines of C deleted, `prism_es2_monocle` target, `monocle_egl_ext.h` | Commit the series (hand-off notes in the session scratchpad), then remove this row and the `US-009-*` files |
 
 Closed and therefore not here: US-002 `prism_common` (deleted 2026-09-07), US-004 `glass/win`
 (no `native` method left in `com.sun.glass.ui.win`, verified 2026-09-22).

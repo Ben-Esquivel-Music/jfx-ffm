@@ -31,9 +31,10 @@
  * memory behind them) or caller-provided buffers, and nothing here ever calls back into Java. No
  * exception crosses this boundary. Failures are reported exactly as the JNI entry points reported
  * them: a NULL handle where the JNI returned 0L, 0 where it returned a GL object name of 0 or
- * false, and a diagnostic on stderr. The symbol set is identical on Windows, Linux (X11/GLX)
- * and macOS (NSOpenGL); a query that only one platform can answer returns ES2_ERR_NOT_IMPLEMENTED
- * elsewhere (the jfxmedia_api.h convention).
+ * false, and a diagnostic on stderr. The symbol set is identical on Windows, Linux (X11/GLX),
+ * macOS (NSOpenGL) and Linux Monocle (prism_es2_monocle: EGL / OpenGL ES 2, where Java owns the
+ * context and hands it over with es2_context_adopt); a query that only one platform can answer
+ * returns ES2_ERR_NOT_IMPLEMENTED elsewhere (the jfxmedia_api.h convention).
  *
  * Handles. ctx is a ContextInfo*, pf a PixelFormatInfo*, drawable a DrawableInfo*, mesh a
  * MeshInfo* (all PrismES2Defs.h). Two kinds of ContextInfo exist, as before: the one returned by
@@ -119,9 +120,10 @@ extern "C" {
 /*
  * Bumped whenever a symbol, a prototype, a struct layout or an enum value changes. Java binds
  * es2_abi_version first and every other symbol eagerly, so an old library fails with a version
- * mismatch rather than a "missing native symbol" on the first new function.
+ * mismatch rather than a "missing native symbol" on the first new function. 3: es2_context_adopt
+ * added (ES2Native.ABI_VERSION moves to 3 with its binding).
  */
-#define ES2_ABI_VERSION 2u
+#define ES2_ABI_VERSION 3u
 
 /* Return codes of the int32_t status functions. GL object names and lengths are separate. */
 enum {
@@ -172,8 +174,8 @@ PRISM_ES2_EXPORT int64_t  es2_sizeof_pixel_format_attrs(void);        /* (int64_
  * glGetIntegerv names. Java pins its own copies of the same values against these
  * (ES2GLEnumTableTest), so a header whose macro disagrees with the comment fails a test instead of
  * reaching GL. es2_gl_enum_count() returns 50; es2_gl_enum(index) returns the value at index, or -1
- * when index < 0 or >= the count. Added after ES2_ABI_VERSION 1 shipped; the version moves to 2 in
- * the change set that binds them (READY TO BUMP - Java pairs the bump with ES2Native's binding).
+ * when index < 0 or >= the count. Added after ES2_ABI_VERSION 1 shipped and bound by ES2Native since
+ * ABI 2; ABI 3 then added es2_context_adopt.
  */
 PRISM_ES2_EXPORT int32_t  es2_gl_enum_count(void);
 PRISM_ES2_EXPORT int32_t  es2_gl_enum(int32_t index);
@@ -196,8 +198,9 @@ PRISM_ES2_EXPORT void*   es2_factory_init(const Es2PixelFormatAttrs* attrs);
 /*
  * X11 only: info[0] = default screen, info[1] = (int64_t) Display*, info[2] = X visual ID, all
  * captured by es2_factory_init; returns ES2_OK. Every platform returns ES2_ERR_INVALID_ARG for a
- * NULL ctx or info first; Windows and macOS then return ES2_ERR_NOT_IMPLEMENTED without touching
- * info. The values keep flowing to Glass GTK as the XVisualID / XDisplay / XScreenID map entries.
+ * NULL ctx or info first; Windows, macOS and Monocle then return ES2_ERR_NOT_IMPLEMENTED without
+ * touching info. The values keep flowing to Glass GTK as the XVisualID / XDisplay / XScreenID map
+ * entries.
  */
 PRISM_ES2_EXPORT int32_t es2_factory_get_x11_info(void* ctx, int64_t info[3]);
 
@@ -272,10 +275,33 @@ PRISM_ES2_EXPORT void*   es2_context_create(void* drawable, void* pf, int64_t sh
                                             int32_t vsync_requested);
 
 /*
+ * Monocle (Linux EGL / OpenGL ES 2): adopts a context the CALLER created and made current on the
+ * calling thread - Java (com.sun.glass.ui.monocle.AcceleratedScreen) owns the EGL display, surface
+ * and context and keeps owning them. Replaces MonocleGLFactory.nPopulateNativeCtxInfo of
+ * MonocleGLFactory.c at commit 21d5a654f6. Returns a render ContextInfo* whose driver strings are
+ * captured from the current context (four glGetString calls, copied; extractVersionInfo run on
+ * GL_VERSION) and whose GL 2.0+ / FBO entry points are loader(user, name) for every name
+ * es2_context_get_proc_address knows (the es2_proc_table rows), a NULL entry allowed exactly as the
+ * JNI's warning-free dlsym left it; initState is run. The native context / display members stay
+ * NULL, the vsync state stays 0 (Monocle applies no swap interval) and gl2 stays 0 (the GLES 2
+ * profile). Returns NULL with one stderr line when loader is NULL, malloc fails or
+ * glGetString(GL_VERSION) / glGetString(GL_EXTENSIONS) returns NULL (no current context) - the JNI
+ * called strdup on the NULL and crashed; a NULL GL_VENDOR / GL_RENDERER becomes "<UNKNOWN>", as in
+ * es2_factory_init. es2_context_release on the result frees the strings and the struct and destroys
+ * nothing native; es2_context_get_string and es2_context_get_proc_address work on it unchanged.
+ * Exported by every platform's library (only glGetString and the generic table are involved) so
+ * ES2Native's eager bind sees one symbol set everywhere. Calls back into the loader, which is not
+ * retained after the return: never critical.
+ */
+typedef void* (*Es2ProcLoader)(void* user, const char* name);
+PRISM_ES2_EXPORT void*   es2_context_adopt(Es2ProcLoader loader, void* user);
+
+/*
  * New: the JNI never freed a ContextInfo. Runs deleteCtxInfo (frees the captured strings and
  * deletes the HGLRC / GLXContext; the macOS NSOpenGLContext is not deleted by that helper, as
- * before) and frees the struct. The context must not be current on another thread. Java wires
- * this into a dispose path only in a later commit. NULL -> no-op.
+ * before, and the Monocle EGL context is Java's) and frees the struct. The context must not be
+ * current on another thread. Java wires this into a dispose path only in a later commit.
+ * NULL -> no-op.
  */
 PRISM_ES2_EXPORT void    es2_context_release(void* ctx);
 
@@ -291,12 +317,12 @@ PRISM_ES2_EXPORT int64_t es2_context_get_native_handle(void* ctx);
 PRISM_ES2_EXPORT void    es2_context_make_current(void* ctx, void* drawable);
 
 /*
- * Inspection hook: the GL 2.0+ / FBO entry point es2_context_create resolved and stored in this
- * ContextInfo for the given name ("glUniform4fv", "glBindFramebuffer", ...; also
- * "wglSwapIntervalEXT" on Windows and "glXSwapIntervalSGI" on X11), or NULL when ctx or name is
- * NULL, the name is not one the C resolves, or the driver did not provide it. The value is the
- * stored pointer, not a fresh wglGetProcAddress / dlsym call. Only meaningful for a render
- * ContextInfo (the factory one stores no entry points).
+ * Inspection hook: the GL 2.0+ / FBO entry point es2_context_create (or es2_context_adopt)
+ * resolved and stored in this ContextInfo for the given name ("glUniform4fv", "glBindFramebuffer",
+ * ...; also "wglSwapIntervalEXT" on Windows and "glXSwapIntervalSGI" on X11 - not on Monocle), or
+ * NULL when ctx or name is NULL, the name is not one the C resolves, or the driver did not provide
+ * it. The value is the stored pointer, not a fresh wglGetProcAddress / dlsym / loader call. Only
+ * meaningful for a render ContextInfo (the factory one stores no entry points).
  */
 PRISM_ES2_EXPORT void*   es2_context_get_proc_address(void* ctx, const char* name);
 

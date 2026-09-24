@@ -471,8 +471,9 @@
                                 <exclude>com/sun/prism/mtl/**</exclude>
                                 <exclude>com/sun/scenario/effect/impl/hw/mtl/**</exclude>
                                 <exclude>com/sun/prism/es2/EGL*</exclude>
-                                <exclude>com/sun/glass/ui/monocle/**</exclude>
-                                <exclude>com/sun/prism/es2/Monocle*</exclude>
+                                <!-- com/sun/glass/ui/monocle/** and com/sun/prism/es2/Monocle* ship in
+                                     the Linux jar: Monocle is pure Java (its JNI became FFM bindings);
+                                     Windows and macOS keep excluding it -->
                             </excludes>
                         </configuration>
                     </plugin>
@@ -788,6 +789,7 @@
                                         <argument>-DHEADERS_DIR=${jfx.graphics.gensrc}/headers/javafx.graphics</argument>
                                         <argument>-DBIN_DIR=${project.build.directory}/native/bin</argument>
                                         <argument>-DINCLUDE_ES2=${INCLUDE_ES2}</argument>
+                                        <argument>-DINCLUDE_ES2_MONOCLE=${INCLUDE_ES2_MONOCLE}</argument>
                                     </arguments>
                                 </configuration>
                             </execution>

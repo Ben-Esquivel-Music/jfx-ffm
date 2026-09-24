@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2014, 2026, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2026, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -23,36 +23,41 @@
  * questions.
  */
 
-package com.sun.prism.es2;
+package com.sun.glass.ui.monocle;
 
-import com.sun.glass.ui.monocle.AcceleratedScreen;
+import java.io.IOException;
+import java.nio.ByteBuffer;
 
-class MonocleGLContext extends GLContext {
+/** Exposes the socket and event-header methods of {@link Udev} to tests, without starting its monitor thread. */
+public final class UdevShim {
 
-    private AcceleratedScreen accScreen;
+    public static final int UDEV_MONITOR_GROUP = Udev.UDEV_MONITOR_GROUP;
 
-    MonocleGLContext(long nativeCtxInfo) {
-        this.nativeCtxInfo = nativeCtxInfo;
+    private UdevShim() {
     }
 
-    MonocleGLContext(GLDrawable drawable, GLPixelFormat pixelFormat,
-                          boolean vSyncRequest, AcceleratedScreen accScreen,
-                          long nativeCtxInfo) {
-        this.accScreen = accScreen;
-        this.nativeCtxInfo = nativeCtxInfo;
+    public static long openMonitor() throws IOException {
+        return Udev.openMonitor();
     }
 
-    @Override
-    long getNativeHandle() {
-        return 0l;
+    public static int receive(long fd, ByteBuffer buffer) throws IOException {
+        return Udev.receive(fd, buffer);
     }
 
-    @Override
-    void makeCurrent(GLDrawable drawable) {
-        if (drawable != null) {
-            accScreen.enableRendering(true);
-        } else {
-            accScreen.enableRendering(false);
-        }
+    public static void closeMonitor(long fd) {
+        Udev.closeMonitor(fd);
+    }
+
+    public static int propertiesOffset(ByteBuffer event) {
+        return Udev.propertiesOffset(event);
+    }
+
+    public static int propertiesLength(ByteBuffer event) {
+        return Udev.propertiesLength(event);
+    }
+
+    /** Forgets the process-wide event format decision. */
+    public static void resetEventFormat() {
+        Udev.resetEventFormatForTesting();
     }
 }

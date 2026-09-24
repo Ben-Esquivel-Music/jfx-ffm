@@ -37,7 +37,10 @@
  * through the extern declarations below - the idiom windows/WinGLContext.c already uses. The
  * vertex-attribute helper setVertexAttributePointers is file-static here. The platform lifecycle
  * functions (factory, pixel format, drawable, context) live in
- * windows/prism_es2_api_win.c, x11/prism_es2_api_x11.c and macosx/prism_es2_api_mac.m.
+ * windows/prism_es2_api_win.c, x11/prism_es2_api_x11.c, macosx/prism_es2_api_mac.m and, as stubs,
+ * monocle/prism_es2_api_monocle.c. es2_context_adopt (the Monocle way in: Java owns the EGL
+ * context) is here because it needs only glGetString and es2_proc_table, so every platform's
+ * library exports the same symbol set.
  */
 
 #include "prism_es2_api.h"
@@ -92,6 +95,14 @@ extern void setCullMode(ContextInfo *ctxInfo, MeshViewInfo *mvInfo);
 extern void setPolyonMode(ContextInfo *ctxInfo, MeshViewInfo *mvInfo);
 
 #define ES2_BOOL(x) ((GLboolean) ((x) != 0))
+
+/* MSVC spells the POSIX strdup _strdup and flags the POSIX name (C4996); the platform files already
+ * use each spelling on its own platform. */
+#if defined(_WIN32)
+#  define es2_strdup _strdup
+#else
+#  define es2_strdup strdup
+#endif
 
 /* ------------------------------------------------------------------------------------------------
  * ABI guard / layout checks
@@ -257,8 +268,8 @@ static const Es2ProcEntry es2_proc_table[] = {
 #ifdef WIN32
     ES2_PROC(wglSwapIntervalEXT),
 #endif
-#ifdef UNIX
-    ES2_PROC(glXSwapIntervalSGI),
+#if defined(UNIX) && !defined(IS_EGL)
+    ES2_PROC(glXSwapIntervalSGI),   /* PrismES2Defs.h has no GLX member in the EGL (Monocle) build */
 #endif
 };
 
@@ -279,6 +290,90 @@ es2_context_get_proc_address(void *ctx, const char *name) {
         }
     }
     return NULL;
+}
+
+/*
+ * Java_com_sun_prism_es2_MonocleGLFactory_nPopulateNativeCtxInfo of MonocleGLFactory.c at commit
+ * 21d5a654f6 with the JNI removed: its 50 GET_DLSYM(handle, "gl...") lines are the 50 GL rows of
+ * es2_proc_table, resolved here through the caller's loader instead of
+ * dlsym(handle != 0 ? handle : RTLD_DEFAULT, name), and a NULL result is stored as before (that
+ * get_dlsym ran with warn = 0). The only differences are on paths where the JNI crashed: the loader
+ * and the GL_VERSION / GL_EXTENSIONS strings are checked before anything is allocated.
+ */
+PRISM_ES2_EXPORT void *
+es2_context_adopt(Es2ProcLoader loader, void *user) {
+    ContextInfo *ctxInfo = NULL;
+    const char *glVersion;
+    const char *glVendor;
+    const char *glRenderer;
+    const char *glExtensions;
+    char *tmpVersionStr;
+    int versionNumbers[2];
+    size_t i;
+
+    if (loader == NULL) {
+        fprintf(stderr, "Prism ES2 Error - es2_context_adopt: loader == NULL\n");
+        return NULL;
+    }
+
+    /* The driver strings of the context the caller made current on this thread. */
+    glVersion = (const char *) glGetString(GL_VERSION);
+    if (glVersion == NULL) {
+        fprintf(stderr, "Prism ES2 Error - es2_context_adopt: glGetString(GL_VERSION) == NULL"
+                " (no context is current on this thread?)\n");
+        return NULL;
+    }
+    glVendor = (const char *) glGetString(GL_VENDOR);
+    if (glVendor == NULL) {
+        glVendor = "<UNKNOWN>";
+    }
+    glRenderer = (const char *) glGetString(GL_RENDERER);
+    if (glRenderer == NULL) {
+        glRenderer = "<UNKNOWN>";
+    }
+    glExtensions = (const char *) glGetString(GL_EXTENSIONS);
+    if (glExtensions == NULL) {
+        fprintf(stderr, "Prism ES2 Error - es2_context_adopt: glGetString(GL_EXTENSIONS) == NULL\n");
+        return NULL;
+    }
+
+    /* find out the version, major and minor version number */
+    tmpVersionStr = es2_strdup(glVersion);
+    extractVersionInfo(tmpVersionStr, versionNumbers);
+    free(tmpVersionStr);
+
+    /* Note: We are only storing the string information of a driver.
+     Assuming a system with a single or homogeneous GPUs. For the case
+     of heterogeneous GPUs system the string information will need to move to
+     GLContext class. */
+    /* allocate the structure */
+    ctxInfo = (ContextInfo *) malloc(sizeof (ContextInfo));
+    if (ctxInfo == NULL) {
+        fprintf(stderr, "nInitialize: Failed in malloc\n");
+        return NULL;
+    }
+    /* initialize the structure */
+    initializeCtxInfo(ctxInfo);
+
+    ctxInfo->versionStr = es2_strdup(glVersion);
+    ctxInfo->vendorStr = es2_strdup(glVendor);
+    ctxInfo->rendererStr = es2_strdup(glRenderer);
+    ctxInfo->glExtensionStr = es2_strdup(glExtensions);
+    ctxInfo->versionNumbers[0] = versionNumbers[0];
+    ctxInfo->versionNumbers[1] = versionNumbers[1];
+    /* The context / display members, state.vSyncEnabled, vSyncRequested and gl2 stay 0 from
+     * initializeCtxInfo: the caller owns the context, and Monocle never applied a swap interval
+     * or ran a GL 2 profile. */
+
+    /* set function pointers */
+    for (i = 0; i < sizeof(es2_proc_table) / sizeof(es2_proc_table[0]); i++) {
+        /* Every member is a function pointer; store it through a generic one. */
+        void (*proc)(void) = (void (*)(void)) loader(user, es2_proc_table[i].name);
+        memcpy((char *) ctxInfo + es2_proc_table[i].offset, &proc, sizeof(proc));
+    }
+
+    initState(ctxInfo);
+    return ctxInfo;
 }
 
 /* ------------------------------------------------------------------------------------------------
