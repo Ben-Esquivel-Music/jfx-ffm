@@ -1160,7 +1160,7 @@ public abstract class View {
      * answers {@code WM_GETOBJECT} from Java now, where its JNI caller used to reach the
      * package-private method through {@code GetMethodID}, which bypasses access control; a subclass
      * in {@code com.sun.glass.ui.win} cannot. Same thread, same checks, same value - nothing else
-     * changes, and the mac and gtk peers keep calling {@code getAccessible()} from C.
+     * changes, and the mac peer keeps calling {@code getAccessible()} from C.
      */
     protected final long getAccessibleForNative() {
         return getAccessible();
