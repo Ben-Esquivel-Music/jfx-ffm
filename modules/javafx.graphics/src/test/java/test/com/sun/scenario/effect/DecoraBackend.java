@@ -251,15 +251,33 @@ public final class DecoraBackend {
     }
 
     /**
-     * Runs a box kernel: {@code BoxBlur}/{@code BoxShadow} peers when {@code spread == 0} and the input
-     * is untransformed, otherwise the {@code LinearConvolve}/{@code LinearConvolveShadow} peers - the
-     * same selection {@code BoxRenderState.getPassPeer} makes in production.
+     * Runs a box kernel through the peers {@code BoxRenderState.getPassPeer} picks in production, pass by pass:
+     * the {@code BoxBlur}/{@code BoxShadow} peers when {@code spread == 0} and {@code validatePassInput} found
+     * the pass input sw-compatible (an identity or translate-only transform, or a positive axis-aligned scale, whose
+     * sample vector it renormalises to a unit step along the pass's axis unless it had to clamp the box size),
+     * otherwise the {@code LinearConvolve}/{@code LinearConvolveShadow} peers. A pass {@code isPassNop} finds to
+     * be a no-op, such as a blur pass over a singular input transform, gets no peer.
      */
     public Result box(ImageData src, float hsize, float vsize, int passes, float spread, boolean shadow,
                       Color4f shadowColor, Rectangle clip) {
         BoxRenderState state = new BoxRenderState(hsize, vsize, passes, spread, shadow, shadowColor,
                 BaseTransform.IDENTITY_TRANSFORM);
         return convolve(src, state, clip);
+    }
+
+    /**
+     * Runs pass {@code pass} of the {@code BoxBlur} peer on {@code src}, with {@code state} validated for that
+     * pass, without asking {@code BoxRenderState.getPassPeer} for the peer. {@code getPassPeer} hands no peer a
+     * pass it finds to be a no-op (a box of one pixel, or no blur passes), so this is the only way to reach the
+     * early return of {@code JSWBoxBlurPeer.filter} for such a pass.
+     */
+    @SuppressWarnings({"rawtypes", "unchecked"})
+    public Result boxBlurPass(ImageData src, BoxRenderState state, int pass) {
+        ImageData data = state.validatePassInput(src, pass);
+        EffectPeer peer = renderer.getPeerInstance(fctx, "BoxBlur", -1);
+        peer.setPass(pass);
+        ran(peer);
+        return toResult(peer.filter(null, state, BaseTransform.IDENTITY_TRANSFORM, null, data));
     }
 
     /**
