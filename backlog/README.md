@@ -26,7 +26,7 @@ Acceptance criteria / Definition of Done. Supporting evidence shares the story's
 | [US-011](US-011-fix-box-kernel-weights-off-by-one-for-multipass.md) | Build symmetric box-blur kernels for two or more passes | 📋 Ready (filed 2026-09-26); `BoxRenderState.validateWeights` sums one tap too many at `i == klen`, so every GPU `BoxBlur` with 2+ iterations (the default 3) and every `TWO_PASS_BOX`/`THREE_PASS_BOX` shadow is skewed (12–18 steps vs SW); fix `while (i >= klen)` | Pick up when scheduled; also upstream |
 | [US-013](US-013-fix-sw-texture-paint-first-texel-edge-and-out-of-bounds-read.md) | Fix the first texel row and column of the software texture paint | 📋 Ready (filed 2026-09-26); SW only. `PiscesPaint.c` `genTexturePaintTarget` interpolates the first device column and row between texels 0 and 1 with the weights of texels −1 and 0, so scaled or sub-pixel images are smeared one texel up-left (alpha 191 where D3D/ES2 give 0). The same path reads past the end of the texture array for images one texel tall or wide | Pick up when scheduled; also upstream |
 
-Closed and therefore not here: US-002 `prism_common` (deleted 2026-09-07), US-004 `glass/win`
+Not here: US-002 `prism_common` (deleted 2026-09-07), US-004 `glass/win`
 (no `native` method left in `com.sun.glass.ui.win`, verified 2026-09-22), US-006 Gaussian pass-0
 clip growth (`GaussianRenderState` grows the pass-0 clip by `inputRadiusY`, fixed 2026-09-25 in PR #15), US-007
 software BoxBlur peer dropping its input transform (`JSWBoxBlurPeer` passes `inputs[0].getTransform()` on, fixed
