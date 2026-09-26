@@ -62,7 +62,7 @@ clip to the input effect, so the input (usually `NodeEffectInput`) is rendered o
   - D3D9Ex;
   - ES2 over WGL (a privately built `prism_es2.dll`).
 - **Two runtimes that differ in one class:**
-  - the current working-tree build, which includes the US-006 fix;
+  - the current working-tree build, which includes the US-006 fix (the pass-0 clip grown by `inputRadiusY`);
   - the same build with only `getInputClip` changed to `Math.abs`, compiled with the flags that reproduce the shipped
     class byte-for-byte.
 
@@ -111,7 +111,8 @@ int pady = (int) Math.ceil(Math.abs(dy0) + Math.abs(dy1));
 - **Bounds.** This is the exact integer bound of the two sampling segments' Minkowski sum, and it is what was measured
   above.
 - **Consistency.** With it, the `MotionBlur` input pads equal `MotionBlurState.getHPad/getVPad`, which the effect already
-  uses for its bounds and dirty regions. It covers the US-006 pass-0 region.
+  uses for its bounds and dirty regions. It also covers the pass-0 region, which `getPassResultBounds` grows by
+  `inputRadiusY` since US-006.
 - **The per-pass form.** The alternative `ceil(|dx0|) + ceil(|dx1|)` is at most 1 px larger per side, and only
   off-axis. Neither form changes identity or axis-aligned transforms.
 - **Rounding caveat, pre-existing.** For non-integer radii off-axis, the kernel taps can reach 1 px beyond either
