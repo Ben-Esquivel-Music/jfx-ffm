@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2014, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2014, 2026, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -476,8 +476,8 @@ public class GaussianRenderState extends LinearConvolveRenderState {
                 // Pass 0 needs to retain any added area for Pass 1 to
                 // compute the bounds within the outputClip, so we expand
                 // the outputClip accordingly.
-                dx = samplevectors[2] * r;
-                dy = samplevectors[3] * r;
+                dx = samplevectors[2] * inputRadiusY;
+                dy = samplevectors[3] * inputRadiusY;
                 padx = (int) Math.ceil(Math.abs(dx));
                 pady = (int) Math.ceil(Math.abs(dy));
                 if ((padx | pady) != 0) {
