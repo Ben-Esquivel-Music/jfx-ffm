@@ -101,7 +101,8 @@ import static test.com.sun.scenario.effect.DecoraCorpus.channelDelta;
  * that rectangle unless it has a larger image cached. The grown pass-0 clip then reaches the top of the cut source,
  * however deep the top cut is, so pass 0 keeps {@code filterHV}. The cut-source cases render a source cut that way
  * through the same clips, except that a top cut starts at row 20, against the whole source rendered unclipped. The
- * render-state tests cover rotated filter transforms, which {@link DecoraBackend} does not render.
+ * render-state tests cover rotated filter transforms, which the renders here do not use; {@link GaussianInputClipTest}
+ * renders rotated and mirrored kernels through a clip.
  */
 public class GaussianPassClipGrowthTest {
 
