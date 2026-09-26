@@ -37,6 +37,7 @@ import com.sun.scenario.effect.impl.state.BoxRenderState;
 import com.sun.scenario.effect.impl.state.LinearConvolveRenderState;
 import com.sun.scenario.effect.impl.sw.RendererDelegate;
 import com.sun.scenario.effect.impl.sw.java.JSWBoxBlurPeer;
+import com.sun.scenario.effect.impl.sw.java.JSWBoxShadowPeer;
 import com.sun.scenario.effect.impl.sw.java.JSWLinearConvolveShadowPeer;
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -44,6 +45,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Set;
 import java.util.TreeMap;
 import java.util.TreeSet;
 import java.util.concurrent.atomic.AtomicReference;
@@ -60,6 +62,7 @@ import test.com.sun.scenario.effect.DecoraBackend.Result;
 import test.com.sun.scenario.effect.DecoraCorpus.Cause;
 import test.com.sun.scenario.effect.DecoraCorpus.GoldenRow;
 import test.com.sun.scenario.effect.DecoraCorpus.NativePlatform;
+import test.com.sun.scenario.effect.DecoraCorpus.TransformDeviation;
 import test.com.sun.scenario.effect.DecoraGoldens.Entry;
 import test.com.sun.scenario.effect.DecoraGoldens.Index;
 import test.com.sun.scenario.effect.DecoraGoldens.Tier;
@@ -67,6 +70,7 @@ import test.com.sun.scenario.effect.DecoraGoldens.Tier;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -81,7 +85,10 @@ import static test.com.sun.scenario.effect.DecoraCorpus.pattern;
  * ({@link DecoraGoldens}), on every OS and without any native library.
  * <p>
  * Every {@link DecoraCorpus#rows() golden row} is rendered on a fresh Java backend and judged over its full frame:
- * the result bounds and transform equal the golden's; the native frame is decoded (P), reconstructed from the
+ * the result bounds equal the golden's, and so does the result transform, except on the rows of a reviewed
+ * {@link DecoraCorpus.TransformDeviation} ({@link DecoraCorpus#BOX_BLUR_KEEPS_INPUT_TRANSFORM}, the translated
+ * {@code BoxBlur} rows), where the golden has to record the deviation's old transform and the Java result has to
+ * carry its new one; the native frame is decoded (P), reconstructed from the
  * capture's Java frame (S, only while the Java frame still hashes to the capture's) or taken to be the Java frame
  * (H, only while it hashes to the native one) and has to hash to the recorded native SHA-256; every pixel further
  * from native than the row's Windows bound has to be explained by the row's cause, unless that cause is fixed, and
@@ -100,8 +107,8 @@ import static test.com.sun.scenario.effect.DecoraCorpus.pattern;
  * frame is stored in full, is held to its bound and cause everywhere.
  * <p>
  * The golden never moves: {@link #INDEX_MD5} pins the index, the index pins the frames file and its own data
- * lines, and the bound, cause and explained columns pin what each row may tolerate. The negative controls prove that
- * every branch of the comparison can fail.
+ * lines, the bound, cause and explained columns pin what each row may tolerate, and a transform deviation pins the
+ * golden's transform on its rows. The negative controls prove that every branch of the comparison can fail.
  */
 public class DecoraJavaGoldenTest {
 
@@ -130,8 +137,8 @@ public class DecoraJavaGoldenTest {
 
     /** What a comparison found wrong. */
     enum Kind {
-        BOUNDS, TRANSFORM, PIN_BOUND, PIN_CAUSE, RECORD, NATIVE_SHA, UNJUDGEABLE, CAUSE_SHAPE, BOUND_EXCEEDED,
-        EXPLAINED_EXCEEDS_CAPTURE, DRIFT, SELF_CONSISTENCY, EDGE_ROWS
+        BOUNDS, TRANSFORM, PIN_BOUND, PIN_CAUSE, PIN_TRANSFORM, RECORD, NATIVE_SHA, UNJUDGEABLE, CAUSE_SHAPE,
+        BOUND_EXCEEDED, EXPLAINED_EXCEEDS_CAPTURE, DRIFT, SELF_CONSISTENCY, EDGE_ROWS
     }
 
     record Finding(Kind kind, String message) {
@@ -270,6 +277,10 @@ public class DecoraJavaGoldenTest {
                     : !j.compared() ? "NOT COMPARED (unjudgeable)"
                     : j.maxDelta == 0 ? "exact" : j.maxDelta <= e.bound() ? "within bound"
                     : "explained by " + e.cause();
+            TransformDeviation deviation = DecoraCorpus.transformDeviation(row.key());
+            if (deviation != null && j.tx.equals(deviation.java())) {
+                verdict += "; tx deviates from the golden's " + e.tx() + " by " + deviation.id();
+            }
             text.append(String.format(Locale.ROOT, "%-34s %-44s %-8s %-4s %-3s %5s %8s%% %5d %8d %8s %s%n",
                     row.effect(), row.params(), row.size(), j.tier, j.tx,
                     j.compared() ? Integer.toString(j.maxDelta) : "-",
@@ -555,6 +566,119 @@ public class DecoraJavaGoldenTest {
     }
 
     /**
+     * The transform deviation names exactly the two translated {@code BoxBlur} rows, both in the corpus and in the
+     * golden with the identity transform, requires the translation of {@code DecoraCorpus.translatedCases} on them,
+     * and covers no other row.
+     */
+    @Test
+    void transformDeviationNamesExactlyTheTranslatedBoxBlurRows() {
+        TransformDeviation deviation = DecoraCorpus.BOX_BLUR_KEEPS_INPUT_TRANSFORM;
+        assertEquals(Set.of("translated/BoxBlur | h=9 v=9 passes=3 translate=5,7 | 64x48",
+                "translated/BoxBlur | h=9 v=9 passes=3 translate=5,7 | 257x129"), deviation.rows());
+        assertEquals("I", deviation.golden());
+        assertEquals(DecoraGoldens.tx(BaseTransform.getTranslateInstance(5, 7)), deviation.java());
+        for (String key : deviation.rows()) {
+            assertTrue(corpus.containsKey(key), () -> "no corpus row " + key);
+            Entry e = entries.get(key);
+            assertNotNull(e, () -> "no golden row " + key);
+            assertEquals("I", e.tx(), () -> "golden transform of " + key);
+        }
+        List<String> covered = corpus.keySet().stream().filter(k -> DecoraCorpus.transformDeviation(k) != null)
+                .toList();
+        assertEquals(new TreeSet<>(deviation.rows()), new TreeSet<>(covered), "rows the deviation covers");
+    }
+
+    /**
+     * On a row of the transform deviation the Java result has to carry the documented transform: rendered with a
+     * {@code BoxBlur} peer that drops the input transform, as {@code JSWBoxBlurPeer} did before, the row is reported
+     * with {@code TRANSFORM} alone, its pixels still exact.
+     */
+    @ParameterizedTest(name = "{0}")
+    @MethodSource("transformDeviationRows")
+    void droppedTransformOnDeviationRowIsReported(String key) {
+        GoldenRow blur = row(key);
+        Entry e = entry(blur, Tier.P, 0);
+        AtomicReference<DecoraBackend> used = new AtomicReference<>();
+        Judgement dropped = judgeRow(blur, e, frames, mutating("BoxBlur", TransformDroppingBoxBlurPeer.class, used),
+                true);
+        assertTrue(used.get().ranPeers().contains(TransformDroppingBoxBlurPeer.class.getName()), () -> "ran "
+                + used.get().ranPeers());
+        assertEquals("I", dropped.tx);
+        assertTrue(dropped.has(Kind.TRANSFORM), dropped::describe);
+        assertTrue(dropped.message(Kind.TRANSFORM).contains("transform deviation BOX_BLUR_KEEPS_INPUT_TRANSFORM"),
+                dropped::describe);
+        assertEquals(1, dropped.findings.size(), dropped::describe);
+        assertEquals(0, dropped.maxDelta);
+        Judgement clean = judgeRow(blur, e, frames, DecoraBackend::java, true);
+        assertTrue(clean.passed(), clean::describe);
+        assertEquals(DecoraCorpus.BOX_BLUR_KEEPS_INPUT_TRANSFORM.java(), clean.tx);
+    }
+
+    static Stream<String> transformDeviationRows() {
+        return new TreeSet<>(DecoraCorpus.BOX_BLUR_KEEPS_INPUT_TRANSFORM.rows()).stream();
+    }
+
+    /**
+     * Outside the transform deviation the transform still has to equal the golden's: a translated {@code BoxShadow}
+     * row rendered with a {@code BoxShadow} peer that drops the input transform is reported, and so is an untranslated
+     * {@code BoxBlur} row whose result carries the very transform the deviation requires on its own rows.
+     */
+    @Test
+    void transformMismatchOutsideTheDeviationIsReported() {
+        GoldenRow shadow = row("translated/BoxShadow | h=9 v=9 passes=3 black translate=5,7 | 64x48");
+        assertNull(DecoraCorpus.transformDeviation(shadow.key()));
+        Entry s = entry(shadow, Tier.P, 0);
+        AtomicReference<DecoraBackend> used = new AtomicReference<>();
+        Judgement dropped = judgeRow(shadow, s, frames, mutating("BoxShadow", TransformDroppingBoxShadowPeer.class,
+                used), true);
+        assertTrue(used.get().ranPeers().contains(TransformDroppingBoxShadowPeer.class.getName()), () -> "ran "
+                + used.get().ranPeers());
+        assertTrue(dropped.has(Kind.TRANSFORM), dropped::describe);
+        assertEquals("result transform I differs from the golden's 1.0,0.0,0.0,1.0,5.0,7.0",
+                dropped.message(Kind.TRANSFORM));
+        assertEquals(1, dropped.findings.size(), dropped::describe);
+
+        GoldenRow blur = row("BoxBlur | h=5 v=5 passes=3 | 64x48");
+        assertNull(DecoraCorpus.transformDeviation(blur.key()));
+        Entry b = entry(blur, Tier.P, 0);
+        Result java = blur.render(DecoraBackend.java());
+        Judgement intact = new Judgement(b.key(), b.tier());
+        assertTrue(checkShape(blur, b, java, intact));
+        assertTrue(intact.passed(), intact::describe);
+        Result translated = new Result(java.x(), java.y(), java.width(), java.height(), java.pixels(), java.image(),
+                BaseTransform.getTranslateInstance(5, 7));
+        Judgement moved = new Judgement(b.key(), b.tier());
+        assertTrue(checkShape(blur, b, translated, moved));
+        assertEquals(DecoraCorpus.BOX_BLUR_KEEPS_INPUT_TRANSFORM.java(), moved.tx);
+        assertTrue(moved.has(Kind.TRANSFORM), moved::describe);
+        assertEquals("result transform 1.0,0.0,0.0,1.0,5.0,7.0 differs from the golden's I",
+                moved.message(Kind.TRANSFORM));
+    }
+
+    /**
+     * The transform deviation also pins the golden: a golden that recorded the translation for a deviation row, as a
+     * regenerated one would, fails that row even though its Java transform is the documented one.
+     */
+    @Test
+    void movedGoldenTransformOnDeviationRowIsReported() {
+        GoldenRow blur = row("translated/BoxBlur | h=9 v=9 passes=3 translate=5,7 | 64x48");
+        Entry e = entry(blur, Tier.P, 0);
+        Result java = blur.render(DecoraBackend.java());
+        Judgement intact = new Judgement(e.key(), e.tier());
+        assertTrue(checkShape(blur, e, java, intact));
+        assertTrue(intact.passed(), intact::describe);
+        Entry moved = new Entry(e.effect(), e.params(), e.size(), e.x(), e.y(), e.width(), e.height(),
+                DecoraCorpus.BOX_BLUR_KEEPS_INPUT_TRANSFORM.java(), e.tier(), e.nativeSha256(), e.javaSha256(),
+                e.offset(), e.length(), e.bound(), e.cause(), e.fullMaxD(), e.fullDiff(), e.explained(), e.sseSelf(),
+                e.kernelSha256());
+        Judgement pinned = new Judgement(e.key(), e.tier());
+        assertTrue(checkShape(blur, moved, java, pinned));
+        assertTrue(pinned.has(Kind.PIN_TRANSFORM), pinned::describe);
+        assertTrue(pinned.message(Kind.PIN_TRANSFORM).contains("the golden moved"), pinned::describe);
+        assertFalse(pinned.has(Kind.TRANSFORM), pinned::describe);
+    }
+
+    /**
      * Renders a row on a fresh backend from {@code backends} and judges it against its golden entry: shape and pins,
      * the native frame, the pixels, and for a clipped row the consistency with its unclipped render (on another
      * fresh backend). {@code movedJavaIsFailure} decides whether drift and an unjudgeable S or H row fail the row or
@@ -583,7 +707,12 @@ public class DecoraJavaGoldenTest {
         return j;
     }
 
-    /** Pins, bounds and transform. Returns false when the bounds differ, which leaves no pixels to compare. */
+    /**
+     * Pins, bounds and transform. The transform has to equal the golden's, except on a row of a reviewed
+     * {@link TransformDeviation}, where the golden has to record the deviation's {@code golden} transform and the Java
+     * result has to carry its {@code java} one. Returns false when the bounds differ, which leaves no pixels to
+     * compare.
+     */
     static boolean checkShape(GoldenRow row, Entry e, Result java, Judgement j) {
         int bound = DecoraCorpus.bound(row, GOLDEN_PLATFORM);
         if (bound > e.bound()) {
@@ -592,14 +721,24 @@ public class DecoraJavaGoldenTest {
         if (!row.causeId().equals(e.cause())) {
             j.fail(Kind.PIN_CAUSE, "corpus cause " + row.causeId() + " differs from the golden's " + e.cause());
         }
+        TransformDeviation deviation = DecoraCorpus.transformDeviation(row.key());
+        if (deviation != null && !deviation.golden().equals(e.tx())) {
+            j.fail(Kind.PIN_TRANSFORM, "the golden's transform " + e.tx() + " is not the " + deviation.golden()
+                    + " that transform deviation " + deviation.id() + " was reviewed against: the golden moved");
+        }
         j.tx = DecoraGoldens.tx(java.transform());
         String bounds = java.x() + "," + java.y() + "," + java.width() + "," + java.height();
         if (!bounds.equals(e.bounds())) {
             j.fail(Kind.BOUNDS, "result bounds " + bounds + " differ from the golden's " + e.bounds());
             return false;
         }
-        if (!j.tx.equals(e.tx())) {
-            j.fail(Kind.TRANSFORM, "result transform " + j.tx + " differs from the golden's " + e.tx());
+        if (deviation == null) {
+            if (!j.tx.equals(e.tx())) {
+                j.fail(Kind.TRANSFORM, "result transform " + j.tx + " differs from the golden's " + e.tx());
+            }
+        } else if (!j.tx.equals(deviation.java())) {
+            j.fail(Kind.TRANSFORM, "result transform " + j.tx + " differs from the " + deviation.java()
+                    + " that transform deviation " + deviation.id() + " requires (golden " + e.tx() + ")");
         }
         return true;
     }
@@ -904,6 +1043,40 @@ public class DecoraJavaGoldenTest {
                 flipBlueBit(result);
             }
             return result;
+        }
+    }
+
+    /** The result's image and bounds with the identity transform, whatever transform the result carried. */
+    private static ImageData withoutTransform(ImageData result) {
+        return new ImageData(result.getFilterContext(), result.getUntransformedImage(),
+                result.getUntransformedBounds());
+    }
+
+    /** {@code JSWBoxBlurPeer} returning every result without the input transform, as it used to. */
+    public static final class TransformDroppingBoxBlurPeer extends JSWBoxBlurPeer {
+
+        public TransformDroppingBoxBlurPeer(FilterContext fctx, Renderer r, String uniqueName) {
+            super(fctx, r, uniqueName);
+        }
+
+        @Override
+        public ImageData filter(Effect effect, BoxRenderState state, BaseTransform transform, Rectangle outputClip,
+                                ImageData... inputs) {
+            return withoutTransform(super.filter(effect, state, transform, outputClip, inputs));
+        }
+    }
+
+    /** {@code JSWBoxShadowPeer} returning every result without the input transform. */
+    public static final class TransformDroppingBoxShadowPeer extends JSWBoxShadowPeer {
+
+        public TransformDroppingBoxShadowPeer(FilterContext fctx, Renderer r, String uniqueName) {
+            super(fctx, r, uniqueName);
+        }
+
+        @Override
+        public ImageData filter(Effect effect, BoxRenderState state, BaseTransform transform, Rectangle outputClip,
+                                ImageData... inputs) {
+            return withoutTransform(super.filter(effect, state, transform, outputClip, inputs));
         }
     }
 

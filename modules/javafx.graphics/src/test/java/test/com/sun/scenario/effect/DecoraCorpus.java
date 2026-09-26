@@ -122,6 +122,21 @@ final class DecoraCorpus {
             key("ColorAdjust/full-contrast (JSL 0/0)", "hue=1 sat=1 bri=1 con=1", 257, 129),
             key("ColorAdjust", "hue=-0.25 sat=0.90 bri=-0.60 con=0.40", 257, 129));
 
+    /**
+     * The translated {@code BoxBlur} rows keep their input's transform. The native {@code SSEBoxBlurPeer}, which the
+     * golden recorded, and the Java {@code JSWBoxBlurPeer} both returned their result without the transform of the
+     * input {@code ImageData}, so the golden stores the identity for these rows, and the software pipeline drew the
+     * blur offset by minus the translation. {@code JSWBoxBlurPeer} now carries the input transform on to its result,
+     * as {@code JSWBoxShadowPeer} does since commit 26ce75d02f, which gave it the transform {@code SSEBoxShadowPeer}
+     * kept since JDK-8093087, so the software pipeline draws the blur where the GPU {@code LinearConvolve} peers draw
+     * it: they apply the translation while they sample. The fix changed only the transform: the bounds and pixels of
+     * these rows are judged against the golden like every other row's.
+     */
+    static final TransformDeviation BOX_BLUR_KEEPS_INPUT_TRANSFORM = new TransformDeviation(
+            "BOX_BLUR_KEEPS_INPUT_TRANSFORM", "I", "1.0,0.0,0.0,1.0,5.0,7.0", Set.of(
+                    key("translated/BoxBlur", "h=9 v=9 passes=3 translate=5,7", 64, 48),
+                    key("translated/BoxBlur", "h=9 v=9 passes=3 translate=5,7", 257, 129)));
+
     private DecoraCorpus() {
     }
 
@@ -231,6 +246,21 @@ final class DecoraCorpus {
     }
 
     /**
+     * A reviewed change of the result transform on exactly the golden rows {@code rows}: there the golden has to
+     * still record {@code golden} and the Java result has to carry {@code java}, both in {@link DecoraGoldens#tx}
+     * form, where every other row's transform has to equal the golden's. It is not a {@link Cause}, which explains
+     * pixels and is recorded in the golden; it leaves every other check of its rows as it is. {@code id} names it in
+     * findings and in the report.
+     */
+    record TransformDeviation(String id, String golden, String java, Set<String> rows) {
+    }
+
+    /** The reviewed transform deviation of the golden row {@code key}, or null when its transform is the golden's. */
+    static TransformDeviation transformDeviation(String key) {
+        return BOX_BLUR_KEEPS_INPUT_TRANSFORM.rows().contains(key) ? BOX_BLUR_KEEPS_INPUT_TRANSFORM : null;
+    }
+
+    /**
      * One row of the Decora golden: a recipe over {@code inputs(width, height)} with its Windows and Linux bounds
      * and an optional cause. A clipped row also carries the recipe of the same kernel without the clip
      * ({@code unclipped}), and a clipped blur the number of rows next to the clip's top and bottom edges within which
@@ -331,6 +361,10 @@ final class DecoraCorpus {
         if (!keys.containsAll(FULL_FRAME_ROWS)) {
             throw new IllegalStateException("FULL_FRAME_ROWS names rows the corpus does not have: "
                     + FULL_FRAME_ROWS);
+        }
+        if (!keys.containsAll(BOX_BLUR_KEEPS_INPUT_TRANSFORM.rows())) {
+            throw new IllegalStateException("BOX_BLUR_KEEPS_INPUT_TRANSFORM names rows the corpus does not have: "
+                    + BOX_BLUR_KEEPS_INPUT_TRANSFORM.rows());
         }
         return rows;
     }
@@ -702,7 +736,9 @@ final class DecoraCorpus {
     /**
      * Box kernels over an input whose {@code ImageData} carries a translation, as the input of a
      * {@code DropShadow} over an {@code ImageInput} on a translated node does. The peers filter the
-     * untransformed pixels; the result has to carry the input's translation on to the renderer.
+     * untransformed pixels; the result has to carry the input's translation on to the renderer. For the
+     * {@code BoxBlur} rows the golden stores the identity the native peer returned instead
+     * ({@link #BOX_BLUR_KEEPS_INPUT_TRANSFORM}).
      */
     static List<Case> translatedCases() {
         List<Case> cases = new ArrayList<>();
