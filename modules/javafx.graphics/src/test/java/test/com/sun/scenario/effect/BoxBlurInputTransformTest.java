@@ -97,16 +97,14 @@ import static test.com.sun.scenario.effect.DecoraCorpus.pattern;
  * mapped to device space through its transform, has to lie within {@link #CENTROID_TOLERANCE} device pixels of the
  * input's, mapped through the input's transform. A centred box of odd size whose weights sum to one keeps the alpha
  * mass and its first moment, so an exact blur keeps the centroid, and only the peer's truncation moves it. The
- * tolerance of 0.05 device pixels is measured, not derived: the largest shift measured is 0.0082 device pixels, for
- * {@code h=9 v=9 passes=3} (0.0015 for {@code h=3 v=5 passes=1}), and 0.05 is about six times that. A measured bound
- * is safe here because the peer computes in integers and the centroid is a double sum in a fixed order, so the shift
- * is the same on every platform. It is also sensitive enough: the smallest shift any tested mutation of the peer
- * produced was 0.17 device pixels, and a one-pixel shift of the result moves the centroid by at least 0.5 device
- * pixels at the smallest scale here. Before the fix the scaled cases failed on the transform and by 9.2 to 44.8 device
- * pixels on the centroid. The blur extent of a scaled input is deliberately not asserted, because
- * {@code BoxRenderState.validatePassInput} scales the pass size by the input's sample scale twice where
- * {@code GaussianRenderState.validatePassInput} scales it once, and a correction of that must not have to change this
- * test.
+ * tolerance of 0.05 device pixels is measured, not derived: the largest shift measured is 0.0188 device pixels, for
+ * {@code h=9 v=9 passes=3} (0.0023 for {@code h=3 v=5 passes=1}), and 0.05 is more than two and a half times that. A
+ * measured bound is safe here because the peer computes in integers and the centroid is a double sum in a fixed order,
+ * so the shift is the same on every platform. It is also sensitive enough: a one-pixel shift of the result moves the
+ * centroid by at least 0.5 device pixels at the smallest scale here, and every tested mutation of the peer that changes
+ * a scaled case moves its centroid by 0.79 device pixels or more. Before the peer kept the input transform, the scaled
+ * cases failed on the transform and by 9.2 to 44.8 device pixels on the centroid. The blur extent of a scaled input is
+ * not asserted here: {@link BoxRenderStateScaledInputTest} pins it, in device pixels, on {@code BoxRenderState} itself.
  * <p>
  * The untranslated controls passed before the fix and show that the reference agrees with the peer wherever the
  * transform plays no part. The early-return control covers the one path of the peer that kept the translation before

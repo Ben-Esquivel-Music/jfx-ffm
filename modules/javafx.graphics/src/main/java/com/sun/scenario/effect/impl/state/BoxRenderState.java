@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2014, 2015, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2014, 2026, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -361,7 +361,6 @@ public class BoxRenderState extends LinearConvolveRenderState {
             }
             double srcScale = Math.hypot(samplevectors[0], samplevectors[1]);
             float pSize = (float) (iSize * srcScale);
-            pSize *= srcScale;
             int maxPassSize = MAX_BOX_SIZES[blurPasses];
             if (pSize > maxPassSize) {
                 pSize = maxPassSize;
