@@ -1,6 +1,6 @@
 # US-012 — Scale the box pass size by the input scale once, not twice
 
-**Status:** ✅ Done (2026-09-26, uncommitted) · **Found:** 2026-09-26, review of the software BoxBlur transform fix (scaled `ImageInput` follow-up)
+**Status:** ✅ Done (2026-09-26, PR #17) · **Found:** 2026-09-26, review of the software BoxBlur transform fix (scaled `ImageInput` follow-up)
 
 ## Story
 As a JavaFX app developer blurring or shadowing an `ImageInput` on a scaled node, under a snapshot scale or on a HiDPI
@@ -84,7 +84,7 @@ program, the runtimes and the dumps are in the Claude scratchpad of session 8443
   while doing the hardware check above, and split it out if it is real.
 - Related: US-011 (asymmetric multi-pass box weights), in the same class.
 
-## Resolution (2026-09-26, uncommitted)
+## Resolution (2026-09-26, PR #17)
 - **Fix:** `BoxRenderState.validatePassInput` no longer has `pSize *= srcScale;`, so the pass size is
   `iSize * srcScale` texels, as in `GaussianRenderState.validatePassInput`. The `maxPassSize` clamp and the
   `srcScale = maxPassSize / iSize` renormalisation below it are unchanged and still right: a clamped pass spreads its

@@ -2,7 +2,7 @@
 
 | Field | Value |
 | --- | --- |
-| **Status** | ✅ **S1–S8 and D3 landed in the working tree 2026-09-23 (uncommitted)** — no `native` method under `com.sun.glass.ui.monocle` or `com.sun.prism.es2.Monocle*`, `native-glass/monocle` holds only the two EGL headers, `native-prism-es2/monocle` only `prism_es2_api_monocle.c`; gated on Windows (module suite) and WSL Linux (natives rebuilt, module suite, S0 suite, Xvfb boot + ES2 render, aarch64 static-assert probe). The CMake option is spelled `INCLUDE_ES2_MONOCLE` (AUTO/ON/OFF). Remove this file with the commit that closes the story |
+| **Status** | ✅ **Done (2026-09-23, PR #12)** — S1–S8 and D3 finished 2026-09-23 and landed in PR #12 (26ce75d02f, merged 2026-09-24): no `native` method under `com.sun.glass.ui.monocle` or `com.sun.prism.es2.Monocle*`, `native-glass/monocle` holds only the two EGL headers, `native-prism-es2/monocle` only `prism_es2_api_monocle.c`; gated on Windows (module suite) and WSL Linux (natives rebuilt, module suite, S0 suite, Xvfb boot + ES2 render, aarch64 static-assert probe). The CMake option is spelled `INCLUDE_ES2_MONOCLE` (AUTO/ON/OFF) |
 | **Parent epic** | Fully remove JNI from `javafx.graphics` (replaced by a functioning FFM API) |
 | **Branch of record** | `ffm/graphics` |
 | **Repository** | `Ben-Esquivel-Music/jfx-ffm` |
@@ -44,7 +44,7 @@
   `com.sun.glass.ui.headless` is the endorsed replacement for Monocle-Headless in testing.
   Embedded users run Gluon's builds with Gluon's DRM/KMS EGL library through `-Dmonocle.egl.lib`.
 - **Android and iOS are gone** (PR #12). The runtime selectors that still routed to them were
-  fixed on 2026-09-22 (uncommitted): `Toolkit.getDefaultToolkit`, glass `Platform`,
+  fixed on 2026-09-22 (landed in PR #12): `Toolkit.getDefaultToolkit`, glass `Platform`,
   `PrismSettings`, es2 `GLFactory`, `NativePlatformFactory.DEFAULT_PLATFORM_ORDER`
   (`Android` dropped), `NativeLibLoader`, `PrismFontFactory`/`AndroidFontFinder`, guarded by
   `test.com.sun.glass.ui.monocle.NativePlatformFactoryTest`.
@@ -165,7 +165,7 @@ the Headless suite on an aarch64 JDK, not as a gate.
 
 ## S0 baseline (2026-09-22) — recorded
 
-Tree: HEAD `ab464538a2` plus the uncommitted PR #12 review fixes (22 files, see
+Tree: HEAD `ab464538a2` plus the then-uncommitted PR #12 review fixes (22 files, see
 `US-009-S0-commit-notes.md` in the Downloads register). Host: WSL Ubuntu, JDK 25, no display used,
 natives from source (`-DskipNative=true` reused the same build). Command, run three times in a row:
 

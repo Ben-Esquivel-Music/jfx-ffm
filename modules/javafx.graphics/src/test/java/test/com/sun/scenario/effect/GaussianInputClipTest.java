@@ -33,6 +33,8 @@ import com.sun.scenario.effect.FilterContext;
 import com.sun.scenario.effect.ImageData;
 import com.sun.scenario.effect.impl.Renderer;
 import com.sun.scenario.effect.impl.state.GaussianRenderState;
+import com.sun.scenario.effect.impl.state.LinearConvolveRenderState;
+import com.sun.scenario.effect.impl.state.RenderState.EffectCoordinateSpace;
 import com.sun.scenario.effect.impl.sw.RendererDelegate;
 import com.sun.scenario.effect.impl.sw.java.JSWLinearConvolvePeer;
 import com.sun.scenario.effect.impl.sw.java.JSWLinearConvolveShadowPeer;
@@ -55,6 +57,7 @@ import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.junit.jupiter.api.Assertions.fail;
+import static org.junit.jupiter.api.Assumptions.assumeTrue;
 import static test.com.sun.scenario.effect.DecoraCorpus.ONE_STEP;
 import static test.com.sun.scenario.effect.DecoraCorpus.SHADOW_TINT;
 import static test.com.sun.scenario.effect.DecoraCorpus.channelDelta;
@@ -88,6 +91,13 @@ import static test.com.sun.scenario.effect.DecoraCorpus.channelDelta;
  * tell the two radii apart. The controls pass before the fix too: identity and a positive scale, a kernel whose device
  * radius exceeds {@code GaussianRenderState.MAX_RADIUS} (the scaled {@code CustomSpace} branch, whose sample vectors
  * are the unit axes whatever the transform), and {@code MotionBlur} at a positive angle.
+ * <p>
+ * {@code MAX_RADIUS} is {@code (MAX_KERNEL_SIZE - 1) / 2}, and {@code LinearConvolveRenderState.MAX_KERNEL_SIZE} is
+ * {@code decora.maxLinearConvolveKernelSize}, at most 128, by default 128, or 64 on an embedded platform: 63 or 31. A
+ * device radius above {@code MAX_RADIUS} is clamped to it. The scaled control derives its pads from
+ * {@code MAX_RADIUS}, and its device radius of 80 exceeds any value {@code MAX_RADIUS} can take. Every other case has
+ * device radii of at most 30, which keep it in the render-space branch wherever {@code MAX_RADIUS} is at least 30, and
+ * is skipped where a smaller kernel size makes {@code MAX_RADIUS} less than 30.
  * <p>
  * The pixel cases render a 72x72 source, an opaque checkerboard, through the production pass protocol
  * ({@link DecoraBackend#convolve}, as {@code LinearConvolveCoreEffect.filterImageDatas} runs it) under a clip that cuts
@@ -170,6 +180,24 @@ public class GaussianInputClipTest {
     /** The loops each pass of a render on a {@link #recordingBackend()} ran, in order; removed after each render. */
     private static final ThreadLocal<List<String>> LOOPS = ThreadLocal.withInitial(ArrayList::new);
 
+    /**
+     * The largest device radius of any case but the scaled control, that of {@code MotionBlur} of radius 30; a case
+     * with a larger one has to raise it.
+     */
+    private static final float LARGEST_DEVICE_RADIUS = 30f;
+
+    /**
+     * Skips a case where the configured kernel size makes {@code GaussianRenderState.MAX_RADIUS} smaller than
+     * {@link #LARGEST_DEVICE_RADIUS}: the pads and loops of the cases are derived for the render-space branch, which a
+     * device radius above {@code MAX_RADIUS} leaves for the scaled one.
+     */
+    private static void assumeRenderSpaceRadii() {
+        assumeTrue(LARGEST_DEVICE_RADIUS <= GaussianRenderState.MAX_RADIUS, () -> String.format(Locale.ROOT,
+                "MAX_KERNEL_SIZE %d (decora.maxLinearConvolveKernelSize) makes MAX_RADIUS %.0f, below the largest"
+                + " device radius of the cases, %.0f", LinearConvolveRenderState.MAX_KERNEL_SIZE,
+                GaussianRenderState.MAX_RADIUS, LARGEST_DEVICE_RADIUS));
+    }
+
     private static GaussianRenderState blur(float xradius, float yradius, BaseTransform filterTransform) {
         return new GaussianRenderState(xradius, yradius, 0f, false, null, filterTransform);
     }
@@ -238,18 +266,28 @@ public class GaussianInputClipTest {
     @ParameterizedTest(name = "{0}")
     @MethodSource("inputClipCases")
     void inputClipGrowsByTheAbsoluteSampleDistances(String name, GaussianRenderState state, int padx, int pady) {
+        assumeRenderSpaceRadii();
         assertInputClip(name, state, padx, pady);
     }
 
     /**
-     * A control: device radii of 80 and 40 under a rotation by 90 degrees scaled by 2. 80 exceeds {@code MAX_RADIUS},
-     * 63 on the desktop, so the state asks for its input scaled down to radius 63 and samples along {@code (1, 0)} and
-     * {@code (0, 1)}, leaving the rotation to the result transform: pads 63 and 40.
+     * A control: radii 40 and 10 under a rotation by 90 degrees scaled by 2, device radii 80 and 20. 80 exceeds
+     * {@code MAX_RADIUS}, so the state asks for its input scaled down to that radius along x and samples along
+     * {@code (1, 0)} and {@code (0, 1)}, leaving the rotation to the result transform: each pad is its device radius
+     * clamped to {@code MAX_RADIUS}. Wherever {@code MAX_RADIUS} exceeds 20, as it does by default, that is
+     * {@code MAX_RADIUS} and 20, which the rotated sample vectors would swap.
      */
     @Test
     void scaledBranchGrowsByTheClampedRadii() {
-        assertEquals(63f, GaussianRenderState.MAX_RADIUS, "MAX_RADIUS on the desktop");
-        assertInputClip("rotate 90 scaled by 2, radii 40 and 20", blur(40f, 20f, ROTATE_90_SCALE_2), 63, 40);
+        GaussianRenderState state = blur(40f, 10f, ROTATE_90_SCALE_2);
+        assertEquals(EffectCoordinateSpace.CustomSpace, state.getEffectTransformSpace(),
+                () -> "device radius 80 against MAX_RADIUS " + GaussianRenderState.MAX_RADIUS);
+        assertInputClip("rotate 90 scaled by 2, radii 40 and 10", state, clampedPad(80f), clampedPad(20f));
+    }
+
+    /** The pad of a pass sampling along an axis: its device radius clamped to {@code MAX_RADIUS}, rounded up. */
+    private static int clampedPad(float deviceRadius) {
+        return (int) Math.ceil(Math.min(deviceRadius, GaussianRenderState.MAX_RADIUS));
     }
 
     private static void assertInputClip(String name, GaussianRenderState state, int padx, int pady) {
@@ -382,6 +420,7 @@ public class GaussianInputClipTest {
     @ParameterizedTest(name = "{0}")
     @MethodSource("pixelCases")
     void clippedRenderMatchesUnclipped(String name, PixelCase c) {
+        assumeRenderSpaceRadii();
         Rectangle clip = c.clip();
         Rectangle cut = c.sourceBounds(clip);
         for (Side side : c.cut()) {
@@ -466,6 +505,7 @@ public class GaussianInputClipTest {
     @ParameterizedTest(name = "{0}")
     @MethodSource("pixelCases")
     void bothRendersRunTheSameLoops(String name, PixelCase c) {
+        assumeRenderSpaceRadii();
         List<String> expected = new ArrayList<>();
         for (int pass = 0; pass < c.loops().size(); pass++) {
             expected.add("pass " + pass + " " + c.loops().get(pass));

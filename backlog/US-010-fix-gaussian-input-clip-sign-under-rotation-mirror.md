@@ -1,6 +1,6 @@
 # US-010 — Pad the Gaussian input clip by absolute distances
 
-**Status:** ✅ Done (2026-09-26, uncommitted) · **Found:** 2026-09-25, while fixing US-006 (code reading, then measured)
+**Status:** ✅ Done (2026-09-26, PR #18) · **Found:** 2026-09-25, while fixing US-006 (code reading, then measured)
 
 ## Story
 As a JavaFX app developer blurring or shadowing a node that is rotated or mirrored (including a right-to-left scene),
@@ -180,7 +180,7 @@ int pady = (int) Math.ceil(Math.abs(dy0) + Math.abs(dy1));
   (a container, shape or control, not an `ImageView`, `Canvas`, `Text` or `TextFlow`), whenever a partial repaint cuts
   the effect's result.
 
-## Resolution (2026-09-26, uncommitted)
+## Resolution (2026-09-26, PR #18)
 - **Fix:** `GaussianRenderState.getInputClip` grows the clip by `ceil(|dx0| + |dx1|)` and `ceil(|dy0| + |dy1|)`, as
   proposed.
   - The pads are now never negative and never smaller than before (`|a| + |b| >= a + b`), so every input clip contains
@@ -197,8 +197,11 @@ int pady = (int) Math.ceil(Math.abs(dy0) + Math.abs(dy1));
       - both mirrors, and shear (-0.35, -0.25);
       - `MotionBlur` along (-1, 0) and (0, -1); at -15 degrees and radius 30, which pads 8 rows where the signed sum
         gave -7; and under rotate 180 and `scaleY = -1`.
-    - **Two more state tests:** the scaled `CustomSpace` branch (a device radius above `MAX_RADIUS` = 63) and a `null`
-      clip.
+    - **Two more state tests:** the scaled `CustomSpace` branch, and a `null` clip.
+      - The scaled control blurs radii 40 and 10 under rotate 90 scaled by 2: device radii 80 and 20. 80 exceeds
+        `MAX_RADIUS` on every configuration (at most 63; 31 on embedded).
+      - It asserts that the state takes `CustomSpace`, and derives its pads from the runtime `MAX_RADIUS`: (63, 20)
+        on desktop, (31, 20) on embedded.
     - **18 pixel cases** through the production pass protocol, `DecoraBackend.convolve(ImageData,
       LinearConvolveRenderState, Rectangle)`. That method already existed and is now public, so it is the overload the
       acceptance criteria asked for.
@@ -211,6 +214,11 @@ int pady = (int) Math.ceil(Math.abs(dy0) + Math.abs(dy1));
         degrees. Identity and `MotionBlur` along (1, 0) are the controls.
     - **18 loop checks:** both renders run the same `filterHV`/`filterVector` loop in each pass, which is what keeps
       the one-step bound (JDK-8092042).
+    - **Kernel-size guard:** the render-state, pixel and loop cases (53 tests) are skipped with a message when
+      `decora.maxLinearConvolveKernelSize` makes `MAX_RADIUS` less than 30, the largest device radius of the cases
+      (`MotionBlur` of radius 30 at -15 degrees). That happens only at a kernel size of 60 or less. The scaled control
+      and the `null` clip always run. Verified 55 of 55 at the desktop default, at 64, with
+      `com.sun.javafx.isEmbedded=true` and at 96.
     - **Before the fix,** 29 of 55 failed: 14 of 17 render-state cases and 15 of 18 pixel cases.
       - The quarter turns, the mirrors and the axis-aligned `MotionBlur` differed by 203-255 steps across most of the
         clip.
@@ -248,3 +256,5 @@ int pady = (int) Math.ceil(Math.abs(dy0) + Math.abs(dy1));
   - `hw/US-010-hardware-report.md`, `hw/verdict.txt` and `hw/table-all.md`; the probe is `hw/src/InputClipHW.java`;
   - the independent review, `review-C.md`.
 - **Upstream:** `openjdk/jfx` master still has the signed sums (checked 2026-09-26).
+- **PR #18 review:** the scaled-branch control no longer assumes the desktop `MAX_RADIUS`, and the kernel-size guard
+  was added; see Tests.

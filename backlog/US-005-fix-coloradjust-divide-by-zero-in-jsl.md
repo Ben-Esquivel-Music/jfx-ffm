@@ -1,6 +1,6 @@
 # US-005 — Fix the ColorAdjust divide-by-zero in `ColorAdjust.jsl`
 
-**Status:** ✅ Done (2026-09-25, uncommitted) · **Found:** 2026-09-08, Decora parity study (finding F1) · **Deferred from:** the `decora_sse` deletion (2026-09-14)
+**Status:** ✅ Done (2026-09-25, PR #14) · **Found:** 2026-09-08, Decora parity study (finding F1) · **Deferred from:** the `decora_sse` deletion (2026-09-14)
 
 ## Story
 As a JavaFX app developer using `ColorAdjust`,
@@ -27,7 +27,7 @@ so that the effect looks the same on every pipeline, and doesn't depend on how t
 - Changes all three backends (Java software peer and GPU shaders), which is why it was kept out of the deletion.
 - Evidence: Decora parity study, section 4 "F1".
 
-## Resolution (2026-09-25, uncommitted)
+## Resolution (2026-09-25, PR #14)
 - **Fix:** `ColorAdjust.jsl` `rgb_to_hsb` now reads `if (cmax > cmin && cmax != 0.0) {`, so a pixel whose largest
   channel lands on exactly 0 takes the grey branch (h = s = 0) instead of dividing by `cmax`. At full contrast such
   a pixel renders premultiplied white `(a,a,a,a)` on every backend.
