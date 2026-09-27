@@ -2,7 +2,7 @@
 
 | Field | Value |
 | --- | --- |
-| **Status** | 🔶 **Open, macOS half only** — Windows half done; Linux half done 2026-09-15 (uncommitted on `ffm/graphics`); remaining `coretext.OS` 58 + `MacFontFinder` 5 + `DFontDecoder` 5 = 68 natives, no macOS host |
+| **Status** | 🔶 **Open, macOS half only** — Windows half done; Linux half done 2026-09-15 (landed in PR #12); remaining `coretext.OS` 58 + `MacFontFinder` 5 + `DFontDecoder` 5 = 68 natives, no macOS host |
 | **Parent epic** | Fully remove JNI from `javafx.graphics` (replaced by a functioning FFM API) |
 | **Branch of record** | `ffm/graphics` |
 | **Repository** | `Ben-Esquivel-Music/jfx-ffm` |

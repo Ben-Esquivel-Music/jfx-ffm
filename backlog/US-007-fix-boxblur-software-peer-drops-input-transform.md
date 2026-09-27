@@ -1,6 +1,6 @@
 # US-007 — Keep the input transform in the software BoxBlur peer
 
-**Status:** ✅ Done · **Found:** 2026-09-13, impact assessment for the `decora_sse` deletion (scene snapshots) · **Deferred from:** the `decora_sse` deletion
+**Status:** ✅ Done (2026-09-26, PR #16) · **Found:** 2026-09-13, impact assessment for the `decora_sse` deletion (scene snapshots) · **Deferred from:** the `decora_sse` deletion
 
 ## Story
 As a JavaFX app developer applying a box blur to an offset image input on the software pipeline,

@@ -371,8 +371,8 @@ public class GaussianRenderState extends LinearConvolveRenderState {
             double dy0 = samplevectors[1] * inputRadiusX;
             double dx1 = samplevectors[2] * inputRadiusY;
             double dy1 = samplevectors[3] * inputRadiusY;
-            int padx = (int) Math.ceil(dx0+dx1);
-            int pady = (int) Math.ceil(dy0+dy1);
+            int padx = (int) Math.ceil(Math.abs(dx0) + Math.abs(dx1));
+            int pady = (int) Math.ceil(Math.abs(dy0) + Math.abs(dy1));
             if ((padx | pady) != 0) {
                 filterClip = new Rectangle(filterClip);
                 filterClip.grow(padx, pady);

@@ -303,8 +303,16 @@ public final class DecoraBackend {
         return convolve(src, state, clip);
     }
 
+    /**
+     * Runs a prebuilt kernel state through the per-pass protocol {@link #box}, {@link #gaussian} and {@link #motion}
+     * use, for a state they do not build: a {@code GaussianRenderState} under a rotated, mirrored or sheared filter
+     * transform, for example, whose sample vectors carry the transform's directions and signs. Given an input that
+     * carries at most a translation, which is what an input returns when it honours the state's input transform,
+     * {@code validatePassInput} keeps those sample vectors; an input with any other transform takes its
+     * transformed-input branch, as in production.
+     */
     @SuppressWarnings({"rawtypes", "unchecked"})
-    private Result convolve(ImageData src, LinearConvolveRenderState state, Rectangle clip) {
+    public Result convolve(ImageData src, LinearConvolveRenderState state, Rectangle clip) {
         ImageData data = src;
         if (state.isNop()) {
             return toResult(data);
