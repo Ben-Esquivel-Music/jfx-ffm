@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2008, 2024, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2008, 2026, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -26,7 +26,6 @@
 package com.sun.scenario.effect.compiler.parser;
 
 import com.sun.scenario.effect.compiler.JSLParser;
-import com.sun.scenario.effect.compiler.JSLParser.Fully_specified_typeContext;
 import com.sun.scenario.effect.compiler.model.Qualifier;
 import com.sun.scenario.effect.compiler.model.Type;
 import com.sun.scenario.effect.compiler.tree.JSLVisitor;
@@ -36,6 +35,7 @@ import org.junit.jupiter.api.Test;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 public class FullySpecifiedTypeTest extends ParserBase {
 
@@ -55,14 +55,16 @@ public class FullySpecifiedTypeTest extends ParserBase {
 
     @Test
     public void notAFullySpecifiedType() {
-        assertThrows(ParseCancellationException.class, () -> {
-            parseTreeFor("double");
-        });
+        // JSL has no double type, so "double" lexes as an identifier
+        ParseCancellationException e = assertThrows(ParseCancellationException.class, () -> parseTreeFor("double"));
+        assertTrue(e.getMessage().startsWith("line 1:0 mismatched input 'double' expecting "), e.getMessage());
     }
 
-    private fully_specified_type_return parseTreeFor(String text) {
+    private JSLVisitor.FullySpecifiedTypeExpr parseTreeFor(String text) {
         JSLParser parser = parserOver(text);
         JSLVisitor visitor = new JSLVisitor();
-        return (JSLVisitor.FullySpecifiedTypeExpr) visitor.visit(parser.fully_specified_type());
+        JSLParser.Fully_specified_typeContext tree = parser.fully_specified_type();
+        assertAllInputConsumed(parser);
+        return (JSLVisitor.FullySpecifiedTypeExpr) visitor.visit(tree);
     }
 }

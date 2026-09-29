@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2008, 2024, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2008, 2026, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -25,33 +25,36 @@
 
 package com.sun.scenario.effect.compiler;
 
-import java.io.File;
+import java.nio.file.Path;
 import com.sun.scenario.effect.compiler.JSLC.JSLCInfo;
 
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
 /**
  */
 public class SymbolTest {
 
+    @TempDir
+    static Path outDir;
+
     public SymbolTest() {
     }
 
     static void compile(String s) throws Exception {
-        File tmpfile = File.createTempFile("foo", null);
-        File tmpdir = tmpfile.getParentFile();
         JSLCInfo jslcinfo = new JSLCInfo();
-        jslcinfo.outDir = tmpdir.getAbsolutePath();
+        jslcinfo.outDir = outDir.toString();
         jslcinfo.shaderName = "Effect";
         jslcinfo.peerName = "Foo";
-        jslcinfo.outTypes = JSLC.OUT_ALL;
+        jslcinfo.outTypes = JSLC.OUT_ALL_PEERS | JSLC.OUT_HW_SHADERS;
         JSLC.compile(jslcinfo, s, Long.MAX_VALUE);
     }
 
     @Test
     public void specialVarUsedOutsideOfMain() {
-        assertThrows(RuntimeException.class, () -> {
+        RuntimeException e = assertThrows(RuntimeException.class, () -> {
             String s =
                 "param sampler img;\n" +
                 "float myfunc(float val) {\n" +
@@ -63,5 +66,6 @@ public class SymbolTest {
                 "}\n";
             compile(s);
         });
+        assertEquals("Unknown variable pos0", e.getMessage());
     }
 }

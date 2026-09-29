@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2008, 2024, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2008, 2026, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -30,6 +30,7 @@ import com.sun.scenario.effect.compiler.model.Type;
 import com.sun.scenario.effect.compiler.tree.Expr;
 import com.sun.scenario.effect.compiler.tree.JSLVisitor;
 import com.sun.scenario.effect.compiler.tree.LiteralExpr;
+import com.sun.scenario.effect.compiler.tree.ParenExpr;
 import com.sun.scenario.effect.compiler.tree.VariableExpr;
 import org.antlr.v4.runtime.misc.ParseCancellationException;
 import static com.sun.scenario.effect.compiler.parser.Expressions.SIMPLE_EXPRESSION;
@@ -37,6 +38,7 @@ import static com.sun.scenario.effect.compiler.parser.Expressions.SIMPLE_EXPRESS
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -44,7 +46,7 @@ public class PrimaryExprTest extends ParserBase {
 
     private String primary;
 
-    @Before
+    @BeforeEach
     public void setUp() {
         this.primary = primary();
     }
@@ -86,21 +88,26 @@ public class PrimaryExprTest extends ParserBase {
 
     @Test
     public void bracketted() {
-        Expr tree = parseTreeFor("(" + primary + ")");
+        ParenExpr tree = assertInstanceOf(ParenExpr.class, parseTreeFor("(" + primary + ")"));
+        LiteralExpr inner = assertInstanceOf(LiteralExpr.class, tree.getExpr());
+        assertEquals(primary, String.valueOf(inner.getValue()));
     }
 
     @Test
     public void notAPrimaryExpression() {
-        assertThrows(ParseCancellationException.class, () -> {
-            parseTreeFor("!(@&#");
-        });
+        // "!" starts a unary expression, never a primary one
+        ParseCancellationException e = assertThrows(ParseCancellationException.class,
+                () -> parseTreeFor("!(" + primary + ")"));
+        assertTrue(e.getMessage().startsWith("line 1:0 extraneous input '!' expecting "), e.getMessage());
     }
 
     private Expr parseTreeFor(String text) {
         JSLParser parser = parserOver(text);
         JSLVisitor visitor = new JSLVisitor();
         visitor.getSymbolTable().declareVariable("foo", Type.INT, null);
-        return visitor.visitPrimary_expression(parser.primary_expression());
+        JSLParser.Primary_expressionContext tree = parser.primary_expression();
+        assertAllInputConsumed(parser);
+        return visitor.visitPrimary_expression(tree);
     }
 
     protected String primary() {

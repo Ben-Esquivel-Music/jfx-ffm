@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2008, 2024, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2008, 2026, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -33,7 +33,7 @@ import com.sun.scenario.effect.compiler.tree.BinaryExpr;
 import com.sun.scenario.effect.compiler.tree.JSLVisitor;
 import com.sun.scenario.effect.compiler.tree.LiteralExpr;
 import com.sun.scenario.effect.compiler.tree.VariableExpr;
-import org.antlr.v4.runtime.misc.ParseCancellationException;
+import org.opentest4j.AssertionFailedError;
 
 import org.junit.jupiter.api.Test;
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -71,15 +71,17 @@ public class EqualityExprTest extends ParserBase {
 
     @Test
     public void notAnEqualityExpression() {
-        assertThrows(ParseCancellationException.class, () -> {
-            parseTreeFor("foo @ 3");
-        });
+        // "&&" belongs to the next looser precedence level, so the rule ends after "foo"
+        AssertionFailedError e = assertThrows(AssertionFailedError.class, () -> parseTreeFor("foo && 3"));
+        assertEquals("trailing input '&&' at 1:4", e.getMessage());
     }
 
     private BinaryExpr parseTreeFor(String text) {
         JSLParser parser = parserOver(text);
         JSLVisitor visitor = new JSLVisitor();
         visitor.getSymbolTable().declareVariable("foo", Type.INT, null);
-        return (BinaryExpr) visitor.visit(parser.equality_expression());
+        JSLParser.Equality_expressionContext tree = parser.equality_expression();
+        assertAllInputConsumed(parser);
+        return (BinaryExpr) visitor.visit(tree);
     }
 }

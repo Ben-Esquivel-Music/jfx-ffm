@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2008, 2024, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2008, 2026, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -80,14 +80,15 @@ public class JumpStatementTest extends ParserBase {
 
     @Test
     public void notAJump() {
-        assertThrows(ParseCancellationException.class, () -> {
-            parseTreeFor("float;");
-        });
+        ParseCancellationException e = assertThrows(ParseCancellationException.class, () -> parseTreeFor("float;"));
+        assertTrue(e.getMessage().startsWith("line 1:0 mismatched input 'float' expecting "), e.getMessage());
     }
 
     private Stmt parseTreeFor(String text) {
         JSLParser parser = parserOver(text);
         JSLVisitor visitor = new JSLVisitor();
-        return visitor.visitJump_statement(parser.jump_statement());
+        JSLParser.Jump_statementContext tree = parser.jump_statement();
+        assertAllInputConsumed(parser);
+        return visitor.visitJump_statement(tree);
     }
 }

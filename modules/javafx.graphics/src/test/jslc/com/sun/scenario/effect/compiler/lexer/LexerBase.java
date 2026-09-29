@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2008, 2024, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2008, 2026, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -26,20 +26,13 @@
 package com.sun.scenario.effect.compiler.lexer;
 
 import com.sun.scenario.effect.compiler.JSLLexer;
-import com.sun.scenario.effect.compiler.JSLParser;
 import com.sun.scenario.effect.compiler.ThrowingErrorListener;
 import org.antlr.v4.runtime.CharStream;
 import org.antlr.v4.runtime.CharStreams;
-import org.antlr.v4.runtime.CommonTokenStream;
 import org.antlr.v4.runtime.Token;
 
-import java.io.ByteArrayInputStream;
-import java.io.IOException;
-import java.io.InputStream;
-import java.nio.charset.StandardCharsets;
-
-import org.junit.jupiter.api.Test;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 
 public abstract class LexerBase {
 
@@ -78,9 +71,8 @@ public abstract class LexerBase {
         return lexer.nextToken();
     }
 
-    private JSLLexer lexerOver(String text) throws IOException {
-        InputStream stream = new ByteArrayInputStream(text.getBytes(StandardCharsets.UTF_8));
-        CharStream charStream = CharStreams.fromStream(stream, StandardCharsets.UTF_8);
+    private JSLLexer lexerOver(String text) {
+        CharStream charStream = CharStreams.fromString(text);
         JSLLexer lexer = new JSLLexer(charStream);
         lexer.removeErrorListeners();
         lexer.addErrorListener(ThrowingErrorListener.INSTANCE);

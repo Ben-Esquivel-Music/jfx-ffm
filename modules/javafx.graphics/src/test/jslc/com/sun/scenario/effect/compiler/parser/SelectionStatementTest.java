@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2008, 2024, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2008, 2026, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -29,6 +29,7 @@ import com.sun.scenario.effect.compiler.JSLParser;
 import com.sun.scenario.effect.compiler.model.Type;
 import com.sun.scenario.effect.compiler.tree.BinaryExpr;
 import com.sun.scenario.effect.compiler.tree.ExprStmt;
+import com.sun.scenario.effect.compiler.tree.JSLVisitor;
 import com.sun.scenario.effect.compiler.tree.LiteralExpr;
 import com.sun.scenario.effect.compiler.tree.SelectStmt;
 import com.sun.scenario.effect.compiler.tree.Stmt;
@@ -63,15 +64,17 @@ public class SelectionStatementTest extends ParserBase {
 
     @Test
     public void notASelect() {
-        assertThrows(ParseCancellationException.class, () -> {
-            parseTreeFor("then (so) { bobs yer uncle }");
-        });
+        ParseCancellationException e = assertThrows(ParseCancellationException.class,
+                () -> parseTreeFor("then (so) { bobs yer uncle }"));
+        assertTrue(e.getMessage().startsWith("line 1:0 mismatched input 'then' expecting "), e.getMessage());
     }
 
     private Stmt parseTreeFor(String text) {
         JSLParser parser = parserOver(text);
         JSLVisitor visitor = new JSLVisitor();
         visitor.getSymbolTable().declareVariable("foo", Type.INT, null);
-        return visitor.visitSelection_statement(parser.selection_statement());
+        JSLParser.Selection_statementContext tree = parser.selection_statement();
+        assertAllInputConsumed(parser);
+        return visitor.visitSelection_statement(tree);
     }
 }

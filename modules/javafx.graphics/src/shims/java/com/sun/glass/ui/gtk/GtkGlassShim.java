@@ -2030,6 +2030,57 @@ public final class GtkGlassShim {
     }
 
     /**
+     * The {@code _NET_FRAME_EXTENTS} of the X11 window {@code xid} - the borders a window manager puts around it -
+     * as {@code <left>,<right>,<top>,<bottom>}, or {@code none} without the property; FX thread.
+     */
+    public static String netFrameExtents(long xid) {
+        long[] items = windowProperty(xid, "_NET_FRAME_EXTENTS", 32);
+        if (items == null || items.length < 4) {
+            return "none";
+        }
+        return items[0] + "," + items[1] + "," + items[2] + "," + items[3];
+    }
+
+    /** {@code AllPlanes} of {@code Xlib.h} and {@code ZPixmap} of {@code X.h}. */
+    private static final long ALL_PLANES = -1;
+    private static final int Z_PIXMAP = 2;
+
+    /**
+     * The pixel {@code x, y} of the X11 window {@code xid} itself as {@code rrggbb}: {@code XGetImage} of the
+     * window on GDK's display, which answers what was drawn into the window whether or not a compositor has put it
+     * on the screen, and whether or not the root window holds the screen's contents (it does not on a rootless
+     * Xwayland). {@code null} when the X server refuses - {@code BadMatch}: the window is not viewable, the pixel is
+     * outside it or, without a compositor, off the screen. Assumes a TrueColor visual with eight bits per channel,
+     * as on every display these tests run on. FX thread.
+     */
+    public static String windowPixel(long xid, int x, int y) {
+        try {
+            MemorySegment gdkDisplay = (MemorySegment) Readback.GDK_DISPLAY_GET_DEFAULT.invokeExact();
+            MemorySegment display = (MemorySegment) Readback.GDK_X11_GET_DEFAULT_XDISPLAY.invokeExact();
+            Readback.GDK_X11_DISPLAY_ERROR_TRAP_PUSH.invokeExact(gdkDisplay);
+            MemorySegment image;
+            int error;
+            try {
+                image = (MemorySegment) Readback.X_GET_IMAGE.invokeExact(display, xid, x, y, 1, 1, ALL_PLANES,
+                        Z_PIXMAP);
+            } finally {
+                error = (int) Readback.GDK_X11_DISPLAY_ERROR_TRAP_POP.invokeExact(gdkDisplay);
+            }
+            if (image.address() == 0) {
+                return null;
+            }
+            try {
+                long pixel = (long) Readback.X_GET_PIXEL.invokeExact(image, 0, 0);
+                return error != 0 ? null : HexFormat.of().toHexDigits((int) pixel).substring(2);
+            } finally {
+                int destroyed = (int) Readback.X_DESTROY_IMAGE.invokeExact(image);
+            }
+        } catch (Throwable t) {
+            throw new IllegalStateException(t);
+        }
+    }
+
+    /**
      * The items of the property {@code name} of the X11 window {@code xid}, of any type, when its format is
      * {@code format} ({@code 8}: bytes, {@code 32}: the C {@code long}s Xlib hands back for 32-bit items), each as a
      * {@code long}; {@code null} without the property or in another format.
@@ -2473,6 +2524,23 @@ public final class GtkGlassShim {
                 FunctionDescriptor.of(JAVA_INT, ADDRESS, JAVA_LONG, JAVA_LONG));
         static final MethodHandle X_SYNC = downcall("libX11.so.6", "XSync",
                 FunctionDescriptor.of(JAVA_INT, ADDRESS, JAVA_INT));
+        /**
+         * {@code XImage *XGetImage(Display *, Drawable, int x, int y, unsigned int width, unsigned int height,
+         * unsigned long plane_mask, int format)}.
+         */
+        static final MethodHandle X_GET_IMAGE = downcall("libX11.so.6", "XGetImage",
+                FunctionDescriptor.of(ADDRESS, ADDRESS, JAVA_LONG, JAVA_INT, JAVA_INT, JAVA_INT, JAVA_INT, JAVA_LONG,
+                        JAVA_INT));
+        /** {@code unsigned long XGetPixel(XImage *, int x, int y)}: the function libX11 exports beside the macro. */
+        static final MethodHandle X_GET_PIXEL = downcall("libX11.so.6", "XGetPixel",
+                FunctionDescriptor.of(JAVA_LONG, ADDRESS, JAVA_INT, JAVA_INT));
+        /** {@code int XDestroyImage(XImage *)}: the function libX11 exports beside the macro. */
+        static final MethodHandle X_DESTROY_IMAGE = downcall("libX11.so.6", "XDestroyImage",
+                FunctionDescriptor.of(JAVA_INT, ADDRESS));
+        static final MethodHandle GDK_X11_DISPLAY_ERROR_TRAP_PUSH = downcall("libgdk-3.so.0",
+                "gdk_x11_display_error_trap_push", FunctionDescriptor.ofVoid(ADDRESS));
+        static final MethodHandle GDK_X11_DISPLAY_ERROR_TRAP_POP = downcall("libgdk-3.so.0",
+                "gdk_x11_display_error_trap_pop", FunctionDescriptor.of(JAVA_INT, ADDRESS));
         /** {@code GtkStyle *gtk_style_new(void)}, the yardstick for the theme colours of the preferences. */
         static final MethodHandle GTK_STYLE_NEW = downcall("libgtk-3.so.0", "gtk_style_new",
                 FunctionDescriptor.of(ADDRESS));

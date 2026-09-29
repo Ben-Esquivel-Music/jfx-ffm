@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2008, 2024, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2008, 2026, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -28,10 +28,12 @@ package com.sun.scenario.effect.compiler.parser;
 import com.sun.scenario.effect.compiler.JSLParser;
 import com.sun.scenario.effect.compiler.tree.JSLVisitor;
 import org.antlr.v4.runtime.misc.ParseCancellationException;
+import org.opentest4j.AssertionFailedError;
 
 import org.junit.jupiter.api.Test;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 public class FieldSelectTest extends ParserBase {
 
@@ -109,50 +111,37 @@ public class FieldSelectTest extends ParserBase {
 
     @Test
     public void notAFieldSelection1() {
-        assertThrows(ParseCancellationException.class, () -> {
-            parseTreeFor("qpz");
-        });
+        // lexes as the identifier "qpz", not as a swizzle
+        ParseCancellationException e = assertThrows(ParseCancellationException.class, () -> parseTreeFor("qpz"));
+        assertTrue(e.getMessage().startsWith("line 1:0 mismatched input 'qpz' expecting "), e.getMessage());
     }
 
     @Test
     public void notAFieldSelection2() {
-        assertThrows(AssertionFailedError.class, () -> {
-            parseTreeFor(".xqpz", true);
-        });
+        // lexes as ".x" followed by the identifier "qpz"
+        AssertionFailedError e = assertThrows(AssertionFailedError.class, () -> parseTreeFor(".xqpz"));
+        assertEquals("trailing input 'qpz' at 1:2", e.getMessage());
     }
 
     @Test
     public void tooManyVals() {
-        assertThrows(AssertionFailedError.class, () -> {
-            parseTreeFor(".xyzwx", true);
-        });
+        // lexes as ".xyzw" followed by the identifier "x"
+        AssertionFailedError e = assertThrows(AssertionFailedError.class, () -> parseTreeFor(".xyzwx"));
+        assertEquals("trailing input 'x' at 1:5", e.getMessage());
     }
 
     @Test
     public void mixedVals() {
-        assertThrows(AssertionFailedError.class, () -> {
-            parseTreeFor(".xyba", true);
-        });
+        // lexes as ".xy" followed by the identifier "ba"
+        AssertionFailedError e = assertThrows(AssertionFailedError.class, () -> parseTreeFor(".xyba"));
+        assertEquals("trailing input 'ba' at 1:3", e.getMessage());
     }
 
     private String parseTreeFor(String text) {
-        return parseTreeFor(text, false);
-    }
-
-    private String parseTreeFor(String text, boolean expectEx) {
         JSLParser parser = parserOver(text);
         JSLVisitor visitor = new JSLVisitor();
-        String ret = visitor.visitField_selection(parser.field_selection()).getString();
-        // TODO: there's probably a better way to check for trailing (invalid) characters
-        boolean sawException = false;
-        try {
-            visitor.visitField_selection(parser.field_selection());
-        } catch (Exception e) {
-            sawException = true;
-        }
-        if (sawException == expectEx) {
-            Assert.fail(expectEx ? "Expecting EOF" : "Not expecting EOF");
-        }
-        return ret;
+        JSLParser.Field_selectionContext tree = parser.field_selection();
+        assertAllInputConsumed(parser);
+        return visitor.visitField_selection(tree).getString();
     }
 }

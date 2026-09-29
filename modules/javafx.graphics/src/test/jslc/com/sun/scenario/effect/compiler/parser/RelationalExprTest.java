@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2008, 2024, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2008, 2026, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -30,7 +30,7 @@ import com.sun.scenario.effect.compiler.model.BinaryOpType;
 import com.sun.scenario.effect.compiler.model.Type;
 import com.sun.scenario.effect.compiler.tree.BinaryExpr;
 import com.sun.scenario.effect.compiler.tree.JSLVisitor;
-import org.antlr.v4.runtime.misc.ParseCancellationException;
+import org.opentest4j.AssertionFailedError;
 
 import org.junit.jupiter.api.Test;
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -64,15 +64,17 @@ public class RelationalExprTest extends ParserBase {
 
     @Test
     public void notARelationalExpression() {
-        assertThrows(ParseCancellationException.class, () -> {
-            parseTreeFor("foo @ 3");
-        });
+        // "==" belongs to the next looser precedence level, so the rule ends after "foo"
+        AssertionFailedError e = assertThrows(AssertionFailedError.class, () -> parseTreeFor("foo == 3"));
+        assertEquals("trailing input '==' at 1:4", e.getMessage());
     }
 
     private BinaryExpr parseTreeFor(String text) {
         JSLParser parser = parserOver(text);
         JSLVisitor visitor = new JSLVisitor();
         visitor.getSymbolTable().declareVariable("foo", Type.INT, null);
-        return (BinaryExpr) visitor.visit(parser.relational_expression());
+        JSLParser.Relational_expressionContext tree = parser.relational_expression();
+        assertAllInputConsumed(parser);
+        return (BinaryExpr) visitor.visit(tree);
     }
 }

@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2008, 2024, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2008, 2026, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -38,6 +38,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 public class UnaryExprTest extends PrimaryExprTest {
 
@@ -101,9 +102,10 @@ public class UnaryExprTest extends PrimaryExprTest {
 
     @Test
     public void notAUnaryExpression() {
-        assertThrows(ParseCancellationException.class, () -> {
-            parseTreeFor("^" + primary);
-        });
+        // JSL has no pointers, so "*" is only ever a binary operator
+        ParseCancellationException e = assertThrows(ParseCancellationException.class,
+                () -> parseTreeFor("*" + primary));
+        assertTrue(e.getMessage().startsWith("line 1:0 extraneous input '*' expecting "), e.getMessage());
     }
 
     private UnaryExpr parseTreeFor(String text) {
@@ -111,7 +113,9 @@ public class UnaryExprTest extends PrimaryExprTest {
         JSLVisitor visitor = new JSLVisitor();
         visitor.getSymbolTable().declareVariable("foo", Type.INT, null);
         visitor.getSymbolTable().declareVariable("vec", Type.INT3, null);
-        return (UnaryExpr) visitor.visit(parser.unary_expression());
+        JSLParser.Unary_expressionContext tree = parser.unary_expression();
+        assertAllInputConsumed(parser);
+        return (UnaryExpr) visitor.visit(tree);
     }
 
     protected String unary() {
