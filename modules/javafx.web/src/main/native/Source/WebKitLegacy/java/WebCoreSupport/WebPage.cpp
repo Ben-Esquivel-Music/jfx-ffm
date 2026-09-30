@@ -470,7 +470,7 @@ void WebPage::renderCompositedLayers(GraphicsContext& context, const IntRect& cl
     TextureMapperLayer& rootTextureMapperLayer = downcast<GraphicsLayerTextureMapper>(*m_rootLayer).layer();
 
     if (m_textureMapper)
-        static_cast<TextureMapperJavaAdapter*>(m_textureMapper.get())->setGraphicsContext(&context);
+        m_textureMapper->setGraphicsContext(&context);
 
     TransformationMatrix matrix;
     m_textureMapper->beginPainting();
@@ -480,6 +480,8 @@ void WebPage::renderCompositedLayers(GraphicsContext& context, const IntRect& cl
     rootTextureMapperLayer.paint(*m_textureMapper);
     m_textureMapper->endClip();
     m_textureMapper->endPainting();
+    // The context belongs to the caller and does not outlive this paint.
+    m_textureMapper->setGraphicsContext(nullptr);
 }
 
 void WebPage::notifyAnimationStarted(const GraphicsLayer*, const String& /*animationKey*/, MonotonicTime /*time*/)

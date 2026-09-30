@@ -26,9 +26,11 @@
 package test.javafx.scene.web;
 
 import static javafx.concurrent.Worker.State.SUCCEEDED;
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
 
 import javafx.application.Application;
 import javafx.application.Platform;
@@ -91,20 +93,56 @@ public class TextureMapperTest {
      */
     @Test
     public void testViewTransitionDoesNotCrashTextureMapper() {
-        CountDownLatch transitionStarted = new CountDownLatch(1);
+        loadContent("<html></html>");
+        assertEquals("function", executeScript("typeof document.startViewTransition"),
+                "document.startViewTransition() is not available, so no view transition would run");
 
+        // A view transition puts the page into compositing mode, which creates the TextureMapper, and the
+        // rendering update after the transition has finished takes it out again, which destroys it. Wait for
+        // two animation frames after that so the teardown runs inside the test, and repeat the cycle.
+        for (int i = 1; i <= 3; i++) {
+            executeScript("(function() {"
+                    + "    window.transitionReady = false;"
+                    + "    window.transitionDone = false;"
+                    + "    const transition = document.startViewTransition(function() {});"
+                    + "    transition.ready.then(function() { window.transitionReady = true; });"
+                    + "    transition.finished.then(function() {"
+                    + "        requestAnimationFrame(function() {"
+                    + "            requestAnimationFrame(function() { window.transitionDone = true; });"
+                    + "        });"
+                    + "    });"
+                    + "})();");
+            waitForScript("window.transitionDone === true", "view transition " + i + " to finish");
+            assertEquals(Boolean.TRUE, executeScript("window.transitionReady"),
+                    "View transition " + i + " was skipped, so it never entered compositing mode");
+        }
+    }
+
+    private void loadContent(String content) {
+        CountDownLatch loaded = new CountDownLatch(1);
         Util.runAndWait(() -> {
             WebEngine engine = webView.getEngine();
             engine.getLoadWorker().stateProperty().addListener((obs, oldState, newState) -> {
                 if (newState == SUCCEEDED) {
-                    engine.executeScript("if (document.startViewTransition) { document.startViewTransition(function() {}); }");
-                    transitionStarted.countDown();
+                    loaded.countDown();
                 }
             });
-            engine.loadContent("<html></html>", "text/html");
+            engine.loadContent(content, "text/html");
         });
+        assertTrue(Util.await(loaded), "Timeout waiting for the page to load");
+    }
 
-        assertTrue(Util.await(transitionStarted), "Timeout waiting for the view transition to start");
-        Util.sleep(500);
+    private Object executeScript(String script) {
+        Object[] result = new Object[1];
+        Util.runAndWait(() -> result[0] = webView.getEngine().executeScript(script));
+        return result[0];
+    }
+
+    private void waitForScript(String condition, String description) {
+        long deadline = System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(Util.TIMEOUT);
+        while (!Boolean.TRUE.equals(executeScript(condition))) {
+            assertTrue(System.nanoTime() < deadline, "Timeout waiting for " + description);
+            Util.sleep(50);
+        }
     }
 }

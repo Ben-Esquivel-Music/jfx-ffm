@@ -148,7 +148,9 @@ private:
     RefPtr<RQRef> m_jRenderTheme;
 
     RefPtr<GraphicsLayer> m_rootLayer;
-    std::unique_ptr<TextureMapper> m_textureMapper;
+    // Not unique_ptr<TextureMapper>: ~TextureMapper() is not virtual, so deleting the adapter through it
+    // would skip ~TextureMapperJavaAdapter() and leak its TextureMapperJava.
+    std::unique_ptr<TextureMapperJavaAdapter> m_textureMapper;
     bool m_syncLayers { false };
 
     // Webkit expects keyPress events to be suppressed if the associated keyDown

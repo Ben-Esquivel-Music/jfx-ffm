@@ -228,6 +228,10 @@ std::unique_ptr<TextureMapper> TextureMapper::create()
 TextureMapper::TextureMapper()
 #if !PLATFORM(JAVA)
     : m_data(new TextureMapperGLData(GLContext::current()->platformContext()))
+#else
+    // Java has no GL data, but ~TextureMapper() deletes m_data unconditionally.
+    // data() must not be reached on Java.
+    : m_data(nullptr)
 #endif
 {
 }
