@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2008, 2024, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2008, 2026, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -132,14 +132,15 @@ public class ExternalDeclarationTest extends ParserBase {
 
     @Test
     public void notAnExtDecl() {
-        assertThrows(ParseCancellationException.class, () -> {
-            parseTreeFor("foo = 4");
-        });
+        ParseCancellationException e = assertThrows(ParseCancellationException.class, () -> parseTreeFor("foo = 4"));
+        assertTrue(e.getMessage().startsWith("line 1:0 mismatched input 'foo' expecting "), e.getMessage());
     }
 
     private List<ExtDecl> parseTreeFor(String text) {
         JSLParser parser = parserOver(text);
         JSLVisitor visitor = new JSLVisitor();
-        return visitor.visitExternal_declaration(parser.external_declaration()).getDecls();
+        JSLParser.External_declarationContext tree = parser.external_declaration();
+        assertAllInputConsumed(parser);
+        return visitor.visitExternal_declaration(tree).getDecls();
     }
 }

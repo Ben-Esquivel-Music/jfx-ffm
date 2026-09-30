@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2008, 2025, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2008, 2026, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -520,18 +520,6 @@ public abstract class Effect {
          * (i.e., running on the CPU), without any special acceleration.
          */
         NONE("CPU/Java"),
-        /**
-         * Indicates that this {@code Effect} is implemented in software
-         * (i.e., running on the CPU), accelerated using native
-         * SIMD instructions (e.g. SSE).
-         */
-        SIMD("CPU/SIMD"),
-        /**
-         * Indicates that this {@code Effect} is implemented in software
-         * (i.e., running on the CPU), accelerated using native
-         * fixed-point arithmetic.
-         */
-        FIXED("CPU/Fixed"),
         /**
          * Indicates that this {@code Effect} is being accelerated in
          * graphics hardware via OpenGL.

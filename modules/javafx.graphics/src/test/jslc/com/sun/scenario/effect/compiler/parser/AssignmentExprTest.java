@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2008, 2024, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2008, 2026, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -26,10 +26,14 @@
 package com.sun.scenario.effect.compiler.parser;
 
 import com.sun.scenario.effect.compiler.JSLParser;
+import com.sun.scenario.effect.compiler.model.BinaryOpType;
+import com.sun.scenario.effect.compiler.model.Qualifier;
 import com.sun.scenario.effect.compiler.model.SymbolTable;
 import com.sun.scenario.effect.compiler.model.Type;
 import com.sun.scenario.effect.compiler.model.Variable;
 import com.sun.scenario.effect.compiler.tree.BinaryExpr;
+import com.sun.scenario.effect.compiler.tree.Expr;
+import com.sun.scenario.effect.compiler.tree.FieldSelectExpr;
 import com.sun.scenario.effect.compiler.tree.JSLVisitor;
 import com.sun.scenario.effect.compiler.tree.LiteralExpr;
 import com.sun.scenario.effect.compiler.tree.VariableExpr;
@@ -41,8 +45,12 @@ import java.util.List;
 import org.junit.jupiter.api.Test;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 public class AssignmentExprTest extends ParserBase {
+
+    private static final String CONST_LEFT_HAND_SIDE =
+            "Left-hand side of assignment expression cannot be const variable";
 
     @Test
     public void userVar() {
@@ -60,9 +68,8 @@ public class AssignmentExprTest extends ParserBase {
 
     @Test
     public void userROVar() {
-        assertThrows(RuntimeException.class, () -> {
-            BinaryExpr tree = parseTreeFor("readonly = 32.0");
-        });
+        RuntimeException e = assertThrows(RuntimeException.class, () -> parseTreeFor("readonly = 32.0"));
+        assertEquals(CONST_LEFT_HAND_SIDE, e.getMessage());
     }
 
     @Test
@@ -104,23 +111,22 @@ public class AssignmentExprTest extends ParserBase {
 
     @Test
     public void coreROVar() {
-        assertThrows(RuntimeException.class, () -> {
-            parseTreeFor("pos0 = float2(1.0)");
-        });
+        RuntimeException e = assertThrows(RuntimeException.class, () -> parseTreeFor("pos0 = float2(1.0)"));
+        assertEquals(CONST_LEFT_HAND_SIDE, e.getMessage());
     }
 
     @Test
     public void coreROVarField() {
-        assertThrows(RuntimeException.class, () -> {
-            parseTreeFor("pos0.x = 1.0");
-        });
+        RuntimeException e = assertThrows(RuntimeException.class, () -> parseTreeFor("pos0.x = 1.0"));
+        assertEquals(CONST_LEFT_HAND_SIDE, e.getMessage());
     }
 
     @Test
     public void notAnAssignment() {
-        assertThrows(ParseCancellationException.class, () -> {
-            parseTreeFor("const foo");
-        });
+        // a type qualifier can start a declaration, never an expression
+        ParseCancellationException e = assertThrows(ParseCancellationException.class,
+                () -> parseTreeFor("const foo"));
+        assertTrue(e.getMessage().startsWith("line 1:0 extraneous input 'const' expecting "), e.getMessage());
     }
 
     private BinaryExpr parseTreeFor(String text) {
@@ -133,6 +139,8 @@ public class AssignmentExprTest extends ParserBase {
         // scope so that we can test core variables such as color and pos0
         st.enterFrame();
         st.declareFunction("main", Type.VOID, null);
-        return (BinaryExpr) visitor.visit(parser.assignment_expression());
+        JSLParser.Assignment_expressionContext tree = parser.assignment_expression();
+        assertAllInputConsumed(parser);
+        return (BinaryExpr) visitor.visit(tree);
     }
 }

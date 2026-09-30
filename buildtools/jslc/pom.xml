@@ -42,9 +42,20 @@
             <groupId>org.antlr</groupId>
             <artifactId>antlr4</artifactId>
         </dependency>
+        <dependency>
+            <groupId>org.junit.jupiter</groupId>
+            <artifactId>junit-jupiter</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.junit.platform</groupId>
+            <artifactId>junit-platform-launcher</artifactId>
+            <scope>test</scope>
+        </dependency>
     </dependencies>
 
     <build>
+        <testSourceDirectory>${jfx.root}/modules/javafx.graphics/src/test/jslc</testSourceDirectory>
         <resources>
             <resource>
                 <directory>${jfx.root}/modules/javafx.graphics/src/jslc/resources</directory>
@@ -95,6 +106,21 @@
                         <arg>-Xmaxwarns</arg>
                         <arg>1000</arg>
                     </compilerArgs>
+                </configuration>
+            </plugin>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-surefire-plugin</artifactId>
+                <configuration>
+                    <!-- The JSL compiler tests live in the compiler's own packages, not
+                         under the "test" package the parent's include selects. -->
+                    <includes combine.self="override">
+                        <include>com/sun/scenario/effect/compiler/**/*.java</include>
+                    </includes>
+                    <systemPropertyVariables>
+                        <junit.jupiter.execution.timeout.test.method.default>${junit.test.timeout}s</junit.jupiter.execution.timeout.test.method.default>
+                        <junit.jupiter.execution.timeout.lifecycle.method.default>${junit.lifecycle.timeout}s</junit.jupiter.execution.timeout.lifecycle.method.default>
+                    </systemPropertyVariables>
                 </configuration>
             </plugin>
         </plugins>

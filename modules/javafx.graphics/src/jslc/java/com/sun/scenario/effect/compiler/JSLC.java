@@ -30,7 +30,6 @@ import com.sun.scenario.effect.compiler.backend.hw.HLSLBackend;
 import com.sun.scenario.effect.compiler.backend.hw.MSLBackend;
 import com.sun.scenario.effect.compiler.backend.prism.PrismBackend;
 import com.sun.scenario.effect.compiler.backend.sw.java.JSWBackend;
-import com.sun.scenario.effect.compiler.backend.sw.me.MEBackend;
 import com.sun.scenario.effect.compiler.tree.JSLVisitor;
 import com.sun.scenario.effect.compiler.tree.ProgramUnit;
 import org.antlr.v4.runtime.CharStream;
@@ -60,12 +59,6 @@ public class JSLC {
     public static final int OUT_MTL      = (1 << 2);
     public static final int OUT_JAVA     = (1 << 3);
     public static final int OUT_PRISM    = (1 << 4);
-
-
-    public static final int OUT_ME_JAVA         = (1 << 7);
-    public static final int OUT_ME_NATIVE       = (1 << 8);
-
-    public static final int OUT_ME       = OUT_ME_JAVA | OUT_ME_NATIVE;
 
     public static final int OUT_SW_PEERS   = OUT_JAVA;
     public static final int OUT_HW_PEERS   = OUT_PRISM;
@@ -114,27 +107,26 @@ public class JSLC {
      * If trimToOutDir is provided by the user, then we will output all files
      * under the out directory, for example if outDir=/foo/bar:
      *   /foo/bar/ + rootPkg + /impl/sw/java
-     *   /foo/bar/ + rootPkg + /impl/sw/me
      *   /foo/bar/ + rootPkg + /impl/hw/d3d/hlsl
+     *   /foo/bar/ + rootPkg + /impl/hw/mtl/msl
      *   /foo/bar/ + rootPkg + /impl/es2/glsl
      *   /foo/bar/ + rootPkg + /impl/prism/ps
      *
      * Otherwise, we use the layout currently expected by decora-runtime
-     * for core effects:
-     *   ../decora-jsw/build/gensrc/     + rootPkg + /impl/sw/java
-     *   ../decora-me/build/gensrc/      + rootPkg + /impl/sw/me
-     *   ../decora-d3d/build/gensrc/     + rootPkg + /impl/hw/d3d/hlsl
-     *   ../decora-es2/build/gensrc/     + rootPkg + /impl/es2/glsl
-     *   ../decora-prism-ps/build/gensrc/+ rootPkg + /impl/prism/ps
+     * for core effects, under the out directory (or the working directory
+     * if there is none):
+     *   decora-jsw/build/gensrc/      + rootPkg + /impl/sw/java
+     *   decora-d3d/build/gensrc/      + rootPkg + /impl/hw/d3d/hlsl
+     *   decora-mtl/build/gensrc/      + rootPkg + /impl/hw/mtl/msl
+     *   decora-es2/build/gensrc/      + rootPkg + /impl/es2/glsl
+     *   decora-prism-ps/build/gensrc/ + rootPkg + /impl/prism/ps
      */
     private static final Map<Integer, String> DEFAULT_INFO_MAP = Map.of(
         OUT_D3D,        "decora-d3d/build/gensrc/{pkg}/impl/hw/d3d/hlsl/{name}.hlsl",
         OUT_MTL,        "decora-mtl/build/gensrc/{pkg}/impl/hw/mtl/msl/{name}.metal",
         OUT_ES2,        "decora-es2/build/gensrc/{pkg}/impl/es2/glsl/{name}.frag",
         OUT_JAVA,       "decora-jsw/build/gensrc/{pkg}/impl/sw/java/JSW{name}Peer.java",
-        OUT_PRISM,      "decora-prism-ps/build/gensrc/{pkg}/impl/prism/ps/PPS{name}Peer.java",
-        OUT_ME_JAVA,    "decora-me/build/gensrc/{pkg}/impl/sw/me/ME{name}Peer.java",
-        OUT_ME_NATIVE,  "decora-me-native/build/gensrc/ME{name}Peer.cc");
+        OUT_PRISM,      "decora-prism-ps/build/gensrc/{pkg}/impl/prism/ps/PPS{name}Peer.java");
 
     public static ParserInfo compile(JSLCInfo jslcinfo,
                                      String str,
@@ -241,32 +233,6 @@ public class JSLC {
             }
         }
 
-        if ((outTypes & OUT_ME) != 0) {
-            File outFile = jslcinfo.getOutputFile(OUT_ME_JAVA);
-            // TODO: native code is always generated into the same
-            // destination directory for now; need to make this more flexible
-            File genCFile = jslcinfo.getOutputFile(OUT_ME_NATIVE);
-
-            boolean outFileStale = outOfDate(outFile, sourceTime);
-            boolean genCFileStale = outOfDate(genCFile, sourceTime);
-            if (jslcinfo.force || outFileStale || genCFileStale) {
-                if (pinfo == null) pinfo = getParserInfo(stream);
-                MEBackend meBackend = new MEBackend(pinfo.parser, pinfo.visitor, pinfo.program);
-                MEBackend.GenCode gen =
-                    meBackend.getGenCode(shaderName, peerName, genericsName, interfaceName);
-
-                // write impl class
-                if (outFileStale) {
-                    write(gen.javaCode, outFile);
-                }
-
-                // write impl native code
-                if (genCFileStale) {
-                    write(gen.nativeCode, genCFile);
-                }
-            }
-        }
-
         if ((outTypes & OUT_PRISM) != 0) {
             File outFile = jslcinfo.getOutputFile(OUT_PRISM);
             if (jslcinfo.force || outOfDate(outFile, sourceTime)) {
@@ -323,7 +289,7 @@ public class JSLC {
             String prefix0 = "Usage: java "+prog+" ";
             String prefix1 = "";
             for (int i = 0; i < prefix0.length(); i++) prefix1 += " ";
-            out.println(prefix0+"[-d3d | -es2 | -mtl | -java | -me | -sw | -hw | -all]");
+            out.println(prefix0+"[-d3d | -es2 | -mtl | -java | -sw | -hw | -all]");
             out.println(prefix1+"[-o <outdir>] [-i <srcdir>] [-t]");
             out.println(prefix1+"[-name <name>] [-ifname <interface name>]");
             if (extraOpts != null) {
@@ -371,8 +337,6 @@ public class JSLC {
                 outTypes |= OUT_MTL;
             } else if (arg.equals("-java")) {
                 outTypes |= OUT_JAVA;
-            } else if (arg.equals("-me")) {
-                outTypes |= OUT_ME;
             } else if (arg.equals("-sw")) {
                 outTypes = OUT_SW_PEERS;
             } else if (arg.equals("-hw")) {

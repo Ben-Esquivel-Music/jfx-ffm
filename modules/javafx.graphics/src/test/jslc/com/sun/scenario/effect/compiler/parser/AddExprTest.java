@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2008, 2024, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2008, 2026, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -29,6 +29,7 @@ import com.sun.scenario.effect.compiler.JSLParser;
 import com.sun.scenario.effect.compiler.model.BinaryOpType;
 import com.sun.scenario.effect.compiler.tree.BinaryExpr;
 import com.sun.scenario.effect.compiler.tree.JSLVisitor;
+import org.opentest4j.AssertionFailedError;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -66,15 +67,17 @@ public class AddExprTest extends MultExprTest {
 
     @Test
     public void notAnAdditiveExpression() {
-        assertThrows(ClassCastException.class, () -> {
-            parseTreeFor(mult + "!" + mult);
-        });
+        // "!" is only a prefix operator, so the rule ends after the first operand
+        AssertionFailedError e = assertThrows(AssertionFailedError.class, () -> parseTreeFor(mult + "!" + mult));
+        assertEquals("trailing input '!' at 1:" + mult.length(), e.getMessage());
     }
 
     private BinaryExpr parseTreeFor(String text) {
         JSLParser parser = parserOver(text);
         JSLVisitor visitor = new JSLVisitor();
-        return (BinaryExpr) visitor.visit(parser.additive_expression());
+        JSLParser.Additive_expressionContext tree = parser.additive_expression();
+        assertAllInputConsumed(parser);
+        return (BinaryExpr) visitor.visit(tree);
     }
 
     protected String additive() {

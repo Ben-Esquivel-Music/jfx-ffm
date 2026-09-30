@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2008, 2024, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2008, 2026, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -107,9 +107,8 @@ public class IterationStatementTest extends ParserBase {
 
     @Test
     public void notAnIterationStmt() {
-        assertThrows(ParseCancellationException.class, () -> {
-            parseTreeFor("return;");
-        });
+        ParseCancellationException e = assertThrows(ParseCancellationException.class, () -> parseTreeFor("return;"));
+        assertTrue(e.getMessage().startsWith("line 1:0 mismatched input 'return' expecting "), e.getMessage());
     }
 
     private Stmt parseTreeFor(String text) {
@@ -117,6 +116,8 @@ public class IterationStatementTest extends ParserBase {
         JSLVisitor visitor = new JSLVisitor();
         visitor.getSymbolTable().declareVariable("i", Type.INT, null);
         visitor.getSymbolTable().declareVariable("j", Type.INT, null);
-        return visitor.visitIteration_statement(parser.iteration_statement());
+        JSLParser.Iteration_statementContext tree = parser.iteration_statement();
+        assertAllInputConsumed(parser);
+        return visitor.visitIteration_statement(tree);
     }
 }

@@ -299,7 +299,6 @@ public class BoxRenderState extends LinearConvolveRenderState {
         String name;
         switch (actype) {
             case NONE:
-            case SIMD:
                 if (swCompatible && spread == 0.0f) {
                     name = isShadow() ? "BoxShadow" : "BoxBlur";
                     break;

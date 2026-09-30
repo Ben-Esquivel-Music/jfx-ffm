@@ -26,7 +26,6 @@
 package test.com.sun.glass.ui.gtk;
 
 import com.sun.glass.ui.Application;
-import com.sun.glass.ui.GlassRobot;
 import com.sun.glass.ui.Pixels;
 import com.sun.glass.ui.Screen;
 import com.sun.glass.ui.View;
@@ -41,7 +40,6 @@ import java.util.Arrays;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
-import javafx.scene.paint.Color;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.Timeout;
@@ -62,9 +60,16 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * Per kind, after one warm-up round, {@code -Dgtk.upload.rounds} rounds (default 9) of {@code -Dgtk.upload.frames}
  * uploads (default 30) on the FX thread, each round ended by an {@code XSync} of GDK's connection so that the X
  * server has taken every frame; recorded are the medians of the wall time and of the FX thread's CPU time per
- * frame. Then one frame of a colour of its own per kind, read back with the robot at the view's centre: a kind
- * whose upload painted nothing would show as a colour that is not its own. A measurement, not a pass/fail test,
- * except that every kind must paint its colour and every round must take time.
+ * frame. Then one frame of a colour of its own per kind, read back at the view's centre: a kind whose upload painted
+ * nothing would show as a colour that is not its own. A measurement, not a pass/fail test, except that every kind
+ * must paint its colour and every round must take time.
+ * <p>
+ * Every read-back is an {@code XGetImage} of the window itself ({@code GtkGlassShim.windowPixel}), not a capture of
+ * the root window through the robot: under a compositor the root window need not hold what a window shows - on a
+ * rootless Xwayland (WSLg) it holds nothing, an {@code XGetImage} of it is refused, and the robot answers whatever
+ * the temporary pixmap of cairo's fallback happened to contain. The first frame is uploaded only once the window is
+ * viewable: a window manager maps it when it is ready (Weston: seconds later), and a frame painted before that is
+ * lost.
  * <p>
  * Then, for the two array kinds, the bounds the C checks ({@code ggtk_view_upload_pixels_int} / {@code _byte} of
  * {@code GlassView.cpp}), through {@code GtkView._uploadPixelsIntArray} and {@code _uploadPixelsByteArray}
@@ -98,6 +103,9 @@ public class GtkUploadBenchmarkTest {
     static final int OFFSET_PIXELS = 7;
 
     static final List<String> REFUSED_CASES = List.of("oneShort", "onePastTheEnd", "negativeOffset", "zeroWidth");
+
+    /** How long the window manager may take to map the window before the first frame. */
+    static final long VIEWABLE_MILLIS = 20_000;
 
     private static GtkGlassChildJvm.Run run;
 
@@ -201,11 +209,11 @@ public class GtkUploadBenchmarkTest {
             return v;
         });
         try {
-            // mapped and exposed before the first frame
-            GtkGlassChild.onFx(() -> {
-                GtkGlassShim.syncGdkDisplay();
-                return null;
-            });
+            // mapped - viewable, so that the X server keeps what is drawn - and exposed before the first frame
+            long start = System.nanoTime();
+            boolean viewable = GtkGlassChild.waitFor(VIEWABLE_MILLIS, () -> readBack(view, 0, 0) != null);
+            out.put("upload.viewable", viewable ? "after " + (System.nanoTime() - start) / 1_000_000 + " ms"
+                    : "not within " + VIEWABLE_MILLIS + " ms");
             Thread.sleep(500);
             ThreadMXBean threads = ManagementFactory.getThreadMXBean();
             for (int k = 0; k < KINDS.size(); k++) {
@@ -224,15 +232,11 @@ public class GtkUploadBenchmarkTest {
                 out.put("upload." + kind + ".median.msPerFrame", format("%.3f", median(ms)));
                 out.put("upload." + kind + ".median.fxCpuMsPerFrame", format("%.3f", median(cpu)));
                 Pixels check = GtkGlassChild.onFx(() -> pixels(kind, width, height, CHECK_COLORS[KINDS.indexOf(kind)]));
-                out.put("upload." + kind + ".readBack", GtkGlassChild.onFx(() -> {
+                GtkGlassChild.onFx(() -> {
                     view.uploadPixels(check);
-                    GtkGlassShim.syncGdkDisplay();
-                    GlassRobot robot = Application.GetApplication().createRobot();
-                    Color color = robot.getPixelColor(view.getWindow().getX() + view.getX() + view.getWidth() / 2,
-                            view.getWindow().getY() + view.getY() + view.getHeight() / 2);
-                    return String.format(Locale.ROOT, "%02x%02x%02x", channel(color.getRed()),
-                            channel(color.getGreen()), channel(color.getBlue()));
-                }));
+                    return null;
+                });
+                out.put("upload." + kind + ".readBack", String.valueOf(readBack(view, width / 2, height / 2)));
             }
             for (String kind : ARRAY_KINDS) {
                 bounds(view, kind, width, height, out);
@@ -310,16 +314,19 @@ public class GtkUploadBenchmarkTest {
         }
     }
 
-    /** The colour at {@code x, y} of the view, read with the robot after an {@code XSync}, as {@code rrggbb}. */
-    private static String readBack(View view, int x, int y) throws Exception {
-        return GtkGlassChild.onFx(() -> {
-            GtkGlassShim.syncGdkDisplay();
-            GlassRobot robot = Application.GetApplication().createRobot();
-            Color color = robot.getPixelColor(view.getWindow().getX() + view.getX() + x,
-                    view.getWindow().getY() + view.getY() + y);
-            return String.format(Locale.ROOT, "%02x%02x%02x", channel(color.getRed()), channel(color.getGreen()),
-                    channel(color.getBlue()));
-        });
+    /**
+     * The colour at {@code x, y} of the view - frame pixels, which are the pixels of its window - read from the
+     * window itself after an {@code XSync}, as {@code rrggbb}; {@code null} while the window is not viewable.
+     */
+    private static String readBack(View view, int x, int y) {
+        try {
+            return GtkGlassChild.onFx(() -> {
+                GtkGlassShim.syncGdkDisplay();
+                return GtkGlassShim.windowPixel(view.getWindow().getNativeWindow(), x, y);
+            });
+        } catch (Exception e) {
+            throw new IllegalStateException(e);
+        }
     }
 
     private static String hex(int argb) {
@@ -369,10 +376,6 @@ public class GtkUploadBenchmarkTest {
             buffer.putInt(argb);
         }
         return buffer.rewind();
-    }
-
-    private static int channel(double value) {
-        return (int) Math.round(value * 255);
     }
 
     private static double median(double[] values) {

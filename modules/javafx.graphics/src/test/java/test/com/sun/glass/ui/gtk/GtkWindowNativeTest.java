@@ -55,7 +55,10 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
  * <li>The size natives refuse a negative minimum and a zero maximum ({@code false}, no change), map a minimum of 0
  * to 1 and a maximum of -1 - what {@code Window.setMaximumSize} passes for {@code Integer.MAX_VALUE} - to
  * {@code G_MAXSHORT}, and the larger of the minimum and the system minimum is the window's minimum: all read back
- * from the {@code WM_NORMAL_HINTS} GTK gives the X server.</li>
+ * from the {@code WM_NORMAL_HINTS} GTK gives the X server. Those sizes are the window's, frame included, and the
+ * hints the client area's: {@code update_window_constraints} takes off the {@code _NET_FRAME_EXTENTS} a window
+ * manager reports (a minimum stays at least 1), so every hint is compared with the size asked for less the frame
+ * extents the window had when the hints were read - none without a window manager.</li>
  * </ul>
  * No window manager is needed: GTK sets the properties either way.
  */
@@ -65,6 +68,9 @@ public class GtkWindowNativeTest {
 
     /** The titles set, in this order, by name. */
     static final Map<String, String> TITLES = titles();
+
+    /** {@code G_MAXSHORT}, the maximum {@code _setMaximumSize} makes of -1. */
+    static final int G_MAXSHORT = Short.MAX_VALUE;
 
     private static Map<String, String> titles() {
         Map<String, String> titles = new LinkedHashMap<>();
@@ -131,11 +137,11 @@ public class GtkWindowNativeTest {
     /** {@code _setMinimumSize}: the width first, a minimum of 0 is 1, a negative one is refused and changes nothing. */
     @Test
     public void theMinimumSizeReachesTheWindowManager() {
-        assertEquals("true min=123,45", value("size.min 123x45"));
-        assertEquals("false min=123,45", value("size.min -5x10 (native)"));
-        assertEquals("false min=123,45", value("size.min 10x-5 (native)"));
-        assertEquals("true min=1,1", value("size.min 0x0"));
-        assertEquals("true min=150,60", value("size.min 150x60"));
+        assertEquals(min(true, 123, 45, "min 123x45"), value("size.min 123x45"));
+        assertEquals(min(false, 123, 45, "min -5x10 (native)"), value("size.min -5x10 (native)"));
+        assertEquals(min(false, 123, 45, "min 10x-5 (native)"), value("size.min 10x-5 (native)"));
+        assertEquals(min(true, 1, 1, "min 0x0"), value("size.min 0x0"));
+        assertEquals(min(true, 150, 60, "min 150x60"), value("size.min 150x60"));
     }
 
     /**
@@ -144,11 +150,12 @@ public class GtkWindowNativeTest {
      */
     @Test
     public void theMaximumSizeReachesTheWindowManager() {
-        assertEquals("true max=800,600", value("size.max 800x600"));
-        assertEquals("false max=800,600", value("size.max 0x600 (native)"));
-        assertEquals("false max=800,600", value("size.max 800x0 (native)"));
-        assertEquals("true max=32767,32767", value("size.max MAX_VALUE x MAX_VALUE"));
-        assertEquals("true max=32767,600", value("size.max -1x600 (native)"));
+        assertEquals(max(true, 800, 600, "max 800x600"), value("size.max 800x600"));
+        assertEquals(max(false, 800, 600, "max 0x600 (native)"), value("size.max 0x600 (native)"));
+        assertEquals(max(false, 800, 600, "max 800x0 (native)"), value("size.max 800x0 (native)"));
+        assertEquals(max(true, G_MAXSHORT, G_MAXSHORT, "max MAX_VALUE x MAX_VALUE"),
+                value("size.max MAX_VALUE x MAX_VALUE"));
+        assertEquals(max(true, G_MAXSHORT, 600, "max -1x600 (native)"), value("size.max -1x600 (native)"));
     }
 
     /**
@@ -157,9 +164,42 @@ public class GtkWindowNativeTest {
      */
     @Test
     public void theSystemMinimumSizeRaisesTheMinimum() {
-        assertEquals("true min=300,200", value("size.sysmin 300x200 (native)"));
-        assertEquals("false min=300,200", value("size.sysmin -1x5 (native)"));
-        assertEquals("true min=300,70", value("size.sysmin 300x10 (native) over min 150x70"));
+        assertEquals(min(true, 300, 200, "sysmin 300x200 (native)"), value("size.sysmin 300x200 (native)"));
+        assertEquals(min(false, 300, 200, "sysmin -1x5 (native)"), value("size.sysmin -1x5 (native)"));
+        assertEquals(min(true, 300, 70, "sysmin 300x10 (native) over min 150x70"),
+                value("size.sysmin 300x10 (native) over min 150x70"));
+    }
+
+    /**
+     * {@code <result> min=<w>,<h>} as {@code update_window_constraints} hands GTK a minimum window size of
+     * {@code width x height}: less the frame extents recorded with the hints of {@code step}, and at least 1.
+     */
+    private static String min(boolean result, int width, int height, String step) {
+        int[] e = frameExtents(step);
+        return result + " min=" + Math.max(1, width - e[0] - e[1]) + "," + Math.max(1, height - e[2] - e[3]);
+    }
+
+    /**
+     * {@code <result> max=<w>,<h>} as {@code update_window_constraints} hands GTK a maximum window size of
+     * {@code width x height}: less the frame extents recorded with the hints of {@code step}.
+     */
+    private static String max(boolean result, int width, int height, String step) {
+        int[] e = frameExtents(step);
+        return result + " max=" + (width - e[0] - e[1]) + "," + (height - e[2] - e[3]);
+    }
+
+    /** The left, right, top and bottom {@code _NET_FRAME_EXTENTS} recorded with {@code step}, all 0 for none. */
+    private static int[] frameExtents(String step) {
+        String extents = value("size." + step + ".extents");
+        if (extents.equals("none")) {
+            return new int[4];
+        }
+        String[] parts = extents.split(",");
+        int[] e = new int[4];
+        for (int i = 0; i < 4; i++) {
+            e[i] = Integer.parseInt(parts[i]);
+        }
+        return e;
     }
 
     // ---------------------------------------------------------------------------------------------
@@ -188,7 +228,7 @@ public class GtkWindowNativeTest {
                     return null;
                 });
             }
-            out.put("size.initial", hints(t, window, "min", () -> true));
+            size(t, out, window, "initial", "min", () -> true);
             size(t, out, window, "min 123x45", "min", () -> {
                 window.setMinimumSize(123, 45);
                 return window.getMinimumWidth() == 123 && window.getMinimumHeight() == 45;
@@ -235,22 +275,39 @@ public class GtkWindowNativeTest {
 
     /**
      * Runs {@code step} on the FX thread, lets GTK hand the hints to the X server, and records
-     * {@code <result> <the min or max part of WM_NORMAL_HINTS>} under {@code size.<name>}.
+     * {@code <result> <the min or max part of WM_NORMAL_HINTS>} under {@code size.<name>} and the window's
+     * {@code _NET_FRAME_EXTENTS} with them under {@code size.<name>.extents}.
      */
     private static void size(GtkEventTrace t, Map<String, String> out, Window window, String name, String part,
                              Step step) throws Exception {
-        out.put("size." + name, hints(t, window, part, step));
+        String[] hints = hints(t, window, part, step);
+        out.put("size." + name, hints[0]);
+        out.put("size." + name + ".extents", hints[1]);
     }
 
-    private static String hints(GtkEventTrace t, Window window, String part, Step step) throws Exception {
+    /**
+     * {@code <result> <part>} and the frame extents, read together once they have stopped changing: a window
+     * manager may report the extents late (Weston does, seconds after the map), and glass then applies them to the
+     * hints only when it handles the property change.
+     */
+    private static String[] hints(GtkEventTrace t, Window window, String part, Step step) throws Exception {
         boolean result = GtkGlassChild.onFx(step::run);
-        t.settle();
-        String hints = GtkGlassChild.onFx(() -> GtkGlassShim.wmNormalHints(window.getNativeWindow()));
-        for (String item : hints.split(" ")) {
+        String[] read = null;
+        for (int i = 0; i < 10; i++) {
+            t.settle();
+            String[] now = GtkGlassChild.onFx(() -> new String[] {
+                GtkGlassShim.wmNormalHints(window.getNativeWindow()),
+                GtkGlassShim.netFrameExtents(window.getNativeWindow())});
+            if (read != null && read[0].equals(now[0]) && read[1].equals(now[1])) {
+                break;
+            }
+            read = now;
+        }
+        for (String item : read[0].split(" ")) {
             if (item.startsWith(part + "=")) {
-                return result + " " + item;
+                return new String[] {result + " " + item, read[1]};
             }
         }
-        return result + " " + hints;
+        return new String[] {result + " " + read[0], read[1]};
     }
 }
