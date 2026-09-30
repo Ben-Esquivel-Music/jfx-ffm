@@ -67,7 +67,7 @@ public:
     GraphicsContext* graphicsContext() { return m_context; }
 private:
     RefPtr<BitmapTextureJava> m_currentSurface;
-    GraphicsContext* m_context;
+    GraphicsContext* m_context { nullptr };
 };
 
 }
