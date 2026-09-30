@@ -4,6 +4,10 @@ Parent epic: *fully remove JNI from `javafx.graphics`, replacing it with the Jav
 delete as much C/C++ as can be removed safely without changing behaviour.* Branch of record:
 `ffm/graphics`.
 
+A second epic, the **Rust port** (the fork's long-term goal 3), was surveyed on 2026-09-30. It covers the native code
+that has to stay native. Its stories, and the defects and Java routes the survey found, are US-027 to US-050; see
+"Rust port" below.
+
 This directory holds the epic's user stories, **open and done**, so they are tracked in source
 control. A done story stays here for the record: its status is set to "✅ Done" with the date and
 the PR that finished it, and its row moves from the open table to the done table below. Numbers are
@@ -16,7 +20,7 @@ Acceptance criteria / Definition of Done. Supporting evidence shares the story's
 
 ## Open stories
 
-| ID | Title | Status (2026-09-28) | Next action |
+| ID | Title | Status (2026-09-30) | Next action |
 | --- | --- | --- | --- |
 | [US-001](US-001-descope-glass-gtk-glass-mac-prism-mtl-ffm-migration.md) | Migrate `glass/gtk`, `glass/mac`, `prism_mtl` to FFM | 🔶 Linux half unblocked (WSL builds and tests the module); macOS half needs a macOS host | Schedule `glass/gtk` (99 natives, 102 upcall sites) |
 | [US-003](US-003-migrate-javafx-font-jni-to-ffm.md) | Migrate `javafx_font` to FFM | 🔶 Windows and Linux halves done; macOS half (68 natives: `coretext.OS`, `MacFontFinder`, `DFontDecoder`) remains | Needs a macOS host |
@@ -35,6 +39,30 @@ Acceptance criteria / Definition of Done. Supporting evidence shares the story's
 | [US-024](US-024-regenerate-shaders-when-the-jsl-tools-change.md) | Regenerate the shaders when the JSL compiler or a generator changes | 📋 Ready (filed 2026-09-28); the up-to-date check compares only the time of the `.jsl` text, so a build without `clean` after a change to the JSL compiler or a generator rewrites nothing (a changed Prism generator: none of the 1,059 files rewritten, where a clean run changes 318), and a `.jsl` file restored with its older time is not compiled again. The gates build with `clean` and are unaffected; US-019, US-020 and US-022 all change the compiler (upstream too: JDK-8090470, open since 2012) | Pick up when scheduled, before a compiler change is built without `clean`: choose the tools in the source time, a stamp, always `-force`, or documentation |
 | [US-025](US-025-fix-uninitialized-and-dangling-members-in-java-webkit-branches.md) | Fix three uninitialized or dangling members in the Java branches of WebKit | 📋 Ready (filed 2026-09-30); found by a sweep of all 573 `PLATFORM(JAVA)` guard sites while fixing the `TextureMapper` crash. `LocaleNone::monthLabels()`/`shortMonthLabels()` return references to locals that shadow the members (and fill the wrong member); `ComplexTextRun::m_stringLength` is garbage for runs built by the generic constructors; the Java custom `Cursor` constructor leaves `m_type` `Invalid`. None is reachable in production today (upstream too, not a fork regression) | Pick up when scheduled; needs a `jfxwebkit` rebuild; also upstream |
 | [US-026](US-026-make-composited-webview-content-render-on-the-java-port.md) | Make composited WebView content render on the Java port | 📋 Ready (filed 2026-09-30); since the WebKit 623.1 update every composited paint on Java runs the base `TextureMapper` functions through `TextureMapper&`, and on Java they are no-ops (`beginPainting` compiled out, so the clip stays empty; `drawTexture`/`drawSolidColor` empty), so in compositing mode, which a view transition enters with default settings and CSS 3D enters always, `WebPage` draws no new page content (probe: with CSS 3D a `translateZ(0)` box never appears; during a default view transition the previous frame stays on screen). The `data()` users that became null dereferences with the `TextureMapper` crash fix are unreachable only because of this, so they must be guarded first (upstream too, not a fork regression) | Maintainer chooses (A) draw through `TextureMapperJava` or (B) keep the default configuration out of compositing mode |
+| [US-027](US-027-add-a-rust-toolchain-to-the-native-build-and-ci.md) | Add a Rust toolchain to the native build and CI | 📋 Ready (filed 2026-09-30); the tree and the development machine have no Rust. Cargo runs from CMake (a custom target plus an IMPORTED staticlib); exports go through `/EXPORT:` and a Linux version script; the C/Rust switch is `JFX_RUST`; the toolchain is pinned, crates are vendored, a cbindgen check guards the ABI and a perl script gates licences. The proof slice moves `jfxm_abi_version` | The enabler for every Rust port: install rustup on Windows and in WSL, then pick up |
+| [US-028](US-028-build-and-link-the-rust-slices-on-macos.md) | Build and link the Rust slices on macOS | 🔶 Deferred (filed 2026-09-30); the trigger is the first library also built on macOS whose C is ready to delete (`jfxmedia`, `fxplugins`). CI-only verification, since there is no macOS host | Pick up when US-032, US-033, US-035 or US-036 reaches its deletion slice |
+| [US-029](US-029-port-the-glass-windows-winrt-preferences-to-rust.md) | Port the Glass Windows WinRT preferences to Rust | 📋 Ready (filed 2026-09-30); 755 lines, 5 exports. The WinRT sinks capture a raw `this` and are never unregistered, and Java-side COM was already rejected for this code in the ABI header | The first real Rust slice. glass.dll is Windows-only, so its C can be deleted without US-028. After US-027 and US-039 part 2 |
+| [US-030](US-030-port-the-glass-windows-com-servers-to-rust.md) | Port the Glass Windows COM servers (clipboard, DnD, UI Automation) to Rust | 📋 Ready (filed 2026-09-30); 4,507 lines, 32 exports, 105 callback slots. `#[implement]` replaces hand-written refcounts and `delete this` in objects that other processes hold | After US-029 and US-039 part 3 |
+| [US-031](US-031-port-the-glass-windows-toolkit-core-to-rust.md) | Port the Glass Windows toolkit core (loop, WndProcs, IME, key tables) to Rust | 📋 Ready (filed 2026-09-30); 9,306 lines, 65 exports; the toolkit-HWND race and per-HWND lifetimes. Its "why not Java" rests on an unmeasured WndProc upcall volume, so the maintainer may defer it | After US-030, US-039 parts 1 and 4, and US-049 |
+| [US-032](US-032-port-the-javasource-gstreamer-element-to-rust.md) | Port the javasource GStreamer element to Rust | 📋 Ready (filed 2026-09-30); 1,398 lines. It proves gstreamer-rs against gstreamer-lite, whose ordinal-only `.def` grows append-only, and adds the native trace driver the other media ports reuse | After US-027 and US-041 |
+| [US-033](US-033-port-progressbuffer-and-hlsprogressbuffer-to-rust.md) | Port progressbuffer and hlsprogressbuffer to Rust | 📋 Ready (filed 2026-09-30); 2,357 lines and three threads. No test reaches either element today, so the trace goldens are the oracle | After US-032 |
+| [US-034](US-034-port-the-mfwrapper-h265-decoder-element-to-rust.md) | Port the mfwrapper H.265 decoder element to Rust | 📋 Ready (filed 2026-09-30); 2,550 lines. A hand-rolled `IMFMediaBuffer` refcount and an untrusted `hvcC` parser. Parity needs an HEVC decoder MFT on the test machine | After US-032 |
+| [US-035](US-035-port-the-jfxmedia-frame-conversion-spectrum-equalizer-and-logger-code-to-rust.md) | Port jfxmedia's frame, conversion, spectrum, equalizer and logger code to Rust | 📋 Ready (filed 2026-09-30); 5,224 lines, 25 exports. Java cannot bind GStreamer on Windows, because gstreamer-lite exports by ordinal only | After US-027; its C stays on macOS until US-028 |
+| [US-036](US-036-port-the-jfxmedia-gstreamer-pipeline-core-to-rust.md) | Port the jfxmedia GStreamer pipeline core to Rust | 📋 Ready (filed 2026-09-30); 9,544 lines, 33 exports. A hand-rolled teardown handshake, and races reproduced as relaxed atomics, not fixed | After US-035, ideally after US-040 |
+| [US-037](US-037-port-the-gtk-glass-screencast-code-to-rust.md) | Port the GTK Glass screencast code to Rust | 🔶 Blocked (filed 2026-09-30); 3,051 lines, 11 exports. WSL has no PipeWire, portal or D-Bus daemon, and CI runs no GTK display tests. The rest of GTK Glass is deferred until a GTK 4 port, because gtk-rs's GTK 3 crates are archived | After US-027, US-038 and US-042 |
+| [US-038](US-038-run-the-gtk-screencast-paths-in-wsl-against-a-mock-portal-and-a-stub-pipewire.md) | Run the GTK screencast paths in WSL against a mock portal and a stub PipeWire | 📋 Ready (filed 2026-09-30); today's tests reach only the "no PipeWire" branch | Pick up when scheduled; it unblocks US-037 and US-042's regression tests |
+| [US-039](US-039-fix-four-glass-windows-cpp-defects-before-its-rust-port.md) | Fix four Glass Windows C++ defects before its Rust port | 📋 Ready (filed 2026-09-30); a racy toolkit HWND, WinRT sinks that outlive their object, a UIA text-range NULL crash and BSTR leak, and `bad_alloc` unwinding through `user32` | Pick up now; the parts merge separately |
+| [US-040](US-040-fix-lock-allocation-and-leak-defects-in-the-jfxmedia-gstreamer-pipeline.md) | Fix lock, allocation and leak defects in the jfxmedia GStreamer pipeline | 📋 Ready (filed 2026-09-30); two flags under mixed locks, spectrum lists indexed by the Java band count, a throwing `new` in a GLib callback, and a source-element leak on three failure returns | Pick up now |
+| [US-041](US-041-fix-gstbuffer-map-misuse-a-leaked-buffer-and-a-float-to-int-ub-in-fxplugins.md) | Fix GstBuffer map misuse, a leaked buffer and a float-to-int UB in fxplugins | 📋 Ready (filed 2026-09-30); writes through read maps in javasource and dshowwrapper, a DirectShow sink leak, and an unbounded double-to-`gint64` in progressbuffer | Pick up now; it blocks US-032 and US-033 |
+| [US-042](US-042-fix-the-lost-wake-up-and-unchecked-frame-geometry-in-the-gtk-screencast.md) | Fix the lost wake-up and unchecked frame geometry in the GTK screencast | 📋 Ready (filed 2026-09-30); the predicate is tested outside the PipeWire loop lock, and compositor strides and sizes are not bounds-checked | Pick up now; its regression tests need US-038 |
+| [US-043](US-043-fix-seven-latent-defects-in-the-d3d-pipeline-cpp.md) | Fix seven latent defects in the D3D pipeline's C++ | 📋 Ready (filed 2026-09-30); the phong destructor releases NULL slots (new), blend factors are uninitialised, a read-back over-copies 4× and divides by `w`, plus three more that the FFM migration carried | Pick up now; it blocks US-047 |
+| [US-044](US-044-delete-the-encoder-and-unreachable-decoder-modules-from-the-bundled-libjpeg.md) | Delete the encoder and the unreachable decoder modules from the bundled libjpeg | 📋 Ready (filed 2026-09-30); 23 files and 15,870 lines (45.6 % of libjpeg) that `iio_api.c` can never execute | Pick up now (goal 1) |
+| [US-045](US-045-replace-javafx-iio-with-a-faithful-java-port-of-the-ijg-libjpeg-decoder.md) | Replace javafx_iio with a faithful Java port of the IJG libjpeg 10 decoder | 📋 Ready (filed 2026-09-30); routed to Java by the Rust survey: an integer-only decoder is as provable in Java as in Rust. Rust is the fallback if the slice-4 benchmark fails. Forking IJG needs the maintainer's sign-off | After US-044 |
+| [US-046](US-046-port-the-pisces-software-compositor-to-java-and-delete-prism-sw.md) | Port the Pisces software compositor to Java and delete prism_sw | 📋 Ready (filed 2026-09-30); the plan of record is in `prism_sw_api.h:54-62`, and a golden harness exists (`PiscesGoldenRenderTest`) | After US-013 |
+| [US-047](US-047-drive-direct3d-9ex-from-java-and-delete-the-prism-d3d-cpp.md) | Drive Direct3D 9Ex from Java and delete the prism_d3d C++ | 📋 Ready (filed 2026-09-30); routed to Java by the Rust survey, with KEEP as the fallback: every OS entry is a COM slot or a plain export (the DirectWrite precedent). A readback corpus is needed first | After US-043 |
+| [US-048](US-048-call-opengl-from-java-and-delete-the-prism-es2-wrappers.md) | Call OpenGL from Java and delete the prism_es2 wrappers | 🔶 Needs a ruling (filed 2026-09-30); the survey reads the 58 GL-call exports as WRAPPERs that FFM binds by address, which contradicts the ES2 audit's OS-CALL | The maintainer rules first; then the corpus |
+| [US-049](US-049-move-glass-windows-robot-capture-to-java-and-delete-the-pre-vista-file-dialogs.md) | Move Glass Windows robot capture to Java and delete the pre-Vista file dialogs | 🔶 Needs a ruling on part 1 (filed 2026-09-30); it contradicts the header's "stays native". Part 2 deletes 384 dead lines | Before US-031 |
+| [US-050](US-050-retire-dshowwrapper-by-decoding-through-media-foundation.md) | Retire dshowwrapper by decoding through Media Foundation | 🔶 Needs a ruling (filed 2026-09-30); it would delete 43k lines (the plugin plus the DirectShow baseclasses), but AAC/MP3 parity is `tolerance` or `unprovable` | The maintainer rules first; then after US-034 |
 
 ## Done stories
 
@@ -50,6 +78,102 @@ Acceptance criteria / Definition of Done. Supporting evidence shares the story's
 
 Never filed in this directory: US-002 `prism_common` (deleted 2026-09-07) and US-004 `glass/win` (no
 `native` method left in `com.sun.glass.ui.win`, verified 2026-09-22).
+
+## Rust port (goal 3)
+
+The fork's goals, outermost first:
+1. less native code, in favour of pure Java, with behaviour-neutrality outranking it;
+2. JNI → FFM;
+3. port what has to stay native to Rust.
+
+So Rust is only for the residue. A library goes to Rust when all of these hold:
+- the triage leaves it native (OS-CALL, PURE-HOT, or a Java replacement ruled `PARITY: unprovable`);
+- it is our own code, not vendored;
+- it can be built and tested here (Windows and WSL);
+- Rust buys something concrete (memory safety on untrusted input, COM or refcount lifetimes, cross-thread state);
+- a maintained, GPLv2-compatible binding exists;
+- it can be sliced behind its unchanged C ABI.
+
+Code that Java can own with provable parity goes to Java instead. The survey of 2026-09-30 applied these tests to
+every native library; the verdicts are in the table below.
+
+### Port rules
+
+Every Rust story follows these rules. Stories cite them as P1-P9.
+
+- **P1 The header is the contract.** The Rust code exports exactly the symbols of the library's `*_api.h`: the same
+  C types, ABI version, struct layouts, threading and ownership rules. The Java facade and its tests do not change.
+- **P2 Mixed library.** Each library has one Rust `staticlib`, linked into its existing CMake target. A slice moves one
+  function group behind `JFX_RUST`. The slice's C is deleted in its own commit once the slice is accepted on Windows
+  and WSL (US-027). The C of a library that is also built on macOS stays for macOS until US-028.
+- **P3 Parity.** Goldens or call/event traces are captured from the C/C++ before it is deleted. The Rust must match
+  them exactly, unless a tolerance was agreed in advance. Moving a golden is a behaviour change with its own commit.
+- **P4 Failures and panics.**
+  - Every failure value of the C comes back through a `Result`.
+  - Allocations sized by input are fallible.
+  - Every export and every entry point foreign code calls (WNDPROCs, COM methods, GLib/GStreamer/PipeWire
+    callbacks) runs in the crate's `catch_unwind` guard. The guard returns the C/C++ failure value and poisons the
+    handle.
+  - Nothing unwinds into C, C++ or Java.
+- **P5 `unsafe`.** `unsafe` appears only in a boundary module, with a true `// SAFETY:` comment on each block.
+- **P6 No new concurrency.** No new threads, locks, event loops or async runtimes. A race the C has is reproduced
+  (with atomics where the C raced) and fixed in its own story.
+- **P7 Memory.** The side that allocates frees. There is no global allocator.
+- **P8 Crates.** GPLv2-compatible licences only: MIT, BSD, ISC, Zlib, Unicode-3.0, or the MIT option of dual-licensed
+  crates. Crates are vendored, built offline, and recorded in `legal/` (US-027's licence gate).
+- **P9 Exports.** The export list stays identical in every slice (`dumpbin /exports`, `nm -D --defined-only`). On
+  Linux, one exception is allowed: symbols of deleted C that were exported only through default visibility, and
+  that no consumer resolves, may disappear if the PR lists them.
+
+Test media for the media stories is small and generated by a command recorded next to the file, with a provenance
+note. No downloaded or third-party media is committed.
+
+### Verdict per native library (survey of 2026-09-30)
+
+| Native code | Lines (`wc -l`) | Verdict | Why | Stories |
+| --- | --- | --- | --- | --- |
+| Glass Windows: WinRT preferences | 755 | RUST | Java-side COM already rejected in the header; WinRT sinks capture a raw `this` and are never unregistered | US-039 → US-029 |
+| Glass Windows: COM servers (clipboard, DnD, UIA) | 4,507 | RUST | Inbound COM objects that other processes hold; hand-written refcounts and `delete this` | US-039 → US-030 |
+| Glass Windows: toolkit core (loop, WndProcs, IME, keys, screen, menu) | 9,306 | RUST, last | OS-CALL and native state; toolkit-HWND race, per-HWND lifetimes; "why not Java" rests on unmeasured upcall volume | US-039, US-049 → US-031 |
+| Glass Windows: robot capture; pre-Vista file dialogs | in the core row; 384 | JAVA / delete | A stateless GDI sequence; dead on Windows 10 and later | US-049 |
+| Glass Windows: COM file dialogs, `OleUtils.h` | 453 + 209 | DEFER | A COM client on `_com_ptr_t`, no defect found. Trigger: the last C++ left in glass.dll, or a test that drives the dialogs | — |
+| Glass GTK: screencast (portal + PipeWire) | 3,051 | BLOCKED, then RUST | Callbacks on PipeWire's thread and compositor-described buffers; WSL has no PipeWire, portal or D-Bus yet | US-038, US-042 → US-037 |
+| Glass GTK: window, events, IME, DnD, keys, cursor, screen | 7,779 | DEFER | gtk-rs's GTK 3 crates are archived, so there is no safe binding. Trigger: a GTK 4 Glass story | — |
+| Glass macOS, including accessibility | 19,728 | BLOCKED | No macOS host; still JNI | US-001 |
+| Monocle EGL headers; Monocle test stub | 179 + 273 | KEEP | Headers only; a test double of a vendor contract | — |
+| prism_d3d | 7,545 C++ + 709 HLSL | JAVA (conditional; fallback KEEP) | Every OS entry is a COM slot or a plain export; Java also removes the two-language reset protocol; needs a readback corpus first | US-043 → US-047 |
+| prism_es2 | 5,804 owned + 17,501 Khronos headers | JAVA (needs a ruling) | The GL calls are WRAPPERs that FFM binds by address, contrary to the ES2 audit; macOS part BLOCKED; the headers are KEEP | US-048 |
+| prism_sw (Pisces) | 5,240 | JAVA | The plan of record in `prism_sw_api.h:54-62` | US-046 |
+| prism_mtl | 5,737 | BLOCKED | macOS only | — |
+| iio: libjpeg encoder and unreachable decoder modules | 15,870 | delete | Never executed by `iio_api.c` | US-044 |
+| iio: used libjpeg decoder + `iio_api.c` | 18,902 + 1,140 | JAVA (conditional; Rust fallback) | Integer-only, so a faithful port is as provable in Java as in Rust; memory safety on web images; the maintainer rules on forking IJG | US-044 → US-045 |
+| Fonts (macOS: CoreText, DFont) | 1,685 | BLOCKED, then JAVA | US-003's plan; needs a macOS host | US-003 |
+| jfxmedia: frames, colour conversion, spectrum, equalizer, logger | 5,224 | RUST | Java cannot bind gstreamer-lite on Windows (ordinal-only exports); refcount-dense; `ColorConverter` is PURE-HOT | US-035 |
+| jfxmedia: GStreamer pipeline core | 9,544 | RUST | GStreamer callbacks on foreign threads; a hand-rolled teardown handshake; racy fields | US-040 → US-036 |
+| jfxmedia: `platform/osx` (AVFoundation) | 4,407 | BLOCKED | macOS only | — |
+| fxplugins: javasource | 1,398 | RUST | A `GstElement` on GStreamer threads; the smallest element, so it proves the gstreamer-rs setup | US-041 → US-032 |
+| fxplugins: progressbuffer + hlsprogressbuffer | 2,357 | RUST | Three threads; range arithmetic on container-driven offsets | US-041 → US-033 |
+| fxplugins: mfwrapper (Windows) | 2,550 | RUST | A hand-rolled COM refcount on a GstBuffer map; an untrusted `hvcC` parser | US-034 |
+| fxplugins: dshowwrapper (Windows) | 5,134 + 37,810 baseclasses | KEEP; retire instead | The DirectShow baseclasses have no Rust equivalent (2.6× the plugin) | US-041, US-050 |
+| fxplugins: avplugin (Linux) and the registration shim | 4,066 + 138 | KEEP | The untrusted parsing happens inside the system ffmpeg; a binding per libavcodec major | — |
+| gstreamer-lite, GLib, libffi, DirectShow baseclasses | about 690,000, vendored | KEEP | Vendored third-party code | — |
+| WebKit (jfxwebkit) and its Java-port glue | 4.37 million, 55,835 of it under `*/java/*` | KEEP | A vendored engine; the glue is written against WebCore's C++ classes and is built only by `build-webkit.yml` | — |
+| javafx.web test stub (`wkjstub`) | 2,731 | KEEP | Test-only | — |
+
+### Order
+
+1. **Now, with no Rust needed:**
+   - the C/C++ fixes: US-039, US-040, US-041, US-042, US-043;
+   - the deletions and Java routes: US-044, US-049, US-046 (after US-013);
+   - the screencast test bed: US-038.
+2. **US-027**, the toolchain. It needs rustup installed on Windows and in WSL.
+3. **Rust ports:**
+   - Glass Windows: US-029 → US-030 → US-031. Windows-only, so their C can be deleted without US-028.
+   - Media plugins: US-032 → US-033, plus US-034 alongside US-033.
+   - jfxmedia: US-035 → US-036.
+   - Screencast: US-037.
+   - US-028 before any media C is deleted on macOS.
+4. **After the maintainer's rulings:** US-045 (forking IJG), US-047, US-048 (vs the ES2 audit), US-050 (AAC/MP3 parity).
 
 ## US-009 evidence
 
