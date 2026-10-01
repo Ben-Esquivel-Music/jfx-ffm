@@ -21,7 +21,7 @@ and checked instead of written by hand.
   COM objects stay native" (`glass_win_api.h:110-111`). The WRAPPERs already left: `isOwner` (`:112`),
   `UiaRaiseAutomationEvent` and `UiaClientsAreListening` (`:2306-2310`).
 - **Owned code (R2):** OpenJFX code.
-- **Buildable and testable here (R3):** Windows 10 + VS2022; 46 module test annotations, plus
+- **Buildable and testable here (R3):** Windows 10 + VS2022; 46 module `@Test` methods, plus
   `WinTextRangeProviderTest` in `tests/system`.
 - **Benefit (R4):**
   - Hand-written refcounting. `delete this` appears at `GlassAccessible.cpp:424`, `GlassTextRangeProvider.cpp:200`
@@ -92,8 +92,9 @@ and checked instead of written by hand.
 6. **Delete** each slice's C++ in its own commit. Reduce `OleUtils.h` to what `CommonDialogs_COM.cpp` still uses.
 
 ## Acceptance criteria
-- `dumpbin /exports glass.dll` is identical (106 exports), and `gwin_abi_version()` is still 6.
-- The 46 module annotations and `WinTextRangeProviderTest` pass unchanged; the slice-1 goldens and traces are exact.
+- `dumpbin /exports glass.dll` is identical before and after, and `gwin_abi_version()` is unchanged: 106 exports and
+  ABI 6, or 105 exports and ABI 7 once US-049 part 1 has landed.
+- The 46 module `@Test` methods and `WinTextRangeProviderTest` pass unchanged; the slice-1 goldens and traces are exact.
 - `QueryInterface` answers the same IIDs per class. `accessible_disposed` and `range_disposed` fire at the same
   points, on the same kind of thread, as in the C trace.
 - `GlassClipboard.cpp/.h`, `GlassDnD.cpp/.h`, `GlassAccessible.cpp/.h` and `GlassTextRangeProvider.cpp/.h` are

@@ -31,13 +31,15 @@ compiler-checked cross-thread state and bounds-checked frame access, with no cha
   - an unlocked predicate read against the PipeWire thread (`screencast_pipewire.c:710-720` and `:889-897`, against
     `:384-389`);
   - a teardown on Java's `Timer` thread (`screencast_api.h:88-90`, `screencast_pipewire.c:134`);
-  - frames wrapped from a compositor-supplied stride and size with no bound check (`:328-336`);
+  - frames wrapped from a compositor-supplied stride and size with no bound check (`:328-336`), and read after their
+    buffer goes back to PipeWire (`:381-387`);
   - 35 lines of manual free/unref in `screencast_portal.c`.
 
   The C fix story repairs the first and third items *before* the port. The port's own gain is that the fixed defects
   cannot silently come back:
   - the loop-thread state is reachable only through a guard obtained from `pw_thread_loop_lock`;
-  - a frame is a `&[u8]` of `maxsize`;
+  - a frame is a `&[u8]` borrowed from the dequeued buffer: the part of its `maxsize` bytes that US-042's checks
+    select, so it cannot be read past its chunk, or after the buffer goes back to PipeWire;
   - GLib objects are owned by the `glib`/`gio` smart pointers.
 - **Binding (R5):**
   - `gio` and `glib`, optionally `gdk-pixbuf` (gtk-rs-core, maintained, MIT *(unverified)*), plus `libc` (the MIT

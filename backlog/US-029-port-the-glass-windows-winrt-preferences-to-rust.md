@@ -16,7 +16,7 @@ generated projections instead of hand-written HSTRING/activation code and a raw 
 - **Must stay native (R1):** Java-side COM was considered for exactly this code and rejected: hard-coded IIDs,
   vtable slot indices and a fabricated vtable for the two event sinks, none testable here (`glass_win_api.h:54-56`).
 - **Owned code (R2):** OpenJFX code; nothing vendored in `native-glass/win` (file headers not audited).
-- **Buildable and testable here (R3):** Windows 10 + VS2022; `WinPreferencesNativeTest` (28 annotations) runs in the
+- **Buildable and testable here (R3):** Windows 10 + VS2022; `WinPreferencesNativeTest` (28 `@Test` methods) runs in the
   module suite and `WinPreferencesParityTest` (7) in `tests/system`.
 - **Benefit (R4):**
   - The two sinks capture a raw `this` (`PlatformSupport.cpp:90,115`) and run on a WinRT thread
@@ -71,7 +71,8 @@ generated projections instead of hand-written HSTRING/activation code and a raw 
 4. **Delete** `PlatformSupport.cpp/.h` and the slice's CMake option, in their own commit.
 
 ## Acceptance criteria
-- `dumpbin /exports glass.dll` is identical before and after (106 exports), and `gwin_abi_version()` is still 6.
+- `dumpbin /exports glass.dll` is identical before and after, and `gwin_abi_version()` is unchanged: 106 exports and
+  ABI 6, or 105 exports and ABI 7 once US-049 part 1 has landed.
 - `WinPreferencesNativeTest` (28) and `WinPreferencesParityTest` (7) are unchanged and pass; slice-1 goldens exact.
 - `PlatformSupport.cpp/.h` and `RoActivationSupport.cpp/.h` are deleted.
 - Every export and both delegate bodies are guarded with `catch_unwind` and answer the C++ fallback value.

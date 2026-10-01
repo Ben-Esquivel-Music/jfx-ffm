@@ -73,7 +73,8 @@ events, error codes and threads as today.
 - Windows: a process-wide `SetUnhandledExceptionFilter` is installed from `MediaManager.cpp:82`
   (`Utils/win32/WinExceptionHandler.cpp:108-116`).
 - Tests:
-  - `modules/javafx.media/src/test` has 34 tests in 6 classes (`git grep -c '@Test'`). Playback coverage is
+  - `modules/javafx.media/src/test` has 33 tests in 6 classes (`modules/javafx.media/FFM-STATUS.md:256-261`; a plain
+    `git grep -c '@Test'` also counts the `@TestMethodOrder` at `JfxMediaNativeTest.java:108`). Playback coverage is
     `MediaPlaybackTest` (2 tests; states in order, `:223`).
   - `tests/system` has one media test, and it is macOS-only (`AVFVideoDisposeRaceTest.java:130`). So no GStreamer
     system test runs under `FULL_TEST` on Windows or Linux.
@@ -128,7 +129,7 @@ Each slice removes its C++ from the Windows/Linux builds, in its own commit, onc
 ## Acceptance criteria
 - The export list is identical and `jfxm_abi_version()` = 4. The `jfxm_sizeof_*`/`jfxm_offsetof_*` values are
   unchanged.
-- The 34 module tests are unchanged and pass on Windows and on WSL (ALSA null PCM).
+- The 33 module tests are unchanged and pass on Windows and on WSL (ALSA null PCM).
 - The event traces match, under the comparison rule of slice 0, for every scenario on both platforms.
 - The fxplugins signal names and C signatures are unchanged, and no plugin file is edited.
 - No new thread, lock or `GMainContext`: one `MainLoop` thread per process.

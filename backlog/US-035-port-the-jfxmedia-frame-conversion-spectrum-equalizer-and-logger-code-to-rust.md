@@ -61,7 +61,7 @@ RAII-managed and bounds-checked, with no Java change.
   - frames created in the appsink `new-sample` callback (`GstAVPlaybackPipeline.cpp:120`) and handed to `new_frame`.
 - Memory: converted frames are GLib-allocated and freed by GStreamer (`g_try_malloc` +
   `gst_buffer_new_wrapped_full`, `GstVideoFrame.cpp:50-73`).
-- Tests today: `JfxMediaNativeTest` has 24 tests: symbols, ABI version, struct/slot offsets, mapping exports, log
+- Tests today: `JfxMediaNativeTest` has 23 tests: symbols, ABI version, struct/slot offsets, mapping exports, log
   sink, null handles, spectrum holder release, frame planes, dispose leak checks. There are also
   `NativeVideoBufferOwnershipTest` (1) and `MediaPlaybackTest` (2). Judging by test names, none pins converted
   pixels, equalizer values or spectrum magnitudes.
@@ -116,7 +116,7 @@ Each slice removes its C/C++ from the Windows/Linux builds, in its own commit, o
 ## Acceptance criteria
 - The export list is identical (`dumpbin /exports jfxmedia.dll`, `nm -D --defined-only libjfxmedia.so`), and
   `jfxm_abi_version()` = 4.
-- The 34 tests of `modules/javafx.media/src/test` are unchanged and pass on Windows and on WSL (ALSA null PCM).
+- The 33 tests of `modules/javafx.media/src/test` are unchanged and pass on Windows and on WSL (ALSA null PCM).
 - The conversion, spectrum, equalizer and logger goldens match exactly. The frame goldens match exactly on each
   platform they were captured on.
 - The slice files are absent from `native/win.cmake` and `native/linux.cmake`; `native/mac.cmake` is unchanged.

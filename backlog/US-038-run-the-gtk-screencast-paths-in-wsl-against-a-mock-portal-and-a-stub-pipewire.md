@@ -20,7 +20,10 @@ so that goldens and regression tests can pin their behaviour; today the tests re
 ## Approach
 - **A stub `libpipewire-0.3.so.0`.** It is test native code, like the Monocle vendor stub
   `modules/javafx.graphics/src/test/native/monocle/egl_vendor_stub.c`. It implements the 25 symbols the C resolves
-  (`screencast_pipewire.c:727-766`), runs a real thread as its loop, and delivers scripted formats and frames.
+  (`screencast_pipewire.c:727-766`), runs a real thread as its loop, and delivers scripted formats and frames. For
+  US-042's regression tests, a scripted frame sets its chunk's `size`, `offset`, `stride` and `flags` and its
+  `maxsize`, and the stub counts the buffers given back with `pw_stream_queue_buffer` and can overwrite a buffer after
+  it is given back.
 - **A mock `org.freedesktop.portal.Desktop`.** It covers ScreenCast and RemoteDesktop.
   - It is written in C on GDBus, because the image has no python3.
   - It runs on a private `dbus-daemon --session` for the test JVM.
@@ -35,7 +38,13 @@ so that goldens and regression tests can pin their behaviour; today the tests re
 ## Acceptance criteria
 - The `GtkRobot` screen-capture, mouse and key paths run end to end in WSL against the stub and the mock.
 - Each scenario's test javadoc names what that scenario pins.
+- A test can set each frame's chunk `size`, `offset`, `stride` and `flags` and its `maxsize`, read how many buffers
+  were given back, and overwrite a buffer after it is given back (US-042's regression tests use all three).
 - When the stub is absent, the existing "no PipeWire" tests behave exactly as before.
+
+## Definition of Done
+Merged and verified in WSL Ubuntu under the rootless-Xvfb recipe, with the stub and the mock present and absent. The
+goldens record their commit and platform. `backlog/README.md` is updated. The CI half is picked up with US-016.
 
 ## Risks
 | # | Risk | Mitigation |

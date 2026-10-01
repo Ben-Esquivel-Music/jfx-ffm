@@ -13,7 +13,7 @@ I want Windows media decoding to go through Media Foundation decoder MFTs instea
 so that `dshowwrapper` (5,134 lines) and the vendored DirectShow `baseclasses` (37,810 lines) are deleted. That is
 the largest native deletion available in `javafx.media`.
 
-## Why this story, and not a Rust port
+## Problem: why this story, and not a Rust port
 - `dshowwrapper` builds a private DirectShow graph from its own filters on the SDK `baseclasses`
   (`gstreamer/plugins/dshowwrapper/dshowwrapper.cpp:1086`; `Src.h:55`, `:80`; `Sink.h:77`, `:101`; `Allocator.h:40`,
   `:59`).

@@ -3,15 +3,19 @@
 **Status:** 📋 Ready (drafted 2026-09-30 from a read-only survey; read `glass_win_api.h:1-262,573-757,807-870,
 1182-1216`, `BaseWnd.cpp:140-219`, `GlassApplication.cpp:70-96`, `glass_win_api.cpp:596-622` and class declarations by
 `grep`; the bodies of `ViewContainer.cpp`, `GlassWindow.cpp`, `FullScreenWindow.cpp` and `GlassInputTextInfo.cpp` were
-NOT read; the robot tests' platform gating was not checked; nothing built) · **Epic:** Rust port of the remaining
+NOT read; the robot tests' platform gating was not checked; the `gwin_robot_capture` fallback was added in the PR #21
+review from `glass_win_api.h:252-295`, `glass_win_api.cpp:302-335,470-491` and `WinGlassNativeTest.java:99,643-713`
+(`CaptureScreen` past `:335` not read); nothing built) · **Epic:** Rust port of the remaining
 native code (goal 3) · **Blocked by:** US-027, US-030 (the COM servers the WndProcs hand
-out move first), US-039 part 1, US-039 part 4 (C++ fixes)
+out move first), US-039 part 1, US-039 part 4 (C++ fixes), US-049 part 1 (the ruling on robot capture, and the
+move to Java if the ruling is yes; if it is no, this story ports `gwin_robot_capture` as a 66th export)
 
 ## Story
 As a platform maintainer,
-I want the Glass toolkit core on Windows to be Rust exporting the same 65 symbols: the message loop and toolkit
-window, `BaseWnd` and its window classes, the window and view WndProcs with their input translation (keys, mouse,
-IMM32, touch), fullscreen, the screen and menu upcalls, and the key tables,
+I want the Glass toolkit core on Windows to be Rust exporting the same 65 symbols (66 if the ruling on US-049 part 1
+keeps robot capture native): the message loop and toolkit window, `BaseWnd` and its window classes, the window and
+view WndProcs with their input translation (keys, mouse, IMM32, touch), fullscreen, the screen and menu upcalls, and
+the key tables,
 so that per-HWND object lifetime, the toolkit window's cross-thread state and the exception paths the ABI header
 records as undefined behaviour live in checked code, and glass.dll's remaining C++ shrinks to the common dialogs.
 
@@ -19,7 +23,7 @@ records as undefined behaviour live in checked code, and glass.dll's remaining C
 - **Must stay native (R1):** the per-function triage of the FFM migration left only OS-CALL or native-state entry
   points here and sent the WRAPPERs to Java (`glass_win_api.h:78-83,92-97,121-124`).
 - **Owned code (R2):** OpenJFX code.
-- **Buildable and testable here (R3):** Windows 10 + VS2022; 131 module test annotations, 11 in `tests/system`, and
+- **Buildable and testable here (R3):** Windows 10 + VS2022; 131 module `@Test` methods, 11 in `tests/system`, and
   the local robot suite.
 - **Benefit (R4):**
   - **Cross-thread state.** `GlassApplication::pInstance` is written on the toolkit thread
@@ -49,8 +53,11 @@ records as undefined behaviour live in checked code, and glass.dll's remaining C
   `ViewContainer` 1,806, `GlassView` 408, `ManipulationEvents` 245, `GlassInputTextInfo` 475, `KeyTable` 453,
   `GlassScreen` 123, `GlassMenu` 111, `Pixels` 194, `Utils` 333, `common` 95, `GlassStringBlock.h` 80, and the export
   shims in `glass_win_api.cpp` 1,723. Total 9,306 lines.
-- 65 exports: `gwin_abi_version`, application 9, key 3, menu 2, view + gesture 17, window 30, screen 3.
-  `gwin_robot_capture` goes to Java instead (US-049).
+- 65 exports: `gwin_abi_version`, application 9, key 3, menu 2, view + gesture 17, window 30, screen 3. They are 65
+  of the 106 in `glass_win_api.h`: US-029 ports 5, US-030 ports 32, and the 3 file-dialog exports stay C++.
+- `gwin_robot_capture` (`glass_win_api.h:294`) is the last one. If the ruling on US-049 part 1 is yes, it moves to
+  Java before this story starts. If the ruling is no, it is this story's 66th export, and its 115 lines
+  (`glass_win_api.cpp:302-394,470-491`, counted in the 1,723 above) join slice 2.
 - 6 tables with 30 slots: `GwinAppCallbacks` 1, `GwinMenuCallbacks` 1, `GwinViewCallbacks` 10, `GwinGestureCallbacks`
   5, `GwinWindowCallbacks` 12, `GwinScreenCallbacks` 1. All run on the toolkit thread
   (`glass_win_api.h:592-602,755-757,839-848,1216`). `gwin_run_loop` defines that thread, and `gwin_invoke_later`
@@ -58,7 +65,7 @@ records as undefined behaviour live in checked code, and glass.dll's remaining C
 - Hierarchy: `GlassWindow` and `FullScreenWindow` are `BaseWnd` + `ViewContainer` (`GlassWindow.h:37`,
   `FullScreenWindow.h:36`); `GlassApplication : protected BaseWnd` (`GlassApplication.h:71`).
 - The IME is IMM32 (five `Imm*` calls), with no TSF.
-- Tests:
+- Tests (`@Test` methods; a plain `grep '@Test'` also matches `@TestMethodOrder`):
   - module: `WinApplicationNativeTest` 19, `WinViewNativeTest` 28, `WinWindowNativeTest` 32, `WinGlassNativeTest` 27,
     `WinScreenNativeTest` 7, `WinScreenParityTest` 3, `WinScreenLayoutParityTest` 5, `WinMenuNativeTest` 9,
     `WinDowncallExceptionReportingTest` 1;
@@ -94,6 +101,9 @@ records as undefined behaviour live in checked code, and glass.dll's remaining C
 2. **Helpers**: `KeyTable` and the three key exports, `GlassScreen`, `GlassMenu`, `Pixels` and `GlassStringBlock`,
    called by the C++ WndProcs through internal seams. Gate: key sweep exact, `WinGlassNativeTest`, `WinScreen*`,
    `WinMenuNativeTest`, and the robot key tests.
+   If US-049 part 1 is ruled no, `gwin_robot_capture` is ported here too; it is a GDI sequence that no WndProc
+   calls. Its gate adds a pixel golden of the C capture over a fixed scene and the four capture tests of
+   `WinGlassNativeTest` (`:643-713`).
 3. **Toolkit window**: `GlassApplication` and the loop/invoke exports, on a Rust window class, including the
    clipboard-viewer arms the COM story left behind a seam. Gate: `WinApplicationNativeTest`,
    `WinDowncallExceptionReportingTest`, `WinApplicationStartupTest`, invoke traces.
@@ -105,8 +115,12 @@ records as undefined behaviour live in checked code, and glass.dll's remaining C
 6. **Delete** each slice's C++ in its own commit, and `glass_win_api.cpp` once it is empty.
 
 ## Acceptance criteria
-- `dumpbin /exports glass.dll` is identical (106 exports), and `gwin_abi_version()` is still 6.
-- The 131 + 11 annotations above pass unchanged, and the slice-1 traces are exact on the capture machine.
+- `dumpbin /exports glass.dll` is identical before and after, and `gwin_abi_version()` is unchanged: 105 exports and
+  ABI 7 once US-049 part 1 has landed, or 106 exports and ABI 6 if it was ruled out.
+- The 131 + 11 `@Test` methods above pass unchanged, and the slice-1 traces are exact on the capture machine, as is the
+  slice-2 robot pixel golden if US-049 part 1 is ruled no.
+  If US-049 part 1 has landed, recount `WinGlassNativeTest` first: its capture tests (`:643-713`) change with
+  the export.
 - The Windows robot suite (`USE_ROBOT`) gives the same result as the C baseline run on the same machine.
 - The listed C++ files are deleted; glass.dll's C++ is reduced to `CommonDialogs*` and what it includes.
 - Every export and every `extern "system"` entry (WndProcs, COM methods, timer/hook procs) is guarded and answers

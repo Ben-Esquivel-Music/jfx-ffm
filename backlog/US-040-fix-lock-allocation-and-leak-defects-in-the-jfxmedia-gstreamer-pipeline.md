@@ -47,7 +47,7 @@ Paths are relative to `modules/javafx.media/src/main/native/jfxmedia/platform/gs
 - **Part 3:** no throwing `new` remains inside a GLib or GStreamer callback in `jfxmedia` (`git grep` in the PR).
 - **Part 4:** a fault-injected failure of each of the three returns finalizes `javaSource`, checked with
   `g_object_weak_ref`. `disposingAMediaClosesTheConnectionTheStreamCallbacksNeverClosed` still passes.
-- The 34 module tests pass on Windows and WSL, and the export list and `JFXM_ABI_VERSION` are unchanged.
+- The 33 module tests pass on Windows and WSL, and the export list and `JFXM_ABI_VERSION` are unchanged.
 
 ## Definition of Done
 Merged and verified on Windows and WSL Ubuntu. `backlog/README.md` is updated. An upstream issue is drafted for

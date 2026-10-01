@@ -37,6 +37,7 @@ checked), US-013 commits the new golden with its reason (`PiscesGoldenRenderTest
 The Java compositor sits behind the unchanged `PiscesRenderer`/`JavaSurface` API, selected by an internal switch;
 the C stays the default and the reference until slice 6, and each slice makes its golden steps pass on Java.
 1. **Corpus** from the C at the post-US-013 commit: all composite/image modes, clip edges, 1-px spans, gamma sweep.
+   It goes into a new golden file named after that commit; `pisces-golden-a544256444.bin` (or US-013's) is not edited.
 2. **Integer core**: integer steps exact on Windows and WSL.
 3. **Transform inverse + texture paints** in the C's float order: steps 12-19 exact on Windows x64.
 4. **Gradients** in the C's widths and order: exact on Windows x64, or a bound accepted first (`prism_sw_api.h:59`).
@@ -46,6 +47,7 @@ the C stays the default and the reference until slice 6, and each slice makes it
 ## Acceptance criteria
 - `PiscesGoldenRenderTest` passes on the Java path with the golden bytes unchanged (or US-013's), on Windows and WSL;
   float-step variance off Windows x64 handled as its class comment says; the frame-time A/B is in the PR.
+- The slice-1 corpus matches on the Java path as slices 2-5 require: exact, or within a bound accepted before the port.
 - No `psw_*` symbol, `prism_sw` library or `native-prism-sw/` file is left.
 
 ## Definition of Done

@@ -55,10 +55,12 @@ platform.
   - the scale choice (`iio_api.c:732-746`, a float compare).
 - **Tests.**
   - `jpeg-goldens.txt` holds 113 keys, captured by `JpegCorpusGenerator` (opt-in `-Djfx.iio.jpeg.capture=true`)
-    from the JNI build on Windows 10 amd64. Per member it records the decoded type, geometry and SHA-256, or the
-    exception class and message, plus the ordered listener events.
+    from the JNI build on Windows 10 amd64: `capture.provenance`, `images` and 111 member keys. Per member it
+    records the file's length and SHA-256, the decoded type, geometry and SHA-256, or the exception class and
+    message, plus the ordered listener events.
   - The members cover baseline 4:2:0, gray, progressive, odd sizes, ICC (valid and invalid), Adobe unknown, CMYK,
-    corrupt input and a truncated stream, at 1/1, plus 1/2 for one member.
+    corrupt input and a truncated stream, at 1/1. The baseline member is also decoded at 1/2 and to 40x30, smooth
+    and rough (`JpegTestSupport.java:151-156`).
   - The module tests are listed in US-044. The gaps a parity gate must close, with each member captured on Windows
     **and** WSL:
 
@@ -99,7 +101,10 @@ platform.
    - Add the seeded mutation corpus (flips, truncations, marker splices) with its outcome goldens.
    - Capture on Windows **and** WSL, and record commit and platform. A Windows/Linux difference is a finding (see
      risk 3), never averaged.
-   - The existing 113 keys stay byte-identical.
+   - The existing keys keep their values, except `images`, which lists the new members after the existing 9, and
+     `capture.provenance`, which names the new capture. The generator rewrites the whole file in insertion order and
+     needs `-Djfx.iio.jpeg.regenerate=true` to do so (`JpegCorpusGenerator.java:99-105,116-120`), so the PR reviews
+     the diff key by key.
    - The maintainer approves the R2 trade-off and the slice-4 budget here.
 2. **Headers.** Port the marker reader, input controller, API state machine and error/message catalogue
    (`jdmarker`, `jdinput`, `jdapimin`, `jerror`/`jerror.h`), plus the source-manager semantics and ICC
@@ -136,7 +141,9 @@ platform.
 
 ## Acceptance criteria
 - Goldens:
-  - `jpeg-goldens.txt` is byte-identical;
+  - slice 1 keeps the value of each of the 111 member keys of today's `jpeg-goldens.txt` (`image.*`, `decode.*`,
+    `events.*`); `images` lists the new members after the existing 9, and `capture.provenance` names the new capture;
+  - after slice 1, `jpeg-goldens.txt` is byte-identical to the slice-1 capture;
   - the extended corpus and mutation goldens are exact on Windows and WSL;
   - event traces are identical.
 - The slice-4 budget is met on both platforms, recorded in the PR with its hardware.
