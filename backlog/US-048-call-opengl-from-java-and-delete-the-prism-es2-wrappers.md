@@ -1,7 +1,9 @@
 # US-048 — Call OpenGL from Java and delete the prism_es2 wrappers (Windows and Linux)
 
 **Status:** 🔶 Needs a maintainer ruling first (drafted 2026-09-30 from the Rust-port survey of `native-prism-es2`;
-exports and OS calls counted with `git grep`/`wc -l`; no frame-time measurement exists; nothing built). The survey
+exports and OS calls counted with `git grep`/`wc -l`; no frame-time measurement exists; nothing built. 2026-10-01,
+after PR review: read `es2_uniform1i` (`prism_es2_api.c:740-747`) and the JDK's `SharedUtils.checkSymbol`; the
+per-call cost, the NULL-guard reason and the handle-binding risk are corrected). The survey
 disagrees with the ES2 audit of record, which rules the GL entry points OS-CALL. · **Epic:** Less native code
 (goal 1); routed here by the Rust-port survey · **Blocked by:** nothing
 
@@ -10,12 +12,15 @@ As a platform maintainer,
 I want Prism's ES2 pipeline to call OpenGL through the function pointers it already resolves, from Java, and not
 through 58 one-call C wrappers,
 so that Windows and Linux compile no `prism_es2` C (4,884 of the 5,804 owned lines: the 2,047 of `windows/`,
-`x11/` and `monocle/`, which are deleted, and the shared 2,837, which stay for macOS), and each GL call costs one
-downcall instead of two.
+`x11/` and `monocle/`, which are deleted, and the shared 2,837, which stay for macOS), and a GL call no longer
+passes through a C wrapper. Both paths make one downcall per GL call: today Java downcalls into the `es2_*` export,
+whose wrapper then calls the stored pointer (`prism_es2_api.c:740-747`). Binding that pointer from Java removes the
+wrapper's extra native call, not a downcall.
 
 ## The ruling this story needs
-The ES2 audit (the Copilot JNI→FFM audit of `prism_es2`, §1, §11) rules the GL entry points OS-CALL. Its reason is
-that they are resolved per context through `wglGetProcAddress`/`dlsym` and are "not directly bindable from Java".
+The ES2 audit (the Copilot JNI→FFM audit of `prism_es2`, §1, §11, which is not in this repository) rules the GL
+entry points OS-CALL. Its reason is that they are resolved per context through `wglGetProcAddress`/`dlsym` and are
+"not directly bindable from Java".
 Under FFM they are bindable:
 - an address-taking downcall handle binds a function pointer at call time;
 - the ABI already hands Java the stored pointer (`prism_es2_api.h:320-324`).
@@ -44,7 +49,9 @@ no COM and no UB to gain from Rust.
 1. **Parity corpus.** Read back scripted 2D and 3D scenes through `es2_*` read-back, on Windows (GPU and driver
    recorded) and on WSL (Mesa, with the version recorded).
 2. **State setters (35).** Java downcalls through the stored per-context pointers, behind the same `ES2Native`
-   entry points.
+   entry points. Java keeps each wrapper's no-op on a NULL context or NULL pointer (`prism_es2_api.c:743-745`).
+   FFM rejects a NULL target with `IllegalArgumentException` ("Symbol is NULL", JDK 26 `SharedUtils.checkSymbol`),
+   which would turn today's silent no-op into an exception on the render thread.
 3. **Resources, texture, shaders and mesh (23).** Same pattern, plus a frame-time A/B.
 4. **Lifecycle and factory: WGL (Windows) and GLX (Linux).** Follow the `es2_context_adopt` pattern, so Java creates
    the context and hands it to what remains.
@@ -76,7 +83,7 @@ Merged PRs, verified on Windows (ES2) and WSL Linux; macOS unverified. `backlog/
 ## Risks
 | # | Risk | Mitigation |
 | --- | --- | --- |
-| 1 | Per-context pointers differ between contexts (WGL) | Keep the per-context table; bind handles per context, as the C does |
-| 2 | Extra Java overhead on state-heavy frames | The downcall count halves; slice 3's A/B decides |
+| 1 | Per-context pointers differ between contexts (WGL) | Keep the per-context pointer table, and pass each pointer to one `static final` address-taking handle per signature, as the C passes it to one wrapper. Handles bound per context could not be `static final`, and slice 3's A/B would then measure that JIT penalty |
+| 2 | Extra Java overhead on state-heavy frames | The downcall count does not change (one per GL call either way); only the wrapper's native call goes. Slice 3's frame-time A/B is the mitigation and decides |
 | 3 | Mesa output drifts with the Mesa version | Record the version with the golden; skip elsewhere, as the Linux font goldens do |
 | 4 | Slice 5 deletes something the macOS build still compiles, and nothing here builds macOS | Slice 5 leaves the shared C and every vendored header; CI's macOS jobs are the compile check |

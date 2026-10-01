@@ -5,7 +5,8 @@
 `grep`; the bodies of `ViewContainer.cpp`, `GlassWindow.cpp`, `FullScreenWindow.cpp` and `GlassInputTextInfo.cpp` were
 NOT read; the robot tests' platform gating was not checked; the `gwin_robot_capture` fallback was added in the PR #21
 review from `glass_win_api.h:252-295`, `glass_win_api.cpp:302-335,470-491` and `WinGlassNativeTest.java:99,643-713`
-(`CaptureScreen` past `:335` not read); nothing built) · **Epic:** Rust port of the remaining
+(`CaptureScreen` past `:335` not read); the export count in the acceptance criteria was made relative on 2026-10-01;
+nothing built) · **Epic:** Rust port of the remaining
 native code (goal 3) · **Blocked by:** US-027, US-030 (the COM servers the WndProcs hand
 out move first), US-039 part 1, US-039 part 4 (C++ fixes), US-049 part 1 (the ruling on robot capture, and the
 move to Java if the ruling is yes; if it is no, this story ports `gwin_robot_capture` as a 66th export)
@@ -115,8 +116,10 @@ records as undefined behaviour live in checked code, and glass.dll's remaining C
 6. **Delete** each slice's C++ in its own commit, and `glass_win_api.cpp` once it is empty.
 
 ## Acceptance criteria
-- `dumpbin /exports glass.dll` is identical before and after, and `gwin_abi_version()` is unchanged: 105 exports and
-  ABI 7 once US-049 part 1 has landed, or 106 exports and ABI 6 if it was ruled out.
+- `dumpbin /exports glass.dll` is identical before and after, and `gwin_abi_version()` is unchanged by this story.
+  At commit `200192cfd8` that is 106 exports and ABI 6. US-039's shim-only test hooks add exports. US-049 part 1,
+  once landed, removes one and bumps to ABI 7; if it was ruled out, the count keeps that export and the ABI stays 6.
+  Either way they move the starting point, not this story.
 - The 131 + 11 `@Test` methods above pass unchanged, and the slice-1 traces are exact on the capture machine, as is the
   slice-2 robot pixel golden if US-049 part 1 is ruled no.
   If US-049 part 1 has landed, recount `WinGlassNativeTest` first: its capture tests (`:643-713`) change with

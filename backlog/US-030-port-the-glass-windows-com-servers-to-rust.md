@@ -2,7 +2,8 @@
 
 **Status:** 📋 Ready (drafted 2026-09-30 from a read-only survey; read `glass_win_api.h:97-113,1697-1733,2293-2400,
 2893-2930`, class declarations and refcount sites by `grep`; the COM method bodies of `GlassClipboard.cpp`,
-`GlassDnD.cpp`, `GlassAccessible.cpp` and `GlassTextRangeProvider.cpp` were NOT read; nothing built) · **Epic:** Rust
+`GlassDnD.cpp`, `GlassAccessible.cpp` and `GlassTextRangeProvider.cpp` were NOT read; nothing built; on 2026-10-01,
+after PR review, the export count in the acceptance criteria was made relative) · **Epic:** Rust
 port of the remaining native code (goal 3) · **Blocked by:** US-027,
 US-039 part 3 (a C++ fix); should follow
 US-029, which proves the mixed-library seam on a small scale
@@ -92,8 +93,9 @@ and checked instead of written by hand.
 6. **Delete** each slice's C++ in its own commit. Reduce `OleUtils.h` to what `CommonDialogs_COM.cpp` still uses.
 
 ## Acceptance criteria
-- `dumpbin /exports glass.dll` is identical before and after, and `gwin_abi_version()` is unchanged: 106 exports and
-  ABI 6, or 105 exports and ABI 7 once US-049 part 1 has landed.
+- `dumpbin /exports glass.dll` is identical before and after, and `gwin_abi_version()` is unchanged by this story.
+  At commit `200192cfd8` that is 106 exports and ABI 6. US-039's shim-only test hooks add exports and US-049 part 1
+  removes one and bumps to ABI 7; both move the starting point, not this story.
 - The 46 module `@Test` methods and `WinTextRangeProviderTest` pass unchanged; the slice-1 goldens and traces are exact.
 - `QueryInterface` answers the same IIDs per class. `accessible_disposed` and `range_disposed` fire at the same
   points, on the same kind of thread, as in the C trace.

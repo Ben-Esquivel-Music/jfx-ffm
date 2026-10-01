@@ -2,7 +2,9 @@
 
 **Status:** 📋 Ready (drafted 2026-09-30 from a read-only survey; read `iio_api.h`, the `iio_api.c` entry points
 and error path, libjpeg config/defaults, the test harness; NOT read: the source-manager and ICC bodies of
-`iio_api.c`, most libjpeg bodies; no benchmark exists; nothing built) · **Epic:** Less native code (goal 1);
+`iio_api.c`, most libjpeg bodies; no benchmark exists; nothing built. 2026-10-01, after PR review: FFM memory is
+permitted for the off-heap buffers; read `JPEGImageLoader.java:244-357` and the `ImageStorage` callers of `dispose()`
+to choose the arena kind) · **Epic:** Less native code (goal 1);
 fallback under the Rust port (goal 3) · **Blocked by:** US-044 (it fixes the ported
 subset); the Rust fallback only: US-027
 
@@ -82,8 +84,13 @@ platform.
   - `int` where IJG's `INT32` stays in range.
   - The same tables, the same `RANGE_MASK`/`range_limit` clamping, and the same message catalogue (`jerror.h`
     texts, first-warning-only).
-- **Memory.** Large intermediate buffers stay **off-heap** (a confined `Arena` per decoder, closed on dispose) so
-  that progressive decodes do not move to the Java heap. Their whole-image coefficient arrays are malloc'd today.
+- **Memory.** Large intermediate buffers stay **off-heap**, so that progressive decodes do not move to the Java heap.
+  Their whole-image coefficient arrays are malloc'd today. They live in a confined `Arena` that `load` opens for one
+  decode and closes in its `finally`, on the thread that ran the decode (`JPEGImageLoader.java:268-312`). It is not
+  one arena per decoder closed on dispose: `dispose()` is public, synchronized and skips while a `load` holds
+  `accessLock` (`:247-257`), so it is written for a second thread, where closing a confined arena throws
+  `WrongThreadException`. The production callers dispose on the loading thread (`ImageStorage.java:339-343`,
+  `:487-490`).
 - **Errors.** Exceptions replace `error_exit`/`longjmp`. The public behaviour of `JPEGImageLoader` stays the same
   (IOException/OutOfMemoryError messages, listener events).
 - **Staying dead until the switch.** The Java decoder is not selected until slice 7, so slices 2-6 are
@@ -147,8 +154,10 @@ platform.
   - the extended corpus and mutation goldens are exact on Windows and WSL;
   - event traces are identical.
 - The slice-4 budget is met on both platforms, recorded in the PR with its hardware.
-- No `native` method, `java.lang.foreign` use or `System.loadLibrary("javafx_iio")` remains in
-  `com.sun.javafx.iio`.
+- No `native` method, no downcall or upcall (`Linker`, `SymbolLookup`), no other restricted method and no load of
+  the `javafx_iio` library (named at `JPEGNative.java:173` today) remains in `com.sun.javafx.iio`. The only
+  `java.lang.foreign` use left is the decoder's `Arena`/`MemorySegment` buffers. Allocating and accessing them is
+  not restricted, so the decoder needs no native code and no native access.
 - The listed native files and CMake targets are deleted, and the legal notice is kept.
 - Peak Java heap for the largest progressive corpus member does not exceed today's by more than the output buffer.
 
@@ -171,7 +180,7 @@ Merged PRs (one per slice); verified on Windows and WSL; macOS unverified, but i
 | # | Risk | Mitigation |
 | --- | --- | --- |
 | 1 | Java is too slow on the FX thread (cold JIT) | Slice 4 gates before progressive work; Rust fallback |
-| 2 | Progressive buffers move to the heap, so `-Xmx` OOMs where C succeeded | Off-heap `Arena` buffers; huge-dimension members pin the outcome |
+| 2 | Progressive buffers move to the heap, so `-Xmx` OOMs where C succeeded | Off-heap buffers in a confined per-decode `Arena`; huge-dimension members pin the outcome |
 | 3 | `INT32` is `long` (`jmorecfg.h:252`): 32-bit on Windows, 64-bit on LP64 Linux, so ISLOW intermediates (`jidctint.c:196-198`) can differ by platform for adversarial coefficients | Capture on both; if they differ, the maintainer picks one behaviour, recorded in the test |
 | 4 | OOM messages that only native allocation failure produces ("Initializing Reader", `iio_api.h:58`) | Decide per message in slice 1; never silently different |
 | 5 | Corpus blind spots (SmartScale, YCCK) | Byte-surgery generator and fixtures; differential mutation test while the C exists |

@@ -4,8 +4,8 @@
 §0–1, the frame/spectrum/equalizer/logger sources and `native/{win,linux,mac}.cmake`; counted lines with `wc -l` and
 refcount sites with `git grep -c`; NOT checked: current gstreamer-rs/glib releases, their minimum GStreamer/GLib
 versions and dependency licences, which `gst_*`/`g_*` symbols they reference versus the ordinal-only `.def` exports,
-macOS; nothing built) · **Epic:** Rust port of the remaining native code (goal 3) · **Blocked by:**
-US-027
+macOS; nothing built; 2026-10-01: the macOS deletion became slice 6, after US-028, as US-028 expects) ·
+**Epic:** Rust port of the remaining native code (goal 3) · **Blocked by:** US-027; slice 6 also by US-028
 
 ## Story
 As a platform maintainer,
@@ -75,7 +75,7 @@ RAII-managed and bounds-checked, with no Java change.
 - Every export and every GLib/GStreamer callback entry is guarded with `catch_unwind`. Allocation keeps GLib's
   allocator wherever GStreamer frees the memory.
 - End state on Windows/Linux: the 25 exports are in Rust, and the files above are out of `win.cmake`/`linux.cmake`.
-  `mac.cmake` is unchanged.
+  `mac.cmake` is unchanged until slice 6, after US-028.
 
 ### Slices
 0. **Goldens and split:**
@@ -110,8 +110,11 @@ RAII-managed and bounds-checked, with no Java change.
    - `#[repr(C)]` asserts for `JfxmFrameInfo`.
    - Gate: the frame goldens, `NativeVideoBufferOwnershipTest`, `aPlaneTheFrameDoesNotHaveReadsAsAnEmptyBuffer` and
      `frameInfoFieldOffsetsMatchTheCompiledStruct`.
+6. **Delete the C/C++, after US-028.** Delete the files slices 1-5 removed from the Windows/Linux builds, and their
+   `native/mac.cmake` lines.
 
-Each slice removes its C/C++ from the Windows/Linux builds, in its own commit, once it is accepted on both.
+Slices 1-5 each remove their C/C++ from the Windows/Linux builds, in their own commit, once accepted on both. macOS
+keeps compiling it until slice 6.
 
 ## Acceptance criteria
 - The export list is identical (`dumpbin /exports jfxmedia.dll`, `nm -D --defined-only libjfxmedia.so`), and
@@ -119,7 +122,8 @@ Each slice removes its C/C++ from the Windows/Linux builds, in its own commit, o
 - The 33 tests of `modules/javafx.media/src/test` are unchanged and pass on Windows and on WSL (ALSA null PCM).
 - The conversion, spectrum, equalizer and logger goldens match exactly. The frame goldens match exactly on each
   platform they were captured on.
-- The slice files are absent from `native/win.cmake` and `native/linux.cmake`; `native/mac.cmake` is unchanged.
+- After slices 1-5, the slice files are absent from `native/win.cmake` and `native/linux.cmake`, and
+  `native/mac.cmake` is unchanged. After slice 6, the files are deleted and nothing references them (`git grep`).
 - The staticlib references no `gst_*`/`g_*` symbol that gstreamer-lite/glib-lite do not export. `.def` changes are
   append-only.
 - `unsafe` appears only in the boundary modules, each block with a `// SAFETY:` comment. clippy and rustfmt are
@@ -129,7 +133,7 @@ Each slice removes its C/C++ from the Windows/Linux builds, in its own commit, o
 - The PRs are merged, one slice per PR.
 - Each slice is verified on Windows (VS2022) and on WSL Ubuntu, and its C/C++ is removed from the Windows/Linux
   builds.
-- The Rust table in `backlog/README.md` is updated; the macOS row stays BLOCKED.
+- Slice 6 deletes the C/C++ from the tree once US-028 has landed. The Rust table in `backlog/README.md` is updated.
 
 ## Risks
 | # | Risk | Mitigation |

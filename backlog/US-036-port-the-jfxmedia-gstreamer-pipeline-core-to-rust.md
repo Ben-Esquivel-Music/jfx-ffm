@@ -3,9 +3,10 @@
 **Status:** 📋 Ready (drafted 2026-09-30 from a read-only survey; read the bus-watch, dispose, stall/resume,
 javasource-wiring and dispatcher code and `jfxmedia_api.h`; counted lines and refcount/lock sites with `wc -l`/
 `git grep -c`; NOT checked: which threads call `UpdatePlayerState`, the lock state of every cross-thread field,
-current gstreamer-rs/glib APIs and the licences of their dependency trees, macOS; nothing built) · **Epic:** Rust port
-of the remaining native code (goal 3) · **Blocked by:** US-027, US-035 (jfxmedia video-frame,
-colour-conversion, spectrum, equalizer and logger port)
+current gstreamer-rs/glib APIs and the licences of their dependency trees, macOS; nothing built; 2026-10-01: the
+macOS deletion became slice 7, after US-028, as US-028 expects) · **Epic:** Rust port of the remaining native code
+(goal 3) · **Blocked by:** US-027, US-035 (jfxmedia video-frame, colour-conversion, spectrum, equalizer and logger
+port); slice 7 also by US-028
 
 ## Story
 As a JavaFX app developer,
@@ -123,8 +124,11 @@ events, error codes and threads as today.
    - Gate: all traces, `MediaPlaybackTest` and both dispose-leak tests.
 6. **Exports and leftovers** (`ffi/jfxmedia_api.cpp`, `JfxmMediaHandle.h`, the 33 exports). The guards return the
    C's error codes. Then `Utils/` locks, `Singleton.h` and `Common/` leave the Windows/Linux builds.
+7. **Delete the C++, after US-028.** Delete the files slices 1-6 removed from the Windows/Linux builds, and their
+   `native/mac.cmake` lines.
 
-Each slice removes its C++ from the Windows/Linux builds, in its own commit, once it is accepted on both.
+Slices 1-6 each remove their C++ from the Windows/Linux builds, in their own commit, once accepted on both. macOS
+keeps compiling it until slice 7.
 
 ## Acceptance criteria
 - The export list is identical and `jfxm_abi_version()` = 4. The `jfxm_sizeof_*`/`jfxm_offsetof_*` values are
@@ -133,13 +137,14 @@ Each slice removes its C++ from the Windows/Linux builds, in its own commit, onc
 - The event traces match, under the comparison rule of slice 0, for every scenario on both platforms.
 - The fxplugins signal names and C signatures are unchanged, and no plugin file is edited.
 - No new thread, lock or `GMainContext`: one `MainLoop` thread per process.
+- After slice 7, the slice files are deleted and nothing references them (`git grep`).
 - The Windows/Linux builds compile no jfxmedia C/C++. `unsafe` appears only in the boundary modules. clippy and
   rustfmt are clean.
 
 ## Definition of Done
 - The PRs are merged.
 - The port is verified on Windows (VS2022) and on WSL Ubuntu, and the C++ is gone from the Windows/Linux builds.
-- `backlog/README.md` is updated, and the macOS deletion row stays BLOCKED.
+- Slice 7 deletes the C++ from the tree once US-028 has landed. `backlog/README.md` is updated.
 
 ## Risks
 | # | Risk | Mitigation |
@@ -148,6 +153,6 @@ Each slice removes its C++ from the Windows/Linux builds, in its own commit, onc
 | 2 | A racy field mapped to a relaxed atomic hides an ordering dependency | Each field listed with its accesses and the C's lock set; the reviewer checks the ordering |
 | 3 | glib-rs marshalling differs from C trampolines for the fxplugins signals | Raw `g_signal_connect_data` with `extern "C"` trampolines in the boundary module |
 | 4 | Under OOM, Rust aborts where the C++ returned `ERROR_MEMORY_ALLOCATION` from `new (nothrow)` | Keep `g_try_malloc` where the C used it; record the remaining difference (the throwing-`new` paths already terminate) |
-| 5 | macOS keeps the C++ backend (`native/mac.cmake` compiles `platform/gstreamer`) | As in the story this one depends on; the macOS row stays BLOCKED until a macOS host exists |
+| 5 | macOS keeps the C++ backend (`native/mac.cmake` compiles `platform/gstreamer`) | As in the story this one depends on: the C++ stays in the macOS build until US-028, which needs no macOS host because CI builds and tests macOS; slice 7 then deletes it |
 | 6 | Slice 5 is large | Three commits with the traces run per commit; slices 1–4 shrink its seam first |
 

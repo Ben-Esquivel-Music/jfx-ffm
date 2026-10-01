@@ -3399,9 +3399,11 @@ final class WinGlassNative {
      * <p>
      * <b>Thread.</b> The {@code WM_SETTINGCHANGE} / {@code WM_THEMECHANGED} / {@code WM_SYSCOLORCHANGE}
      * / {@code WM_DWMCOLORIZATIONCOLORCHANGED} arms reach this on the Glass toolkit thread. The two
-     * WinRT sinks may not: they are WRL {@code Callback<>} delegates, agile by default (they aggregate
-     * the free-threaded marshaler), so WinRT does not marshal them into the apartment
-     * {@code RoInitialize(RO_INIT_SINGLETHREADED)} created on the toolkit thread and can run them on a
+     * WinRT sinks may not: they are WRL {@code Callback<>} delegates, not agile by default -
+     * {@code Callback<>} builds them with {@code RuntimeClassFlags<Delegate>}, {@code Delegate} is
+     * {@code ClassicCom}, and only {@code WinRt} classes aggregate the free-threaded marshaler
+     * ({@code FtmBase}) - so each event source decides whether to marshal its sink into the apartment
+     * {@code RoInitialize(RO_INIT_SINGLETHREADED)} created on the toolkit thread or to call it on a
      * WinRT thread of its own; the upcall stub attaches such a thread. {@link WinPreferences} is
      * written for that second thread.
      * <p>

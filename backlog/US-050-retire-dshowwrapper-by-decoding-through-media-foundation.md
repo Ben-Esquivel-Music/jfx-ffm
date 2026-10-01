@@ -1,7 +1,8 @@
 # US-050 — Retire dshowwrapper by decoding through Media Foundation
 
 **Status:** 🔶 Needs a maintainer ruling (filed 2026-09-30 from the Rust-port survey of the media plugins; nothing
-built or run). This is a behaviour change. H.264 can be exact, but AAC and MP3 would be decoded by a different
+built or run; 2026-10-01: dshowwrapper's `CoInitialize(NULL)` calls were re-read with their `CoUninitialize`
+calls). This is a behaviour change. H.264 can be exact, but AAC and MP3 would be decoded by a different
 decoder, so their parity is `tolerance` or `unprovable`. Behaviour-neutrality outranks the deletion unless the
 maintainer accepts a bound. · **Epic:** Less native code (goal 1), routed here by the Rust-port survey · **Best
 after:** US-034, whose Rust Media Foundation element is the natural host
@@ -21,8 +22,8 @@ the largest native deletion available in `javafx.media`.
   uses total 13,160 `.cpp` and 4,467 `.h` lines, 2.6 times the plugin itself. So the survey's verdict on a port is
   KEEP.
 - Retiring the plugin removes both it and the baseclasses.
-- It also removes the STA `CoInitialize(NULL)` calls on GStreamer streaming threads (`dshowwrapper.cpp:1144`, `:1325`,
-  `:2743`), which the Media Foundation element has to work around (US-034, risk 3).
+- It also removes dshowwrapper's transient STA joins: `CoInitialize(NULL)` at `dshowwrapper.cpp:1144`, `:1325` and
+  `:2743`, each undone before its function returns (`:1236-1237`, `:1386-1387`, `:2764-2765`).
 
 ## Approach
 1. **Inventory.** List the caps `dshowwrapper` accepts, the pipelines that select it (`GstPipelineFactory`,

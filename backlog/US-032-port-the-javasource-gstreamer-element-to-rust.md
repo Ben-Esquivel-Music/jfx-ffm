@@ -4,8 +4,9 @@
 properties, locking, both buffer paths), `fxplugins.c`, the `fxplugins` CMake targets, `gstreamer-lite.def`, the
 jfxmedia signal wiring; lines counted with `git ls-files | xargs wc -l`; not checked: how gstreamer-rs's `-sys`
 link names are overridden, gstreamer-rs's panic trampolines and signal marshalling, which gstreamer-lite symbols
-gstreamer-rs pulls in; nothing built) · **Epic:** Rust port of the remaining native code (goal 3) · **Blocked by:**
-US-027, US-041 (fxplugins map-misuse fix)
+gstreamer-rs pulls in; nothing built; 2026-10-01: the file deletion moved behind US-028 after a re-read of the
+macOS `fxplugins` target, `native/mac.cmake:603-625`) · **Epic:** Rust port of the remaining native code (goal 3) ·
+**Blocked by:** US-027, US-041 (fxplugins map-misuse fix); the file deletion (slice 4) also by US-028
 
 ## Story
 As a platform maintainer,
@@ -24,7 +25,8 @@ Paths relative to `modules/javafx.media/src/main/native/` unless they start with
   (`jfxmedia/platform/gstreamer/GstPipelineFactory.cpp:236-260`). It is neither a WRAPPER nor a PURE function.
 - **Owned code (R2):** OpenJFX code; the FFM migration edited it (`FFM-STATUS.md:118-122`).
 - **Buildable and testable here (R3):**
-  - It is compiled into `fxplugins` on both OSes (`native/win.cmake:753-754`, `native/linux.cmake:369-370`).
+  - It is compiled into `fxplugins` on Windows and Linux (`native/win.cmake:753-754`, `native/linux.cmake:369-370`).
+    macOS compiles it too (`native/mac.cmake:610-611`) and keeps the C until US-028 (P2).
   - It is the pipeline's source element (`GstPipelineFactory.cpp:230`), so `MediaPlaybackTest` runs through it:
     executed on Windows x64, and run by CI Linux against a null ALSA device (`FFM-STATUS.md:252-268`).
 - **Benefit (R4):**
@@ -91,7 +93,8 @@ Paths relative to `modules/javafx.media/src/main/native/` unless they start with
 - **Panics.** Every pad function, property and signal path returns the C's failure value (`GST_FLOW_ERROR`,
   `FALSE`, the C's error code) under gstreamer-rs's per-callback panic guard. A caught panic is a bug.
 - **Mixed transition.** A CMake option (named by the toolchain story's convention) drops `javasource.c` and
-  `marshal.c` from the `fxplugins` sources and links the crate instead.
+  `marshal.c` from the `fxplugins` sources and links the crate instead. macOS keeps the option off until US-028
+  (P2).
 - **Parity harness.** A test-only native trace driver, not shipped, reused by the later ports.
   - It cannot be a Java FFM test: Windows gstreamer-lite exports by ordinal, and `SymbolLookup` resolves names
     only.
@@ -117,25 +120,32 @@ Paths relative to `modules/javafx.media/src/main/native/` unless they start with
    - The whole element as one translation unit.
    - Gate: introspection and trace goldens exact on Windows and WSL. The module's Java suite passes with the
      option on. With the option off, the build is identical to today.
-3. **Delete the C.** Remove `javasource.c`, `marshal.c`, `marshal.h`, `marshal.in` and `genmarshal.sh`, and
-   their lines in both `.cmake` files. `javasource.h` shrinks to the init prototype `fxplugins.c:28` includes.
-   Remove the option.
+3. **Remove the C from the Windows and Linux builds.** In its own commit, once slice 2 is accepted on both, drop
+   `javasource.c` and `marshal.c` from the `fxplugins` sources in `native/win.cmake` and `native/linux.cmake`. On
+   those two OSes the option goes too. The files and the full `javasource.h` stay, because macOS still compiles
+   them (`native/mac.cmake:610-611`, include directory `:615`).
+4. **Delete the C, after US-028.** Remove `javasource.c`, `marshal.c`, `marshal.h`, `marshal.in` and
+   `genmarshal.sh`, and their `native/mac.cmake` lines. `javasource.h` shrinks to the init prototype
+   `fxplugins.c:28` includes. Remove the option.
 
 ## Acceptance criteria
 - Windows `dumpbin /exports fxplugins.dll` is identical to the slice-1 list.
-- Linux `nm -D --defined-only libfxplugins.so` is identical except for symbols internal to the deleted C files,
-  each listed in the PR. No Rust std symbol is exported.
+- Linux `nm -D --defined-only libfxplugins.so` is identical except for symbols internal to the C files the Linux
+  build no longer compiles, each listed in the PR. No Rust std symbol is exported.
 - Introspection and trace goldens exact on Windows and WSL. The goldens are never edited to pass.
 - The 33-test module suite unchanged and passing.
 - `gstreamer-lite.def` changes only by appended entries.
-- The C files of slice 3 deleted, and nothing references them (`git grep`).
+- After slice 3, `javasource.c` and `marshal.c` are absent from `native/win.cmake` and `native/linux.cmake`, and
+  `native/mac.cmake` is unchanged. After slice 4, the slice-4 files are deleted and nothing references them
+  (`git grep`).
 - `unsafe` only in the crate's `ffi` module: the init export and the `copy-block` pointer hand-off. Each block
   has a `// SAFETY:` comment.
 - clippy and rustfmt clean.
 
 ## Definition of Done
-PR merged after review by the maintainer; verified on Windows and on WSL Linux; the C deleted; the link recipe
-recorded where the toolchain story keeps build notes; the Rust table in `backlog/README.md` updated.
+PR merged after review by the maintainer; verified on Windows and on WSL Linux; the C removed from the Windows and
+Linux builds, and deleted from the tree by slice 4 once US-028 has landed; the link recipe recorded where the
+toolchain story keeps build notes; the Rust table in `backlog/README.md` updated.
 
 ## Risks
 | # | Risk | Mitigation |

@@ -5,8 +5,8 @@ delete as much C/C++ as can be removed safely without changing behaviour.* Branc
 `ffm/graphics`.
 
 A second epic, the **Rust port** (the fork's long-term goal 3), was surveyed on 2026-09-30. It covers the native code
-that has to stay native. Its stories, and the defects and Java routes the survey found, are US-027 to US-050; see
-"Rust port" below.
+that has to stay native. Its stories, and the defects and Java routes the survey found, are US-027 to US-050.
+A review of US-034 added US-051. See "Rust port" below.
 
 This directory holds the epic's user stories, **open and done**, so they are tracked in source
 control. A done story stays here for the record: its status is set to "✅ Done" with the date and
@@ -44,14 +44,14 @@ Acceptance criteria / Definition of Done. Supporting evidence shares the story's
 | [US-029](US-029-port-the-glass-windows-winrt-preferences-to-rust.md) | Port the Glass Windows WinRT preferences to Rust | 📋 Ready (filed 2026-09-30); 755 lines, 5 exports. The WinRT sinks capture a raw `this` and are never unregistered, and Java-side COM was already rejected for this code in the ABI header | The first real Rust slice. glass.dll is Windows-only, so its C can be deleted without US-028. After US-027 and US-039 part 2 |
 | [US-030](US-030-port-the-glass-windows-com-servers-to-rust.md) | Port the Glass Windows COM servers (clipboard, DnD, UI Automation) to Rust | 📋 Ready (filed 2026-09-30); 4,507 lines, 32 exports, 105 callback slots. `#[implement]` replaces hand-written refcounts and `delete this` in objects that other processes hold | After US-029 and US-039 part 3 |
 | [US-031](US-031-port-the-glass-windows-toolkit-core-to-rust.md) | Port the Glass Windows toolkit core (loop, WndProcs, IME, key tables) to Rust | 📋 Ready (filed 2026-09-30); 9,306 lines, 65 exports (66 if the ruling on US-049 part 1 is no); the toolkit-HWND race and per-HWND lifetimes. Its "why not Java" rests on an unmeasured WndProc upcall volume, so the maintainer may defer it | After US-030, US-039 parts 1 and 4, and US-049 part 1 |
-| [US-032](US-032-port-the-javasource-gstreamer-element-to-rust.md) | Port the javasource GStreamer element to Rust | 📋 Ready (filed 2026-09-30); 1,398 lines. It proves gstreamer-rs against gstreamer-lite, whose ordinal-only `.def` grows append-only, and adds the native trace driver the other media ports reuse | After US-027 and US-041 |
-| [US-033](US-033-port-progressbuffer-and-hlsprogressbuffer-to-rust.md) | Port progressbuffer and hlsprogressbuffer to Rust | 📋 Ready (filed 2026-09-30); 2,357 lines and three threads. No test reaches either element today, so the trace goldens are the oracle | After US-032 |
-| [US-034](US-034-port-the-mfwrapper-h265-decoder-element-to-rust.md) | Port the mfwrapper H.265 decoder element to Rust | 📋 Ready (filed 2026-09-30); 2,550 lines. A hand-rolled `IMFMediaBuffer` refcount and an untrusted `hvcC` parser. Parity needs an HEVC decoder MFT on the test machine | After US-032 |
+| [US-032](US-032-port-the-javasource-gstreamer-element-to-rust.md) | Port the javasource GStreamer element to Rust | 📋 Ready (filed 2026-09-30); 1,398 lines. It proves gstreamer-rs against gstreamer-lite, whose ordinal-only `.def` grows append-only, and adds the native trace driver the other media ports reuse | After US-027 and US-041; its C stays on macOS until US-028 |
+| [US-033](US-033-port-progressbuffer-and-hlsprogressbuffer-to-rust.md) | Port progressbuffer and hlsprogressbuffer to Rust | 📋 Ready (filed 2026-09-30); 2,357 lines and three threads. No test reaches either element today, so the trace goldens are the oracle | After US-032; its C stays on macOS until US-028 |
+| [US-034](US-034-port-the-mfwrapper-h265-decoder-element-to-rust.md) | Port the mfwrapper H.265 decoder element to Rust | 📋 Ready (filed 2026-09-30); 2,550 lines. A hand-rolled `IMFMediaBuffer` refcount and an untrusted `hvcC` parser. Parity needs an HEVC decoder MFT on the test machine | After US-032 and US-051 |
 | [US-035](US-035-port-the-jfxmedia-frame-conversion-spectrum-equalizer-and-logger-code-to-rust.md) | Port jfxmedia's frame, conversion, spectrum, equalizer and logger code to Rust | 📋 Ready (filed 2026-09-30); 5,224 lines, 25 exports. Java cannot bind GStreamer on Windows, because gstreamer-lite exports by ordinal only | After US-027; its C stays on macOS until US-028 |
-| [US-036](US-036-port-the-jfxmedia-gstreamer-pipeline-core-to-rust.md) | Port the jfxmedia GStreamer pipeline core to Rust | 📋 Ready (filed 2026-09-30); 9,544 lines, 33 exports. A hand-rolled teardown handshake, and races reproduced as relaxed atomics, not fixed | After US-035, ideally after US-040 |
+| [US-036](US-036-port-the-jfxmedia-gstreamer-pipeline-core-to-rust.md) | Port the jfxmedia GStreamer pipeline core to Rust | 📋 Ready (filed 2026-09-30); 9,544 lines, 33 exports. A hand-rolled teardown handshake, and races reproduced as relaxed atomics, not fixed | After US-035, ideally after US-040; its C stays on macOS until US-028 |
 | [US-037](US-037-port-the-gtk-glass-screencast-code-to-rust.md) | Port the GTK Glass screencast code to Rust | 🔶 Blocked (filed 2026-09-30); 3,051 lines, 11 exports. WSL has no PipeWire, portal or D-Bus daemon, and CI runs no GTK display tests. The rest of GTK Glass is deferred until a GTK 4 port, because gtk-rs's GTK 3 crates are archived | After US-027, US-038 and US-042 |
 | [US-038](US-038-run-the-gtk-screencast-paths-in-wsl-against-a-mock-portal-and-a-stub-pipewire.md) | Run the GTK screencast paths in WSL against a mock portal and a stub PipeWire | 📋 Ready (filed 2026-09-30); today's tests reach only the "no PipeWire" branch | Pick up now; it blocks US-042 and US-037 |
-| [US-039](US-039-fix-four-glass-windows-cpp-defects-before-its-rust-port.md) | Fix four Glass Windows C++ defects before its Rust port | 📋 Ready (filed 2026-09-30); a racy toolkit HWND, WinRT sinks that outlive their object, a UIA text-range NULL crash and BSTR leak, and `bad_alloc` unwinding through `user32` | Pick up now; the parts merge separately |
+| [US-039](US-039-fix-four-glass-windows-cpp-defects-before-its-rust-port.md) | Fix four Glass Windows C++ defects before its Rust port | 📋 Ready (filed 2026-09-30); a racy toolkit HWND, WinRT sinks that outlive their object, a UIA text-range NULL crash and BSTR leak, and `bad_alloc` unwinding through `user32` | Pick up now; the parts merge separately, part 2 after part 1 |
 | [US-040](US-040-fix-lock-allocation-and-leak-defects-in-the-jfxmedia-gstreamer-pipeline.md) | Fix lock, allocation and leak defects in the jfxmedia GStreamer pipeline | 📋 Ready (filed 2026-09-30); two flags under mixed locks, spectrum lists indexed by the Java band count, a throwing `new` in a GLib callback, and a source-element leak on three failure returns | Pick up now |
 | [US-041](US-041-fix-gstbuffer-map-misuse-a-leaked-buffer-and-a-float-to-int-ub-in-fxplugins.md) | Fix GstBuffer map misuse, a leaked buffer and a float-to-int UB in fxplugins | 📋 Ready (filed 2026-09-30); writes through read maps in javasource and dshowwrapper, a DirectShow sink leak, and an unbounded double-to-`gint64` in progressbuffer | Pick up now; it blocks US-032 and US-033 |
 | [US-042](US-042-fix-the-lost-wake-up-and-unchecked-frame-geometry-in-the-gtk-screencast.md) | Fix the lost wake-up and unchecked frame geometry in the GTK screencast | 📋 Ready (filed 2026-09-30); the predicate is tested outside the PipeWire loop lock, compositor strides and sizes are not bounds-checked, and an uncropped frame is read after its buffer goes back to PipeWire | After US-038, whose test bed its regression tests run on |
@@ -63,6 +63,7 @@ Acceptance criteria / Definition of Done. Supporting evidence shares the story's
 | [US-048](US-048-call-opengl-from-java-and-delete-the-prism-es2-wrappers.md) | Call OpenGL from Java and delete the prism_es2 wrappers | 🔶 Needs a ruling (filed 2026-09-30); the survey reads the 58 GL-call exports as WRAPPERs that FFM binds by address, which contradicts the ES2 audit's OS-CALL | The maintainer rules first; then the corpus |
 | [US-049](US-049-move-glass-windows-robot-capture-to-java-and-delete-the-pre-vista-file-dialogs.md) | Move Glass Windows robot capture to Java and delete the pre-Vista file dialogs | 🔶 Needs a ruling on part 1 (filed 2026-09-30); it contradicts the header's "stays native". Part 2 deletes 384 dead lines | Part 2 now; the ruling on part 1 before US-031 |
 | [US-050](US-050-retire-dshowwrapper-by-decoding-through-media-foundation.md) | Retire dshowwrapper by decoding through Media Foundation | 🔶 Needs a ruling (filed 2026-09-30); it would delete 43k lines (the plugin plus the DirectShow baseclasses), but AAC/MP3 parity is `tolerance` or `unprovable` | The maintainer rules first; then after US-034 |
+| [US-051](US-051-keep-the-mta-alive-for-mfwrapper-com-calls.md) | Keep the MTA alive for mfwrapper's COM calls | 📋 Ready (filed 2026-10-01); mfwrapper leaves the MTA as soon as `MFStartup` returns, then creates and drives its decoder and colour converter mostly on GStreamer threads that hold no apartment (a flushing seek's reload can run on the seeking thread, which may be in an STA), so it depends on another thread holding the MTA. The DirectSound sink's device notifier holds it in every jfxmedia pipeline today, but nothing in the element declares the dependence; a pipeline without that sink, such as US-034's trace driver, has no holder | Pick up now; it blocks US-034 |
 
 ## Done stories
 
@@ -122,8 +123,9 @@ Every Rust story follows these rules. Stories cite them as P1-P9.
 - **P8 Crates.** GPLv2-compatible licences only: MIT, BSD, ISC, Zlib, Unicode-3.0, or the MIT option of dual-licensed
   crates. Crates are vendored, built offline, and recorded in `legal/` (US-027's licence gate).
 - **P9 Exports.** The export list stays identical in every slice (`dumpbin /exports`, `nm -D --defined-only`). On
-  Linux, one exception is allowed: symbols of deleted C that were exported only through default visibility, and
-  that no consumer resolves, may disappear if the PR lists them.
+  Linux, one exception is allowed: symbols of C removed from the Linux build (deleted, or kept only for macOS until
+  US-028) that were exported only through default visibility, and that no consumer resolves, may disappear if the
+  PR lists them.
 
 Test media for the media stories is small and generated by a command recorded next to the file, with a provenance
 note. No downloaded or third-party media is committed.
@@ -153,7 +155,7 @@ note. No downloaded or third-party media is committed.
 | jfxmedia: `platform/osx` (AVFoundation) | 4,407 | BLOCKED | macOS only | — |
 | fxplugins: javasource | 1,398 | RUST | A `GstElement` on GStreamer threads; the smallest element, so it proves the gstreamer-rs setup | US-041 → US-032 |
 | fxplugins: progressbuffer + hlsprogressbuffer | 2,357 | RUST | Three threads; range arithmetic on container-driven offsets | US-041 → US-033 |
-| fxplugins: mfwrapper (Windows) | 2,550 | RUST | A hand-rolled COM refcount on a GstBuffer map; an untrusted `hvcC` parser | US-034 |
+| fxplugins: mfwrapper (Windows) | 2,550 | RUST | A hand-rolled COM refcount on a GstBuffer map; an untrusted `hvcC` parser | US-051 → US-034 |
 | fxplugins: dshowwrapper (Windows) | 5,134 + 37,810 baseclasses | KEEP; retire instead | The DirectShow baseclasses have no Rust equivalent (2.6× the plugin) | US-041, US-050 |
 | fxplugins: avplugin (Linux) and the registration shim | 4,066 + 138 | KEEP | The untrusted parsing happens inside the system ffmpeg; a binding per libavcodec major | — |
 | gstreamer-lite, GLib, libffi, DirectShow baseclasses | about 690,000, vendored | KEEP | Vendored third-party code | — |
@@ -163,13 +165,13 @@ note. No downloaded or third-party media is committed.
 ### Order
 
 1. **Now, with no Rust needed:**
-   - the C/C++ fixes: US-039, US-040, US-041, US-043;
+   - the C/C++ fixes: US-039, US-040, US-041, US-043, US-051;
    - the deletions and Java routes: US-044, US-049 part 2, US-046 (after US-013), US-047 (after US-043);
    - the screencast test bed US-038, then US-042, whose regression tests run on it.
 2. **US-027**, the toolchain. It needs rustup installed on Windows and in WSL.
 3. **Rust ports:**
    - Glass Windows: US-029 → US-030 → US-031. Windows-only, so their C can be deleted without US-028.
-   - Media plugins: US-032 → US-033, plus US-034 alongside US-033.
+   - Media plugins: US-032 → US-033, plus US-034 (after US-051) alongside US-033.
    - jfxmedia: US-035 → US-036.
    - Screencast: US-037.
    - US-028 before any media C is deleted on macOS.
