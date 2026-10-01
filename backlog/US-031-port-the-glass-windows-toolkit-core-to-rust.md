@@ -6,10 +6,13 @@
 NOT read; the robot tests' platform gating was not checked; the `gwin_robot_capture` fallback was added in the PR #21
 review from `glass_win_api.h:252-295`, `glass_win_api.cpp:302-335,470-491` and `WinGlassNativeTest.java:99,643-713`
 (`CaptureScreen` past `:335` not read); the export count in the acceptance criteria was made relative on 2026-10-01;
-nothing built) · **Epic:** Rust port of the remaining
+the cross-thread text follows US-039 part 1 as redesigned on 2026-10-01, a guarded publication in place of an
+atomic HWND; nothing built) · **Epic:** Rust port of the remaining
 native code (goal 3) · **Blocked by:** US-027, US-030 (the COM servers the WndProcs hand
 out move first), US-039 part 1, US-039 part 4 (C++ fixes), US-049 part 1 (the ruling on robot capture, and the
-move to Java if the ruling is yes; if it is no, this story ports `gwin_robot_capture` as a 66th export)
+move to Java if the ruling is yes; if it is no, this story ports `gwin_robot_capture` as a 66th export); slice 3
+should follow US-052 and US-053 (toolkit teardown gaps and two window-procedure hazards, C++ fixes), or it
+reproduces them
 
 ## Story
 As a platform maintainer,
@@ -30,8 +33,13 @@ records as undefined behaviour live in checked code, and glass.dll's remaining C
   - **Cross-thread state.** `GlassApplication::pInstance` is written on the toolkit thread
     (`GlassApplication.cpp:80,90`) and deleted after `WM_NCDESTROY` (`BaseWnd.cpp:166-168`). It is read without
     synchronisation from any thread through `GetToolkitHWND()`, which tests and then dereferences it
-    (`GlassApplication.h:78`), and through `ExecAction` (`GlassApplication.cpp:180-183`). Once the C++ fix publishes
-    the HWND atomically, Rust keeps it an atomic by type; a raw shared pointer would not be `Sync`.
+    (`GlassApplication.h:78`), and through `ExecAction` (`GlassApplication.cpp:180-183`). An atomic HWND alone
+    would not fix it, because HWND values are recycled (`glass_win_api.h:643-644`). US-039 part 1 fixes it in the
+    C++ first: an atomic HWND and an atomic thread id, a guard held across each post and taken exclusively to
+    clear them in the `WM_NCDESTROY` arm, and a pending list with its own lock for the synchronous call from
+    another thread, which is queued with `SendNotifyMessage` under the guard and released by a rundown. The port
+    reproduces that design and adds nothing to it. Rust keeps the two atomics as atomics, and one function owns
+    the guarded load; a raw shared pointer would not be `Sync`.
   - **Per-HWND lifetime.** `this` lives in a window property and is deleted at a re-entrancy count of zero after
     `WM_NCDESTROY` (`BaseWnd.cpp:154-172,176-190`). `gwin_view_close` leaves `view` dangling
     (`glass_win_api.h:1095`), and the animated fullscreen exit reaches a stale peer through "a pre-existing defect
@@ -83,7 +91,21 @@ records as undefined behaviour live in checked code, and glass.dll's remaining C
   the input handlers behind the still-C++ WndProcs, then the window classes themselves.
 - Re-entrancy is reproduced, not redesigned. No borrow of per-HWND state may be held across a call that can re-enter
   the WndProc (`SendMessage`, `DestroyWindow`, `DefWindowProc`, or a modal loop such as menus, sizing or
-  `DoDragDrop`). The message-count lifetime of `BaseWnd.cpp:176-190` is kept.
+  `DoDragDrop`). The message-count lifetime of `BaseWnd.cpp:176-190` is kept. If US-053 part 1 has landed, the
+  window property is removed when `WM_NCDESTROY` returns, as the C++ then does, and the delete stays at the
+  outermost message.
+- The toolkit publication of US-039 part 1 is reproduced as it stands in the C++, with its two locks and their
+  acquisition points. Port rule P6 allows no lock beyond those two:
+  - the HWND and the toolkit thread id are atomics outside the guard. `WM_CREATE` stores them with no lock, and the
+    thread-id comparison in the synchronous path loads the id with no lock;
+  - the guard's shared side spans the HWND load and one `PostMessageW` or one `SendNotifyMessageW`, in one function;
+  - the guard's exclusive side is taken only where the C++ takes it: in the `WM_NCDESTROY` arm, and in US-052's
+    thread-exit callback if US-052 has landed. The rundown of the pending list follows it;
+  - the pending list has its own lock, held for list operations only and never across a call out of the library.
+    If US-053 part 2 has landed, its list of posted actions is under that same lock, and a post links its action
+    inside the shared section;
+  - the toolkit thread's own synchronous path takes no guard and reads its thread-confined state;
+  - no lock is held across a `SendMessageW`, an upcall or a wait.
 
 ### Slices
 1. **Goldens from the C**:
@@ -106,8 +128,11 @@ records as undefined behaviour live in checked code, and glass.dll's remaining C
    calls. Its gate adds a pixel golden of the C capture over a fixed scene and the four capture tests of
    `WinGlassNativeTest` (`:643-713`).
 3. **Toolkit window**: `GlassApplication` and the loop/invoke exports, on a Rust window class, including the
-   clipboard-viewer arms the COM story left behind a seam. Gate: `WinApplicationNativeTest`,
-   `WinDowncallExceptionReportingTest`, `WinApplicationStartupTest`, invoke traces.
+   clipboard-viewer arms the COM story left behind a seam, and US-039 part 1's guarded publication with its
+   shim-only hooks (glass.dll exports, which the crate takes over), plus those of US-052 and US-053 if they have
+   landed. Gate: `WinApplicationNativeTest`, `WinDowncallExceptionReportingTest`, `WinApplicationStartupTest`,
+   invoke traces, and the teardown tests of US-039 part 1, and of US-052 and US-053 if landed, run against the
+   Rust slice.
 4. **Input handlers**: `ViewContainer`'s key, mouse, IME and touch handlers, `GlassInputTextInfo` and
    `ManipulationEventSink`, as Rust over Rust-owned per-view state and dispatched from the C++ WndProcs. Gate:
    slice-1 traces exact, `WinViewNativeTest`.
@@ -124,6 +149,10 @@ records as undefined behaviour live in checked code, and glass.dll's remaining C
   slice-2 robot pixel golden if US-049 part 1 is ruled no.
   If US-049 part 1 has landed, recount `WinGlassNativeTest` first: its capture tests (`:643-713`) change with
   the export.
+- US-039 part 1's teardown tests (a parked poster holds teardown, no stale post, a post after the clear is refused,
+  the order of a send against a post, the three `gwin_invoke_and_wait` teardown cases, the unknown `WPARAM`) pass
+  unchanged against the Rust slice, with the same child-JVM run count for the statistical line. So do the tests of
+  US-052 and US-053, if those stories have landed.
 - The Windows robot suite (`USE_ROBOT`) gives the same result as the C baseline run on the same machine.
 - The listed C++ files are deleted; glass.dll's C++ is reduced to `CommonDialogs*` and what it includes.
 - Every export and every `extern "system"` entry (WndProcs, COM methods, timer/hook procs) is guarded and answers
@@ -142,4 +171,5 @@ The C++ is deleted. The WSL Linux build still configures. `backlog/README.md` is
 | 3 | The IME golden needs an installed IME. | Install a Microsoft Japanese IME on the capture machine and record it with the golden. |
 | 4 | Behaviour before `WM_CREATE`: the C++ ignores `WM_NCCREATE`/`WM_GETMINMAXINFO` (`BaseWnd.cpp:172`). | Attach at `WM_CREATE`, exactly as the C++ does. |
 | 5 | Upcall order and timing in the invoke and fullscreen-animation paths. | Traces record order and thread; no new thread, timer or lock. |
+| 6 | The shared side of the toolkit guard held across a `SendMessageW`, an upcall or a wait deadlocks teardown. | One function owns the shared side and makes one OS call inside it; US-039 part 1's parked-poster and exit-from-a-runnable tests run against the slice. |
 

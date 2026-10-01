@@ -3,7 +3,8 @@
 **Status:** 📋 Ready (drafted 2026-09-30 from a read-only survey; read `glass_win_api.h:1-262,488-523,641-649` and
 `PlatformSupport.cpp:80-140`, counted with `wc -l`/`grep -c`; `RoActivationSupport.cpp` and the two query bodies were
 NOT read; nothing built. 2026-10-01, after PR review: the sink text follows US-039 part 2's design, in which the
-sinks only post; re-read `PlatformSupport.cpp:36-47` and `:138-144`, and `GlassApplication.h:97-99` and `:128`) ·
+sinks only post; re-read `PlatformSupport.cpp:36-47` and `:138-144`, and `GlassApplication.h:97-99` and `:128`; the
+same day the post became US-039 part 1's guarded post, after that part's redesign) ·
 **Epic:** Rust port of the remaining native code (goal 3) · **Blocked by:** US-027, US-039 part 2 (a C++ fix)
 
 ## Story
@@ -26,13 +27,17 @@ generated projections instead of hand-written HSTRING/activation code.
     after `~PlatformSupport` calls a destroyed object.
   - US-039 part 2 fixes this in the C++ first, and this story is blocked by it. After that fix, a sink captures
     nothing that teardown frees and only posts its `PT_*` bits to the toolkit window through US-039 part 1's
-    atomic HWND, so `preferences_changed` runs only on the toolkit thread. Teardown removes both registrations and
-    releases the WinRT objects and the factory before `RoUninitialize`. Removing the registrations alone would not
-    be enough, because `remove_*` does not wait for an invocation that has already started.
+    guarded post, so `preferences_changed` runs only on the toolkit thread. That post holds a shared guard across
+    the HWND load and the `PostMessage`, and `WM_NCDESTROY` clears the HWND under the exclusive side, so a late
+    post is refused and never reaches a recycled HWND. Teardown removes both registrations and releases the WinRT
+    objects and the factory before `RoUninitialize`. Removing the registrations alone would not be enough, because
+    `remove_*` does not wait for an invocation that has already started.
   - The port keeps that design, and Rust makes the unsafe variant hard to write. The delegate closures capture only
-    their `PT_*` bits and post through the atomic HWND, so a late invocation reaches nothing `Drop` frees. `Drop`
-    removes both registrations, then releases the objects before `RoUninitialize`. There is no lock, so port rule
-    P6 holds trivially. A closure holding a raw `this` would need an `unsafe impl Send`, which review rejects.
+    their `PT_*` bits and call the toolkit core's guarded post through the internal seam. They never hold the
+    HWND, so a late invocation reaches nothing `Drop` frees. `Drop` removes both registrations, then releases the
+    objects before `RoUninitialize`. This crate module adds no lock. The guard belongs to the toolkit core, which
+    is C++ until US-031, and it spans one `PostMessage`, never a call into Java, so port rule P6 holds. A closure
+    holding a raw `this` would need an `unsafe impl Send`, which review rejects.
   - The `IActivationFactory*` and the `INetworkInformationStatics*` queried from it are raw pointers that are never
     released (`PlatformSupport.cpp:101-110`, `PlatformSupport.h:85`). In Rust every projected interface releases
     on `Drop`.
@@ -67,8 +72,9 @@ generated projections instead of hand-written HSTRING/activation code.
   seam. The four WndProc arms and `gwin_app_create` reach the Rust side through that seam until the core story
   moves them.
 - The structs behind the two `gwin_sizeof_*` probes become `#[repr(C)]` with `const` size and offset assertions.
-- No thread, lock or marshalling (port rule P6, "No new concurrency", `backlog/README.md:120`). The delegates keep
-  running on whatever thread the OS picks and only post, as the C does after US-039 part 2.
+- No thread, lock or marshalling of its own (port rule P6, "No new concurrency", in the "Rust port" section of
+  `backlog/README.md`). The delegates keep running on whatever thread the OS picks and only post, through the
+  toolkit core's guarded post, as the C does after US-039 part 2.
 
 ### Slices
 1. **Goldens from the C**, before any Rust:
@@ -105,7 +111,7 @@ The WSL Linux build still configures (glass/win is not built there). `backlog/RE
 ## Risks
 | # | Risk | Mitigation |
 | --- | --- | --- |
-| 1 | After US-039 part 2 the stub is called only on the toolkit thread; a Rust lock, thread or extra marshal would change timing. | No lock or thread (port rule P6); the delegates only post; the trace records the thread of every `preferences_changed`. |
+| 1 | After US-039 part 2 the stub is called only on the toolkit thread; a Rust lock, thread or extra marshal would change timing. | No lock or thread of its own (port rule P6); the delegates only post, through US-039 part 1's guarded post; the trace records the thread of every `preferences_changed`. |
 | 2 | `RoInitialize` must precede `gwin_run_loop`'s `OleInitialize` in the same apartment (`glass_win_api.h:646,655`). | Keep the call order; the slice-3 trace spans `gwin_app_create` → `gwin_run_loop`. |
 | 3 | Theme-dependent goldens differ between machines. | Store the settings with the golden and compare the Rust build on the same machine. |
 | 4 | The `windows` crate may cache activation factories for the process (from memory, not checked), so the factory would not be released before `RoUninitialize`. | Read the crate's generated factory accessor in slice 3. If it caches, activate through `RoGetActivationFactory` directly, as the C does. |

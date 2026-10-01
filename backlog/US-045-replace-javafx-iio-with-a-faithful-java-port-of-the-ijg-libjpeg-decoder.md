@@ -4,9 +4,13 @@
 and error path, libjpeg config/defaults, the test harness; NOT read: the source-manager and ICC bodies of
 `iio_api.c`, most libjpeg bodies; no benchmark exists; nothing built. 2026-10-01, after PR review: FFM memory is
 permitted for the off-heap buffers; read `JPEGImageLoader.java:244-357` and the `ImageStorage` callers of `dispose()`
-to choose the arena kind) · **Epic:** Less native code (goal 1);
+to choose the arena kind. The same day, with US-044's correction: the upsampling paths, the kept-file counts and the
+SmartScale corpus requirement were corrected from `jdmaster.c`, `jdmerge.c`, `jdsample.c` and the SOF and SOS
+headers of the 9 corpus members. An independent review the same day led to a second round: the merged-path members
+moved to US-054, the SmartScale row was completed so that all 32 kernels have a member, and block sizes 9 to 16 are
+built by header surgery, not from fixtures) · **Epic:** Less native code (goal 1);
 fallback under the Rust port (goal 3) · **Blocked by:** US-044 (it fixes the ported
-subset); the Rust fallback only: US-027
+subset); US-054 part 1 (slice 1 builds on its members); the Rust fallback only: US-027
 
 ## Story
 As a JavaFX app developer who loads JPEGs from untrusted sources (WebView pages, remote URLs),
@@ -18,7 +22,13 @@ platform.
 ## Why Java, not Rust or the C (R1–R6)
 - **Must stay native (R1): no.**
   - libjpeg is PURE: it links only libc (`jmemnobs.c` malloc/free), and bytes arrive through callbacks.
-  - The used path is integer-only (ISLOW `jidctint.c:192`, table colour conversion, replication upsampling).
+  - The used path is integer-only:
+    - the ISLOW kernels (`jidctint.c:192`);
+    - chroma upsampled by a larger IDCT where the sampling ratio allows it (`jdmaster.c:123-142`), by replication
+      otherwise (`jdsample.c:180-270`);
+    - table colour conversion (`jdcolor.c`);
+    - the merged upsampler and converter for block sizes 9 to 16 (`jdmerge.c`; see US-044, Current state).
+
     A faithful port is therefore provable by goldens plus a live differential test against the C.
   - The audit's "PARITY: unprovable" applies to a *different* decoder, not a faithful port.
 - **Hot path.** Per-pixel loops run on the FX thread for synchronous loads (`Image.java:878-896`). No measurement
@@ -41,10 +51,13 @@ platform.
   facade and a toolchain dependency. It stays the fallback if slice 4 fails.
 
 ## Current state
-- **Native code.** After the deletion story: 18 `.c` (15,578 lines) + 9 `.h` (3,324) of libjpeg, plus
+- **Native code.** After the deletion story: 19 `.c` (16,015 lines) + 9 `.h` (3,324) of libjpeg, plus
   `iio_api.c` (870) and `iio_api.h` (270).
   - `jidctint.c` alone is 5,496 lines of 32 kernels.
   - `jmemmgr.c`/`jmemnobs.c` (1,236) become Java allocation, not ported code.
+  - `jdmerge.c` (437) is one of the 19. US-044 keeps it, because a JPEG with a block size of 9 to 16 sampled 2h1v
+    or 2h2v reaches it at 1/1. US-054 part 2 may remove it from the C before slice 6; until that passes its gate,
+    it is ported.
 - **ABI and Java.** 9 exports, `IIO_ABI_VERSION 2` (`iio_api.h:134`, `:221-264`). Callbacks: `read`/`skip`/
   `emit_warning`/`update_progress` (`:157-182`). The Java facade is `JPEGNative.java` (725 lines), called from
   `JPEGImageLoader.java:286`.
@@ -63,6 +76,10 @@ platform.
   - The members cover baseline 4:2:0, gray, progressive, odd sizes, ICC (valid and invalid), Adobe unknown, CMYK,
     corrupt input and a truncated stream, at 1/1. The baseline member is also decoded at 1/2 and to 40x30, smooth
     and rough (`JpegTestSupport.java:151-156`).
+  - Read from the SOF and SOS headers of the 9 members: 8 are SOF0, and the one SOF2 member's first SOS names 3
+    components, so every block size is 8 (`jdinput.c:243-247`). The 7 three-component members are all 2h2v; gray
+    and CMYK are 1h1v. There is no 2h1v member, and none reaches the merged upsampler: at block size 8 the 2h2v
+    chroma is upsampled by the IDCT.
   - The module tests are listed in US-044. The gaps a parity gate must close, with each member captured on Windows
     **and** WSL:
 
@@ -72,9 +89,10 @@ platform.
   | Stream structure | restart intervals (DRI/RSTn); every member at 1/1, 1/2, 1/4 and 1/8 |
   | ICC | a multi-chunk profile, plus one member per ICC error message (7) |
   | Colour | Adobe CMYK transform 0 and YCCK transform 2 (the JDK writer may refuse 4-band, `JpegCorpusGenerator.java:190-203`) |
-  | Truncation and corruption | truncated baseline *and* truncated progressive (block smoothing); corrupt markers and Huffman data, with exact warning/error text and order |
+  | Truncation and corruption | truncated baseline *and* truncated progressive (block smoothing); corrupt markers and Huffman data, with exact warning/error text and order. The SOF1 file cut after the `Ss` byte of its SOS, which makes the block size 16, is a member of US-054 part 1 |
   | Rejected inputs | arithmetic SOF (`JERR_ARITH_NOTIMPL`); 12-bit precision; dimensions at and beyond the limits (IOException or `OutOfMemoryError("Reading JPEG Stream")`, `iio_api.h:60-62`) |
-  | Edge cases | a SmartScale/non-8 block size, if one can be produced; 16-bit quantizer tables with extreme coefficients (risk 3) |
+  | Block size (SmartScale) | required, not optional: `jdmerge.c` and the kernels of every size other than 1, 2, 4, 8 and 16 run only for these. The 2h1v and 2h2v members at block sizes 9 to 16 are those of US-054 part 1 and are not specified again here. Added here: 1h2v at block sizes 10, 12 and 14 (the only members that select the 5x10, 6x12, 7x14 and 3x6 kernels, at 1/2 and 1/4); one 1h1v member at a block size of 9 or more; a block size below 8. Every SmartScale member is decoded at 1/1, 1/2, 1/4 and 1/8 (3x3 and 6x3 need 1/4) |
+  | Edge cases | 16-bit quantizer tables with extreme coefficients (risk 3) |
   | Mutation corpus | a deterministic, seeded mutation corpus over all members |
 
 ## Approach
@@ -105,13 +123,24 @@ platform.
    - Extend `JpegCorpusGenerator` and the goldens with every gap in the table above. Members the JDK writer
      cannot produce (YCCK, 4:1:1, SmartScale) are built by byte-level surgery in the generator, or committed as
      small fixtures with written provenance.
+   - SmartScale members:
+     - Block sizes 9 to 16 are built by header surgery in the generator, as US-054 part 1 describes: from 8 up the
+       entropy data keeps the 64-coefficient layout (`jdinput.c:285-329`), so only the headers change. The 1h2v
+       members need a 4:4:0 source; that the JDK writer can produce one was not verified.
+     - Only a block size below 8 needs an encoder or a committed fixture: `lim_Se` is then below 63
+       (`jdinput.c:250-284`), which changes the entropy layout, and after US-044 the tree has no encoder. IJG's
+       encoder writes such files when `block_size` is set (US-044's scratch probe used the `jc*.c` files US-044
+       deletes); the switches of the stock `cjpeg` were not checked.
+     - A test predicts the IDCT kernel of each component of each member at each scale from its SOF and SOS headers
+       (`jdinput.c:57-190`, `jdmaster.c:123-148`). The prediction is confirmed once by an instrumented scratch
+       run recorded in the provenance, as in US-054 part 1.
    - Add the seeded mutation corpus (flips, truncations, marker splices) with its outcome goldens.
    - Capture on Windows **and** WSL, and record commit and platform. A Windows/Linux difference is a finding (see
      risk 3), never averaged.
-   - The existing keys keep their values, except `images`, which lists the new members after the existing 9, and
-     `capture.provenance`, which names the new capture. The generator rewrites the whole file in insertion order and
-     needs `-Djfx.iio.jpeg.regenerate=true` to do so (`JpegCorpusGenerator.java:99-105,116-120`), so the PR reviews
-     the diff key by key.
+   - The existing keys keep their values, except `images`, which lists the new members after the existing ones
+     (today's 9 and those of US-054 part 1), and `capture.provenance`, which names the new capture. The generator
+     rewrites the whole file in insertion order and needs `-Djfx.iio.jpeg.regenerate=true` to do so
+     (`JpegCorpusGenerator.java:99-105,116-120`), so the PR reviews the diff key by key.
    - The maintainer approves the R2 trade-off and the slice-4 budget here.
 2. **Headers.** Port the marker reader, input controller, API state machine and error/message catalogue
    (`jdmarker`, `jdinput`, `jdapimin`, `jerror`/`jerror.h`), plus the source-manager semantics and ICC
@@ -120,8 +149,11 @@ platform.
      corpus.
 3. **Baseline decode.**
    - Port Huffman (`jdhuff`), the single-pass coefficient controller, `jddctmgr` with the ISLOW kernels, the
-     DCT-domain upsampling selection (`jdmaster.c:128-137`), `jdsample`, `jdcolor` (with the JFX CMYK/YCCK
+     DCT-domain upsampling selection (`jdmaster.c:123-142`), `jdsample`, `jdcolor` (with the JFX CMYK/YCCK
      converters), and the main and post controllers.
+   - The kernels this slice needs are the 8x8 one and those the selection picks at block size 8: 16x16 for 2h2v
+     chroma at 1/1, 16x8 and 8x16 for 2h1v and 1h2v, and their halves down to 1x1 at 1/2 to 1/8.
+   - The merged upsampler is not in this slice: no block-size-8 member reaches it (`jdmaster.c:78-84`).
    - Gate: every baseline member at 1/1 to 1/8 is exact.
 4. **Benchmark gate — the decision point.**
    - Add an in-tree decode benchmark (a flag-gated JUnit harness) that runs large baseline images (4:2:0, 4:4:4,
@@ -133,8 +165,12 @@ platform.
 5. **Progressive.** Port the progressive Huffman paths, the multi-scan coefficient buffering (off-heap) and
    `decompress_smooth_data`.
    - Gate: the progressive and truncated-progressive members are exact.
-6. **The rest of the input space.** All 32 `jidctint` kernels (SmartScale sizes) and every remaining error path.
-   - Gate: the whole mutation corpus is exact.
+6. **The rest of the input space.** All 32 `jidctint` kernels (SmartScale sizes), the merged upsampler
+   (`jdmerge`: block sizes 9 to 16 sampled 2h1v or 2h2v, at 1/1) and every remaining error path.
+   - `jdmerge` is ported unless US-054 part 2 has passed its gate and removed it from the C first. The port never
+     drops it on its own: the Java decoder follows whatever the C does at that point.
+   - Gate: every SmartScale member, those of US-054 part 1 included, and the whole mutation corpus are exact. A
+     test asserts that each of the 32 kernel sizes is selected by at least one member (the prediction of slice 1).
 7. **Switch.** `JPEGImageLoader` uses the Java decoder, with no user-visible property.
    - Gate: all module tests, `tests/system` JPEG tests, and goldens exact on Windows and WSL.
 8. **Delete the native library.**
@@ -149,9 +185,13 @@ platform.
 ## Acceptance criteria
 - Goldens:
   - slice 1 keeps the value of each of the 111 member keys of today's `jpeg-goldens.txt` (`image.*`, `decode.*`,
-    `events.*`); `images` lists the new members after the existing 9, and `capture.provenance` names the new capture;
+    `events.*`) and of the keys US-054 part 1 added; `images` lists the new members after the existing ones, and
+    `capture.provenance` names the new capture;
   - after slice 1, `jpeg-goldens.txt` is byte-identical to the slice-1 capture;
   - the extended corpus and mutation goldens are exact on Windows and WSL;
+  - the members of US-054 part 1, whose shapes reach the merged upsampler while it is compiled in, are exact
+    against whichever path the C has at that point (merged, or separate after US-054 part 2);
+  - each of the 32 `jidctint` kernel sizes is selected by at least one member;
   - event traces are identical.
 - The slice-4 budget is met on both platforms, recorded in the PR with its hardware.
 - No `native` method, no downcall or upcall (`Linker`, `SymbolLookup`), no other restricted method and no load of
@@ -183,7 +223,7 @@ Merged PRs (one per slice); verified on Windows and WSL; macOS unverified, but i
 | 2 | Progressive buffers move to the heap, so `-Xmx` OOMs where C succeeded | Off-heap buffers in a confined per-decode `Arena`; huge-dimension members pin the outcome |
 | 3 | `INT32` is `long` (`jmorecfg.h:252`): 32-bit on Windows, 64-bit on LP64 Linux, so ISLOW intermediates (`jidctint.c:196-198`) can differ by platform for adversarial coefficients | Capture on both; if they differ, the maintainer picks one behaviour, recorded in the test |
 | 4 | OOM messages that only native allocation failure produces ("Initializing Reader", `iio_api.h:58`) | Decide per message in slice 1; never silently different |
-| 5 | Corpus blind spots (SmartScale, YCCK) | Byte-surgery generator and fixtures; differential mutation test while the C exists |
+| 5 | Corpus blind spots (SmartScale, YCCK). Today no member reaches `jdmerge.c` or a kernel of a size other than 1, 2, 4, 8 and 16 | The SmartScale members of US-054 part 1 and of slice 1 are required, not optional, and a test asserts that all 32 kernel sizes are selected; byte-surgery generator and fixtures for the rest; differential mutation test while the C exists |
 | 6 | Owning a forked decoder: future IJG fixes need a manual re-port | Record the followed IJG version; review each IJG release's change log |
 | 7 | Upstream OpenJFX libjpeg updates conflict after slice 8 | Documented resolution in the PR: drop them, and review for security content |
 
