@@ -89,21 +89,36 @@ public final class DecoraBackend {
     /** Extra ints per scanline beyond the image width, deliberately odd. */
     public static final int STRIDE_PAD = 5;
 
+    /** Builds the {@code BoxRenderState} a {@link #box} recipe renders with. */
+    @FunctionalInterface
+    public interface BoxStates {
+        BoxRenderState create(float hsize, float vsize, int passes, float spread, boolean shadow,
+                              Color4f shadowColor);
+    }
+
+    /** The production state: a {@code BoxRenderState} under the identity filter transform. */
+    private static final BoxStates PRODUCTION_BOX_STATES = (hsize, vsize, passes, spread, shadow, shadowColor) ->
+            new BoxRenderState(hsize, vsize, passes, spread, shadow, shadowColor, BaseTransform.IDENTITY_TRANSFORM);
+
     private final String name;
+    private final RendererDelegate delegate;
+    private final BoxStates boxStates;
     private final DirectRenderer renderer;
     private final FilterContext fctx = new FilterContext(new Object()) {
     };
     private final SortedSet<String> ranPeers = new TreeSet<>();
     private final List<float[]> gaussianPassWeights = new ArrayList<>();
 
-    private DecoraBackend(String name, RendererDelegate delegate) {
+    private DecoraBackend(String name, RendererDelegate delegate, BoxStates boxStates) {
         this.name = name;
+        this.delegate = delegate;
+        this.boxStates = boxStates;
         this.renderer = new DirectRenderer(delegate);
     }
 
     /** The pure-Java backend: {@code JSWRendererDelegate} and the {@code JSW*Peer} classes. */
     public static DecoraBackend java() {
-        return new DecoraBackend("Java", new JSWRendererDelegate());
+        return new DecoraBackend("Java", new JSWRendererDelegate(), PRODUCTION_BOX_STATES);
     }
 
     /**
@@ -112,7 +127,18 @@ public final class DecoraBackend {
      * are instantiated through their public {@code (FilterContext, Renderer, String)} constructor.
      */
     static DecoraBackend javaWith(RendererDelegate delegate) {
-        return new DecoraBackend("Java (" + delegate.getClass().getName() + ")", delegate);
+        return new DecoraBackend("Java (" + delegate.getClass().getName() + ")", delegate, PRODUCTION_BOX_STATES);
+    }
+
+    /**
+     * A fresh backend with this backend's peers whose {@link #box} recipes render with the states {@code boxStates}
+     * builds instead of the production {@code BoxRenderState}, so a test can render a box recipe with another kernel
+     * ({@link BoxKernels.KernelBoxRenderState}). {@code what} names the states in the backend's name. The copy
+     * records its own {@link #ranPeers()} and {@link #gaussianPassWeights()}: a control that kept this backend sees
+     * nothing the copy rendered.
+     */
+    DecoraBackend withBoxStates(String what, BoxStates boxStates) {
+        return new DecoraBackend(name + ", box states: " + what, delegate, boxStates);
     }
 
     public String name() {
@@ -256,12 +282,12 @@ public final class DecoraBackend {
      * the pass input sw-compatible (an identity or translate-only transform, or a positive axis-aligned scale, whose
      * sample vector it renormalises to a unit step along the pass's axis unless it had to clamp the box size),
      * otherwise the {@code LinearConvolve}/{@code LinearConvolveShadow} peers. A pass {@code isPassNop} finds to
-     * be a no-op, such as a blur pass over a singular input transform, gets no peer.
+     * be a no-op, such as a blur pass over a singular input transform, gets no peer. The state is the production
+     * {@code BoxRenderState} unless the backend was made by {@link #withBoxStates}.
      */
     public Result box(ImageData src, float hsize, float vsize, int passes, float spread, boolean shadow,
                       Color4f shadowColor, Rectangle clip) {
-        BoxRenderState state = new BoxRenderState(hsize, vsize, passes, spread, shadow, shadowColor,
-                BaseTransform.IDENTITY_TRANSFORM);
+        BoxRenderState state = boxStates.create(hsize, vsize, passes, spread, shadow, shadowColor);
         return convolve(src, state, clip);
     }
 

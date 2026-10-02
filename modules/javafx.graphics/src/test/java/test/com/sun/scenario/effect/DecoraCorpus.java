@@ -137,6 +137,29 @@ final class DecoraCorpus {
                     key("translated/BoxBlur", "h=9 v=9 passes=3 translate=5,7", 64, 48),
                     key("translated/BoxBlur", "h=9 v=9 passes=3 translate=5,7", 257, 129)));
 
+    /**
+     * The box shadows with a spread and two or more blur passes render with the box kernel whose tap count was fixed.
+     * {@code BoxRenderState.validateWeights} convolves the box with itself once per further pass, in place from the
+     * last tap backwards. Its first loop ran {@code while (i > klen)} and left {@code i == klen} to the second loop,
+     * which sums taps {@code 0..i}, {@code klen + 1} taps there, so every kernel of two or more passes was asymmetric
+     * and divided by too large a sum; the first loop now runs {@code while (i >= klen)}. On the software pipeline a box
+     * shadow with a spread runs on the {@code LinearConvolveShadow} peer, which reads these weights through
+     * {@code getPassWeights}, and the golden recorded the native {@code SSELinearConvolveShadowPeer}, which read them
+     * from the same Java state ({@code SSELinearConvolvePeer.filter}, deleted in commit 26ce75d02f). The golden
+     * therefore holds the pre-fix kernel on these rows and on no other: a box without a spread runs on the
+     * {@code BoxBlur} and {@code BoxShadow} peers, which never read the weights, and a single pass convolves nothing.
+     * <p>
+     * Each of these rows is judged three ways by {@link DecoraJavaGoldenTest}. Rendered by the same recipe with the
+     * pre-fix kernel ({@link BoxKernels#preFixKernel}, a frozen copy of the old loop that only these rows render with
+     * and that the golden test's controls pin), it has
+     * to pass every check against the golden that any other row passes. The production render has to differ from
+     * that render, so the fix is in effect on the row. And the production render has to equal, exactly, the render of
+     * the same recipe with the kernel {@link BoxKernels#oracleKernel} computes independently. Every other row is judged
+     * against the golden as before, so a row that moves without being listed here fails.
+     */
+    static final KernelDeviation BOX_KERNEL_TAP_COUNT = new KernelDeviation("BOX_KERNEL_TAP_COUNT",
+            BoxKernels.PRE_FIX, BoxKernels.ORACLE, multiPassBoxSpreadRows());
+
     private DecoraCorpus() {
     }
 
@@ -261,6 +284,60 @@ final class DecoraCorpus {
     }
 
     /**
+     * A reviewed change of the box kernel on exactly the golden rows {@code rows}: the golden recorded them with the
+     * kernel {@code golden}, and production now renders them with the kernel {@code oracle}. On these rows the golden
+     * is judged against renders of the same recipe whose box states hand the peers {@code golden}, and the production
+     * render against renders with {@code oracle} ({@link BoxKernels#states}). It is not a {@link Cause}, which explains
+     * pixels of a render compared with the golden itself. {@code id} names it in findings and in the report.
+     */
+    record KernelDeviation(String id, BoxKernels.Kernel golden, BoxKernels.Kernel oracle, Set<String> rows) {
+    }
+
+    /** The reviewed kernel deviation of the golden row {@code key}, or null when its golden kernel is production's. */
+    static KernelDeviation kernelDeviation(String key) {
+        return BOX_KERNEL_TAP_COUNT.rows().contains(key) ? BOX_KERNEL_TAP_COUNT : null;
+    }
+
+    /**
+     * The rows of {@link #BOX_KERNEL_TAP_COUNT}, listed one by one: the box shadows with a spread over two and three
+     * passes and the clip matrix's box shadow with a spread, at both sizes.
+     */
+    private static Set<String> multiPassBoxSpreadRows() {
+        String spread = "LinearConvolveShadow/box";
+        String clip = "clip/LinearConvolveShadow/box";
+        String clipped = "box h=9 v=9 passes=3 spread=0.5 black clip ";
+        return Set.of(
+                key(spread, "box h=25 v=25 passes=2 spread=0.3 black", 64, 48),
+                key(spread, "box h=25 v=25 passes=2 spread=0.3 black", 257, 129),
+                key(spread, "box h=25 v=25 passes=2 spread=0.3 tinted", 64, 48),
+                key(spread, "box h=25 v=25 passes=2 spread=0.3 tinted", 257, 129),
+                key(spread, "box h=25 v=25 passes=2 spread=1.0 black", 64, 48),
+                key(spread, "box h=25 v=25 passes=2 spread=1.0 black", 257, 129),
+                key(spread, "box h=25 v=25 passes=2 spread=1.0 tinted", 64, 48),
+                key(spread, "box h=25 v=25 passes=2 spread=1.0 tinted", 257, 129),
+                key(spread, "box h=4 v=6 passes=3 spread=0.3 black", 64, 48),
+                key(spread, "box h=4 v=6 passes=3 spread=0.3 black", 257, 129),
+                key(spread, "box h=4 v=6 passes=3 spread=0.3 tinted", 64, 48),
+                key(spread, "box h=4 v=6 passes=3 spread=0.3 tinted", 257, 129),
+                key(spread, "box h=4 v=6 passes=3 spread=1.0 black", 64, 48),
+                key(spread, "box h=4 v=6 passes=3 spread=1.0 black", 257, 129),
+                key(spread, "box h=4 v=6 passes=3 spread=1.0 tinted", 64, 48),
+                key(spread, "box h=4 v=6 passes=3 spread=1.0 tinted", 257, 129),
+                key(clip, clipped + "bottom only", 64, 48),
+                key(clip, clipped + "bottom only", 257, 129),
+                key(clip, clipped + "right only", 64, 48),
+                key(clip, clipped + "right only", 257, 129),
+                key(clip, clipped + "bottom+right", 64, 48),
+                key(clip, clipped + "bottom+right", 257, 129),
+                key(clip, clipped + "top only", 64, 48),
+                key(clip, clipped + "top only", 257, 129),
+                key(clip, clipped + "left only", 64, 48),
+                key(clip, clipped + "left only", 257, 129),
+                key(clip, clipped + "all four edges", 64, 48),
+                key(clip, clipped + "all four edges", 257, 129));
+    }
+
+    /**
      * One row of the Decora golden: a recipe over {@code inputs(width, height)} with its Windows and Linux bounds
      * and an optional cause. A clipped row also carries the recipe of the same kernel without the clip
      * ({@code unclipped}), and a clipped blur the number of rows next to the clip's top and bottom edges within which
@@ -366,6 +443,10 @@ final class DecoraCorpus {
             throw new IllegalStateException("BOX_BLUR_KEEPS_INPUT_TRANSFORM names rows the corpus does not have: "
                     + BOX_BLUR_KEEPS_INPUT_TRANSFORM.rows());
         }
+        if (!keys.containsAll(BOX_KERNEL_TAP_COUNT.rows())) {
+            throw new IllegalStateException("BOX_KERNEL_TAP_COUNT names rows the corpus does not have: "
+                    + BOX_KERNEL_TAP_COUNT.rows());
+        }
         return rows;
     }
 
@@ -406,7 +487,7 @@ final class DecoraCorpus {
         cases.add(new Case("BoxBlur", "h=5 v=5 passes=1 origin=-7,3", EXACT,
                 (b, in) -> b.box(b.data(in.primary(), -7, 3), 5, 5, 1, 0f, false, null, null)));
         // spread != 0 makes BoxRenderState choose the LinearConvolveShadow peer (GENERAL_VECTOR pass); exact against
-        // both measured libraries.
+        // both measured libraries. The golden holds the pre-fix kernel of the multi-pass ones (BOX_KERNEL_TAP_COUNT).
         Bound spreadBound = new Bound(EXACT, EXACT, ONE_STEP);
         float[][] spreadSizes = {{5, 5, 1}, {25, 25, 2}, {4, 6, 3}};
         for (float[] s : spreadSizes) {
@@ -667,6 +748,7 @@ final class DecoraCorpus {
         // library at both sizes. Linux keeps their bounds from before the Java peers were aligned, as the earlier Linux
         // trial did not cover these cases; the Linux measurement just before decora_sse was deleted did, and found them
         // within those bounds: largest delta 0 against 3 for the Gaussian shadow and 0 against 1 for the box spread.
+        // The golden holds the pre-fix kernel of the three-pass box spread (BOX_KERNEL_TAP_COUNT).
         Bound gaussianShadow = new Bound(EXACT, THREE_STEPS, THREE_STEPS);
         Bound boxSpread = new Bound(EXACT, ONE_STEP, ONE_STEP);
         List<ClipCase> cases = new ArrayList<>();
