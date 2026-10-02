@@ -175,6 +175,13 @@ layout, the test asserts "no foreign colour", not particular values.
 - The robot/paint tests on SW (`tests/system` painttest with `-Dprism.order=sw`) and `DecoraJavaGoldenTest` stay
   green. `DecoraJavaGoldenTest` runs the Java peers on heap images and does not use this paint. **Never regenerate a
   golden.**
+- The exception is `PiscesGoldenRenderTest`. It drives this paint directly: its texture-paint steps (12-19,
+  `FLOAT_STEPS`) sample through `genTexturePaintTarget`. So the fix may legitimately change
+  `pisces-golden-a544256444.bin` (not checked).
+  - If it does, the new golden is captured from the fixed C in its own commit, with the reason stated, as the
+    test's class comment requires. Its file name carries the new capture commit, and `GOLDEN_RESOURCE` and the
+    class comment's capture instructions follow (`PiscesGoldenRenderTest.java:64-66,90-91,103`).
+  - The PR lists which steps moved. That golden then becomes the baseline for the Java port of `prism_sw`.
 - Hardware re-check: rerun `EdgeProbe` and `OobProbe` on SW, D3D and ES2. SW matches D3D within 1 per channel on the
   `ImageView` and `Canvas` scenes.
 

@@ -90,9 +90,11 @@ import javafx.scene.paint.Color;
  * <b>Threading.</b> No lock, deliberately - {@code PlatformSupport} had none and a lock held across
  * {@code notifyPreferencesChanged} (application listener code) would be a deadlock the C never had.
  * The four {@code WndProc} arms reach {@link #update} on the Glass toolkit thread. The two WinRT sinks
- * need not: they are WRL {@code Callback<>} delegates, which are agile (they aggregate the
- * free-threaded marshaler), so they are not marshalled into the single-threaded apartment the toolkit
- * thread created and may run on a WinRT thread instead. A second thread is therefore expected, not
+ * need not: they are WRL {@code Callback<>} delegates and are not agile - {@code Callback<>} builds
+ * them with {@code RuntimeClassFlags<Delegate>}, {@code Delegate} is {@code ClassicCom}, and by default
+ * only {@code WinRt} classes aggregate the free-threaded marshaler ({@code FtmBase}) - so each event
+ * source decides whether to marshal its sink into the single-threaded apartment the toolkit thread
+ * created or to call it on a WinRT thread of its own. A second thread is therefore possible, not
  * excluded: {@link #collected} is {@code volatile} and {@link #update} checks no thread. Two concurrent
  * updates can still both report a change, exactly as two concurrent {@code updatePreferences} calls
  * could.
