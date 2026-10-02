@@ -47,24 +47,38 @@ static bool is_helper(DWORD tid) {
 
 // Behavioural loader-lock test: a thread started here must pass its DLL_THREAD_ATTACH notifications (which need
 // the loader lock) before its start routine runs. 1 = helper ran within 300 ms, 0 = helper did not run within
-// 300 ms (blocked), 2 = CreateThread failed (error in *err), 9 = not attempted.
+// 300 ms (blocked), 2 = the test could not run: CreateEventW, DuplicateHandle, CreateThread, ResumeThread or the
+// wait failed (error in *err; logged as behGle), 9 = not attempted. Only 0 is evidence of a held loader lock.
 static int behavioural(DWORD* err) {
     *err = 0;
     LPTHREAD_START_ROUTINE proc = g_helperProc;
     if (!(g_flags & FLAG_BEHAVIOURAL) || !proc || is_helper(GetCurrentThreadId())) return 9;
     HANDLE ev = CreateEventW(NULL, TRUE, FALSE, NULL);
-    HANDLE dup = NULL;
-    DuplicateHandle(GetCurrentProcess(), ev, GetCurrentProcess(), &dup, 0, FALSE, DUPLICATE_SAME_ACCESS);
+    if (!ev) { *err = GetLastError(); return 2; }
+    HANDLE dup = NULL;   // the helper's own handle to ev; the helper closes it
+    if (!DuplicateHandle(GetCurrentProcess(), ev, GetCurrentProcess(), &dup, 0, FALSE, DUPLICATE_SAME_ACCESS)) {
+        *err = GetLastError();
+        CloseHandle(ev);
+        return 2;
+    }
     DWORD tid = 0;
     HANDLE th = CreateThread(NULL, 0, proc, dup, CREATE_SUSPENDED, &tid);
     if (!th) { *err = GetLastError(); CloseHandle(ev); CloseHandle(dup); return 2; }
     LONG i = InterlockedIncrement(&g_nhelpers) - 1;
     if (i < 256) g_helpers[i] = tid;
-    ResumeThread(th);
+    if (ResumeThread(th) == (DWORD)-1) {
+        *err = GetLastError();
+        TerminateThread(th, 0);   // never ran, so it never touched dup
+        CloseHandle(th);
+        CloseHandle(ev);
+        CloseHandle(dup);
+        return 2;
+    }
     DWORD w = WaitForSingleObject(ev, 300);
+    if (w == WAIT_FAILED) *err = GetLastError();
     CloseHandle(ev);
     CloseHandle(th);
-    return w == WAIT_OBJECT_0 ? 1 : 0;
+    return w == WAIT_OBJECT_0 ? 1 : w == WAIT_TIMEOUT ? 0 : 2;
 }
 
 static void cb_state(PLine* l, bool withBehavioural) {

@@ -8,6 +8,11 @@
 #   mb1, mb2  probe_dm.dll, plus the behavioural test
 # Raw logs go to logs/<pass>/<scenario>.log; US-052-thread-end-probe-summarize.pl then writes summary.txt.
 # Usage: perl US-052-thread-end-probe-run-all.pl [pass ...]     (PROBE_ONLY=<regex> limits the scenarios)
+# Each selected pass starts from an empty logs/<pass>: all its .log and .norm files are deleted first, also those
+# of scenarios PROBE_ONLY excludes, so the pass holds only this run's scenarios. Unselected passes keep their logs.
+# "probe_exe.exe run <scenario>" exits 0 once it has waited for the child and logged "L child ended", whatever the
+# child's own exit code or the watchdog verdict; 1 = bad arguments, 2 = CreateProcess failed. Anything but exit 0
+# with that line in the log stops the run.
 use strict;
 use warnings;
 use File::Basename;
@@ -26,14 +31,22 @@ for my $p (@pass) {
     my @scen = $is_dm ? @dm : @all;
     @scen = grep { /$ENV{PROBE_ONLY}/ } @scen if $ENV{PROBE_ONLY};
     make_path("logs/$p");
+    for my $old (glob("logs/$p/*.log"), glob("logs/$p/*.norm")) { unlink $old or die "unlink $old: $!\n"; }
     for my $s (@scen) {
-        unlink "logs/$p/$s.log";
+        my $log = "logs/$p/$s.log";
         $ENV{PROBE_LOG} = "$wdir\\logs\\$p\\$s.log";
         my @cmd = ("./probe_exe.exe", "run", $s);
         push @cmd, "beh" if $is_beh;
         push @cmd, "dm" if $is_dm;
         system(@cmd);
+        die "$p $s: cannot launch $cmd[0]: $!\n" if $? == -1;
+        die "$p $s: $cmd[0] died with signal " . ($? & 127) . "\n" if $? & 127;
+        die "$p $s: $cmd[0] exited with " . ($? >> 8) . "\n" if $? >> 8;
+        open my $fh, '<', $log or die "$p $s: no log $log: $!\n";
+        my $ended = grep { /L child ended / } <$fh>;
+        close $fh;
+        die "$p $s: $log has no 'L child ended' line\n" unless $ended;
         print "$p $s done\n";
     }
 }
-system("perl US-052-thread-end-probe-summarize.pl > summary.txt") == 0 or warn "summarize failed\n";
+system("perl US-052-thread-end-probe-summarize.pl > summary.txt") == 0 or die "summarize failed\n";

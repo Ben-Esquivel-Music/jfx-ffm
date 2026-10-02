@@ -12,6 +12,8 @@ use File::Basename;
 
 chdir dirname(__FILE__) or die;
 my @pass = grep { -d "logs/$_" } qw(r1 r2 b1 b2 m1 m2 mb1 mb2);
+die "no logs/<pass> directory\n" unless @pass;
+for my $p (@pass) { my @l = glob("logs/$p/*.log"); die "logs/$p holds no .log file\n" unless @l; }
 my @plain = grep { !/^m/ } @pass;
 my @dmpass = grep { /^m/ } @pass;
 

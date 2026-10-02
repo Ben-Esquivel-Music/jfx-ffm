@@ -135,8 +135,8 @@ platform.
        (`jdinput.c:57-190`, `jdmaster.c:123-148`). The prediction is confirmed once by an instrumented scratch
        run recorded in the provenance, as in US-054 part 1.
    - Add the seeded mutation corpus (flips, truncations, marker splices) with its outcome goldens.
-   - Capture on Windows **and** WSL, and record commit and platform. A Windows/Linux difference is a finding (see
-     risk 3), never averaged.
+   - Capture on Windows **and** WSL, and record commit and platform. A Windows/Linux difference gets a golden per
+     platform and is listed in the test as a known platform divergence (see risk 3), never averaged.
    - The existing keys keep their values, except `images`, which lists the new members after the existing ones
      (today's 9 and those of US-054 part 1), and `capture.provenance`, which names the new capture. The generator
      rewrites the whole file in insertion order and needs `-Djfx.iio.jpeg.regenerate=true` to do so
@@ -221,7 +221,7 @@ Merged PRs (one per slice); verified on Windows and WSL; macOS unverified, but i
 | --- | --- | --- |
 | 1 | Java is too slow on the FX thread (cold JIT) | Slice 4 gates before progressive work; Rust fallback |
 | 2 | Progressive buffers move to the heap, so `-Xmx` OOMs where C succeeded | Off-heap buffers in a confined per-decode `Arena`; huge-dimension members pin the outcome |
-| 3 | `INT32` is `long` (`jmorecfg.h:252`): 32-bit on Windows, 64-bit on LP64 Linux, so ISLOW intermediates (`jidctint.c:196-198`) can differ by platform for adversarial coefficients | Capture on both; if they differ, the maintainer picks one behaviour, recorded in the test |
+| 3 | `INT32` is `long` (`jmorecfg.h:252`): 32-bit on Windows, 64-bit on LP64 Linux, so ISLOW intermediates (`jidctint.c:196-198`) can differ by platform for adversarial coefficients | The Java port reproduces the C's width: it selects its `INT32` arithmetic once per platform, `int` (wrapping) on Windows and `long` on LP64, so it is exact against each platform's own C capture. A member whose C output differs between Windows and WSL gets a golden per platform and is listed in the test as a known platform divergence. macOS follows the LP64 path, unverified (no macOS capture) |
 | 4 | OOM messages that only native allocation failure produces ("Initializing Reader", `iio_api.h:58`) | Decide per message in slice 1; never silently different |
 | 5 | Corpus blind spots (SmartScale, YCCK). Today no member reaches `jdmerge.c` or a kernel of a size other than 1, 2, 4, 8 and 16 | The SmartScale members of US-054 part 1 and of slice 1 are required, not optional, and a test asserts that all 32 kernel sizes are selected; byte-surgery generator and fixtures for the rest; differential mutation test while the C exists |
 | 6 | Owning a forked decoder: future IJG fixes need a manual re-port | Record the followed IJG version; review each IJG release's change log |
