@@ -17,7 +17,7 @@ the repository until filed.
 
 Conventions: one file per story, `US-NNN-<slug>.md`, with Story / Problem or Central finding /
 Acceptance criteria / Definition of Done. Supporting evidence shares the story's prefix
-(`US-009-*`). Files are LF-terminated, like the rest of the tree.
+(`US-009-*`, `US-052-*`). Files are LF-terminated, like the rest of the tree.
 
 ## Open stories
 
@@ -65,7 +65,7 @@ Acceptance criteria / Definition of Done. Supporting evidence shares the story's
 | [US-049](US-049-move-glass-windows-robot-capture-to-java-and-delete-the-pre-vista-file-dialogs.md) | Move Glass Windows robot capture to Java and delete the pre-Vista file dialogs | 🔶 Needs a ruling on part 1 (filed 2026-09-30); it contradicts the header's "stays native". Part 2 deletes 384 dead lines | Part 2 now; the ruling on part 1 before US-031 |
 | [US-050](US-050-retire-dshowwrapper-by-decoding-through-media-foundation.md) | Retire dshowwrapper by decoding through Media Foundation | 🔶 Needs a ruling (filed 2026-09-30); it would delete 43k lines (the plugin plus the DirectShow baseclasses), but AAC/MP3 parity is `tolerance` or `unprovable` | The maintainer rules first; then after US-034 |
 | [US-051](US-051-keep-the-mta-alive-for-mfwrapper-com-calls.md) | Keep the MTA alive for mfwrapper's COM calls | 📋 Ready (filed 2026-10-01); mfwrapper leaves the MTA as soon as `MFStartup` returns, then creates and drives its decoder and colour converter mostly on GStreamer threads that hold no apartment (a flushing seek's reload can run on the seeking thread, which may be in an STA), so it depends on another thread holding the MTA. The DirectSound sink's device notifier holds it in every jfxmedia pipeline today, but nothing in the element declares the dependence; a pipeline without that sink, such as US-034's trace driver, has no holder | Pick up now; it blocks US-034 |
-| [US-052](US-052-fix-two-glass-windows-toolkit-teardown-gaps.md) | Fix two Glass Windows toolkit teardown gaps | 📋 Ready (filed 2026-10-01); a toolkit thread can end without `gwin_terminate_loop` (SWT-embedded, or a `WM_QUIT` on the pump, which needs foreign code). The `WM_NCDESTROY` arm may then never run (not checked), and the toolkit would stay published: US-039 part 1's guard would protect a dead or recycled HWND and a thread id that can be reused, and a queued `gwin_invoke_and_wait` would wait for ever. Separately, the classes of the toolkit window and of every window open at exit are never unregistered | Directly after US-039 part 1, which ships that wait until this lands; before US-031 slice 3, which it does not block |
+| [US-052](US-052-fix-two-glass-windows-toolkit-teardown-gaps.md) | Fix two Glass Windows toolkit teardown gaps | 📋 Ready (filed 2026-10-01; part 1 redesigned the same day after PR review); a toolkit thread can end without `gwin_terminate_loop` (SWT-embedded, or a `WM_QUIT` on the pump, which needs foreign code). The system then frees the toolkit window (documented) and its procedure gets no `WM_NCDESTROY` (measured on a probe), so the toolkit stays published: US-039 part 1's guard protects a dead or recycled HWND and a thread id that can be reused, and a queued `gwin_invoke_and_wait` waits for ever. Part 1 clears the publication from the `DLL_THREAD_DETACH` arm of a `DllMain`. Separately, the classes of the toolkit window and of every window open at exit are never unregistered | Directly after US-039 part 1, which ships that wait until this lands; before US-031 slice 3, which it does not block |
 | [US-053](US-053-fix-two-glass-windows-window-procedure-hazards.md) | Fix two Glass Windows window-procedure hazards | 📋 Ready (filed 2026-10-01); a window destroyed inside one of its own messages has its property removed after the system freed the handle, so `RemoveProp` can hit a recycled HWND; and the toolkit window calls through the `WPARAM` of any `WM_DO_ACTION` or `WM_DO_ACTION_LATER` it receives, from any sender. Both are in upstream's code too | Part 1 now; part 2 after US-039 part 1; before US-031 slice 3, which it does not block |
 | [US-054](US-054-test-the-libjpeg-merged-upsampler-then-replace-it-if-identical.md) | Test the libjpeg merged upsampler, then replace it with the separate path if the two are identical | 📋 Ready (filed 2026-10-01); `jdmerge.c` runs when the decoder derives a block size of 9 to 16 for a 2h1v or 2h2v YCbCr JPEG decoded at 1/1, which an image URL can cause, and no corpus member reaches it. Part 1 adds the members by header surgery, with no encoder. Part 2 is optional: compile merging out if every golden stays identical | Part 1 now; it blocks US-045 slice 1. Part 2 after the mutation corpus of US-045 slice 1 |
 
@@ -205,3 +205,28 @@ perl backlog/US-009-s0-classify.pl <archived S0 report dirs> tests/system/target
 
 A slice passes when every `stable-pass` row of the baseline still passes. The `persistent` rows
 are the known baseline and the `flaky` rows are tracked but not gating.
+
+## US-052 evidence
+
+A standalone Windows probe for the thread-end notification of US-052 part 1. It is not shipped and not built by
+Maven.
+
+| File | Purpose |
+| --- | --- |
+| `US-052-thread-end-probe-results.md` | What the probe measured on 2026-10-01 (Windows 10.0.19045.6466 x64, glass.dll's compiler and linker flags): which of five mechanisms (FLS callback, image TLS callback, `thread_local` destructor, `DllMain`, thread-handle wait) fires in scenarios S1 to S12, on which thread, with the window alive or not and the loader lock held or not; and what was not measured |
+| `US-052-thread-end-probe-dll.cpp` | The probe DLL: `probe.dll` without a `DllMain`, as glass.dll is today, and `probe_dm.dll` with one (`/DPROBE_DLLMAIN`) |
+| `US-052-thread-end-probe-delayload.cpp` | `probe_dl.dll`, which reaches `user32` through delay-load thunks as glass.dll does (S8c, S8d) |
+| `US-052-thread-end-probe-exe.cpp` | `probe_exe.exe`: the scenarios, and a launcher with a 20 s watchdog |
+| `US-052-thread-end-probe-log.h` | CRT-free logging shared by the probe DLL and the EXE sources; the delay-load source does not use it |
+| `US-052-thread-end-probe-build.bat` | Builds the four binaries with the flags `native/win.cmake` gives glass.dll in a Release build |
+| `US-052-thread-end-probe-run-all.pl` | Runs every scenario in a fresh process, eight passes, then calls the summary script |
+| `US-052-thread-end-probe-summarize.pl` | Normalises the logs and prints the figures the results file quotes. A run writes them to `summary.txt` next to the sources; that file is not kept in the tree |
+
+To rebuild and rerun (Visual Studio 2022 x64 and Git Bash perl, about five minutes), copy the files to a scratch
+directory first: the binaries, `logs/` and `summary.txt` are written next to the sources and are not kept in the
+tree.
+
+```
+cmd /c US-052-thread-end-probe-build.bat
+perl US-052-thread-end-probe-run-all.pl
+```

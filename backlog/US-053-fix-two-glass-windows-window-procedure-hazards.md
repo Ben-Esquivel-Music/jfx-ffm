@@ -63,7 +63,9 @@ Paths are relative to `modules/javafx.graphics/src/main/native-glass/win`.
    - The teardown rundown deletes the actions still listed, which are those posted but never dispatched. Today they
      leak. The Java ids the header records as leaked with them (`glass_win_api.h:728-729`) still leak. The rundown
      detaches the list under the lock and deletes outside it: `delete` on an `Action` is a virtual call, and the
-     list lock is never held across a call out of the library.
+     list lock is never held across a call out of the library. If US-052 part 1 has landed, the delete stays in
+     the `WM_NCDESTROY` arm. That story's `DLL_THREAD_DETACH` path runs under the loader lock: it only detaches
+     the list, and those actions leak as they do today.
    - Each action is deleted once. If US-039 part 1's fallback for messages left in the queue is ever needed, it
      deletes only the actions it unlinks from this list.
    - No new lock: the list uses the lock of US-039 part 1's pending list.

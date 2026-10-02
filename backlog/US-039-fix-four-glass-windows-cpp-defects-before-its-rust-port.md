@@ -104,7 +104,9 @@ Paths are relative to `modules/javafx.graphics/src/main/native-glass/win`.
      held, and one static `SRWLOCK`. The `WM_NCDESTROY` arm (`GlassApplication.cpp:88-92`) takes the lock
      exclusively, clears both and releases it. `pInstance` stays as the toolkit thread's own copy. Teardown is
      `DestroyWindow` on that thread (`glass_win_api.cpp:578-584`), the only teardown the library has. A toolkit
-     thread that ends without it never reaches the arm, so nothing is cleared: that gap is US-052 part 1.
+     thread that ends without it never reaches the arm, so nothing is cleared: that gap is US-052 part 1,
+     which also moves the two `WM_CREATE` stores inside the exclusive guard, makes the clear conditional on what
+     is published, and detaches the pending list inside the exclusive section, before the rundown.
    - **Readers.** Each off-thread reader of the Problem list changes as follows:
      - `gwin_invoke_later` and `ExecAction` use the guarded paths below and no longer call `GetToolkitHWND()`;
      - `gwin_invoke_and_wait` drops its `GetInstance()` test (`glass_win_api.cpp:598`). The guarded load in
@@ -171,13 +173,14 @@ Paths are relative to `modules/javafx.graphics/src/main/native-glass/win`.
        two in-tree callers run `stage.setEnabled` and a layout pass, not COM;
      - a toolkit thread that ends with a record pending leaves the caller waiting, because nothing runs the
        rundown. Today `SendMessage` is said to return when the receiving thread ends (from memory, not run). A call
-       made after the thread ended is expected to be refused, as long as the dead HWND was not reused: the system
-       is said to destroy a dead thread's windows, and `SendNotifyMessage` to fail for a dead handle (both from
-       memory, not checked). The gap is the one US-052
-       part 1 closes, and its thread-exit rundown releases these callers. Part 1 ships with this hang until US-052
-       part 1 lands, so US-052 follows part 1 directly. Waiting on the toolkit thread as well was rejected: it
-       needs a thread handle per call and a second way out for a record that is already running, for a case that
-       exists only inside that gap.
+       made after the thread ended is expected to be refused, as long as the dead HWND was not reused. US-052
+       settles part of that. Documented: a terminated thread's windows are freed ("Terminating a Thread").
+       Measured on US-052's probe: the window procedure gets no `WM_NCDESTROY`, and `PostMessage` to the dead
+       handle fails with error 1400. Not measured: what `SendNotifyMessage` and `SendMessage` answer for it. The
+       gap is the one US-052 part 1 closes, and its thread-exit rundown releases these callers. Part 1 ships with
+       this hang until US-052 part 1 lands, so US-052 follows part 1 directly. Waiting on the toolkit thread as
+       well was rejected: it needs a thread handle per call and a second way out for a record that is already
+       running, for a case that exists only inside that gap.
    - **Comments.** The same change corrects the text that calls the race benign or the single read enough, or that
      names `SendMessage` for the cross-thread path: `glass_win_api.cpp:417-421`, `:602-604`, `:611-617`;
      `glass_win_api.h:162` ("There are no locks"), `:592-596`, `:676-683`, `:704-711`, `:723-729`;
@@ -255,7 +258,8 @@ Paths are relative to `modules/javafx.graphics/src/main/native-glass/win`.
 ## Acceptance criteria
 - **Part 1:** the tests use these shim-only hooks, which do nothing in production unless a test arms them:
   - a gate that parks a caller inside the shared section, between the load and the `PostMessage`, and signals that
-    it is parked;
+    it is parked. It parks on a kernel wait and does nothing there that can need the loader lock: US-052 part 1
+    takes the exclusive side under that lock;
   - counters: the `PostMessage` and `SendNotifyMessage` calls, those of them whose target was not the published
     HWND at the time of the call ("stale"), and the actions allocated and freed;
   - a send of the third private message to the toolkit window with a `WPARAM` the caller chooses;

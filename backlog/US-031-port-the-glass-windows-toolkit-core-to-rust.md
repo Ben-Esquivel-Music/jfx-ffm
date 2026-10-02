@@ -7,7 +7,8 @@ NOT read; the robot tests' platform gating was not checked; the `gwin_robot_capt
 review from `glass_win_api.h:252-295`, `glass_win_api.cpp:302-335,470-491` and `WinGlassNativeTest.java:99,643-713`
 (`CaptureScreen` past `:335` not read); the export count in the acceptance criteria was made relative on 2026-10-01;
 the cross-thread text follows US-039 part 1 as redesigned on 2026-10-01, a guarded publication in place of an
-atomic HWND; nothing built) · **Epic:** Rust port of the remaining
+atomic HWND, and US-052 part 1 as revised the same day, a `DllMain` in place of a thread-exit callback; nothing
+built) · **Epic:** Rust port of the remaining
 native code (goal 3) · **Blocked by:** US-027, US-030 (the COM servers the WndProcs hand
 out move first), US-039 part 1, US-039 part 4 (C++ fixes), US-049 part 1 (the ruling on robot capture, and the
 move to Java if the ruling is yes; if it is no, this story ports `gwin_robot_capture` as a 66th export); slice 3
@@ -96,11 +97,18 @@ records as undefined behaviour live in checked code, and glass.dll's remaining C
   outermost message.
 - The toolkit publication of US-039 part 1 is reproduced as it stands in the C++, with its two locks and their
   acquisition points. Port rule P6 allows no lock beyond those two:
-  - the HWND and the toolkit thread id are atomics outside the guard. `WM_CREATE` stores them with no lock, and the
-    thread-id comparison in the synchronous path loads the id with no lock;
+  - the HWND and the toolkit thread id are atomics. `WM_CREATE` stores them with no lock, or under the exclusive
+    guard if US-052 has landed, and the thread-id comparison in the synchronous path loads the id with no lock;
   - the guard's shared side spans the HWND load and one `PostMessageW` or one `SendNotifyMessageW`, in one function;
-  - the guard's exclusive side is taken only where the C++ takes it: in the `WM_NCDESTROY` arm, and in US-052's
-    thread-exit callback if US-052 has landed. The rundown of the pending list follows it;
+  - the guard's exclusive side is taken only where the C++ takes it: in the `WM_NCDESTROY` arm and, if US-052 has
+    landed, around the two `WM_CREATE` stores and in the `DLL_THREAD_DETACH` arm of glass.dll's `DllMain`. The
+    rundown of the pending list follows the clear. If US-052 has landed, the clear is conditional, the list is
+    detached under its lock inside the exclusive section, and the detached records are run down after the
+    release;
+  - if US-052 has landed, `DllMain` moves in slice 3, with the teardown function it calls. Its C++ definition goes
+    under the slice's `JFX_RUST_<SLICE>` switch, and the crate defines it as an `extern "system"` entry inside the P4
+    guard, answering TRUE. It is not an export, so no `/EXPORT:` pulls it out of the staticlib. How the link then
+    prefers it to the CRT's default `DllMain` is not verified; US-052's thread-end tests are the check;
   - the pending list has its own lock, held for list operations only and never across a call out of the library.
     If US-053 part 2 has landed, its list of posted actions is under that same lock, and a post links its action
     inside the shared section;
