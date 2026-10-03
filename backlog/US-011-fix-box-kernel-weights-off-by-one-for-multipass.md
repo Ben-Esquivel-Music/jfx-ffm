@@ -1,6 +1,6 @@
 # US-011 — Build symmetric box-blur kernels for two or more passes
 
-**Status:** ✅ Done (2026-10-02) · **Found:** 2026-09-26, hardware check of the software BoxBlur transform fix (D3D vs SW snapshots)
+**Status:** ✅ Done (2026-10-02, PR #22) · **Found:** 2026-09-26, hardware check of the software BoxBlur transform fix (D3D vs SW snapshots)
 
 ## Story
 As a JavaFX app developer using `BoxBlur` with two or three iterations, or a box-type shadow, on a GPU pipeline,

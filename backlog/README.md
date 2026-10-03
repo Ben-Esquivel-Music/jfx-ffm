@@ -21,7 +21,7 @@ Acceptance criteria / Definition of Done. Supporting evidence shares the story's
 
 ## Open stories
 
-| ID | Title | Status (2026-10-01) | Next action |
+| ID | Title | Status (2026-10-02) | Next action |
 | --- | --- | --- | --- |
 | [US-001](US-001-descope-glass-gtk-glass-mac-prism-mtl-ffm-migration.md) | Migrate `glass/gtk`, `glass/mac`, `prism_mtl` to FFM | 🔶 Linux half unblocked (WSL builds and tests the module); macOS half needs a macOS host | Schedule `glass/gtk` (99 natives, 102 upcall sites) |
 | [US-003](US-003-migrate-javafx-font-jni-to-ffm.md) | Migrate `javafx_font` to FFM | 🔶 Windows and Linux halves done; macOS half (68 natives: `coretext.OS`, `MacFontFinder`, `DFontDecoder`) remains | Needs a macOS host |
@@ -82,7 +82,7 @@ Acceptance criteria / Definition of Done. Supporting evidence shares the story's
 | [US-008](US-008-remove-dead-jslc-me-backend-and-simd.md) | Remove the dead jslc ME backend and `AccelType.SIMD` | 2026-09-27, PR #19 | ME backend (4 `.java`, 2 `.stg`; it could still emit JNI C) and `AccelType.SIMD` deleted, −1,867 lines; `OUT_*` bits kept; `jsl-decora`/`jsl-prism` md5-identical and test counts unchanged on Windows and Linux. Extended: `AccelType.FIXED` deleted; the jslc tests ported to ANTLR 4/JUnit 5 and run in the build (159 tests; 6 that could never fail now can, and every negative is pinned to its reason, with an end-of-input check in all 13 parser helpers); `GtkWindowNativeTest`/`GtkUploadBenchmarkTest` corrected for window managers and WSLg (6 failures, all test assumptions). Later findings filed as US-015 to US-024 |
 | [US-009](US-009-migrate-monocle-jni-to-ffm.md) | Keep Monocle (embedded Linux) and migrate it from JNI to FFM | 2026-09-23, PR #12 | S1–S8 + D3; 195 natives → 0, ~3,500 lines of C deleted, `prism_es2_monocle` target, `monocle_egl_ext.h` |
 | [US-010](US-010-fix-gaussian-input-clip-sign-under-rotation-mirror.md) | Pad the Gaussian input clip by absolute distances | 2026-09-26, PR #18 | `GaussianRenderState.getInputClip` pads by `ceil(\|dx0\| + \|dx1\|)` and `ceil(\|dy0\| + \|dy1\|)`; `GaussianInputClipTest`, golden unchanged, D3D/ES2/SW snapshot check met |
-| [US-011](US-011-fix-box-kernel-weights-off-by-one-for-multipass.md) | Build symmetric box-blur kernels for two or more passes | 2026-10-02 | `BoxRenderState.validateWeights` sums a full window at `i == klen` (`while (i >= klen)`); `BoxRenderStateWeightsTest` checks the kernels bitwise against independent convolutions; the 28 golden rows recorded with the old kernel are a reviewed `KernelDeviation`; D3D/ES2/SW snapshot check met. Follow-ups US-055 to US-058 |
+| [US-011](US-011-fix-box-kernel-weights-off-by-one-for-multipass.md) | Build symmetric box-blur kernels for two or more passes | 2026-10-02, PR #22 | `BoxRenderState.validateWeights` sums a full window at `i == klen` (`while (i >= klen)`); `BoxRenderStateWeightsTest` checks the kernels bitwise against independent convolutions; the 28 golden rows recorded with the old kernel are a reviewed `KernelDeviation`; D3D/ES2/SW snapshot check met. Follow-ups US-055 to US-058 |
 | [US-012](US-012-fix-box-pass-size-squared-srcscale-for-scaled-inputs.md) | Scale the box pass size by the input scale once, not twice | 2026-09-26, PR #17 | `BoxRenderState.validatePassInput` scales the pass size by `srcScale` once; `BoxRenderStateScaledInputTest`, golden unchanged, D3D/ES2/SW snapshot check met |
 
 Never filed in this directory: US-002 `prism_common` (deleted 2026-09-07) and US-004 `glass/win` (no
