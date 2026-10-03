@@ -277,6 +277,14 @@ public final class DecoraBackend {
     }
 
     /**
+     * Wraps an image as an {@code ImageData} with the given untransformed bounds and transform, as an input that
+     * renders in another space than the filter's returns its result: the filter draws it through the transform.
+     */
+    public ImageData data(Image image, Rectangle bounds, BaseTransform transform) {
+        return new ImageData(fctx, image, new Rectangle(bounds), transform);
+    }
+
+    /**
      * Runs a box kernel through the peers {@code BoxRenderState.getPassPeer} picks in production, pass by pass:
      * the {@code BoxBlur}/{@code BoxShadow} peers when {@code spread == 0} and {@code validatePassInput} found
      * the pass input sw-compatible (an identity or translate-only transform, or a positive axis-aligned scale, whose
@@ -552,8 +560,8 @@ public final class DecoraBackend {
 
     /**
      * {@code PSWRenderer} without Prism: heap images from {@link Image}, peers from the delegate's class
-     * names. The renderer's {@code transform} methods are not supported: an input carries at most a
-     * translation in its {@code ImageData}, which the software peers read without the renderer.
+     * names. The renderer's {@code transform} methods are not supported: the software peers read an input's
+     * transform from its {@code ImageData} without the renderer.
      */
     private static final class DirectRenderer extends Renderer {
 
