@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2012, 2013, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2012, 2026, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -26,7 +26,9 @@
 package com.sun.prism.sw;
 
 import com.sun.javafx.geom.transform.BaseTransform;
+import com.sun.pisces.RendererBase;
 import com.sun.pisces.Transform6;
+import com.sun.prism.Texture;
 
 final class SWUtils {
 
@@ -49,5 +51,19 @@ final class SWUtils {
         piscesTx.m11 = (int) (TO_PISCES * prismTx.getMyy());
         piscesTx.m02 = (int) (TO_PISCES * prismTx.getMxt());
         piscesTx.m12 = (int) (TO_PISCES * prismTx.getMyt());
+    }
+
+    /**
+     * The Pisces wrap mode for a texture: what linear filtering reads beyond its content. A {@code _SIMULATED}
+     * mode is the mode it simulates: the SW pipeline passes the content size, so the C applies the wrap mode
+     * itself at the content edge and never reads the simulated guard texels. {@code CLAMP_NOT_NEEDED} promises
+     * that no sample lands outside the content, so its edge texels are as good as any.
+     */
+    static int toPiscesWrapMode(Texture.WrapMode wrapMode) {
+        return switch (wrapMode) {
+            case CLAMP_NOT_NEEDED, CLAMP_TO_EDGE, CLAMP_TO_EDGE_SIMULATED -> RendererBase.WRAP_CLAMP_TO_EDGE;
+            case CLAMP_TO_ZERO, CLAMP_TO_ZERO_SIMULATED -> RendererBase.WRAP_CLAMP_TO_ZERO;
+            case REPEAT, REPEAT_SIMULATED -> RendererBase.WRAP_REPEAT;
+        };
     }
 }

@@ -76,7 +76,10 @@ static const int32_t psw_constants[] = {
     PSW_IMAGE_MODE_MULTIPLY,
     PSW_IMAGE_FRAC_EDGE_KEEP,
     PSW_IMAGE_FRAC_EDGE_PAD,
-    PSW_IMAGE_FRAC_EDGE_TRIM
+    PSW_IMAGE_FRAC_EDGE_TRIM,
+    PSW_WRAP_CLAMP_TO_EDGE,
+    PSW_WRAP_REPEAT,
+    PSW_WRAP_CLAMP_TO_ZERO
 };
 PSW_STATIC_ASSERT(sizeof(psw_constants) / sizeof(psw_constants[0]) == PSW_CONSTANT_COUNT, psw_constants_count);
 
@@ -91,6 +94,13 @@ PSW_STATIC_ASSERT(sizeof(psw_constants) / sizeof(psw_constants[0]) == PSW_CONSTA
 static int32_t
 psw_finish(void) {
     return (readAndClearMemErrorFlag() == XNI_TRUE) ? PSW_ERR_OOM : PSW_OK;
+}
+
+/* The wrap modes psw_renderer_set_texture and psw_renderer_draw_image accept (PSW_WRAP_*). */
+static int
+psw_wrap_mode_valid(int32_t wrap_mode) {
+    return wrap_mode == PSW_WRAP_CLAMP_TO_EDGE || wrap_mode == PSW_WRAP_REPEAT
+        || wrap_mode == PSW_WRAP_CLAMP_TO_ZERO;
 }
 
 static void
@@ -627,7 +637,7 @@ psw_renderer_set_texture(void* rdr, int32_t image_type,
                          const int32_t* data, int32_t data_len,
                          int32_t w, int32_t h, int32_t stride,
                          const PswTransform6* tx,
-                         int32_t repeat, int32_t linear_filtering, int32_t has_alpha)
+                         int32_t wrap_mode, int32_t linear_filtering, int32_t has_alpha)
 {
     Renderer* r = (Renderer*) rdr;
     Transform6 textureTransform;
@@ -638,7 +648,7 @@ psw_renderer_set_texture(void* rdr, int32_t image_type,
     if (r == NULL) {
         return PSW_ERR_STATE;
     }
-    if (data == NULL || tx == NULL) {
+    if (data == NULL || tx == NULL || !psw_wrap_mode_valid(wrap_mode)) {
         return PSW_ERR_ARG;
     }
 
@@ -663,7 +673,7 @@ psw_renderer_set_texture(void* rdr, int32_t image_type,
             }
             renderer_setTexture(r, IMAGE_MODE_NORMAL,
                                 alloc_data, w, h, w,
-                                (jboolean) (repeat != 0), (jboolean) (linear_filtering != 0),
+                                wrap_mode, (jboolean) (linear_filtering != 0),
                                 &textureTransform, XNI_TRUE, (jboolean) (has_alpha != 0),
                                 0, 0, w - 1, h - 1);
         } else {
@@ -915,7 +925,7 @@ psw_renderer_draw_image(void* rdr, int32_t* pixels,
                         const int32_t* data, int32_t w, int32_t h,
                         int32_t offset, int32_t stride,
                         const PswTransform6* tx,
-                        int32_t repeat, int32_t linear_filtering,
+                        int32_t wrap_mode, int32_t linear_filtering,
                         int32_t bbox_x, int32_t bbox_y, int32_t bbox_w, int32_t bbox_h,
                         int32_t l_edge, int32_t r_edge, int32_t t_edge, int32_t b_edge,
                         int32_t tx_min, int32_t ty_min, int32_t tx_max, int32_t ty_max,
@@ -931,7 +941,7 @@ psw_renderer_draw_image(void* rdr, int32_t* pixels,
     if (r == NULL) {
         return PSW_ERR_STATE;
     }
-    if (data == NULL || tx == NULL) {
+    if (data == NULL || tx == NULL || !psw_wrap_mode_valid(wrap_mode)) {
         return PSW_ERR_ARG;
     }
     surface = r->_surface;
@@ -943,7 +953,7 @@ psw_renderer_draw_image(void* rdr, int32_t* pixels,
     psw_transform_copy(tx, &textureTransform);
     // the texture is sampled in place (freeData == XNI_FALSE) and detached again below
     renderer_setTexture(r, image_mode, (jint*) data + offset, w, h, stride,
-                        (jboolean) (repeat != 0), (jboolean) (linear_filtering != 0),
+                        wrap_mode, (jboolean) (linear_filtering != 0),
                         &textureTransform, XNI_FALSE, (jboolean) (has_alpha != 0),
                         tx_min, ty_min, tx_max, ty_max);
 

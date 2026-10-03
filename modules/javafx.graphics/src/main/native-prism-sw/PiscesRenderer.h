@@ -138,6 +138,10 @@
 #define IMAGE_FRAC_EDGE_PAD  PSW_IMAGE_FRAC_EDGE_PAD
 #define IMAGE_FRAC_EDGE_TRIM PSW_IMAGE_FRAC_EDGE_TRIM
 
+#define TEXTURE_WRAP_CLAMP_TO_EDGE PSW_WRAP_CLAMP_TO_EDGE
+#define TEXTURE_WRAP_REPEAT        PSW_WRAP_REPEAT
+#define TEXTURE_WRAP_CLAMP_TO_ZERO PSW_WRAP_CLAMP_TO_ZERO
+
 #define LG_GRADIENT_MAP_SIZE 8
 #define GRADIENT_MAP_SIZE (1 << LG_GRADIENT_MAP_SIZE)
 
@@ -360,7 +364,8 @@ typedef struct _Renderer {
     jint _texture_stride;
     jint _texture_txMin, _texture_tyMin;
     jint _texture_txMax, _texture_tyMax;
-    jboolean _texture_repeat;
+    // TEXTURE_WRAP_*: REPEAT tiles the texture; see the edge rule in PiscesPaint.c
+    jint _texture_wrapMode;
     jlong _texture_m00, _texture_m01, _texture_m02;
     jlong _texture_m10, _texture_m11, _texture_m12;
     // if XNI_TRUE, then we use linear interpolation for result pixel value calc.

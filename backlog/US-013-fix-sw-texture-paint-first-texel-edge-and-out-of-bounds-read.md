@@ -1,6 +1,6 @@
 # US-013 — Fix the first texel row and column of the SW texture paint: wrong interpolation, out-of-bounds read
 
-**Status:** 📋 Ready (reproduced with public API on SW against D3D and ES2; cause identified in the native Pisces paint) · **Found:** 2026-09-26, hardware check of US-012 (the SW edge-column observation in its Notes); out-of-bounds read found by the US-012 review
+**Status:** ✅ Done (2026-10-03, PR #23) · **Found:** 2026-09-26, hardware check of US-012 (the SW edge-column observation in its Notes); out-of-bounds read found by the US-012 review
 
 ## Story
 As a JavaFX app developer whose app runs on the software pipeline (no usable GPU, `-Dprism.order=sw`, or the SW
@@ -199,3 +199,148 @@ layout, the test asserts "no foreign colour", not particular values.
     bilinear fringe of a scaled `ImageInput` across its pass direction (-3.1 px² vertical at s = 2). It needs no
     change here.
 - If the prism_sw paint is later ported to Java, the port has to reproduce the fixed behaviour, not this bug.
+
+## Resolution (2026-10-03)
+- **Edge rule (decision):** SW now honours each texture's Prism `Texture.WrapMode` at the texture's content edge, as
+  the GPU pipelines do.
+  - A texel inside the content `[0, W-1] x [0, H-1]` (W, H = `tex.getContentWidth/Height()`) is read as it is. That
+    includes texels outside a drawn sub-rectangle, so sub-rectangle draws are unchanged.
+  - Outside the content, `CLAMP_TO_EDGE` and `CLAMP_NOT_NEEDED` give the edge texel, `CLAMP_TO_ZERO` gives 0 and
+    `REPEAT` wraps. The `_SIMULATED` variants map to their base mode.
+  - The paint never reads outside `[0, W-1] x [0, H-1]`.
+
+  Image and canvas-image textures (`getCachedTexture`, `CLAMP_TO_EDGE`) therefore clamp on all four sides, as on
+  D3D/ES2. Every SW render-target texture is `CLAMP_TO_ZERO` (`SWRTTexture`: the Decora intermediates, the Canvas RTT,
+  the node cache). It now reads 0 beyond its content on all four sides, as D3D does for effect textures. The pool
+  clears its slack on checkout, so the right/bottom edge no longer depends on how the texture was allocated. One
+  intended change follows: under a scale, the right and bottom edges of an exact-size render target now fade to zero
+  instead of clamping, as on D3D.
+- **Fix (C, `native-prism-sw`):**
+  - `PiscesPaint.c` has one neighbour fetch, `getPointsToInterpolate`, at all 12 interpolating sites. It replaces
+    the old helper and its `Repeat` twin. Its fast path is unchanged for footprints inside the content. At the edge it
+    maps each of the four texels through `wrapTexel` (edge: clamp; repeat: -1 to the last texel and back; zero: an
+    outside texel reads 0).
+  - `checkBoundsNoRepeat` keeps a clamped coordinate outside the content in zero mode, so a footprint that lies
+    wholly outside reads 0 rather than the edge texel. This applies when minifying.
+  - Nearest-neighbour REPEAT wraps texel -1 to the last texel; it read texel 0.
+  - In zero mode the alpha interpolators are used even for an opaque texture. Otherwise the zero texels would give an
+    opaque black fringe.
+- **ABI 2:**
+  - The `repeat` flag of `psw_renderer_set_texture` and `psw_renderer_draw_image` becomes `int32_t wrap_mode`:
+    `PSW_WRAP_CLAMP_TO_EDGE` 0, `PSW_WRAP_REPEAT` 1, `PSW_WRAP_CLAMP_TO_ZERO` 2. 0 and 1 keep their old meaning.
+  - The three constants are pinned through `psw_constant` indices 9-11 (`PSW_CONSTANT_COUNT` 9 to 12). Any other
+    value returns `PSW_ERR_ARG`, which Java raises as an `IllegalArgumentException`.
+  - `PSW_ABI_VERSION` 2 = `PiscesNative.ABI_VERSION` 2. The library still has 22 `psw_*` exports and the same
+    imports.
+- **Java:**
+  - `RendererBase` gains `WRAP_CLAMP_TO_EDGE`/`WRAP_REPEAT`/`WRAP_CLAMP_TO_ZERO`, and
+    `PiscesRenderer.setTexture`/`drawImage` take an `int wrapMode`.
+  - `SWUtils.toPiscesWrapMode` maps every `Texture.WrapMode` with an exhaustive switch. `SWGraphics` (2 sites) and
+    `SWPaint` (1 site) pass the texture's mode where they passed `repeat`.
+  - `REPEAT_SIMULATED` now maps to repeat; the old `== REPEAT` made it no-repeat. No SW texture reports a
+    `_SIMULATED` mode today, so nothing visible changes.
+- **Corrections to this story:**
+  - The mirror criterion needs the 1-per-channel tolerance at scale 1.5 as well as at 3: the 16.16 `m00` of 1/1.5 is
+    not exact either. The independent oracle shows 104 pixels 1 off at 1.5. At scale 2 the mirror is exact.
+  - "REPEAT ... not measured" is now measured. Every interpolating REPEAT branch paired tile texels 0 and 1 for
+    texel -1, and a one-row tile read row 1 past its end.
+  - "Not affected: nearest-neighbour texture paints" holds except for nearest REPEAT. There texel -1 read texel 0
+    instead of the last texel, which is the one golden change below.
+  - Hardware criterion: SW is within 1 of D3D on every fully covered pixel. On partially covered edge pixels SW is
+    coverage x D3D within 1 (see the hardware check).
+- **Tests:**
+  - New `test.com.sun.pisces.PiscesTexturePaintEdgeTest`, 175 cases, drives `PiscesRenderer` directly. Each wrap
+    mode is checked against an independent padding oracle: the same texture padded by edge copies, zeros or
+    pre-tiling, drawn as an inner sub-rectangle at 6 placements, so the oracle never reaches an edge. The test also
+    covers:
+    - an out-of-bounds sentinel: the 1-texel-tall and -wide textures sit inside larger arrays whose tail holds a
+      sentinel colour, and the sentinel must never appear;
+    - mirror symmetry, the alpha centroid, the quarter-texel translate against the D3D values, and the colour
+      stripes;
+    - the alpha ramp against D3D (64 clamp, 48 zero);
+    - zero mode against exact-size and pooled allocations (allocation independence), and a minified zero-mode case;
+    - a nearest-neighbour control, and sub-rectangle frames pinned by SHA-256 from HEAD.
+
+    Before the ABI change, its first 93 cases ran on HEAD: 80 failed, and the 13 controls (nearest 6, sub-rectangle 7)
+    passed.
+  - New `test.javafx.scene.image.SWTextureEdgeSnapshotTest` (`tests/system`, headless SW, `Node.snapshot`), 18
+    cases: mirror, centroid, the translate-(0.25, 0.25) row against D3D, stripes, the three one-texel images, and the
+    alpha ramp edges of an `ImageView` (64) and an `ImageInput` (48) against D3D. Its first 16 cases all failed on
+    HEAD with the story's numbers; the out-of-bounds cases failed with heap-dependent garbage.
+  - New `test.com.sun.prism.sw.SWUtilsTest` (2, through `SWUtilsShim`): the mapping of every `WrapMode`.
+    `PiscesNativeTest` pins ABI 2 and the three constants, and rejects an unknown wrap mode (17 to 18).
+  - Mutant proof: 7 native mutants, each re-introducing one defect class (left/top pair, out-of-bounds read,
+    zero-as-edge, REPEAT, right/bottom edge, zero-mode footprint, nearest REPEAT), plus one Java mutant (the
+    `CLAMP_TO_ZERO` mapping). Every one fails tests, and no failure is an exception. The zero-footprint mutant
+    survived the first run, which led to the minified zero-mode case; with it, 8 cases fail.
+- **Golden (`PiscesGoldenRenderTest`), moved:** steps 14-25 differ, each in the same 22 pixels at
+  x = 2, y = 40..61 (max 93 per channel).
+  - Step 14 is `setTexture` REPEAT, nearest, opaque, with a stride wider than the tile. Its first column samples
+    tile texel -1, which now wraps to texel 11 of the 12-texel tile instead of reading texel 0. The half-covered
+    pixel there goes from `0xFF0CACB2` to `0xFF69ACED`.
+  - Steps 15-25 draw on the same surface and carry those pixels.
+  - A mutant with every fix except nearest REPEAT reproduces the old golden byte for byte. So the bilinear and zero
+    fixes move no step.
+  - The new golden is `pisces-golden-820a4c35d7.bin`, captured from the fixed C. `GOLDEN_RESOURCE` and the class
+    comment name it and say why it moved. It replaces `pisces-golden-a544256444.bin` and is the baseline for US-046.
+  - The fix and the golden landed together in commit 820a4c35d7 (PR #23), not in separate commits as the acceptance
+    criteria planned. So no commit fails `PiscesGoldenRenderTest`.
+  - The golden was first named `pisces-golden-dc521e99b6-us013.bin`, which names no commit that holds the fixed C;
+    Copilot's PR #23 review flagged this. It was recaptured on 820a4c35d7 with `prism_sw` rebuilt clean from that
+    commit's C. The recapture is byte-identical: 425,984 bytes, 26 steps, SHA-256
+    `3b0ba8b06cf5d06cc6f7a9eddc31923416cef0eb52f54a601c7bc2d6cfc8eb1c`. It was then renamed after its capture
+    commit. The class comment says to capture on 820a4c35d7 to reproduce it.
+  - `DecoraJavaGoldenTest` was not regenerated and printed byte-identical output.
+- **Windows and Linux runs** (counts from the Maven logs):
+  - Windows, `mvn -B -ntp -pl buildtools/jslc,modules/javafx.graphics clean test -Djfx.parity.require=true`: before
+    (HEAD) graphics 25,715 run, 0 failures, 356 skipped; after 25,893 run, 0 failures, 0 errors, 356 skipped; jslc
+    159/0. Only `PiscesNativeTest` (+1), `PiscesTexturePaintEdgeTest` (+175) and `SWUtilsTest` (+2) changed counts.
+    Generated JSL sources and headers were md5-identical, and there was no `hs_err`.
+  - Linux (WSL, JDK 25, a fresh clone with the change, `-am`, no parity flag): graphics 25,707 run, 0 failures,
+    500 skipped, against 25,529/0/500 for plain HEAD; base 5,510/0/22; jslc 159/0. The same three classes changed
+    counts, `DecoraJavaGoldenTest` output was byte-identical, and there was no `hs_err`.
+  - `ImagePaintTest`, the only robot paint test, on SW (`-DHEADLESS_TEST=true`): 2/2 before and after. The full
+    `FULL_TEST`/`USE_ROBOT` suite takes over the desktop and was not run; it is left to the pre-push check
+    (`openjfx-conventions`).
+- **Hardware check (met), with the clamp-to-zero half confirmed.** `Node.snapshot`, AMD Radeon R7 240, D3D9Ex, ES2
+  over WGL and SW. PRE is a HEAD runtime; POST is the same runtime plus the changed classes and the tree's
+  `prism_sw.dll` (ABI 2).
+  - `EdgeRepro`: SW POST `0 64 191 255 .. 255 191 64 0` = D3D = ES2 (PRE `191 64 191 ...`).
+  - `EdgeProbe`, 90 scenes (`ImageView`, `Canvas.drawImage`, `ImageInput`, a scaled `Canvas` node, a cached node):
+    - fully covered pixels: SW vs D3D at most 1 in all 90 (PRE 255);
+    - mirror at most 1;
+    - centroid within 0.009 px of the centre (PRE up to 0.90);
+    - colour stripes at s = 2: first column the edge colour, max 0.
+  - Clamp to zero: the `ImageInput` alpha ramp starts at 48 = D3D (PRE 136). The scaled `Canvas` node and the cached
+    node equal D3D, and an exact-size Canvas RTT and a pooled cache RTT now give the same pixels (PRE: 10 of 18
+    scenes differed).
+  - `OobProbe`: 0 foreign pixels under G1, ParallelGC `-Xmx64m` and SerialGC (PRE: 7, the story's values).
+  - Effects: the US-012 `BoxBlur(5,5,1)` over a scaled `ImageInput` is 13 from D3D (was 57) and mirror-symmetric
+    (was 51). The story's `DropShadow(THREE_PASS_BOX)` is 5 from D3D (was 105).
+  - Controls: D3D and ES2 are pixel-identical PRE and POST in every probe.
+- **Accepted differences (recorded, not filed):**
+  - **Partially covered quad edges.** SW antialiases the edge of a texture quad that ends mid-pixel: it multiplies
+    the pixel by its coverage. D3D/ES2 use the pixel-centre rule and draw the pixel whole or not at all. In 30 of the
+    90 scenes (s = 1.5 and 0.5, t = 0.25 with a non-transparent edge texel) this is the whole difference: SW =
+    coverage x D3D within 1. It is the same before the fix, and it is a rasterisation difference, not the texture
+    paint. It is also why the GPU's centroid is off by up to 0.5 px there while SW's is exact.
+  - **Decora pass space.** SW blurs an `ImageInput` in texel space and draws a result quad that ends at the content
+    edge. D3D convolves in device space and carries the bilinear tail one device pixel further. That tail is the
+    residual 13 of the `BoxBlur` scene: 0.25 x the edge texel, the u = -0.75 sample. Both pipelines apply the same
+    zero rule, so this is independent of this fix. The same blur without the `ImageInput` differs by 25 before and
+    after.
+- **Filed:** one story, US-059, for the remaining SW texture-sampling differences found here:
+  - nearest-neighbour samples the pixel corner; at a 90-degree rotation that moves the image by one pixel;
+  - `ImageView.setSmooth` is a no-op;
+  - minified edges depend on the transform branch.
+
+  It also carries a note on `psw_renderer_draw_image` bounds checks.
+- **Evidence:** Claude scratchpad of session 540c3f66, `us013/`:
+  - `A-notes.md`, the HEAD runs `a1-*`, `mut/` (`summary.txt`, whose second block is the rerun after the minified
+    zero-mode case), `golden/`, `gate/` (Windows and WSL);
+  - `c-wip/` (the C harness and its mutants), `N-report.md`;
+  - `hw/US-013-hardware-report.md` with the probes and dumps;
+  - the independent review `review/R-review.md`.
+- **Upstream:** `openjdk/jfx` master still has the old `getPointsToInterpolate[Repeat]` and bounds lines (checked
+  2026-10-03). The fix changes a fork-only FFM ABI, so it would go upstream as the C change alone, with the JNI
+  `repeat` flag widened to a wrap mode.

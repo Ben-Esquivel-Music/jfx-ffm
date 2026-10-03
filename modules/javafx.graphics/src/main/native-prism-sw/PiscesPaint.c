@@ -376,33 +376,80 @@ static INLINE void checkBoundsRepeat(jint *a, jlong *la, jint min, jint max) {
     }
 }
 
-static INLINE void checkBoundsNoRepeat(jint *a, jlong *la, jint min, jint max) {
+//
+// zero is XNI_TRUE for the bilinear footprint of a CLAMP_TO_ZERO texture: a coordinate whose
+// footprint leaves the content [0, last] is then not moved back into it but kept outside, below 0
+// as -1 or -2 and from last on as last or last + 1, so getPointsToInterpolate reads every texel
+// that the unclamped footprint has outside the content as 0, whatever the frac is
+//
+static INLINE void checkBoundsNoRepeat(jint *a, jlong *la, jint min, jint max,
+    jint last, jboolean zero)
+{
     jint aval = *a;
     if (aval < min) {
-        *a = min;
+        *a = (zero && aval < 0) ? MAX(aval, -2) : min;
     } else if (aval > max) {
-        *a = max;
+        *a = (zero && aval >= last) ? MIN(aval, last + 1) : max;
     }
 }
 
-static INLINE void getPointsToInterpolate(jint *pts, jint *data, jint sidx, jint stride, jint p00,
-    jint tx, jint txMax, jint ty, jint tyMax)
-{
-    jint sidx2 = (ty >= tyMax) ? sidx : sidx + stride;
-    jboolean isXin = (tx < txMax);
-    pts[0] = (isXin) ? data[sidx + 1] : p00;
-    pts[1] = data[sidx2];
-    pts[2] = (isXin) ? data[sidx2 + 1] : data[sidx2];
+/*
+ * Edge rule of the bilinear footprint. The footprint of (tx, ty) is the texels (tx, ty),
+ * (tx+1, ty), (tx, ty+1) and (tx+1, ty+1), with tx and ty already bounded to [txMin-1, txMax] and
+ * [tyMin-1, tyMax], or kept outside the content (checkBoundsNoRepeat). A texel inside the content
+ * [0, txLast] x [0, tyLast] (width - 1, height - 1) is always read as it is, also outside the drawn
+ * sub-rectangle txMin..txMax, as a GPU samples it.
+ * A texel outside the content follows the texture's com.sun.prism.Texture.WrapMode, as on the GPU
+ * pipelines: TEXTURE_WRAP_CLAMP_TO_EDGE (CLAMP_TO_EDGE, CLAMP_NOT_NEEDED) is the nearest edge
+ * texel, TEXTURE_WRAP_CLAMP_TO_ZERO (CLAMP_TO_ZERO) is transparent 0, and TEXTURE_WRAP_REPEAT
+ * (REPEAT) wraps -1 to txLast and txLast + 1 to 0. So tx == -1 pairs texel -1 with texel 0, never
+ * with texel 1, and no texel outside the content is ever read.
+ */
+static INLINE jint wrapTexel(jint i, jint last, jint wrapMode) {
+    if (i < 0) {
+        return (wrapMode == TEXTURE_WRAP_REPEAT) ? last :
+            (wrapMode == TEXTURE_WRAP_CLAMP_TO_ZERO) ? -1 : 0;
+    }
+    if (i > last) {
+        return (wrapMode == TEXTURE_WRAP_REPEAT) ? 0 :
+            (wrapMode == TEXTURE_WRAP_CLAMP_TO_ZERO) ? -1 : last;
+    }
+    return i;
 }
 
-static INLINE void getPointsToInterpolateRepeat(jint *pts, jint *data, jint sidx, jint stride, jint p00,
-    jint tx, jint txMax, jint ty, jint tyMax)
+static INLINE jint texelAt(jint *data, jint stride, jint x, jint y) {
+    return (x < 0 || y < 0) ? 0x00000000 : data[y * stride + x];
+}
+
+static jint getPointsToInterpolateAtEdge(jint *pts, jint *data, jint stride,
+    jint tx, jint txLast, jint ty, jint tyLast, jint wrapMode)
 {
-    jint sidx2 = (ty >= tyMax) ? MAX(tx,0) : sidx + stride;
-    jboolean isXin = (tx < txMax);
-    pts[0] = (isXin) ? data[sidx + 1] : data[sidx - MAX(tx,0)];
-    pts[1] = data[sidx2];
-    pts[2] = (isXin) ? data[sidx2 + 1] : data[sidx2 - MAX(tx,0)];
+    jint x0 = wrapTexel(tx, txLast, wrapMode);
+    jint x1 = wrapTexel(tx + 1, txLast, wrapMode);
+    jint y0 = wrapTexel(ty, tyLast, wrapMode);
+    jint y1 = wrapTexel(ty + 1, tyLast, wrapMode);
+    pts[0] = texelAt(data, stride, x1, y0);
+    pts[1] = texelAt(data, stride, x0, y1);
+    pts[2] = texelAt(data, stride, x1, y1);
+    return texelAt(data, stride, x0, y0);
+}
+
+/*
+ * Returns texel (tx, ty) and stores its right, lower and lower-right neighbours in pts[0..2].
+ */
+static INLINE jint getPointsToInterpolate(jint *pts, jint *data, jint stride,
+    jint tx, jint txLast, jint ty, jint tyLast, jint wrapMode)
+{
+    if (tx >= 0 && tx < txLast && ty >= 0 && ty < tyLast) {
+        // the whole footprint is inside the content
+        jint sidx = ty * stride + tx;
+        jint sidx2 = sidx + stride;
+        pts[0] = data[sidx + 1];
+        pts[1] = data[sidx2];
+        pts[2] = data[sidx2 + 1];
+        return data[sidx];
+    }
+    return getPointsToInterpolateAtEdge(pts, data, stride, tx, txLast, ty, tyLast, wrapMode);
 }
 
 void
@@ -419,18 +466,24 @@ genTexturePaintTarget(Renderer *rdr, jint *paint, jint height) {
     jint tyMin = rdr->_texture_tyMin;
     jint txMax = rdr->_texture_txMax;
     jint tyMax = rdr->_texture_tyMax;
+    jint wrapMode = rdr->_texture_wrapMode;
+    jboolean repeat = (wrapMode == TEXTURE_WRAP_REPEAT);
+    // never true for nearest sampling, whose NO_REPEAT reads stay inside txMin-1..txMax
+    jboolean zeroEdge = (wrapMode == TEXTURE_WRAP_CLAMP_TO_ZERO) && rdr->_texture_interpolate;
     jint repeatInterpolateMode;
 
     if (rdr->_texture_interpolate) {
-        if (rdr->_texture_hasAlpha) {
-            repeatInterpolateMode = (rdr->_texture_repeat) ?
+        // the transparent texels beyond a CLAMP_TO_ZERO edge need the alpha interpolation; on an
+        // opaque texture (alpha 0xff) it gives the same pixels as the no-alpha one inside the content
+        if (rdr->_texture_hasAlpha || wrapMode == TEXTURE_WRAP_CLAMP_TO_ZERO) {
+            repeatInterpolateMode = (repeat) ?
                 REPEAT_INTERPOLATE_ALPHA : NO_REPEAT_INTERPOLATE_ALPHA;
         } else {
-            repeatInterpolateMode = (rdr->_texture_repeat) ?
+            repeatInterpolateMode = (repeat) ?
                 REPEAT_INTERPOLATE_NO_ALPHA : NO_REPEAT_INTERPOLATE_NO_ALPHA;
         }
     } else {
-        repeatInterpolateMode = (rdr->_texture_repeat) ?
+        repeatInterpolateMode = (repeat) ?
             REPEAT_NO_INTERPOLATE : NO_REPEAT_NO_INTERPOLATE;
     }
 
@@ -474,10 +527,11 @@ genTexturePaintTarget(Renderer *rdr, jint *paint, jint height) {
             hfrac = (jint)(ltx & 0xffff);
             vfrac = (jint)(lty & 0xffff);
 
-            if (rdr->_texture_repeat) {
-                checkBoundsRepeat(&ty, &lty, tyMin-1, tyMax);
+            if (repeat) {
+                // only a bilinear footprint may start at tyMin - 1 unwrapped
+                checkBoundsRepeat(&ty, &lty, (rdr->_texture_interpolate) ? tyMin-1 : tyMin, tyMax);
             } else {
-                checkBoundsNoRepeat(&ty, &lty, tyMin-1, tyMax);
+                checkBoundsNoRepeat(&ty, &lty, tyMin-1, tyMax, txtHeight-1, zeroEdge);
             }
 
             a = paint + pidx;
@@ -508,7 +562,7 @@ genTexturePaintTarget(Renderer *rdr, jint *paint, jint height) {
             case REPEAT_NO_INTERPOLATE:
                 while (a < am) {
                     tx = (jint)(ltx >> 16);
-                    checkBoundsRepeat(&tx, &ltx, txMin-1, txMax);
+                    checkBoundsRepeat(&tx, &ltx, txMin, txMax);
                     PISCES_DEBUG("[%d, %d, h:%d, v:%d] ", tx, ty, hfrac, vfrac);
                     sidx = MAX(0, ty) * txtStride + MAX(0, tx);
                     assert(pidx >= 0);
@@ -522,12 +576,10 @@ genTexturePaintTarget(Renderer *rdr, jint *paint, jint height) {
             case NO_REPEAT_INTERPOLATE_ALPHA:
                 while (a < am) {
                     tx = (jint)(ltx >> 16);
-                    checkBoundsNoRepeat(&tx, &ltx, txMin-1, txMax);
+                    checkBoundsNoRepeat(&tx, &ltx, txMin-1, txMax, txtWidth-1, zeroEdge);
                     PISCES_DEBUG("[%d, %d, h:%d, v:%d] ", tx, ty, hfrac, vfrac);
-                    sidx = MAX(0, ty) * txtStride + MAX(0, tx);
-                    p00 = txtData[sidx];
-                    getPointsToInterpolate(pts, txtData, sidx, txtStride, p00,
-                        tx, txtWidth-1, ty, txtHeight-1);
+                    p00 = getPointsToInterpolate(pts, txtData, txtStride,
+                        tx, txtWidth-1, ty, txtHeight-1, wrapMode);
                     PISCES_DEBUG("cols[%x, %x, %x, %x] ", p00, pts[0], pts[1], pts[2]);
                     if (hfrac && vfrac) {
                         cval = interpolate4points(p00, pts[0], pts[1], pts[2], hfrac, vfrac);
@@ -551,10 +603,8 @@ genTexturePaintTarget(Renderer *rdr, jint *paint, jint height) {
                     tx = (jint)(ltx >> 16);
                     checkBoundsRepeat(&tx, &ltx, txMin-1, txMax);
                     PISCES_DEBUG("[%d, %d, h:%d, v:%d] ", tx, ty, hfrac, vfrac);
-                    sidx = MAX(0, ty) * txtStride + MAX(0, tx);
-                    p00 = txtData[sidx];
-                    getPointsToInterpolateRepeat(pts, txtData, sidx, txtStride, p00,
-                        tx, txtWidth-1, ty, txtHeight-1);
+                    p00 = getPointsToInterpolate(pts, txtData, txtStride,
+                        tx, txtWidth-1, ty, txtHeight-1, wrapMode);
                     PISCES_DEBUG("cols[%x, %x, %x, %x] ", p00, pts[0], pts[1], pts[2]);
                     if (hfrac && vfrac) {
                         cval = interpolate4points(p00, pts[0], pts[1], pts[2], hfrac, vfrac);
@@ -576,12 +626,10 @@ genTexturePaintTarget(Renderer *rdr, jint *paint, jint height) {
             case NO_REPEAT_INTERPOLATE_NO_ALPHA:
                 while (a < am) {
                     tx = (jint)(ltx >> 16);
-                    checkBoundsNoRepeat(&tx, &ltx, txMin-1, txMax);
+                    checkBoundsNoRepeat(&tx, &ltx, txMin-1, txMax, txtWidth-1, zeroEdge);
                     PISCES_DEBUG("[%d, %d, h:%d, v:%d] ", tx, ty, hfrac, vfrac);
-                    sidx = MAX(0, ty) * txtStride + MAX(0, tx);
-                    p00 = txtData[sidx];
-                    getPointsToInterpolate(pts, txtData, sidx, txtStride, p00,
-                        tx, txtWidth-1, ty, txtHeight-1);
+                    p00 = getPointsToInterpolate(pts, txtData, txtStride,
+                        tx, txtWidth-1, ty, txtHeight-1, wrapMode);
                     PISCES_DEBUG("cols[%x, %x, %x, %x] ", p00, pts[0], pts[1], pts[2]);
                     if (hfrac && vfrac) {
                         cval = interpolate4pointsNoAlpha(p00, pts[0], pts[1], pts[2], hfrac, vfrac);
@@ -605,10 +653,8 @@ genTexturePaintTarget(Renderer *rdr, jint *paint, jint height) {
                     tx = (jint)(ltx >> 16);
                     checkBoundsRepeat(&tx, &ltx, txMin-1, txMax);
                     PISCES_DEBUG("[%d, %d, h:%d, v:%d] ", tx, ty, hfrac, vfrac);
-                    sidx = MAX(0, ty) * txtStride + MAX(0, tx);
-                    p00 = txtData[sidx];
-                    getPointsToInterpolateRepeat(pts, txtData, sidx, txtStride, p00,
-                        tx, txtWidth-1, ty, txtHeight-1);
+                    p00 = getPointsToInterpolate(pts, txtData, txtStride,
+                        tx, txtWidth-1, ty, txtHeight-1, wrapMode);
                     PISCES_DEBUG("cols[%x, %x, %x, %x] ", p00, pts[0], pts[1], pts[2]);
                     if (hfrac && vfrac) {
                         cval = interpolate4pointsNoAlpha(p00, pts[0], pts[1], pts[2], hfrac, vfrac);
@@ -667,8 +713,8 @@ genTexturePaintTarget(Renderer *rdr, jint *paint, jint height) {
                     ty = (jint)(lty >> 16);
                     hfrac = (jint)(ltx & 0xffff);
                     vfrac = (jint)(lty & 0xffff);
-                    checkBoundsNoRepeat(&tx, &ltx, txMin-1, txMax);
-                    checkBoundsNoRepeat(&ty, &lty, tyMin-1, tyMax);
+                    checkBoundsNoRepeat(&tx, &ltx, txMin-1, txMax, txtWidth-1, zeroEdge);
+                    checkBoundsNoRepeat(&ty, &lty, tyMin-1, tyMax, txtHeight-1, zeroEdge);
                     PISCES_DEBUG("[%d, %d, h:%d, v:%d] ", tx, ty, hfrac, vfrac);
                     sidx = MAX(0, ty) * txtStride + MAX(0, tx);
                     assert(pidx >= 0);
@@ -686,8 +732,8 @@ genTexturePaintTarget(Renderer *rdr, jint *paint, jint height) {
                     ty = (jint)(lty >> 16);
                     hfrac = (jint)(ltx & 0xffff);
                     vfrac = (jint)(lty & 0xffff);
-                    checkBoundsRepeat(&tx, &ltx, txMin-1, txMax);
-                    checkBoundsRepeat(&ty, &lty, tyMin-1, tyMax);
+                    checkBoundsRepeat(&tx, &ltx, txMin, txMax);
+                    checkBoundsRepeat(&ty, &lty, tyMin, tyMax);
                     PISCES_DEBUG("[%d, %d, h:%d, v:%d] ", tx, ty, hfrac, vfrac);
                     sidx = MAX(0, ty) * txtStride + MAX(0, tx);
                     assert(pidx >= 0);
@@ -705,13 +751,11 @@ genTexturePaintTarget(Renderer *rdr, jint *paint, jint height) {
                     ty = (jint)(lty >> 16);
                     hfrac = (jint)(ltx & 0xffff);
                     vfrac = (jint)(lty & 0xffff);
-                    checkBoundsNoRepeat(&tx, &ltx, txMin-1, txMax);
-                    checkBoundsNoRepeat(&ty, &lty, tyMin-1, tyMax);
+                    checkBoundsNoRepeat(&tx, &ltx, txMin-1, txMax, txtWidth-1, zeroEdge);
+                    checkBoundsNoRepeat(&ty, &lty, tyMin-1, tyMax, txtHeight-1, zeroEdge);
                     PISCES_DEBUG("[%d, %d, h:%d, v:%d] ", tx, ty, hfrac, vfrac);
-                    sidx = MAX(0, ty) * txtStride + MAX(0, tx);
-                    p00 = txtData[sidx];
-                    getPointsToInterpolate(pts, txtData, sidx, txtStride, p00,
-                        tx, txtWidth-1, ty, txtHeight-1);
+                    p00 = getPointsToInterpolate(pts, txtData, txtStride,
+                        tx, txtWidth-1, ty, txtHeight-1, wrapMode);
                     PISCES_DEBUG("cols[%x, %x, %x, %x] ", p00, pts[0], pts[1], pts[2]);
                     if (hfrac && vfrac) {
                         cval = interpolate4points(p00, pts[0], pts[1], pts[2], hfrac, vfrac);
@@ -741,10 +785,8 @@ genTexturePaintTarget(Renderer *rdr, jint *paint, jint height) {
                     checkBoundsRepeat(&tx, &ltx, txMin-1, txMax);
                     checkBoundsRepeat(&ty, &lty, tyMin-1, tyMax);
                     PISCES_DEBUG("[%d, %d, h:%d, v:%d] ", tx, ty, hfrac, vfrac);
-                    sidx = MAX(0, ty) * txtStride + MAX(0, tx);
-                    p00 = txtData[sidx];
-                    getPointsToInterpolateRepeat(pts, txtData, sidx, txtStride, p00,
-                        tx, txtWidth-1, ty, txtHeight-1);
+                    p00 = getPointsToInterpolate(pts, txtData, txtStride,
+                        tx, txtWidth-1, ty, txtHeight-1, wrapMode);
                     PISCES_DEBUG("cols[%x, %x, %x, %x] ", p00, pts[0], pts[1], pts[2]);
                     if (hfrac && vfrac) {
                         cval = interpolate4points(p00, pts[0], pts[1], pts[2], hfrac, vfrac);
@@ -771,13 +813,11 @@ genTexturePaintTarget(Renderer *rdr, jint *paint, jint height) {
                     ty = (jint)(lty >> 16);
                     hfrac = (jint)(ltx & 0xffff);
                     vfrac = (jint)(lty & 0xffff);
-                    checkBoundsNoRepeat(&tx, &ltx, txMin-1, txMax);
-                    checkBoundsNoRepeat(&ty, &lty, tyMin-1, tyMax);
+                    checkBoundsNoRepeat(&tx, &ltx, txMin-1, txMax, txtWidth-1, zeroEdge);
+                    checkBoundsNoRepeat(&ty, &lty, tyMin-1, tyMax, txtHeight-1, zeroEdge);
                     PISCES_DEBUG("[%d, %d, h:%d, v:%d] ", tx, ty, hfrac, vfrac);
-                    sidx = MAX(0, ty) * txtStride + MAX(0, tx);
-                    p00 = txtData[sidx];
-                    getPointsToInterpolate(pts, txtData, sidx, txtStride, p00,
-                        tx, txtWidth-1, ty, txtHeight-1);
+                    p00 = getPointsToInterpolate(pts, txtData, txtStride,
+                        tx, txtWidth-1, ty, txtHeight-1, wrapMode);
                     PISCES_DEBUG("cols[%x, %x, %x, %x] ", p00, pts[0], pts[1], pts[2]);
                     if (hfrac && vfrac) {
                         cval = interpolate4pointsNoAlpha(p00, pts[0], pts[1], pts[2], hfrac, vfrac);
@@ -807,10 +847,8 @@ genTexturePaintTarget(Renderer *rdr, jint *paint, jint height) {
                     checkBoundsRepeat(&tx, &ltx, txMin-1, txMax);
                     checkBoundsRepeat(&ty, &lty, tyMin-1, tyMax);
                     PISCES_DEBUG("[%d, %d, h:%d, v:%d] ", tx, ty, hfrac, vfrac);
-                    sidx = MAX(0, ty) * txtStride + MAX(0, tx);
-                    p00 = txtData[sidx];
-                    getPointsToInterpolateRepeat(pts, txtData, sidx, txtStride, p00,
-                        tx, txtWidth-1, ty, txtHeight-1);
+                    p00 = getPointsToInterpolate(pts, txtData, txtStride,
+                        tx, txtWidth-1, ty, txtHeight-1, wrapMode);
                     PISCES_DEBUG("cols[%x, %x, %x, %x] ", p00, pts[0], pts[1], pts[2]);
                     if (hfrac && vfrac) {
                         cval = interpolate4pointsNoAlpha(p00, pts[0], pts[1], pts[2], hfrac, vfrac);
@@ -900,8 +938,8 @@ genTexturePaintTarget(Renderer *rdr, jint *paint, jint height) {
                     ty = (jint)(lty >> 16);
                     hfrac = (jint)(ltx & 0xffff);
                     vfrac = (jint)(lty & 0xffff);
-                    checkBoundsRepeat(&tx, &ltx, txMin-1, txMax);
-                    checkBoundsRepeat(&ty, &lty, tyMin-1, tyMax);
+                    checkBoundsRepeat(&tx, &ltx, txMin, txMax);
+                    checkBoundsRepeat(&ty, &lty, tyMin, tyMax);
                     PISCES_DEBUG("[%d, %d, h:%d, v:%d] ", tx, ty, hfrac, vfrac);
                     sidx = MAX(0, ty) * txtStride + MAX(0, tx);
                     p00 = txtData[sidx];
@@ -926,11 +964,8 @@ genTexturePaintTarget(Renderer *rdr, jint *paint, jint height) {
                         isInBoundsNoRepeat(&ty, &lty, tyMin-1, tyMax);
                     PISCES_DEBUG("[%d, %d, h:%d, v:%d] ", tx, ty, hfrac, vfrac);
                     if (inBounds) {
-                        sidx = MAX(0, ty) * txtStride + MAX(0, tx);
-                        p00 = txtData[sidx];
-
-                        getPointsToInterpolate(pts, txtData, sidx, txtStride, p00,
-                            tx, txtWidth-1, ty, txtHeight-1);
+                        p00 = getPointsToInterpolate(pts, txtData, txtStride,
+                            tx, txtWidth-1, ty, txtHeight-1, wrapMode);
                         PISCES_DEBUG("cols[%x, %x, %x, %x] ", p00, pts[0], pts[1], pts[2]);
                         if (hfrac && vfrac) {
                             cval = interpolate4points(p00, pts[0], pts[1], pts[2], hfrac, vfrac);
@@ -964,10 +999,8 @@ genTexturePaintTarget(Renderer *rdr, jint *paint, jint height) {
                     checkBoundsRepeat(&tx, &ltx, txMin-1, txMax);
                     checkBoundsRepeat(&ty, &lty, tyMin-1, tyMax);
                     PISCES_DEBUG("[%d, %d, h:%d, v:%d] ", tx, ty, hfrac, vfrac);
-                    sidx = MAX(0, ty) * txtStride + MAX(0, tx);
-                    p00 = txtData[sidx];
-                    getPointsToInterpolateRepeat(pts, txtData, sidx, txtStride, p00,
-                        tx, txtWidth-1, ty, txtHeight-1);
+                    p00 = getPointsToInterpolate(pts, txtData, txtStride,
+                        tx, txtWidth-1, ty, txtHeight-1, wrapMode);
                     PISCES_DEBUG("cols[%x, %x, %x, %x] ", p00, pts[0], pts[1], pts[2]);
                     if (hfrac && vfrac) {
                         cval = interpolate4points(p00, pts[0], pts[1], pts[2], hfrac, vfrac);
@@ -999,11 +1032,8 @@ genTexturePaintTarget(Renderer *rdr, jint *paint, jint height) {
                         isInBoundsNoRepeat(&ty, &lty, tyMin-1, tyMax);
                     PISCES_DEBUG("[%d, %d, h:%d, v:%d] ", tx, ty, hfrac, vfrac);
                     if (inBounds) {
-                        sidx = MAX(0, ty) * txtStride + MAX(0, tx);
-                        p00 = txtData[sidx];
-
-                        getPointsToInterpolate(pts, txtData, sidx, txtStride, p00,
-                            tx, txtWidth-1, ty, txtHeight-1);
+                        p00 = getPointsToInterpolate(pts, txtData, txtStride,
+                            tx, txtWidth-1, ty, txtHeight-1, wrapMode);
                         PISCES_DEBUG("cols[%x, %x, %x, %x] ", p00, pts[0], pts[1], pts[2]);
                         if (hfrac && vfrac) {
                             cval = interpolate4pointsNoAlpha(p00, pts[0], pts[1], pts[2], hfrac, vfrac);
@@ -1037,10 +1067,8 @@ genTexturePaintTarget(Renderer *rdr, jint *paint, jint height) {
                     checkBoundsRepeat(&tx, &ltx, txMin-1, txMax);
                     checkBoundsRepeat(&ty, &lty, tyMin-1, tyMax);
                     PISCES_DEBUG("[%d, %d, h:%d, v:%d] ", tx, ty, hfrac, vfrac);
-                    sidx = MAX(0, ty) * txtStride + MAX(0, tx);
-                    p00 = txtData[sidx];
-                    getPointsToInterpolateRepeat(pts, txtData, sidx, txtStride, p00,
-                        tx, txtWidth-1, ty, txtHeight-1);
+                    p00 = getPointsToInterpolate(pts, txtData, txtStride,
+                        tx, txtWidth-1, ty, txtHeight-1, wrapMode);
                     PISCES_DEBUG("cols[%x, %x, %x, %x] ", p00, pts[0], pts[1], pts[2]);
                     if (hfrac && vfrac) {
                         cval = interpolate4pointsNoAlpha(p00, pts[0], pts[1], pts[2], hfrac, vfrac);

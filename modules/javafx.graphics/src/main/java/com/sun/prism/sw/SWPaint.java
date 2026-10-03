@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2012, 2020, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2012, 2026, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -35,7 +35,6 @@ import com.sun.pisces.RendererBase;
 import com.sun.pisces.Transform6;
 import com.sun.prism.Image;
 import com.sun.prism.PixelFormat;
-import com.sun.prism.Texture;
 import com.sun.prism.impl.PrismSettings;
 import com.sun.prism.paint.Color;
 import com.sun.prism.paint.Gradient;
@@ -188,7 +187,7 @@ final class SWPaint {
                     this.pr.setTexture(RendererBase.TYPE_INT_ARGB_PRE, tex.getDataNoClone(),
                             tex.getContentWidth(), tex.getContentHeight(), tex.getPhysicalWidth(),
                             piscesTx,
-                            tex.getWrapMode() == Texture.WrapMode.REPEAT,
+                            SWUtils.toPiscesWrapMode(tex.getWrapMode()),
                             tex.getLinearFiltering(),
                             tex.hasAlpha());
                 }
