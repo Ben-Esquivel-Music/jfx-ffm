@@ -139,9 +139,11 @@ public class JSWLinearConvolvePeer extends JSWEffectPeer<LinearConvolveRenderSta
                 dxrow = 0f;
                 dyrow = (srcRect[3] - srcRect[1]) * srch / dstBounds.height;
             } else {
+                // Per the corner table of getTextureCoordinates, srcRect[4..5] - srcRect[0..1]
+                // spans the destination width and srcRect[6..7] - srcRect[0..1] its height.
                 dxcol = (srcRect[4] - srcRect[0]) * srcw / dstBounds.width;
-                dycol = (srcRect[5] - srcRect[1]) * srch / dstBounds.height;
-                dxrow = (srcRect[6] - srcRect[0]) * srcw / dstBounds.width;
+                dycol = (srcRect[5] - srcRect[1]) * srch / dstBounds.width;
+                dxrow = (srcRect[6] - srcRect[0]) * srcw / dstBounds.height;
                 dyrow = (srcRect[7] - srcRect[1]) * srch / dstBounds.height;
             }
 
