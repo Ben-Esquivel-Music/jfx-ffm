@@ -40,6 +40,7 @@ import com.sun.scenario.effect.impl.sw.java.JSWBoxBlurPeer;
 import com.sun.scenario.effect.impl.sw.java.JSWBoxShadowPeer;
 import com.sun.scenario.effect.impl.sw.java.JSWLinearConvolveShadowPeer;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -61,17 +62,20 @@ import test.com.sun.javafx.test.ParityGate;
 import test.com.sun.scenario.effect.DecoraBackend.Result;
 import test.com.sun.scenario.effect.DecoraCorpus.Cause;
 import test.com.sun.scenario.effect.DecoraCorpus.GoldenRow;
+import test.com.sun.scenario.effect.DecoraCorpus.KernelDeviation;
 import test.com.sun.scenario.effect.DecoraCorpus.NativePlatform;
 import test.com.sun.scenario.effect.DecoraCorpus.TransformDeviation;
 import test.com.sun.scenario.effect.DecoraGoldens.Entry;
 import test.com.sun.scenario.effect.DecoraGoldens.Index;
 import test.com.sun.scenario.effect.DecoraGoldens.Tier;
 
+import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.junit.jupiter.api.Assertions.fail;
@@ -98,6 +102,12 @@ import static test.com.sun.scenario.effect.DecoraCorpus.pattern;
  * {@code Math}-derived kernel inputs (the Gaussian weights or the displacement float map) hash differently from the
  * capture, else as "Java peer output moved".
  * <p>
+ * The rows of a reviewed {@link DecoraCorpus.KernelDeviation} ({@link DecoraCorpus#BOX_KERNEL_TAP_COUNT}, the
+ * multi-pass box shadows with a spread, whose golden holds the box kernel from before its tap count was fixed) are
+ * judged on a render of the same recipe whose box states hand the peers the golden's kernel, by every check above;
+ * the production render has to differ from that render and has to equal the render with the independently computed
+ * kernel exactly, and a clipped one has to reproduce its own unclipped production render as the golden's did.
+ * <p>
  * How hard a moved Java frame fails depends on {@code os.arch}. On {@code amd64} and {@code x86_64} the Java output
  * was proven identical on Windows with JDK 26 and on Linux with JDK 25, so there drift and an unjudgeable row are
  * failures. On any other architecture {@code Math.exp} (the Gaussian weights) and {@code Math.pow} (the lighting and
@@ -107,8 +117,12 @@ import static test.com.sun.scenario.effect.DecoraCorpus.pattern;
  * frame is stored in full, is held to its bound and cause everywhere.
  * <p>
  * The golden never moves: {@link #INDEX_MD5} pins the index, the index pins the frames file and its own data
- * lines, the bound, cause and explained columns pin what each row may tolerate, and a transform deviation pins the
- * golden's transform on its rows. The negative controls prove that every branch of the comparison can fail.
+ * lines, the bound, cause and explained columns pin what each row may tolerate, a transform deviation pins the
+ * golden's transform on its rows, and a kernel deviation judges its rows' frames against the golden's own kernel. The
+ * negative controls prove that the branches of the comparison can fail, those of a kernel deviation included
+ * ({@link Kind#KERNEL_UNCHANGED}, {@link Kind#KERNEL_ORACLE} and its judgement against the golden), except the
+ * self-consistency check of clipped renders, which has no negative control (backlog story US-058); a kernel deviation
+ * reuses that check for its clipped rows' production renders.
  */
 public class DecoraJavaGoldenTest {
 
@@ -138,7 +152,7 @@ public class DecoraJavaGoldenTest {
     /** What a comparison found wrong. */
     enum Kind {
         BOUNDS, TRANSFORM, PIN_BOUND, PIN_CAUSE, PIN_TRANSFORM, RECORD, NATIVE_SHA, UNJUDGEABLE, CAUSE_SHAPE,
-        BOUND_EXCEEDED, EXPLAINED_EXCEEDS_CAPTURE, DRIFT, SELF_CONSISTENCY, EDGE_ROWS
+        BOUND_EXCEEDED, EXPLAINED_EXCEEDS_CAPTURE, DRIFT, SELF_CONSISTENCY, EDGE_ROWS, KERNEL_UNCHANGED, KERNEL_ORACLE
     }
 
     record Finding(Kind kind, String message) {
@@ -154,6 +168,11 @@ public class DecoraJavaGoldenTest {
         long pixels = -1;
         long explained = -1;
         int javaSelf = -1;
+        /** On a row of a kernel deviation, the production render against the render with the golden's kernel. */
+        int kernelMaxDelta = -1;
+        long kernelDiffering = -1;
+        /** On a clipped row of a kernel deviation, the production render against its unclipped production render. */
+        int kernelSelf = -1;
         String tx = "?";
         final List<Finding> findings = new ArrayList<>();
         final List<String> warnings = new ArrayList<>();
@@ -280,6 +299,12 @@ public class DecoraJavaGoldenTest {
             TransformDeviation deviation = DecoraCorpus.transformDeviation(row.key());
             if (deviation != null && j.tx.equals(deviation.java())) {
                 verdict += "; tx deviates from the golden's " + e.tx() + " by " + deviation.id();
+            }
+            KernelDeviation kernel = DecoraCorpus.kernelDeviation(row.key());
+            if (kernel != null && j.kernelMaxDelta >= 0) {
+                verdict += "; kernel deviates from the golden's by " + kernel.id() + " (production maxD "
+                        + j.kernelMaxDelta + ", " + j.kernelDiffering + " px"
+                        + (j.kernelSelf >= 0 ? ", self " + j.kernelSelf : "") + ")";
             }
             text.append(String.format(Locale.ROOT, "%-34s %-44s %-8s %-4s %-3s %5s %8s%% %5d %8d %8s %s%n",
                     row.effect(), row.params(), row.size(), j.tier, j.tx,
@@ -679,13 +704,237 @@ public class DecoraJavaGoldenTest {
     }
 
     /**
+     * The kernel deviation names exactly the box shadows with a spread over two or more passes, each in the corpus and
+     * in the golden and none in the transform deviation, covers no other row, and pairs the old loop's kernel with
+     * the oracle.
+     */
+    @Test
+    void kernelDeviationNamesExactlyTheMultiPassBoxSpreadRows() {
+        KernelDeviation deviation = DecoraCorpus.BOX_KERNEL_TAP_COUNT;
+        Set<String> multiPassBoxSpread = new TreeSet<>();
+        for (GoldenRow row : corpus.values()) {
+            if (row.effect().endsWith("LinearConvolveShadow/box") && !row.params().contains(" passes=1 ")) {
+                multiPassBoxSpread.add(row.key());
+            }
+        }
+        assertEquals(28, multiPassBoxSpread.size(), () -> "multi-pass box spread rows " + multiPassBoxSpread);
+        assertEquals(multiPassBoxSpread, new TreeSet<>(deviation.rows()), "rows of " + deviation.id());
+        for (String key : deviation.rows()) {
+            assertNotNull(entries.get(key), () -> "no golden row " + key);
+            assertNull(DecoraCorpus.transformDeviation(key), () -> key + " is in the transform deviation as well");
+        }
+        List<String> covered = corpus.keySet().stream().filter(k -> DecoraCorpus.kernelDeviation(k) != null)
+                .toList();
+        assertEquals(new TreeSet<>(deviation.rows()), new TreeSet<>(covered), "rows the deviation covers");
+        assertSame(BoxKernels.PRE_FIX, deviation.golden());
+        assertSame(BoxKernels.ORACLE, deviation.oracle());
+    }
+
+    /**
+     * The golden's kernel is the old loop's. It gives the kernels {@code BoxRenderState} handed out at commit
+     * 900c40e41a, as {@code BoxRenderStateWeightsTest} measured them there: three ones over two passes
+     * {@code [1 2 3 3 1] / 10}, over three passes {@code [1 3 6 9 7 4 1] / 31}, and a size of 4 over two passes
+     * {@code [0.5 1.5 2.5 3.5 4 4 2.5 1.5 0.5] / 20.5}. It differs from the oracle on two or more passes only.
+     */
+    @Test
+    void preFixKernelIsTheOldLoop() {
+        assertArrayEquals(new double[] {1, 2, 3, 3, 1}, BoxKernels.preFixKernel(3, 2), "3 over 2 passes");
+        assertArrayEquals(new double[] {1, 3, 6, 9, 7, 4, 1}, BoxKernels.preFixKernel(3, 3), "3 over 3 passes");
+        assertArrayEquals(new double[] {0.5, 1.5, 2.5, 3.5, 4, 4, 2.5, 1.5, 0.5}, BoxKernels.preFixKernel(4, 2),
+                "4 over 2 passes");
+        assertArrayEquals(new float[] {0.1f, 0.2f, 0.3f, 0.3f, 0.1f, 0f, 0f, 0f},
+                BoxKernels.passWeights(BoxKernels.preFixKernel(3, 2), 0f), "weights of 3 over 2 passes");
+        for (float size : new float[] {3, 4, 4.5f, 25}) {
+            assertArrayEquals(BoxKernels.oracleKernel(size, 1), BoxKernels.preFixKernel(size, 1), "1 pass of " + size);
+            for (int passes = 2; passes <= 3; passes++) {
+                assertFalse(Arrays.equals(BoxKernels.oracleKernel(size, passes), BoxKernels.preFixKernel(size, passes)),
+                        size + " over " + passes + " passes: the old loop's kernel is the oracle's");
+            }
+        }
+    }
+
+    /**
+     * A row of the kernel deviation whose production render has the golden's kernel again, as when the fix is
+     * reverted, is reported: the render with the golden's kernel still passes against the golden, but the production
+     * render no longer differs from it, and it is not the oracle's.
+     */
+    @ParameterizedTest(name = "{0}")
+    @MethodSource("kernelDeviationControlRows")
+    void revertedFixOnKernelDeviationRowIsReported(String key) {
+        GoldenRow row = row(key);
+        Entry e = entries.get(key);
+        Judgement reverted = judgeRow(row, e, frames, () -> DecoraBackend.java().withBoxStates("pre-fix kernel",
+                BoxKernels.states(BoxKernels.PRE_FIX)), true);
+        assertTrue(reverted.has(Kind.KERNEL_UNCHANGED), reverted::describe);
+        assertTrue(reverted.message(Kind.KERNEL_UNCHANGED).contains("kernel deviation BOX_KERNEL_TAP_COUNT: the"
+                + " production render equals the render with the golden's kernel"), reverted::describe);
+        assertTrue(reverted.has(Kind.KERNEL_ORACLE), reverted::describe);
+        assertEquals(2, reverted.findings.size(), reverted::describe);
+        Judgement clean = judgeRow(row, e, frames, DecoraBackend::java, true);
+        assertTrue(clean.passed(), clean::describe);
+        assertTrue(clean.kernelMaxDelta > 0 && clean.kernelDiffering > 0, clean::describe);
+    }
+
+    /** A full-frame row, a hash-only row and a clipped row of the kernel deviation. */
+    static Stream<String> kernelDeviationControlRows() {
+        return Stream.of("LinearConvolveShadow/box | box h=25 v=25 passes=2 spread=0.3 black | 64x48",
+                "LinearConvolveShadow/box | box h=4 v=6 passes=3 spread=1.0 tinted | 257x129",
+                "clip/LinearConvolveShadow/box | box h=9 v=9 passes=3 spread=0.5 black clip top only | 64x48");
+    }
+
+    /**
+     * A row of the kernel deviation whose production render is not the oracle's is reported, and nothing else is:
+     * here the production kernel is the trimmed box convolved with itself, the other reading of the trimming.
+     */
+    @Test
+    void productionOffTheOracleOnKernelDeviationRowIsReported() {
+        GoldenRow row = row("LinearConvolveShadow/box | box h=4 v=6 passes=3 spread=0.3 black | 64x48");
+        Entry e = entry(row, Tier.P, 0);
+        Judgement off = judgeRow(row, e, frames, () -> DecoraBackend.java().withBoxStates("repeated trimmed box",
+                BoxKernels.states(BoxKernels::repeatedTrimmedBox)), true);
+        assertTrue(off.has(Kind.KERNEL_ORACLE), off::describe);
+        assertTrue(off.message(Kind.KERNEL_ORACLE).contains("kernel deviation BOX_KERNEL_TAP_COUNT: the production"
+                + " render differs from the render with the oracle kernel"), off::describe);
+        assertEquals(1, off.findings.size(), off::describe);
+    }
+
+    /**
+     * The golden of a kernel deviation row holds the golden's kernel and not the fixed one: judged on renders with the
+     * oracle kernel instead, a full-frame row exceeds its bound and a hash-only row is unjudgeable, and the production
+     * render no longer differs from the render the golden is judged on.
+     */
+    @ParameterizedTest(name = "{0}")
+    @MethodSource("kernelDeviationControlRows")
+    void fixedKernelDoesNotReproduceTheGolden(String key) {
+        GoldenRow row = row(key);
+        Entry e = entries.get(key);
+        KernelDeviation deviation = DecoraCorpus.BOX_KERNEL_TAP_COUNT;
+        KernelDeviation fixedAsGolden = new KernelDeviation(deviation.id(), BoxKernels.ORACLE, deviation.oracle(),
+                deviation.rows());
+        Judgement fixed = judgeKernelDeviation(row, e, frames, DecoraBackend::java, fixedAsGolden, true);
+        assertTrue(fixed.has(e.tier() == Tier.H ? Kind.UNJUDGEABLE : Kind.BOUND_EXCEEDED), fixed::describe);
+        assertTrue(fixed.has(Kind.KERNEL_UNCHANGED), fixed::describe);
+    }
+
+    /**
+     * A box shadow with a spread that is not in the kernel deviation is judged against the golden like every other
+     * row: rendered with another kernel, the single-pass row exceeds its bound.
+     */
+    @Test
+    void unlistedBoxSpreadRowThatMovesIsReported() {
+        GoldenRow row = row("LinearConvolveShadow/box | box h=5 v=5 passes=1 spread=0.3 black | 64x48");
+        assertNull(DecoraCorpus.kernelDeviation(row.key()));
+        Entry e = entry(row, Tier.P, 0);
+        BoxKernels.Kernel endTapsHalved = (size, passes) -> {
+            double[] taps = BoxKernels.oracleKernel(size, passes);
+            taps[0] /= 2;
+            taps[taps.length - 1] /= 2;
+            return taps;
+        };
+        Judgement moved = judgeRow(row, e, frames, () -> DecoraBackend.java().withBoxStates("end taps halved",
+                BoxKernels.states(endTapsHalved)), true);
+        assertTrue(moved.has(Kind.BOUND_EXCEEDED), moved::describe);
+        assertFalse(moved.has(Kind.KERNEL_UNCHANGED) || moved.has(Kind.KERNEL_ORACLE), moved::describe);
+    }
+
+    /**
+     * Judges a row against its golden entry: {@link #judgeKernelDeviation} for a row of a reviewed kernel deviation,
+     * else {@link #judgeAgainstGolden}.
+     */
+    static Judgement judgeRow(GoldenRow row, Entry e, byte[] frames, Supplier<DecoraBackend> backends,
+                              boolean movedJavaIsFailure) {
+        KernelDeviation deviation = DecoraCorpus.kernelDeviation(row.key());
+        return deviation == null ? judgeAgainstGolden(row, e, frames, backends, movedJavaIsFailure)
+                : judgeKernelDeviation(row, e, frames, backends, deviation, movedJavaIsFailure);
+    }
+
+    /**
+     * A row of a reviewed {@link KernelDeviation}, whose golden recorded the deviation's {@code golden} kernel. The
+     * golden is judged by {@link #judgeAgainstGolden} on renders whose box states hand the peers that kernel
+     * ({@link BoxKernels#states}). The production render, from {@code backends}, has to differ from the render with
+     * that kernel ({@link Kind#KERNEL_UNCHANGED}), and has to equal the render with the deviation's {@code oracle}
+     * kernel in bounds, transform and every pixel ({@link Kind#KERNEL_ORACLE}). A clipped row's production render has
+     * to reproduce its own unclipped production render as {@link #checkSelfConsistency} requires of every clipped row.
+     */
+    static Judgement judgeKernelDeviation(GoldenRow row, Entry e, byte[] frames, Supplier<DecoraBackend> backends,
+                                          KernelDeviation deviation, boolean movedJavaIsFailure) {
+        Supplier<DecoraBackend> goldenKernel = () -> backends.get().withBoxStates(deviation.id() + " golden kernel",
+                BoxKernels.states(deviation.golden()));
+        Judgement j = judgeAgainstGolden(row, e, frames, goldenKernel, movedJavaIsFailure);
+        Result production = row.render(backends.get());
+        Result golden = row.render(goldenKernel.get());
+        Result oracle = row.render(backends.get().withBoxStates(deviation.id() + " oracle kernel",
+                BoxKernels.states(deviation.oracle())));
+        String fromGolden = renderDifference(production, golden);
+        if (fromGolden == null) {
+            j.fail(Kind.KERNEL_UNCHANGED, "kernel deviation " + deviation.id() + ": the production render equals the"
+                    + " render with the golden's kernel, so the deviation no longer applies to this row");
+        } else if (sameShape(production, golden)) {
+            j.kernelMaxDelta = DecoraCorpus.maxDelta(production, golden);
+            j.kernelDiffering = differingPixels(production, golden);
+        }
+        String fromOracle = renderDifference(production, oracle);
+        if (fromOracle != null) {
+            j.fail(Kind.KERNEL_ORACLE, "kernel deviation " + deviation.id() + ": the production render differs from"
+                    + " the render with the oracle kernel: " + fromOracle);
+        }
+        if (row.clipped()) {
+            Judgement self = new Judgement(row.key(), e.tier());
+            checkSelfConsistency(row, e, production, row.renderUnclipped(backends.get()), self);
+            j.kernelSelf = self.javaSelf;
+            for (Finding f : self.findings) {
+                j.fail(f.kind(), "kernel deviation " + deviation.id() + ", production render: " + f.message());
+            }
+        }
+        return j;
+    }
+
+    /** Null when two renders have the same bounds, transform and pixels, else what differs first. */
+    static String renderDifference(Result a, Result b) {
+        if (!sameShape(a, b)) {
+            return "bounds " + a.x() + "," + a.y() + "," + a.width() + "," + a.height() + " against " + b.x() + ","
+                    + b.y() + "," + b.width() + "," + b.height();
+        }
+        String txA = DecoraGoldens.tx(a.transform());
+        String txB = DecoraGoldens.tx(b.transform());
+        if (!txA.equals(txB)) {
+            return "transform " + txA + " against " + txB;
+        }
+        long differing = differingPixels(a, b);
+        if (differing == 0) {
+            return null;
+        }
+        int first = 0;
+        while (a.pixels()[first] == b.pixels()[first]) {
+            first++;
+        }
+        return String.format(Locale.ROOT, "%d pixels differ, by up to %d, first at (%d,%d): %08x against %08x",
+                differing, DecoraCorpus.maxDelta(a, b), a.x() + first % a.width(), a.y() + first / a.width(),
+                a.pixels()[first], b.pixels()[first]);
+    }
+
+    private static boolean sameShape(Result a, Result b) {
+        return a.x() == b.x() && a.y() == b.y() && a.width() == b.width() && a.height() == b.height();
+    }
+
+    private static long differingPixels(Result a, Result b) {
+        long differing = 0;
+        for (int i = 0; i < a.pixels().length; i++) {
+            if (a.pixels()[i] != b.pixels()[i]) {
+                differing++;
+            }
+        }
+        return differing;
+    }
+
+    /**
      * Renders a row on a fresh backend from {@code backends} and judges it against its golden entry: shape and pins,
      * the native frame, the pixels, and for a clipped row the consistency with its unclipped render (on another
      * fresh backend). {@code movedJavaIsFailure} decides whether drift and an unjudgeable S or H row fail the row or
      * only warn.
      */
-    static Judgement judgeRow(GoldenRow row, Entry e, byte[] frames, Supplier<DecoraBackend> backends,
-                              boolean movedJavaIsFailure) {
+    static Judgement judgeAgainstGolden(GoldenRow row, Entry e, byte[] frames, Supplier<DecoraBackend> backends,
+                                        boolean movedJavaIsFailure) {
         Judgement j = new Judgement(row.key(), e.tier());
         DecoraBackend backend = backends.get();
         Result java = row.render(backend);

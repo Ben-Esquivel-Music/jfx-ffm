@@ -504,10 +504,14 @@ public class BoxRenderState extends LinearConvolveRenderState {
             ik[0] = ik[klen-1] = 1.0 - excess * 0.5;
         }
         int filledklen = klen;
+        // Only the first box has the trimmed end weights: every further pass
+        // convolves with klen untrimmed weights of 1.0.
         for (int p = 1; p < blurPasses; p++) {
             filledklen += klen - 1;
             int i = filledklen - 1;
-            while (i > klen) {
+            // ik[i] becomes the sum of the klen taps i-klen+1..i for i >= klen,
+            // and of the i+1 taps 0..i below that; ik[0] keeps its value.
+            while (i >= klen) {
                 double sum = ik[i];
                 for (int k = 1; k < klen; k++) {
                     sum += ik[i-k];
