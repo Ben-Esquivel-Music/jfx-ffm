@@ -70,4 +70,14 @@ public final class RendererBase {
     public static final int IMAGE_FRAC_EDGE_KEEP = 0;
     public static final int IMAGE_FRAC_EDGE_PAD  = 1;
     public static final int IMAGE_FRAC_EDGE_TRIM = 2;
+
+    /*
+     * Texture wrap modes of PiscesRenderer.setTexture and drawImage: what linear filtering reads beyond
+     * the texture content (com.sun.prism.Texture.WrapMode). CLAMP_TO_EDGE reads the nearest edge texel,
+     * REPEAT the wrapped texel (and the texture tiles), CLAMP_TO_ZERO transparent 0. A texel inside the
+     * content is always read as it is, also outside the drawn sub-rectangle.
+     */
+    public static final int WRAP_CLAMP_TO_EDGE = 0;
+    public static final int WRAP_REPEAT        = 1;
+    public static final int WRAP_CLAMP_TO_ZERO = 2;
 }

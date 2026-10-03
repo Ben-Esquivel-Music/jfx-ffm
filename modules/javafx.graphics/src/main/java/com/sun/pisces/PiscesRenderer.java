@@ -298,12 +298,18 @@ public final class PiscesRenderer {
                               gradientTransform == null ? new Transform6(1 << 16, 0, 0, 1 << 16, 0, 0) : gradientTransform);
     }
 
+    /**
+     * Sets a texture paint for the following fills.
+     *
+     * @param wrapMode {@link RendererBase#WRAP_CLAMP_TO_EDGE}, {@link RendererBase#WRAP_REPEAT} or
+     *        {@link RendererBase#WRAP_CLAMP_TO_ZERO}
+     */
     public void setTexture(int imageType, int data[], int width, int height, int stride,
-        Transform6 textureTransform, boolean repeat, boolean linearFiltering, boolean hasAlpha)
+        Transform6 textureTransform, int wrapMode, boolean linearFiltering, boolean hasAlpha)
     {
         this.inputImageCheck(width, height, 0, stride, data.length);
         PiscesNative.rendererSetTexture(nativePtr, imageType, data, width, height, stride,
-                                        transform(textureTransform), repeat, linearFiltering, hasAlpha);
+                                        transform(textureTransform), wrapMode, linearFiltering, hasAlpha);
     }
 
     /**
@@ -395,8 +401,14 @@ public final class PiscesRenderer {
                                               stride);
     }
 
+    /**
+     * Fills the rectangle {@code bbox} with the texture, sampled over {@code [txMin..txMax] x [tyMin..tyMax]}.
+     *
+     * @param wrapMode {@link RendererBase#WRAP_CLAMP_TO_EDGE}, {@link RendererBase#WRAP_REPEAT} or
+     *        {@link RendererBase#WRAP_CLAMP_TO_ZERO}
+     */
     public void drawImage(int imageType, int imageMode, int data[],  int width, int height, int offset, int stride,
-        Transform6 textureTransform, boolean repeat, boolean linearFiltering,
+        Transform6 textureTransform, int wrapMode, boolean linearFiltering,
         int bboxX, int bboxY, int bboxW, int bboxH,
         int lEdge, int rEdge, int tEdge, int bEdge,
         int txMin, int tyMin, int txMax, int tyMax,
@@ -404,7 +416,7 @@ public final class PiscesRenderer {
     {
         this.inputImageCheck(width, height, offset, stride, data.length);
         PiscesNative.rendererDrawImage(nativePtr, surface.pixels(), imageType, imageMode, data, width, height,
-            offset, stride, transform(textureTransform), repeat, linearFiltering,
+            offset, stride, transform(textureTransform), wrapMode, linearFiltering,
             bboxX, bboxY, bboxW, bboxH,
             lEdge, rEdge, tEdge, bEdge,
             txMin, tyMin, txMax, tyMax,

@@ -305,7 +305,7 @@ renderer_setRadialGradient(Renderer* rdr,
 
 static INLINE void
 renderer_setTexture(Renderer* rdr, jint renderMode, jint* data, jint width, jint height, jint stride,
-                    jboolean repeat, jboolean smooth, 
+                    jint wrapMode, jboolean smooth,
                     const Transform6* transform, jboolean freeData,
                     jboolean textureHasAlpha,
                     jint txMin, jint tyMin, jint txMax, jint tyMax) {
@@ -336,7 +336,7 @@ renderer_setTexture(Renderer* rdr, jint renderMode, jint* data, jint width, jint
     rdr->_texture_imageWidth = width;
     rdr->_texture_imageHeight = height;
     rdr->_texture_stride = stride;
-    rdr->_texture_repeat = repeat;
+    rdr->_texture_wrapMode = wrapMode;
     rdr->_texture_txMin = txMin;
     rdr->_texture_tyMin = tyMin;
     rdr->_texture_txMax = txMax;

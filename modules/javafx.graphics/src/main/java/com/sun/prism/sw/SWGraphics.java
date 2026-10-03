@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2011, 2024, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2011, 2026, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -490,7 +490,7 @@ final class SWGraphics implements ReadbackGraphics {
                             tex.getDataNoClone(), tex.getContentWidth(), tex.getContentHeight(),
                             tex.getOffset(), tex.getPhysicalWidth(),
                             piscesTx,
-                            tex.getWrapMode() == Texture.WrapMode.REPEAT,
+                            SWUtils.toPiscesWrapMode(tex.getWrapMode()),
                             tex.getLinearFiltering(),
                             (int)(Math.min(p1.x, p2.x) * SWUtils.TO_PISCES), (int)(Math.min(p1.y, p2.y) * SWUtils.TO_PISCES),
                             (int)(Math.abs(p2.x - p1.x) * SWUtils.TO_PISCES), (int)(Math.abs(p2.y - p1.y) * SWUtils.TO_PISCES),
@@ -804,7 +804,7 @@ final class SWGraphics implements ReadbackGraphics {
                 data, tex.getContentWidth(), tex.getContentHeight(),
                 swTex.getOffset(), tex.getPhysicalWidth(),
                 piscesTx,
-                tex.getWrapMode() == Texture.WrapMode.REPEAT,
+                SWUtils.toPiscesWrapMode(tex.getWrapMode()),
                 tex.getLinearFiltering(),
                 (int)(SWUtils.TO_PISCES * dstBBox.getMinX()), (int)(SWUtils.TO_PISCES * dstBBox.getMinY()),
                 (int)(SWUtils.TO_PISCES * dstBBox.getWidth()), (int)(SWUtils.TO_PISCES * dstBBox.getHeight()),

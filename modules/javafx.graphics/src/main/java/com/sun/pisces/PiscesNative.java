@@ -69,7 +69,7 @@ import static java.lang.foreign.ValueLayout.JAVA_INT;
 final class PiscesNative {
 
     /** The {@code psw_*} ABI revision this class is written against ({@code PSW_ABI_VERSION}). */
-    static final int ABI_VERSION = 1;
+    static final int ABI_VERSION = 2;
 
     static final int PSW_OK = 0;
     static final int PSW_ERR_OOM = 1;
@@ -77,7 +77,7 @@ final class PiscesNative {
     static final int PSW_ERR_STATE = 3;
 
     /** How many values {@link #constant} exposes; they mirror {@link RendererBase} in declaration order. */
-    static final int CONSTANT_COUNT = 9;
+    static final int CONSTANT_COUNT = 12;
 
     /**
      * {@code PswTransform6}: six S15.16 ints in the {@link Transform6} field order, no padding. A test
@@ -450,13 +450,17 @@ final class PiscesNative {
         check(status, ARG_MESSAGE);
     }
 
-    /** The texture ({@code width x height} ints from {@code data[0]}, row pitch {@code stride}) is copied. */
+    /**
+     * The texture ({@code width x height} ints from {@code data[0]}, row pitch {@code stride}) is copied.
+     * {@code wrapMode} is a {@code RendererBase.WRAP_*} value; the C side rejects any other with
+     * {@code PSW_ERR_ARG}.
+     */
     static void rendererSetTexture(MemorySegment renderer, int imageType, int[] data, int width, int height,
-            int stride, int[] tx, boolean repeat, boolean linearFiltering, boolean hasAlpha) {
+            int stride, int[] tx, int wrapMode, boolean linearFiltering, boolean hasAlpha) {
         int status;
         try {
             status = (int) PSW_RENDERER_SET_TEXTURE.invokeExact(renderer, imageType, MemorySegment.ofArray(data),
-                    data.length, width, height, stride, MemorySegment.ofArray(tx), flag(repeat),
+                    data.length, width, height, stride, MemorySegment.ofArray(tx), wrapMode,
                     flag(linearFiltering), flag(hasAlpha));
         } catch (Throwable t) {
             throw unexpected(t);
@@ -527,16 +531,20 @@ final class PiscesNative {
         check(status, ARG_MESSAGE);
     }
 
-    /** The image is sampled while the call runs and detached before it returns; nothing is copied. */
+    /**
+     * The image is sampled while the call runs and detached before it returns; nothing is copied.
+     * {@code wrapMode} is a {@code RendererBase.WRAP_*} value; the C side rejects any other with
+     * {@code PSW_ERR_ARG}.
+     */
     static void rendererDrawImage(MemorySegment renderer, int[] pixels, int imageType, int imageMode, int[] data,
-            int width, int height, int offset, int stride, int[] tx, boolean repeat, boolean linearFiltering,
+            int width, int height, int offset, int stride, int[] tx, int wrapMode, boolean linearFiltering,
             int bboxX, int bboxY, int bboxW, int bboxH, int lEdge, int rEdge, int tEdge, int bEdge,
             int txMin, int tyMin, int txMax, int tyMax, boolean hasAlpha) {
         int status;
         try {
             status = (int) PSW_RENDERER_DRAW_IMAGE.invokeExact(renderer, MemorySegment.ofArray(pixels),
                     imageType, imageMode, MemorySegment.ofArray(data), width, height, offset, stride,
-                    MemorySegment.ofArray(tx), flag(repeat), flag(linearFiltering),
+                    MemorySegment.ofArray(tx), wrapMode, flag(linearFiltering),
                     bboxX, bboxY, bboxW, bboxH, lEdge, rEdge, tEdge, bEdge, txMin, tyMin, txMax, tyMax,
                     flag(hasAlpha));
         } catch (Throwable t) {

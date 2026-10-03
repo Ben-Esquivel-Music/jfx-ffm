@@ -81,7 +81,12 @@ extern "C" {
  * ABI version, status codes, constants, layouts
  * ---------------------------------------------------------------------------------------------- */
 
-#define PSW_ABI_VERSION 1u
+/*
+ * 2: the `repeat` boolean of psw_renderer_set_texture and psw_renderer_draw_image became
+ * `wrap_mode` (PSW_WRAP_*; 0 and 1 keep their meaning, 2 is new, anything else is PSW_ERR_ARG),
+ * and psw_constant() also returns the three PSW_WRAP_* values.
+ */
+#define PSW_ABI_VERSION 2u
 
 /*
  * Status codes. Java maps PSW_ERR_OOM -> OutOfMemoryError("Allocation of internal renderer buffer
@@ -97,8 +102,14 @@ enum {
 
 /*
  * Same values as the constants of com.sun.pisces.RendererBase; the internal COMPOSITE_* / TYPE_* /
- * IMAGE_* macros of PiscesRenderer.h and PiscesSurface.h alias this enum. psw_constant() returns
- * the values in this declaration order so the Java-side test can prove the two sides agree.
+ * IMAGE_* / TEXTURE_WRAP_* macros of PiscesRenderer.h and PiscesSurface.h alias this enum.
+ * psw_constant() returns the values in this declaration order so the Java-side test can prove the
+ * two sides agree.
+ *
+ * PSW_WRAP_* is the texture wrap mode: what bilinear sampling reads beyond the texture content,
+ * mirroring com.sun.prism.Texture.WrapMode - CLAMP_TO_EDGE (also CLAMP_NOT_NEEDED) the nearest edge
+ * texel, REPEAT the wrapped texel (and the texture tiles), CLAMP_TO_ZERO transparent 0. Nearest
+ * sampling takes the edge texel in both clamp modes and the wrapped texel with REPEAT.
  */
 enum {
     PSW_COMPOSITE_CLEAR      = 0,
@@ -109,9 +120,12 @@ enum {
     PSW_IMAGE_MODE_MULTIPLY  = 2,
     PSW_IMAGE_FRAC_EDGE_KEEP = 0,
     PSW_IMAGE_FRAC_EDGE_PAD  = 1,
-    PSW_IMAGE_FRAC_EDGE_TRIM = 2
+    PSW_IMAGE_FRAC_EDGE_TRIM = 2,
+    PSW_WRAP_CLAMP_TO_EDGE   = 0,
+    PSW_WRAP_REPEAT          = 1,
+    PSW_WRAP_CLAMP_TO_ZERO   = 2
 };
-#define PSW_CONSTANT_COUNT 9
+#define PSW_CONSTANT_COUNT 12
 
 /*
  * S15.16 affine matrix. Field order is identical to com.sun.pisces.Transform6 and to the C
@@ -193,7 +207,8 @@ PRISM_SW_EXPORT int32_t psw_renderer_set_radial_gradient(void* rdr, int32_t cx, 
  * Texture paint. The texture (w x h ints starting at data[0], row pitch `stride`, data_len ints in
  * all) is copied into a buffer the renderer owns, so `data` may be released on return. `image_type`
  * is accepted for symmetry with drawImage and is not consulted (INT_ARGB_PRE only), exactly as the
- * JNI code ignored it. `repeat`, `linear_filtering` and `has_alpha` are booleans compared != 0.
+ * JNI code ignored it. `wrap_mode` is PSW_WRAP_*, any other value -> PSW_ERR_ARG; `linear_filtering`
+ * and `has_alpha` are booleans compared != 0.
  * The JNI-era dimension guard is kept unchanged - w > 0, h > 0, stride > 0, w * h * sizeof(int32_t)
  * below INT_MAX, (h - 1) * stride + w <= data_len - and when it fails this returns PSW_ERR_OOM, not
  * PSW_ERR_ARG, because the JNI setTextureImpl fell through to setMemErrorFlag() there. The Java
@@ -204,7 +219,7 @@ PRISM_SW_EXPORT int32_t psw_renderer_set_texture(void* rdr, int32_t image_type,
                                                  const int32_t* data, int32_t data_len,
                                                  int32_t w, int32_t h, int32_t stride,
                                                  const PswTransform6* tx,
-                                                 int32_t repeat, int32_t linear_filtering, int32_t has_alpha);
+                                                 int32_t wrap_mode, int32_t linear_filtering, int32_t has_alpha);
 
 /*
  * Pixel-touching operations. `pixels` is the surface array, bound for this call only.
@@ -248,13 +263,16 @@ PRISM_SW_EXPORT int32_t psw_renderer_fill_lcd_alpha_mask(void* rdr, int32_t* pix
  * (PSW_IMAGE_FRAC_EDGE_*) and texture sampling bounds (tx_min..ty_max, texel coordinates). The
  * texture is NOT copied: it is sampled while the call runs and detached before return.
  * `image_type` is accepted and ignored as in the JNI code; `image_mode` is PSW_IMAGE_MODE_*.
+ * `wrap_mode` is PSW_WRAP_* (any other value -> PSW_ERR_ARG): with linear filtering, a texel
+ * inside the w x h content is always read as it is, also outside tx_min..ty_max, and one outside it
+ * follows the wrap mode, so nothing beyond the content is ever read.
  */
 PRISM_SW_EXPORT int32_t psw_renderer_draw_image(void* rdr, int32_t* pixels,
                                                 int32_t image_type, int32_t image_mode,
                                                 const int32_t* data, int32_t w, int32_t h,
                                                 int32_t offset, int32_t stride,
                                                 const PswTransform6* tx,
-                                                int32_t repeat, int32_t linear_filtering,
+                                                int32_t wrap_mode, int32_t linear_filtering,
                                                 int32_t bbox_x, int32_t bbox_y, int32_t bbox_w, int32_t bbox_h,
                                                 int32_t l_edge, int32_t r_edge, int32_t t_edge, int32_t b_edge,
                                                 int32_t tx_min, int32_t ty_min, int32_t tx_max, int32_t ty_max,

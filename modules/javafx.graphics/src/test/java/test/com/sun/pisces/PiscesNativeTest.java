@@ -68,6 +68,7 @@ public class PiscesNativeTest {
         RendererBase.TYPE_INT_ARGB_PRE,
         RendererBase.IMAGE_MODE_NORMAL, RendererBase.IMAGE_MODE_MULTIPLY,
         RendererBase.IMAGE_FRAC_EDGE_KEEP, RendererBase.IMAGE_FRAC_EDGE_PAD, RendererBase.IMAGE_FRAC_EDGE_TRIM,
+        RendererBase.WRAP_CLAMP_TO_EDGE, RendererBase.WRAP_REPEAT, RendererBase.WRAP_CLAMP_TO_ZERO,
     };
 
     @BeforeAll
@@ -94,7 +95,7 @@ public class PiscesNativeTest {
 
     @Test
     public void abiVersionIsTheOneTheFacadeWasWrittenFor() {
-        assertEquals(1, PiscesNativeShim.expectedAbiVersion());
+        assertEquals(2, PiscesNativeShim.expectedAbiVersion());
         assertEquals(PiscesNativeShim.expectedAbiVersion(), PiscesNativeShim.abiVersion());
     }
 
@@ -217,13 +218,40 @@ public class PiscesNativeTest {
                 new JavaSurface(new int[64 * 64], RendererBase.TYPE_INT_ARGB_PRE, 64, 64));
         int[] texture = PiscesGoldenRenderTest.opaqueTexture();
         Transform6 identity = new Transform6();
+        int edge = RendererBase.WRAP_CLAMP_TO_EDGE;
 
         OutOfMemoryError zeroWidth = assertThrows(OutOfMemoryError.class, () -> pr.setTexture(
-                RendererBase.TYPE_INT_ARGB_PRE, texture, 0, 16, 16, identity, false, false, false));
+                RendererBase.TYPE_INT_ARGB_PRE, texture, 0, 16, 16, identity, edge, false, false));
         assertEquals(PiscesNativeShim.oomMessage(), zeroWidth.getMessage());
         OutOfMemoryError zeroHeight = assertThrows(OutOfMemoryError.class, () -> pr.setTexture(
-                RendererBase.TYPE_INT_ARGB_PRE, texture, 16, 0, 16, identity, false, false, false));
+                RendererBase.TYPE_INT_ARGB_PRE, texture, 16, 0, 16, identity, edge, false, false));
         assertEquals(PiscesNativeShim.oomMessage(), zeroHeight.getMessage());
+    }
+
+    /**
+     * {@code wrap_mode} is one of the three {@code PSW_WRAP_*} values; both texture entry points reject any
+     * other with {@code PSW_ERR_ARG}, before the surface is bound or a pixel is written.
+     */
+    @Test
+    public void anUnknownWrapModeIsAnIllegalArgument() {
+        int[] pixels = new int[64 * 64];
+        PiscesRenderer pr = new PiscesRenderer(new JavaSurface(pixels, RendererBase.TYPE_INT_ARGB_PRE, 64, 64));
+        pr.setClip(0, 0, 64, 64);
+        int[] texture = PiscesGoldenRenderTest.opaqueTexture();
+        for (int wrapMode : new int[] {-1, RendererBase.WRAP_CLAMP_TO_ZERO + 1, Integer.MAX_VALUE}) {
+            IllegalArgumentException setTexture = assertThrows(IllegalArgumentException.class,
+                    () -> pr.setTexture(RendererBase.TYPE_INT_ARGB_PRE, texture, 16, 16, 16, new Transform6(),
+                            wrapMode, true, true), "setTexture, wrap mode " + wrapMode);
+            assertEquals(PiscesNativeShim.argMessage(), setTexture.getMessage());
+            IllegalArgumentException drawImage = assertThrows(IllegalArgumentException.class,
+                    () -> pr.drawImage(RendererBase.TYPE_INT_ARGB_PRE, RendererBase.IMAGE_MODE_NORMAL, texture, 16,
+                            16, 0, 16, new Transform6(), wrapMode, true, 0, 0, 16 << 16, 16 << 16,
+                            RendererBase.IMAGE_FRAC_EDGE_KEEP, RendererBase.IMAGE_FRAC_EDGE_KEEP,
+                            RendererBase.IMAGE_FRAC_EDGE_KEEP, RendererBase.IMAGE_FRAC_EDGE_KEEP, 0, 0, 15, 15, true),
+                    "drawImage, wrap mode " + wrapMode);
+            assertEquals(PiscesNativeShim.argMessage(), drawImage.getMessage());
+        }
+        assertArrayEquals(new int[64 * 64], pixels, "a rejected call must not have touched the pixels");
     }
 
     /**
@@ -293,7 +321,7 @@ public class PiscesNativeTest {
         pr.setClip(0, 0, 64, 64);
         pr.setColor(0, 0, 0, 255);
         pr.drawImage(RendererBase.TYPE_INT_ARGB_PRE, RendererBase.IMAGE_MODE_NORMAL, image, 16, 16, 0, 16,
-                new Transform6(), false, false, 0, 0, 16 << 16, 16 << 16,
+                new Transform6(), RendererBase.WRAP_CLAMP_TO_EDGE, false, 0, 0, 16 << 16, 16 << 16,
                 RendererBase.IMAGE_FRAC_EDGE_KEEP, RendererBase.IMAGE_FRAC_EDGE_KEEP,
                 RendererBase.IMAGE_FRAC_EDGE_KEEP, RendererBase.IMAGE_FRAC_EDGE_KEEP,
                 0, 0, 15, 15, hasAlpha);

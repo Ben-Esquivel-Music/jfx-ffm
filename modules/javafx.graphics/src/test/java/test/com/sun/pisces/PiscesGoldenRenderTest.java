@@ -62,8 +62,16 @@ import static org.junit.jupiter.api.Assertions.fail;
  * A fixed script drives {@link PiscesRenderer} and {@link JavaSurface} through every operation the
  * software pipeline ({@code com.sun.prism.sw}) uses, on a 64x64 {@code TYPE_INT_ARGB_PRE} surface, and
  * takes a full-frame snapshot of the surface after every step. The golden resource
- * {@value #GOLDEN_RESOURCE} is the raw big-endian concatenation of those snapshots, captured from the
- * <b>JNI build</b> at commit {@code a544256444} (the hash in its name) on Windows x64.
+ * {@value #GOLDEN_RESOURCE} is the raw big-endian concatenation of those snapshots, captured on Windows x64
+ * from commit {@code dc521e99b6} with the US-013 fix of {@code native-prism-sw/PiscesPaint.c} applied.
+ * <p>
+ * It replaced {@code pisces-golden-a544256444.bin}, captured from the <b>JNI build</b> at commit
+ * {@code a544256444}, which the FFM build reproduced byte for byte. The US-013 fix moved 22 of its pixels, at
+ * x = 2, y = 40 to 61: step 14 (the REPEAT, nearest-neighbour {@code setTexture} paint) fills that column
+ * from pixel corners left of the tile, which sample tile texel -1. Nearest-neighbour REPEAT now wraps it to
+ * the last texel of the 12-texel tile, as it already wrapped every texel further out, where it read texel 0
+ * before; steps 15 to 25 carry those pixels unchanged. No other pixel and no other step moved: the
+ * linear-filtering edge fix of US-013 changes none of the script's texture paints.
  * <p>
  * Every later change to the Java side of Pisces - the JNI to FFM flip first of all - has to reproduce
  * this file byte for byte: the C bodies do not change in a migration, so any difference is a
@@ -87,9 +95,10 @@ import static org.junit.jupiter.api.Assertions.fail;
  * never by regenerating this one; a mismatch in an integer step, or on Windows x64 at all, is a bug on
  * the Java side, and is reported as such even when float steps differ alongside it.
  * <p>
- * The JNI glue that produced this golden ({@code native-prism-sw/JPiscesRenderer.c} and its siblings) was deleted in
- * commit {@code 45f18c168a}. To extend or re-verify this corpus, check out {@code a544256444} and capture there;
- * capturing on a later commit proves only that the FFM path agrees with itself. The
+ * The JNI glue that produced the first golden ({@code native-prism-sw/JPiscesRenderer.c} and its siblings) was
+ * deleted in commit {@code 45f18c168a}. To extend or re-verify this corpus, capture on the commit that added
+ * {@value #GOLDEN_RESOURCE} ({@code dc521e99b6} plus the US-013 fix); capturing on a later commit proves only
+ * that the build agrees with itself. The
  * per-step comparisons are counted, and a run that compared none of them fails at the end of the class
  * ({@link ParityGate}); a capture run compares nothing by design and is reported as skipped.
  * <p>
@@ -100,7 +109,7 @@ import static org.junit.jupiter.api.Assertions.fail;
  */
 public class PiscesGoldenRenderTest {
 
-    static final String GOLDEN_RESOURCE = "pisces-golden-a544256444.bin";
+    static final String GOLDEN_RESOURCE = "pisces-golden-dc521e99b6-us013.bin";
     static final String CAPTURE_PROPERTY = "pisces.golden.capture";
 
     private static final ParityGate.Ledger LEDGER = ParityGate.ledger(PiscesGoldenRenderTest.class);
@@ -491,21 +500,23 @@ public class PiscesGoldenRenderTest {
             pr.fillRect(toS(34.5f), toS(34.5f), toS(27f), toS(27f));
             snapshot("radial gradient CYCLE_REFLECT (null transform)");
 
+            int edge = RendererBase.WRAP_CLAMP_TO_EDGE;
+            int repeat = RendererBase.WRAP_REPEAT;
             Transform6 fitTx = new Transform6(toS(0.5f), 0, 0, toS(0.5f), toS(-1f), toS(-1f));
-            pr.setTexture(RendererBase.TYPE_INT_ARGB_PRE, opaque, 16, 16, 16, fitTx, false, false, false);
+            pr.setTexture(RendererBase.TYPE_INT_ARGB_PRE, opaque, 16, 16, 16, fitTx, edge, false, false);
             pr.fillRect(toS(2f), toS(2f), toS(32f), toS(32f));
             snapshot("setTexture repeat=false linear=false alpha=false");
 
             Transform6 tileTx = new Transform6(toS(1.3f), toS(0.05f), toS(-0.05f), toS(1.3f), toS(0.5f), toS(0.25f));
-            pr.setTexture(RendererBase.TYPE_INT_ARGB_PRE, translucent, 16, 16, 16, tileTx, true, true, true);
+            pr.setTexture(RendererBase.TYPE_INT_ARGB_PRE, translucent, 16, 16, 16, tileTx, repeat, true, true);
             pr.fillRect(toS(30f), toS(30f), toS(34f), toS(34f));
             snapshot("setTexture repeat=true linear=true alpha=true");
 
-            pr.setTexture(RendererBase.TYPE_INT_ARGB_PRE, opaque, 12, 12, 16, tileTx, true, false, false);
+            pr.setTexture(RendererBase.TYPE_INT_ARGB_PRE, opaque, 12, 12, 16, tileTx, repeat, false, false);
             pr.fillRect(toS(2.5f), toS(34f), toS(28f), toS(28f));
             snapshot("setTexture repeat=true linear=false alpha=false, stride > width");
 
-            pr.setTexture(RendererBase.TYPE_INT_ARGB_PRE, translucent, 16, 16, 16, fitTx, false, true, true);
+            pr.setTexture(RendererBase.TYPE_INT_ARGB_PRE, translucent, 16, 16, 16, fitTx, edge, true, true);
             pr.fillRect(toS(2f), toS(2f), toS(32f), toS(32f));
             snapshot("setTexture repeat=false linear=true alpha=true");
 
@@ -593,7 +604,8 @@ public class PiscesGoldenRenderTest {
         private void drawImage(int mode, int[] data, int w, int h, int offset, int stride, Transform6 tx,
                 boolean repeat, boolean linear, float bx, float by, float bw, float bh,
                 int lEdge, int rEdge, int tEdge, int bEdge, int txMin, int tyMin, int txMax, int tyMax) {
-            pr.drawImage(RendererBase.TYPE_INT_ARGB_PRE, mode, data, w, h, offset, stride, tx, repeat, linear,
+            pr.drawImage(RendererBase.TYPE_INT_ARGB_PRE, mode, data, w, h, offset, stride, tx,
+                    repeat ? RendererBase.WRAP_REPEAT : RendererBase.WRAP_CLAMP_TO_EDGE, linear,
                     toS(bx), toS(by), toS(bw), toS(bh), lEdge, rEdge, tEdge, bEdge, txMin, tyMin, txMax, tyMax,
                     true);
         }
