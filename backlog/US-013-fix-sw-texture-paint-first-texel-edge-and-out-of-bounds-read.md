@@ -1,6 +1,6 @@
 # US-013 — Fix the first texel row and column of the SW texture paint: wrong interpolation, out-of-bounds read
 
-**Status:** ✅ Done (2026-10-03) · **Found:** 2026-09-26, hardware check of US-012 (the SW edge-column observation in its Notes); out-of-bounds read found by the US-012 review
+**Status:** ✅ Done (2026-10-03, PR #23) · **Found:** 2026-09-26, hardware check of US-012 (the SW edge-column observation in its Notes); out-of-bounds read found by the US-012 review
 
 ## Story
 As a JavaFX app developer whose app runs on the software pipeline (no usable GPU, `-Dprism.order=sw`, or the SW
@@ -273,7 +273,7 @@ layout, the test asserts "no foreign colour", not particular values.
     zero-as-edge, REPEAT, right/bottom edge, zero-mode footprint, nearest REPEAT), plus one Java mutant (the
     `CLAMP_TO_ZERO` mapping). Every one fails tests, and no failure is an exception. The zero-footprint mutant
     survived the first run, which led to the minified zero-mode case; with it, 8 cases fail.
-- **Golden (`PiscesGoldenRenderTest`), moved in its own patch:** steps 14-25 differ, each in the same 22 pixels at
+- **Golden (`PiscesGoldenRenderTest`), moved:** steps 14-25 differ, each in the same 22 pixels at
   x = 2, y = 40..61 (max 93 per channel).
   - Step 14 is `setTexture` REPEAT, nearest, opaque, with a stride wider than the tile. Its first column samples
     tile texel -1, which now wraps to texel 11 of the 12-texel tile instead of reading texel 0. The half-covered
@@ -281,14 +281,15 @@ layout, the test asserts "no foreign colour", not particular values.
   - Steps 15-25 draw on the same surface and carry those pixels.
   - A mutant with every fix except nearest REPEAT reproduces the old golden byte for byte. So the bilinear and zero
     fixes move no step.
-  - The new golden is `pisces-golden-dc521e99b6-us013.bin`, captured from the fixed C. `GOLDEN_RESOURCE` and the
-    class comment name it and say why it moved. It replaces `pisces-golden-a544256444.bin` and is the baseline for
-    US-046.
-  - The name carries the base commit plus the story id, not the capture commit, which does not exist until the
-    change is committed. The class comment says how to reproduce the capture: `dc521e99b6` plus this fix.
-  - The fix commit fails `PiscesGoldenRenderTest` until the golden commit follows it. Steps 20, 21, 23 and 25 are
-    integer-only, so this happens on every platform. The two commits land together in one PR: the fix first, then
-    the golden.
+  - The new golden is `pisces-golden-820a4c35d7.bin`, captured from the fixed C. `GOLDEN_RESOURCE` and the class
+    comment name it and say why it moved. It replaces `pisces-golden-a544256444.bin` and is the baseline for US-046.
+  - The fix and the golden landed together in commit 820a4c35d7 (PR #23), not in separate commits as the acceptance
+    criteria planned. So no commit fails `PiscesGoldenRenderTest`.
+  - The golden was first named `pisces-golden-dc521e99b6-us013.bin`, which names no commit that holds the fixed C;
+    Copilot's PR #23 review flagged this. It was recaptured on 820a4c35d7 with `prism_sw` rebuilt clean from that
+    commit's C. The recapture is byte-identical: 425,984 bytes, 26 steps, SHA-256
+    `3b0ba8b06cf5d06cc6f7a9eddc31923416cef0eb52f54a601c7bc2d6cfc8eb1c`. It was then renamed after its capture
+    commit. The class comment says to capture on 820a4c35d7 to reproduce it.
   - `DecoraJavaGoldenTest` was not regenerated and printed byte-identical output.
 - **Windows and Linux runs** (counts from the Maven logs):
   - Windows, `mvn -B -ntp -pl buildtools/jslc,modules/javafx.graphics clean test -Djfx.parity.require=true`: before

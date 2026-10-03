@@ -63,7 +63,8 @@ import static org.junit.jupiter.api.Assertions.fail;
  * software pipeline ({@code com.sun.prism.sw}) uses, on a 64x64 {@code TYPE_INT_ARGB_PRE} surface, and
  * takes a full-frame snapshot of the surface after every step. The golden resource
  * {@value #GOLDEN_RESOURCE} is the raw big-endian concatenation of those snapshots, captured on Windows x64
- * from commit {@code dc521e99b6} with the US-013 fix of {@code native-prism-sw/PiscesPaint.c} applied.
+ * from commit {@code 820a4c35d7} (PR #23), the commit that contains the US-013 fix of
+ * {@code native-prism-sw/PiscesPaint.c}.
  * <p>
  * It replaced {@code pisces-golden-a544256444.bin}, captured from the <b>JNI build</b> at commit
  * {@code a544256444}, which the FFM build reproduced byte for byte. The US-013 fix moved 22 of its pixels, at
@@ -96,8 +97,8 @@ import static org.junit.jupiter.api.Assertions.fail;
  * the Java side, and is reported as such even when float steps differ alongside it.
  * <p>
  * The JNI glue that produced the first golden ({@code native-prism-sw/JPiscesRenderer.c} and its siblings) was
- * deleted in commit {@code 45f18c168a}. To extend or re-verify this corpus, capture on the commit that added
- * {@value #GOLDEN_RESOURCE} ({@code dc521e99b6} plus the US-013 fix); capturing on a later commit proves only
+ * deleted in commit {@code 45f18c168a}. To extend or re-verify this corpus, capture on commit
+ * {@code 820a4c35d7}, whose C produced {@value #GOLDEN_RESOURCE}; capturing on a later commit proves only
  * that the build agrees with itself. The
  * per-step comparisons are counted, and a run that compared none of them fails at the end of the class
  * ({@link ParityGate}); a capture run compares nothing by design and is reported as skipped.
@@ -109,7 +110,7 @@ import static org.junit.jupiter.api.Assertions.fail;
  */
 public class PiscesGoldenRenderTest {
 
-    static final String GOLDEN_RESOURCE = "pisces-golden-dc521e99b6-us013.bin";
+    static final String GOLDEN_RESOURCE = "pisces-golden-820a4c35d7.bin";
     static final String CAPTURE_PROPERTY = "pisces.golden.capture";
 
     private static final ParityGate.Ledger LEDGER = ParityGate.ledger(PiscesGoldenRenderTest.class);
