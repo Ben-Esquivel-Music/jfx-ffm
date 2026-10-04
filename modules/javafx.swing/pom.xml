@@ -76,10 +76,6 @@
                     <release combine.self="override"/>
                     <source>${jfx.jdk.target.version}</source>
                     <target>${jfx.jdk.target.version}</target>
-                    <compilerArgs combine.children="append">
-                        <arg>--module-version</arg>
-                        <arg>${jfx.release.version.short}</arg>
-                    </compilerArgs>
                 </configuration>
             </plugin>
             <plugin>

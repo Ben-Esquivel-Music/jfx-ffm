@@ -244,8 +244,6 @@
                     <source>${jfx.jdk.target.version}</source>
                     <target>${jfx.jdk.target.version}</target>
                     <compilerArgs combine.children="append">
-                        <arg>--module-version</arg>
-                        <arg>${jfx.release.version.short}</arg>
                         <!-- Resolve requires jdk.jsobject against this repository's copy
                              rather than the deprecated-for-removal JDK system module -->
                         <arg>--upgrade-module-path</arg>
