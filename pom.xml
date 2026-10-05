@@ -77,6 +77,8 @@
         <jfx.release.suffix>-internal</jfx.release.suffix>
         <jfx.release.version.short>${jfx.release.version}${jfx.release.suffix}</jfx.release.version.short>
         <jfx.release.version.long>${jfx.release.version.short}+${jfx.promoted.build.number}-${jfx.build.timestamp}</jfx.release.version.long>
+        <!-- Set to true to skip the module-version-check profile below -->
+        <jfx.module.check.skip>false</jfx.module.check.skip>
 
         <!-- Product identification (open build defaults) -->
         <jfx.product.name>OpenJFX</jfx.product.name>
@@ -250,6 +252,12 @@
                         <debuglevel>${jfx.debuglevel}</debuglevel>
                         <showWarnings>true</showWarnings>
                         <fork>true</fork>
+                        <!-- The module version recorded in every module-info.class. Since 3.14.0
+                             the plugin passes its own module version option to javac (default
+                             ${project.version}, i.e. 28-ea) after compilerArgs, and javac keeps the
+                             last one, so setting the option in compilerArgs has no effect. Guarded
+                             by the module-version-check profile below. -->
+                        <moduleVersion>${jfx.release.version.short}</moduleVersion>
                         <compilerArgs>
                             <arg>-Xmaxerrs</arg>
                             <arg>1000</arg>
@@ -508,6 +516,68 @@
             <properties>
                 <jfx.debuglevel>source,lines,vars</jfx.debuglevel>
             </properties>
+        </profile>
+        <profile>
+            <!-- US-057: every JavaFX module descriptor, and every recorded "requires" version
+                 of a JavaFX module, must carry jfx.release.version.short (the CI version when
+                 CI sets jfx.release.suffix). buildtools/CheckModuleVersions.java reads the
+                 module-info.class and fails the build on a mismatch, a missing version or a
+                 missing descriptor. Activated in every project with a module-info.java, so
+                 javafx.swt (an automatic module), jslc, the system tests and the sdk are left
+                 alone and a new module is covered without any change to its pom.
+                 process-classes comes after the javafx.graphics jsl-codegen execution, which
+                 recompiles that module and overwrites its module-info.class in the compile
+                 phase; verify checks the module jar. Skip with -Djfx.module.check.skip=true. -->
+            <id>module-version-check</id>
+            <activation>
+                <file>
+                    <exists>${basedir}/src/main/java/module-info.java</exists>
+                </file>
+            </activation>
+            <build>
+                <plugins>
+                    <plugin>
+                        <groupId>org.apache.maven.plugins</groupId>
+                        <artifactId>maven-antrun-plugin</artifactId>
+                        <executions>
+                            <execution>
+                                <id>check-module-version</id>
+                                <phase>process-classes</phase>
+                                <goals>
+                                    <goal>run</goal>
+                                </goals>
+                                <configuration>
+                                    <skip>${jfx.module.check.skip}</skip>
+                                    <target>
+                                        <exec executable="${java.home}/bin/java" failonerror="true">
+                                            <arg value="${jfx.root}/buildtools/CheckModuleVersions.java"/>
+                                            <arg value="${jfx.release.version.short}"/>
+                                            <arg value="${project.build.outputDirectory}"/>
+                                        </exec>
+                                    </target>
+                                </configuration>
+                            </execution>
+                            <execution>
+                                <id>check-module-version-jar</id>
+                                <phase>verify</phase>
+                                <goals>
+                                    <goal>run</goal>
+                                </goals>
+                                <configuration>
+                                    <skip>${jfx.module.check.skip}</skip>
+                                    <target>
+                                        <exec executable="${java.home}/bin/java" failonerror="true">
+                                            <arg value="${jfx.root}/buildtools/CheckModuleVersions.java"/>
+                                            <arg value="${jfx.release.version.short}"/>
+                                            <arg value="${project.build.directory}/${project.build.finalName}.jar"/>
+                                        </exec>
+                                    </target>
+                                </configuration>
+                            </execution>
+                        </executions>
+                    </plugin>
+                </plugins>
+            </build>
         </profile>
         <profile>
             <!-- Gradle parity: the "javadoc" task (createOverviewFile + javadoc + the
