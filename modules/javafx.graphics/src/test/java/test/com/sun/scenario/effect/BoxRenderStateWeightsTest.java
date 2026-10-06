@@ -155,6 +155,13 @@ import static test.com.sun.scenario.effect.BoxKernels.trimmedTap;
  * that {@code float} is still exact (added with US-055, two more tests). The single-pass controls, 5 and 9, the
  * largest single-pass box with 3, and 4 and 4.5, convolve nothing.
  * <p>
+ * <b>Reuse of the kernel</b> (backlog story US-056). {@code validateWeights} rebuilds the kernel only when the size or
+ * the spread of the pass differs from the ones it was built for. Four tests write a sentinel into the returned buffer
+ * and read the weights again: the same pass and size keep the sentinel, a pass of another size or spread replaces it
+ * with its own kernel, and with no blur passes the one-tap kernel serves both pass sizes. At commit ba7c6a8a8b
+ * {@code validateWeights} never recorded the size and spread, rebuilt the kernel on every read, and the two tests
+ * that keep the sentinel failed.
+ * <p>
  * At commit 900c40e41a every multi-pass case failed on both passes, in all three parameterized tests, and the
  * single-pass controls and the check of the oracles passed.
  */
@@ -168,6 +175,9 @@ public class BoxRenderStateWeightsTest {
 
     /** Kernels up to this many taps are printed in full in a failure message, longer ones around the tap it names. */
     private static final int PRINTED_TAPS = 15;
+
+    /** A value no kernel holds, written into the weights buffer to see whether the next read rebuilds the kernel. */
+    private static final float SENTINEL = -1f;
 
     /** A box kernel of {@code hsize x vsize} with {@code passes} blur passes. */
     record Case(float hsize, float vsize, int passes) {
@@ -377,6 +387,115 @@ public class BoxRenderStateWeightsTest {
         });
         assertEquals(List.of(new Case(maxSize(3) - 0.5f, 7.3f, 3) + ", pass 1"), inexact,
                 "the passes compared within one ulp");
+    }
+
+    /**
+     * A second read of the weights for the same pass and size reuses the kernel (backlog story US-056): a sentinel
+     * written into the buffer survives {@code getPassWeightsArrayLength}, {@code getPassWeights} and a second
+     * {@code validatePassInput} of the same pass, and every read returns the same buffer. Before US-056
+     * {@code validateWeights} never recorded the size and spread it had built the kernel for, so every read rebuilt
+     * the kernel and overwrote the sentinel.
+     */
+    @Test
+    void samePassAndSizeReusesTheKernel() {
+        Case c = new Case(3, 5, 2);
+        BoxRenderState state = c.state();
+        ImageData input = c.input();
+        validate(state, input, 0);
+        float[] kernel = padded(normalised(repeatedBox(3, 2)));
+        FloatBuffer buffer = assertReads(state, kernel, "pass 0 (size 3), first read");
+        buffer.put(0, SENTINEL);
+        kernel[0] = SENTINEL;
+        assertSame(buffer, assertReads(state, kernel, "pass 0 (size 3), second read"), "the weights buffer");
+        validate(state, input, 0);
+        assertSame(buffer, assertReads(state, kernel, "pass 0 (size 3) validated again"), "the weights buffer");
+    }
+
+    /**
+     * A pass of a new size rebuilds the kernel: after a sentinel is written into the kernel of pass 0 (size 3),
+     * pass 1 (size 5) reads its own kernel in the same buffer, and pass 0 validated again reads the kernel of size 3.
+     */
+    @Test
+    void newPassSizeRebuildsTheKernel() {
+        Case c = new Case(3, 5, 2);
+        BoxRenderState state = c.state();
+        ImageData input = c.input();
+        validate(state, input, 0);
+        FloatBuffer buffer = assertReads(state, padded(normalised(repeatedBox(3, 2))), "pass 0 (size 3)");
+        buffer.put(0, SENTINEL);
+        validate(state, input, 1);
+        assertSame(buffer, assertReads(state, padded(normalised(repeatedBox(5, 2))), "pass 1 (size 5)"),
+                "the weights buffer");
+        buffer.put(0, SENTINEL);
+        validate(state, input, 0);
+        assertSame(buffer, assertReads(state, padded(normalised(repeatedBox(3, 2))), "pass 0 (size 3) again"),
+                "the weights buffer");
+    }
+
+    /**
+     * A new spread rebuilds the kernel. A state of {@code h=3 v=3 passes=2} with a spread of 0.5 applies the spread on
+     * pass 1 only, the vertical size being above 1, so both passes have the same size and differ in their spread
+     * only. The spread adds {@code (1 - sum) * spread} to the sum the kernel {@code [1 2 3 2 1]} is divided by:
+     * {@code 9 - 8 * 0.5 = 5}. With a sentinel written into the kernel each time, pass 0 reads
+     * {@code [1 2 3 2 1] / 9}, pass 1 {@code [1 2 3 2 1] / 5}, and pass 0 validated again {@code [1 2 3 2 1] / 9}.
+     */
+    @Test
+    void newSpreadRebuildsTheKernel() {
+        BoxRenderState state = new BoxRenderState(3, 3, 2, 0.5f, false, null, BaseTransform.IDENTITY_TRANSFORM);
+        ImageData input = new Case(3, 3, 2).input();
+        float[] unspread = padded(normalised(repeatedBox(3, 2)));
+        float[] spread = padded(new float[] {0.2f, 0.4f, 0.6f, 0.4f, 0.2f});
+        validate(state, input, 0);
+        FloatBuffer buffer = assertReads(state, unspread, "pass 0 (size 3, no spread)");
+        buffer.put(0, SENTINEL);
+        validate(state, input, 1);
+        assertSame(buffer, assertReads(state, spread, "pass 1 (size 3, spread 0.5)"), "the weights buffer");
+        buffer.put(0, SENTINEL);
+        validate(state, input, 0);
+        assertSame(buffer, assertReads(state, unspread, "pass 0 (size 3, no spread) again"), "the weights buffer");
+    }
+
+    /**
+     * With no blur passes {@code validateWeights} builds the one-tap kernel {@code [1]} whatever the pass size, so
+     * the pass sizes 5 and 9 share it: a sentinel written into it survives the validation of the other pass.
+     */
+    @Test
+    void noBlurPassesReusesTheOneTapKernelForBothPasses() {
+        Case c = new Case(5, 9, 0);
+        BoxRenderState state = c.state();
+        ImageData input = c.input();
+        validate(state, input, 0);
+        FloatBuffer buffer = assertReads(state, new float[] {1f, 0f, 0f, 0f}, "pass 0 (size 5, no blur passes)");
+        buffer.put(0, SENTINEL);
+        validate(state, input, 1);
+        assertSame(buffer, assertReads(state, new float[] {SENTINEL, 0f, 0f, 0f}, "pass 1 (size 9, no blur passes)"),
+                "the weights buffer");
+    }
+
+    /** Validates {@code pass} of the state for the input, which the pass has to keep. */
+    private static void validate(BoxRenderState state, ImageData input, int pass) {
+        assertSame(input, state.validatePassInput(input, pass), () -> "pass " + pass + ": validated input");
+    }
+
+    /**
+     * {@code getPassWeightsArrayLength() * 4} and then the floats of {@code getPassWeights()} up to its limit are
+     * {@code expected}, bitwise; returns the buffer.
+     */
+    private static FloatBuffer assertReads(BoxRenderState state, float[] expected, String what) {
+        assertEquals(expected.length / 4, state.getPassWeightsArrayLength(), () -> what
+                + ": getPassWeightsArrayLength");
+        FloatBuffer buffer = state.getPassWeights();
+        float[] weights = new float[buffer.limit()];
+        for (int i = 0; i < weights.length; i++) {
+            weights[i] = buffer.get(i);
+        }
+        assertArrayEquals(expected, weights, () -> what + ": weights " + Arrays.toString(weights));
+        return buffer;
+    }
+
+    /** The kernel taps followed by zeros up to the peer size of the kernel, as the weights buffer holds them. */
+    private static float[] padded(float[] taps) {
+        return Arrays.copyOf(taps, LinearConvolveRenderState.getPeerSize(taps.length));
     }
 
     /**

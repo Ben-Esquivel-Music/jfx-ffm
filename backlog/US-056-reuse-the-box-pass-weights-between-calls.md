@@ -1,7 +1,7 @@
 # US-056 — Reuse the box-blur pass weights instead of rebuilding them on every call
 
-**Status:** 📋 Ready (filed 2026-10-02 from the implementation of US-011; read: `BoxRenderState.java:100-105`,
-`:447-555`, `GaussianRenderState.java:548-560`; the rebuild cost was not measured) · **Found:** 2026-10-02, while
+**Status:** ✅ Done (2026-10-06, PR pending; filed 2026-10-02 from the implementation of US-011; the rebuild cost
+was not measured) · **Found:** 2026-10-02, while
 writing the weights test of US-011
 
 ## Story
@@ -39,3 +39,32 @@ After the kernel is built, set `weightsValidSize = pSize; weightsValidSpread = p
 
 ## Notes
 - Related: US-011 (the kernel's tap count, the same method) and US-055 (the trimming of non-odd sizes).
+
+## Resolution (2026-10-06)
+- **Fix:** `BoxRenderState.validateWeights()` now sets `weightsValidSize = pSize; weightsValidSpread = passSpread;`
+  after it builds the kernel, as `GaussianRenderState` does. This is the only production change (+2 lines).
+- **Tests:** `BoxRenderStateWeightsTest` gains four tests. They use only the public API and compare the whole
+  buffer bit for bit:
+  - `samePassAndSizeReusesTheKernel`: a sentinel survives a second read and a second `validatePassInput` of the same
+    pass, and every read returns the same buffer.
+  - `newPassSizeRebuildsTheKernel`: sizes 3, then 5, then 3 give the exact repeated box each time.
+  - `newSpreadRebuildsTheKernel`: sizes 3/3 with spread 0.5 give `[1 2 3 2 1] / 9`, then
+    `[0.2 0.4 0.6 0.4 0.2]`, then `/ 9` again.
+  - `noBlurPassesReusesTheOneTapKernelForBothPasses`: with zero blur passes, `[1 0 0 0]` is kept for sizes 5 and 9.
+- **Before and after the fix:** on the unfixed code 34 tests ran and 2 failed (the two reuse tests). After the fix
+  all 34 pass. The 30 tests from US-011 are unchanged.
+- **Mutants:** each half-fix fails at least one new test.
+
+  | Mutant | Failures |
+  | --- | --- |
+  | Size key only | `newSpreadRebuildsTheKernel` |
+  | Spread key only | both reuse tests |
+  | Unfixed code | both reuse tests |
+  | Size comparison removed | 20 failures and 6 errors, `newPassSizeRebuildsTheKernel` among them |
+- **Golden:** `DecoraJavaGoldenTest` with `-Djfx.parity.require=true` ran 370 tests, 0 failed and 0 skipped, before
+  and after. Its per-row output is byte-identical (md5 `a2701ce7eb18aff43faf52de71b8b771`, 396 lines).
+- **Review:** two independent read-only reviews, one of correctness (stale-cache paths, peer use of the buffer) and
+  one of the tests and conventions, found no issues.
+- **Not run:** the robot suite. No pixel changes and no robot test uses box effects.
+- **Upstream:** `openjdk/jfx` master has the same missing assignments. This could go upstream together with US-011
+  and US-055.

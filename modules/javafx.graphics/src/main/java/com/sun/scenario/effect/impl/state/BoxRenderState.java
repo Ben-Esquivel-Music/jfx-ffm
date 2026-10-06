@@ -573,6 +573,8 @@ public class BoxRenderState extends LinearConvolveRenderState {
         }
         weights.limit(limit);
         weights.rewind();
+        weightsValidSize = pSize;
+        weightsValidSpread = passSpread;
     }
 
     @Override
