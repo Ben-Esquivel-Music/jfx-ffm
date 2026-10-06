@@ -40,10 +40,12 @@ import java.util.Arrays;
  * these kernels instead of its own ({@link KernelBoxRenderState}).
  * <p>
  * A kernel here is the list of tap weights of one pass before {@code validateWeights} divides them by their sum. For
- * a pass size {@code size} it is a box of {@code klen = ceil(size) | 1} taps, whose two end taps are trimmed to
- * {@code 1 - (klen - size) / 2} when the size is not an odd integer, convolved with a box of {@code klen} ones once
- * for every further blur pass. Only the first box is trimmed: that is how {@code validateWeights} builds the kernel,
- * and backlog story US-011 keeps it (the trimming question is US-055).
+ * a pass size {@code size} it is built from a box of {@code klen = ceil(size) | 1} taps, whose two end taps are
+ * trimmed to {@code 1 - (klen - size) / 2} when the size is not an odd integer, so that the box sums to the size. The
+ * kernel is that trimmed box convolved with itself once for every further blur pass: every pass is trimmed, as
+ * backlog story US-055 decided (option A). Before US-055 only the first box was trimmed and every further pass
+ * convolved with an untrimmed box of {@code klen} ones, the kernel US-011 kept and pinned; it stays here as
+ * {@link #FIRST_BOX_TRIMMED}, which the negative controls render with to show that a return to it is caught.
  */
 final class BoxKernels {
 
@@ -57,6 +59,13 @@ final class BoxKernels {
     static final Kernel ORACLE = BoxKernels::oracleKernel;
 
     /**
+     * The kernel {@code validateWeights} built from the fix of its tap count (backlog story US-011) until every pass
+     * was trimmed (US-055): only the first box trimmed, {@link #trimmedFirstBox}. No production code builds it any
+     * more; the negative controls render with it.
+     */
+    static final Kernel FIRST_BOX_TRIMMED = BoxKernels::trimmedFirstBox;
+
+    /**
      * The kernel {@code validateWeights} built at commit 900c40e41a, which the golden recorded: {@link #preFixKernel}.
      */
     static final Kernel PRE_FIX = BoxKernels::preFixKernel;
@@ -66,15 +75,15 @@ final class BoxKernels {
 
     /**
      * The kernel a pass has to have: for an odd integer size the {@code passes}-fold convolution of a box of
-     * {@code size} ones ({@link #repeatedBox}), for any other size the trimmed first box convolved with untrimmed
-     * boxes ({@link #trimmedFirstBox}).
+     * {@code size} ones ({@link #repeatedBox}), for any other size the {@code passes}-fold convolution of the trimmed
+     * box ({@link #repeatedTrimmedBox}).
      */
     static double[] oracleKernel(float size, int passes) {
         int odd = (int) size;
         if (odd == size && (odd & 1) == 1) {
             return Arrays.stream(repeatedBox(odd, passes)).asDoubleStream().toArray();
         }
-        return trimmedFirstBox(size, passes);
+        return repeatedTrimmedBox(size, passes);
     }
 
     /**
@@ -92,17 +101,26 @@ final class BoxKernels {
     }
 
     /**
-     * The kernel of a pass of {@code size} over {@code passes} blur passes for any size: a box of
-     * {@code klen = ceil(size) | 1} taps whose two end taps are {@code 1 - (klen - size) / 2}, convolved with an
-     * untrimmed box of {@code klen} ones {@code passes - 1} times.
+     * The box of one pass of {@code size}: {@code klen = ceil(size) | 1} taps, whose two end taps are
+     * {@code 1 - (klen - size) / 2} and the others 1, so that it sums to the size.
+     */
+    static double[] trimmedBox(float size) {
+        int klen = boxLength(size);
+        double[] box = new double[klen];
+        Arrays.fill(box, 1.0);
+        box[0] = trimmedTap(size);
+        box[klen - 1] = trimmedTap(size);
+        return box;
+    }
+
+    /**
+     * The kernel of US-011, before US-055 trimmed every pass: the trimmed box ({@link #trimmedBox}) convolved with an
+     * untrimmed box of {@code klen} ones {@code passes - 1} times. Only the first box is trimmed.
      */
     static double[] trimmedFirstBox(float size, int passes) {
-        int klen = boxLength(size);
-        double[] ones = new double[klen];
+        double[] ones = new double[boxLength(size)];
         Arrays.fill(ones, 1.0);
-        double[] kernel = ones.clone();
-        kernel[0] = trimmedTap(size);
-        kernel[klen - 1] = trimmedTap(size);
+        double[] kernel = trimmedBox(size);
         for (int p = 1; p < passes; p++) {
             kernel = convolve(kernel, ones);
         }
@@ -110,11 +128,11 @@ final class BoxKernels {
     }
 
     /**
-     * The trimmed box convolved with itself {@code passes - 1} times: the other reading of the trimming, which the
-     * kernel does not take.
+     * The trimmed box ({@link #trimmedBox}) convolved with itself {@code passes - 1} times: every pass trimmed, the
+     * kernel of a size that is not an odd integer since US-055.
      */
     static double[] repeatedTrimmedBox(float size, int passes) {
-        double[] box = trimmedFirstBox(size, 1);
+        double[] box = trimmedBox(size);
         double[] kernel = box;
         for (int p = 1; p < passes; p++) {
             kernel = convolve(kernel, box);
@@ -149,7 +167,7 @@ final class BoxKernels {
         return ((int) Math.ceil(Math.max(size, 1f))) | 1;
     }
 
-    /** The weight of each end tap of the first box: 1 less half of what the odd box length exceeds the size by. */
+    /** The weight of each end tap of the box: 1 less half of what the odd box length exceeds the size by. */
     static double trimmedTap(float size) {
         return 1.0 - (boxLength(size) - (double) Math.max(size, 1f)) / 2.0;
     }

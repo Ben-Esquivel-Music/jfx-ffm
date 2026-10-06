@@ -103,7 +103,8 @@ import static test.com.sun.scenario.effect.DecoraCorpus.pattern;
  * capture, else as "Java peer output moved".
  * <p>
  * The rows of a reviewed {@link DecoraCorpus.KernelDeviation} ({@link DecoraCorpus#BOX_KERNEL_TAP_COUNT}, the
- * multi-pass box shadows with a spread, whose golden holds the box kernel from before its tap count was fixed) are
+ * multi-pass box shadows with a spread, whose golden holds the box kernel from before its tap count was fixed, and,
+ * on the rows of even sizes, from before every pass was trimmed by backlog story US-055) are
  * judged on a render of the same recipe whose box states hand the peers the golden's kernel, by every check above;
  * the production render has to differ from that render and has to equal the render with the independently computed
  * kernel exactly, and a clipped one has to reproduce its own unclipped production render as the golden's did.
@@ -728,6 +729,10 @@ public class DecoraJavaGoldenTest {
         assertEquals(new TreeSet<>(deviation.rows()), new TreeSet<>(covered), "rows the deviation covers");
         assertSame(BoxKernels.PRE_FIX, deviation.golden());
         assertSame(BoxKernels.ORACLE, deviation.oracle());
+        for (float size : new float[] {4, 6}) {
+            assertArrayEquals(BoxKernels.repeatedTrimmedBox(size, 3), BoxKernels.oracleKernel(size, 3),
+                    size + " over 3 passes: the oracle trims every pass (US-055)");
+        }
     }
 
     /**
@@ -784,18 +789,46 @@ public class DecoraJavaGoldenTest {
 
     /**
      * A row of the kernel deviation whose production render is not the oracle's is reported, and nothing else is:
-     * here the production kernel is the trimmed box convolved with itself, the other reading of the trimming.
+     * here the production kernel rounds every box up to {@code ceil(size) | 1} ones, as the software box peers do,
+     * one of the readings of a box size that is not an odd integer that backlog story US-055 did not choose.
      */
     @Test
     void productionOffTheOracleOnKernelDeviationRowIsReported() {
         GoldenRow row = row("LinearConvolveShadow/box | box h=4 v=6 passes=3 spread=0.3 black | 64x48");
         Entry e = entry(row, Tier.P, 0);
-        Judgement off = judgeRow(row, e, frames, () -> DecoraBackend.java().withBoxStates("repeated trimmed box",
-                BoxKernels.states(BoxKernels::repeatedTrimmedBox)), true);
+        BoxKernels.Kernel roundedUp = (size, passes) -> Arrays.stream(
+                BoxKernels.repeatedBox(BoxKernels.boxLength(size), passes)).asDoubleStream().toArray();
+        Judgement off = judgeRow(row, e, frames, () -> DecoraBackend.java().withBoxStates("rounded up like SW",
+                BoxKernels.states(roundedUp)), true);
         assertTrue(off.has(Kind.KERNEL_ORACLE), off::describe);
         assertTrue(off.message(Kind.KERNEL_ORACLE).contains("kernel deviation BOX_KERNEL_TAP_COUNT: the production"
                 + " render differs from the render with the oracle kernel"), off::describe);
         assertEquals(1, off.findings.size(), off::describe);
+    }
+
+    /**
+     * A row of the kernel deviation whose box sizes are not odd integers, rendered with the kernel of US-011 that
+     * trimmed the first box only, as when backlog story US-055 is reverted, is reported, and nothing else is: that
+     * kernel is not the oracle's, which trims every pass, and differs from the golden's as well.
+     */
+    @ParameterizedTest(name = "{0}")
+    @MethodSource("nonOddKernelDeviationRows")
+    void revertedTrimmingOfEveryPassOnKernelDeviationRowIsReported(String key) {
+        GoldenRow row = row(key);
+        Entry e = entries.get(key);
+        Judgement reverted = judgeRow(row, e, frames, () -> DecoraBackend.java().withBoxStates(
+                "US-011 kernel, first box trimmed", BoxKernels.states(BoxKernels.FIRST_BOX_TRIMMED)), true);
+        assertTrue(reverted.has(Kind.KERNEL_ORACLE), reverted::describe);
+        assertTrue(reverted.message(Kind.KERNEL_ORACLE).contains("kernel deviation BOX_KERNEL_TAP_COUNT: the"
+                + " production render differs from the render with the oracle kernel"), reverted::describe);
+        assertFalse(reverted.has(Kind.KERNEL_UNCHANGED), reverted::describe);
+        assertEquals(1, reverted.findings.size(), reverted::describe);
+    }
+
+    /** A full-frame row and a hash-only row of the kernel deviation whose box sizes, 4 and 6, are even. */
+    static Stream<String> nonOddKernelDeviationRows() {
+        return Stream.of("LinearConvolveShadow/box | box h=4 v=6 passes=3 spread=0.3 black | 64x48",
+                "LinearConvolveShadow/box | box h=4 v=6 passes=3 spread=0.3 tinted | 257x129");
     }
 
     /**

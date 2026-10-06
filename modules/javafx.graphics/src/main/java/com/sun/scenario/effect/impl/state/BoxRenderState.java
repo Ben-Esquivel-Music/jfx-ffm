@@ -37,6 +37,7 @@ import com.sun.scenario.effect.impl.BufferUtil;
 import com.sun.scenario.effect.impl.EffectPeer;
 import com.sun.scenario.effect.impl.Renderer;
 import java.nio.FloatBuffer;
+import java.util.Arrays;
 
 /**
  * The RenderState for a box filter kernel that can be applied using a
@@ -62,6 +63,20 @@ import java.nio.FloatBuffer;
  * up back at the pattern for an odd size again:
  * [ 1.0 {2*N+1 copies of 1.0} 1.0 ]
  *
+ * The box described above is the box of every blur pass.  For two or more
+ * passes the kernel of a pass is that box, its trimmed end weights
+ * included, convolved with itself once for every further pass, so a size s
+ * over n passes is the n-fold repeated box of size s for every s, and the
+ * blur grows continuously with s.  An odd integer size trims nothing, so
+ * its kernel is the n-fold box of s weights of 1.0.  This was decided
+ * under backlog story US-055 (option A, "trim every pass"): until then only
+ * the first box was trimmed and every further pass convolved with klen
+ * untrimmed weights of 1.0, which blurred up to 2 pixels per pass wider
+ * than the stated size.  The other options were to keep that kernel, or
+ * to round every pass up to klen untrimmed weights as the software loops
+ * below do, which makes the blur grow in steps of 2 pixels as the size
+ * changes.
+ *
  * ***************************
  * SOFTWARE LIMITATION CAVEAT:
  * ***************************
@@ -75,6 +90,11 @@ import java.nio.FloatBuffer;
  * allow partial sums on the first and last values will need to be written.
  * Until then we will be rounding the sizes to an odd size, but only in the
  * sw loops.
+ * So for any size that is not an odd integer the software BoxBlur/BoxShadow
+ * loops apply untrimmed boxes of ceil(size)|1 weights, and differ from the
+ * trimmed repeated box the LinearConvolve peers apply with these weights
+ * (every GPU pipeline, and the software fallback for a shadow spread or an
+ * input that is not swCompatible).
  */
 public class BoxRenderState extends LinearConvolveRenderState {
     private static final int MAX_BOX_SIZES[] = {
@@ -503,25 +523,26 @@ public class BoxRenderState extends LinearConvolveRenderState {
             // assert (excess * 0.5 < 1.0)
             ik[0] = ik[klen-1] = 1.0 - excess * 0.5;
         }
+        // Every pass is the same box, trimmed end weights included: every
+        // further pass convolves with this box (see the class description).
+        double box[] = Arrays.copyOf(ik, klen);
         int filledklen = klen;
-        // Only the first box has the trimmed end weights: every further pass
-        // convolves with klen untrimmed weights of 1.0.
         for (int p = 1; p < blurPasses; p++) {
             filledklen += klen - 1;
             int i = filledklen - 1;
-            // ik[i] becomes the sum of the klen taps i-klen+1..i for i >= klen,
-            // and of the i+1 taps 0..i below that; ik[0] keeps its value.
+            // ik[i] becomes the sum of box[k] * ik[i-k] over the klen taps
+            // i-klen+1..i for i >= klen, and over the i+1 taps 0..i below that.
             while (i >= klen) {
-                double sum = ik[i];
+                double sum = ik[i] * box[0];
                 for (int k = 1; k < klen; k++) {
-                    sum += ik[i-k];
+                    sum += ik[i-k] * box[k];
                 }
                 ik[i--] = sum;
             }
-            while (i > 0) {
-                double sum = ik[i];
-                for (int k = 0; k < i; k++) {
-                    sum += ik[k];
+            while (i >= 0) {
+                double sum = ik[i] * box[0];
+                for (int k = 1; k <= i; k++) {
+                    sum += ik[i-k] * box[k];
                 }
                 ik[i--] = sum;
             }
