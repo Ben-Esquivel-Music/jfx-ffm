@@ -156,6 +156,18 @@ final class DecoraCorpus {
      * that render, so the fix is in effect on the row. And the production render has to equal, exactly, the render of
      * the same recipe with the kernel {@link BoxKernels#oracleKernel} computes independently. Every other row is judged
      * against the golden as before, so a row that moves without being listed here fails.
+     * <p>
+     * The deviation also covers backlog story US-055, which trims every pass of a box whose size is not an odd
+     * integer: {@code validateWeights} used to trim the end taps of the first box only and convolve it with untrimmed
+     * boxes of {@code ceil(size) | 1} ones, and now convolves the trimmed box with itself once per further pass. Of
+     * these rows that moves only the box shadows of 4 x 6 over three passes, whose sizes are even; the others have
+     * odd sizes, which trim nothing. Their golden kernel stays the pre-fix one, which the golden recorded, and their
+     * oracle, {@link BoxKernels#ORACLE}, is now the kernel with every pass trimmed
+     * ({@link BoxKernels#repeatedTrimmedBox}); a production render with the kernel of US-011, which trimmed the
+     * first box only ({@link BoxKernels#FIRST_BOX_TRIMMED}), fails their oracle check. The id stays
+     * {@code BOX_KERNEL_TAP_COUNT}, as the rows, the golden kernel and the three checks are the same, and the id is
+     * what the report lines and the findings carry: a rename would change the report line of every one of these rows
+     * for no change of what is judged.
      */
     static final KernelDeviation BOX_KERNEL_TAP_COUNT = new KernelDeviation("BOX_KERNEL_TAP_COUNT",
             BoxKernels.PRE_FIX, BoxKernels.ORACLE, multiPassBoxSpreadRows());
@@ -487,7 +499,8 @@ final class DecoraCorpus {
         cases.add(new Case("BoxBlur", "h=5 v=5 passes=1 origin=-7,3", EXACT,
                 (b, in) -> b.box(b.data(in.primary(), -7, 3), 5, 5, 1, 0f, false, null, null)));
         // spread != 0 makes BoxRenderState choose the LinearConvolveShadow peer (GENERAL_VECTOR pass); exact against
-        // both measured libraries. The golden holds the pre-fix kernel of the multi-pass ones (BOX_KERNEL_TAP_COUNT).
+        // both measured libraries. The golden holds the pre-fix kernel of the multi-pass ones (BOX_KERNEL_TAP_COUNT,
+        // which covers US-011's tap count and, for the even 4 x 6 sizes, US-055's trimming of every pass).
         Bound spreadBound = new Bound(EXACT, EXACT, ONE_STEP);
         float[][] spreadSizes = {{5, 5, 1}, {25, 25, 2}, {4, 6, 3}};
         for (float[] s : spreadSizes) {
@@ -748,7 +761,8 @@ final class DecoraCorpus {
         // library at both sizes. Linux keeps their bounds from before the Java peers were aligned, as the earlier Linux
         // trial did not cover these cases; the Linux measurement just before decora_sse was deleted did, and found them
         // within those bounds: largest delta 0 against 3 for the Gaussian shadow and 0 against 1 for the box spread.
-        // The golden holds the pre-fix kernel of the three-pass box spread (BOX_KERNEL_TAP_COUNT).
+        // The golden holds the pre-fix kernel of the three-pass box spread (BOX_KERNEL_TAP_COUNT). Its size, 9, is odd,
+        // so US-055's trimming of every pass, which that deviation covers as well, does not move it.
         Bound gaussianShadow = new Bound(EXACT, THREE_STEPS, THREE_STEPS);
         Bound boxSpread = new Bound(EXACT, ONE_STEP, ONE_STEP);
         List<ClipCase> cases = new ArrayList<>();
