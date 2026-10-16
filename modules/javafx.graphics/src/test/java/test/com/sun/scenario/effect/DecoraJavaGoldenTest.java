@@ -38,6 +38,7 @@ import com.sun.scenario.effect.impl.state.LinearConvolveRenderState;
 import com.sun.scenario.effect.impl.sw.RendererDelegate;
 import com.sun.scenario.effect.impl.sw.java.JSWBoxBlurPeer;
 import com.sun.scenario.effect.impl.sw.java.JSWBoxShadowPeer;
+import com.sun.scenario.effect.impl.sw.java.JSWLinearConvolvePeer;
 import com.sun.scenario.effect.impl.sw.java.JSWLinearConvolveShadowPeer;
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -121,9 +122,10 @@ import static test.com.sun.scenario.effect.DecoraCorpus.pattern;
  * lines, the bound, cause and explained columns pin what each row may tolerate, a transform deviation pins the
  * golden's transform on its rows, and a kernel deviation judges its rows' frames against the golden's own kernel. The
  * negative controls prove that the branches of the comparison can fail, those of a kernel deviation included
- * ({@link Kind#KERNEL_UNCHANGED}, {@link Kind#KERNEL_ORACLE} and its judgement against the golden), except the
- * self-consistency check of clipped renders, which has no negative control (backlog story US-058); a kernel deviation
- * reuses that check for its clipped rows' production renders.
+ * ({@link Kind#KERNEL_UNCHANGED}, {@link Kind#KERNEL_ORACLE} and its judgement against the golden), and so can each
+ * branch of the self-consistency check of clipped renders ({@link Kind#SELF_CONSISTENCY} for a golden without
+ * {@code sseSelf}, a clipped result outside its unclipped one and too large a distance, and {@link Kind#EDGE_ROWS}),
+ * also where a kernel deviation reuses that check for its clipped rows' production renders.
  */
 public class DecoraJavaGoldenTest {
 
@@ -871,6 +873,116 @@ public class DecoraJavaGoldenTest {
     }
 
     /**
+     * A row that the corpus renders through a clip while its golden entry holds no {@code sseSelf}, as when a clip is
+     * added to a row the native library never rendered clipped, is reported, and nothing else is: the golden has no
+     * native distance to hold the clipped render to.
+     */
+    @Test
+    void clippedRowWithoutGoldenSseSelfIsReported() {
+        GoldenRow unclipped = row("LinearConvolve/gaussian | radius=5.0 centered | 64x48");
+        Entry e = entry(unclipped, Tier.P, 0);
+        assertEquals(-1, e.sseSelf());
+        GoldenRow clipped = new GoldenRow(unclipped.effect(), unclipped.params(), unclipped.width(),
+                unclipped.height(), unclipped.bound(), unclipped.cause(), unclipped.run(), unclipped.run(), -1);
+        Judgement unmeasured = judgeRow(clipped, e, frames, DecoraBackend::java, true);
+        assertTrue(unmeasured.has(Kind.SELF_CONSISTENCY), unmeasured::describe);
+        assertEquals("the golden has no sseSelf for this clipped row", unmeasured.message(Kind.SELF_CONSISTENCY));
+        assertEquals(1, unmeasured.findings.size(), unmeasured::describe);
+        Judgement clean = judgeRow(unclipped, e, frames, DecoraBackend::java, true);
+        assertTrue(clean.passed(), clean::describe);
+    }
+
+    /**
+     * A clipped row whose unclipped render comes back one pixel right of where it was rendered is reported, and
+     * nothing else is: the clipped result, which starts at the left edge of the unclipped one, no longer lies inside
+     * it.
+     */
+    @Test
+    void clippedResultOutsideItsUnclippedResultIsReported() {
+        GoldenRow clipped = row("clip/LinearConvolve/gaussian | radius=3.0 clip top only | 64x48");
+        Entry e = entry(clipped, Tier.P, 1);
+        AtomicReference<DecoraBackend> used = new AtomicReference<>();
+        Judgement shifted = judgeRow(clipped, e, frames, mutating("LinearConvolve",
+                UnclippedShiftingLinearConvolvePeer.class, used), true);
+        assertTrue(used.get().ranPeers().contains(UnclippedShiftingLinearConvolvePeer.class.getName()), () -> "ran "
+                + used.get().ranPeers());
+        assertTrue(shifted.has(Kind.SELF_CONSISTENCY), shifted::describe);
+        assertEquals("clipped result -3,8 70x43 lies outside the unclipped result",
+                shifted.message(Kind.SELF_CONSISTENCY));
+        assertEquals(1, shifted.findings.size(), shifted::describe);
+    }
+
+    /**
+     * A clipped Gaussian row whose unclipped render is two steps off on the top row of the clip, inside the rows next
+     * to the clip edges, is reported as differing from its unclipped render by more than the native renders did and
+     * the bound, and nothing else is.
+     */
+    @Test
+    void clippedRenderAwayFromItsUnclippedRenderIsReported() {
+        GoldenRow clipped = row("LinearConvolve/gaussian clipped | radius=5.0 clip 10,8 44x32 | 64x48");
+        Entry e = entry(clipped, Tier.P, 1);
+        assertEquals(0, e.sseSelf());
+        assertEquals(5, clipped.edgeRows());
+        AtomicReference<DecoraBackend> used = new AtomicReference<>();
+        Judgement moved = judgeRow(clipped, e, frames, mutating("LinearConvolve",
+                TopRowPixelMovingLinearConvolvePeer.class, used), true);
+        assertTrue(used.get().ranPeers().contains(TopRowPixelMovingLinearConvolvePeer.class.getName()), () -> "ran "
+                + used.get().ranPeers());
+        assertTrue(moved.has(Kind.SELF_CONSISTENCY), moved::describe);
+        assertEquals("Java clipped render differs from its unclipped render by 2, native by 0, bound 1",
+                moved.message(Kind.SELF_CONSISTENCY));
+        assertEquals(1, moved.findings.size(), moved::describe);
+        assertEquals(2, moved.javaSelf);
+    }
+
+    /**
+     * A clipped Gaussian row whose unclipped render is two steps off in the middle of the clip, outside the rows next
+     * to the clip edges, is reported for that pixel as well as for the distance: with the golden's {@code sseSelf} of
+     * 0 and a bound of one step, a pixel more than one step off is too far wherever it lies.
+     */
+    @Test
+    void clippedRenderAwayFromItsUnclippedRenderOutsideTheEdgeRowsIsReported() {
+        GoldenRow clipped = row("LinearConvolve/gaussian clipped | radius=5.0 clip 10,8 44x32 | 64x48");
+        Entry e = entry(clipped, Tier.P, 1);
+        AtomicReference<DecoraBackend> used = new AtomicReference<>();
+        Judgement moved = judgeRow(clipped, e, frames, mutating("LinearConvolve",
+                MiddlePixelMovingLinearConvolvePeer.class, used), true);
+        assertTrue(used.get().ranPeers().contains(MiddlePixelMovingLinearConvolvePeer.class.getName()), () -> "ran "
+                + used.get().ranPeers());
+        assertTrue(moved.has(Kind.EDGE_ROWS), moved::describe);
+        assertEquals("Java clipped render differs from its unclipped render by more than one step outside the 5 rows"
+                + " next to the clip edges: [(22,16)]", moved.message(Kind.EDGE_ROWS));
+        assertTrue(moved.has(Kind.SELF_CONSISTENCY), moved::describe);
+        assertEquals("Java clipped render differs from its unclipped render by 2, native by 0, bound 1",
+                moved.message(Kind.SELF_CONSISTENCY));
+        assertEquals(2, moved.findings.size(), moved::describe);
+    }
+
+    /**
+     * A clipped row of the kernel deviation whose unclipped production render is two steps off inside the clip is
+     * reported, and nothing else is: the renders with the golden's kernel and with the oracle kernel are untouched,
+     * so only the production render's own consistency check can find it.
+     */
+    @Test
+    void clippedProductionRenderOnKernelDeviationRowAwayFromItsUnclippedRenderIsReported() {
+        GoldenRow clipped = row("clip/LinearConvolveShadow/box | box h=9 v=9 passes=3 spread=0.5 black clip top only"
+                + " | 64x48");
+        Entry e = entry(clipped, Tier.P, 0);
+        assertEquals(0, e.sseSelf());
+        assertNotNull(DecoraCorpus.kernelDeviation(clipped.key()));
+        AtomicReference<DecoraBackend> used = new AtomicReference<>();
+        Judgement moved = judgeRow(clipped, e, frames, mutating("LinearConvolveShadow",
+                UnclippedPixelMovingBoxSpreadPeer.class, used), true);
+        assertTrue(moved.has(Kind.SELF_CONSISTENCY), moved::describe);
+        assertEquals("kernel deviation BOX_KERNEL_TAP_COUNT, production render: Java clipped render differs from its"
+                + " unclipped render by 2, native by 0, bound 0", moved.message(Kind.SELF_CONSISTENCY));
+        assertEquals(1, moved.findings.size(), moved::describe);
+        assertEquals(2, moved.kernelSelf);
+        assertTrue(used.get().ranPeers().contains(UnclippedPixelMovingBoxSpreadPeer.class.getName()), () -> "ran "
+                + used.get().ranPeers());
+    }
+
+    /**
      * Judges a row against its golden entry: {@link #judgeKernelDeviation} for a row of a reviewed kernel deviation,
      * else {@link #judgeAgainstGolden}.
      */
@@ -1375,6 +1487,97 @@ public class DecoraJavaGoldenTest {
             ImageData result = super.filter(effect, state, transform, outputClip, inputs);
             if (getPass() == 1) {
                 flipBlueBit(result);
+            }
+            return result;
+        }
+    }
+
+    /** Moves the blue channel of the result's pixel at filter-space {@code (x, y)} two steps. */
+    private static void moveBlueByTwo(ImageData result, int x, int y) {
+        Rectangle bounds = result.getUntransformedBounds();
+        assertTrue(x >= bounds.x && y >= bounds.y && x < bounds.x + bounds.width && y < bounds.y + bounds.height,
+                () -> "(" + x + "," + y + ") lies outside the result " + bounds);
+        HeapImage image = (HeapImage) result.getUntransformedImage();
+        int[] pixels = image.getPixelArray();
+        int i = (y - bounds.y) * image.getScanlineStride() + x - bounds.x;
+        pixels[i] = changeBlue(pixels[i], 2);
+    }
+
+    /** {@code JSWLinearConvolvePeer} returning every unclipped pass-1 result one pixel right of its bounds. */
+    public static final class UnclippedShiftingLinearConvolvePeer extends JSWLinearConvolvePeer {
+
+        public UnclippedShiftingLinearConvolvePeer(FilterContext fctx, Renderer r, String uniqueName) {
+            super(fctx, r, uniqueName);
+        }
+
+        @Override
+        public ImageData filter(Effect effect, LinearConvolveRenderState state, BaseTransform transform,
+                                Rectangle outputClip, ImageData... inputs) {
+            ImageData result = super.filter(effect, state, transform, outputClip, inputs);
+            if (getPass() != 1 || outputClip != null) {
+                return result;
+            }
+            Rectangle bounds = result.getUntransformedBounds();
+            return new ImageData(result.getFilterContext(), result.getUntransformedImage(),
+                    new Rectangle(bounds.x + 1, bounds.y, bounds.width, bounds.height), result.getTransform());
+        }
+    }
+
+    /** {@code JSWLinearConvolvePeer} with pixel {@code (x, y)} of every unclipped pass-1 result two steps off. */
+    public abstract static class UnclippedPixelMovingLinearConvolvePeer extends JSWLinearConvolvePeer {
+
+        private final int x;
+        private final int y;
+
+        UnclippedPixelMovingLinearConvolvePeer(FilterContext fctx, Renderer r, String uniqueName, int x, int y) {
+            super(fctx, r, uniqueName);
+            this.x = x;
+            this.y = y;
+        }
+
+        @Override
+        public ImageData filter(Effect effect, LinearConvolveRenderState state, BaseTransform transform,
+                                Rectangle outputClip, ImageData... inputs) {
+            ImageData result = super.filter(effect, state, transform, outputClip, inputs);
+            if (getPass() == 1 && outputClip == null) {
+                moveBlueByTwo(result, x, y);
+            }
+            return result;
+        }
+    }
+
+    /** Pixel (32,8), on the top row of the clip at 10,8 of a 64x48 source. */
+    public static final class TopRowPixelMovingLinearConvolvePeer extends UnclippedPixelMovingLinearConvolvePeer {
+
+        public TopRowPixelMovingLinearConvolvePeer(FilterContext fctx, Renderer r, String uniqueName) {
+            super(fctx, r, uniqueName, 32, 8);
+        }
+    }
+
+    /** Pixel (32,24), sixteen rows below the top of the clip at 10,8 44x32 of a 64x48 source. */
+    public static final class MiddlePixelMovingLinearConvolvePeer extends UnclippedPixelMovingLinearConvolvePeer {
+
+        public MiddlePixelMovingLinearConvolvePeer(FilterContext fctx, Renderer r, String uniqueName) {
+            super(fctx, r, uniqueName, 32, 24);
+        }
+    }
+
+    /**
+     * {@code JSWLinearConvolveShadowPeer} with pixel (20,30) of every unclipped pass-1 result two steps off, on the
+     * production {@code BoxRenderState} only: the renders whose box states hand the peers a test kernel are left alone.
+     */
+    public static final class UnclippedPixelMovingBoxSpreadPeer extends JSWLinearConvolveShadowPeer {
+
+        public UnclippedPixelMovingBoxSpreadPeer(FilterContext fctx, Renderer r, String uniqueName) {
+            super(fctx, r, uniqueName);
+        }
+
+        @Override
+        public ImageData filter(Effect effect, LinearConvolveRenderState state, BaseTransform transform,
+                                Rectangle outputClip, ImageData... inputs) {
+            ImageData result = super.filter(effect, state, transform, outputClip, inputs);
+            if (getPass() == 1 && outputClip == null && state.getClass() == BoxRenderState.class) {
+                moveBlueByTwo(result, 20, 30);
             }
             return result;
         }
