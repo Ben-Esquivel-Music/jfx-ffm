@@ -1,6 +1,7 @@
 # US-058 — Give the Decora golden test's self-consistency checks negative controls
 
-**Status:** 📋 Ready (filed 2026-10-02 from the independent review of US-011; read: `DecoraJavaGoldenTest`
+**Status:** ✅ Done (2026-10-06, PR pending; filed 2026-10-02 from the independent review of US-011;
+read: `DecoraJavaGoldenTest`
 `checkSelfConsistency`, `enum Kind`, the class javadoc, `DecoraCorpus.GoldenRow`; whether any row still sets
 `edgeRows >= 0` was not checked) · **Found:** 2026-10-02, review of US-011 (finding L4)
 
@@ -35,3 +36,32 @@ the Java peers). If no row sets it any more, the `EDGE_ROWS` branch is dead code
 
 ## Notes
 - Related: US-011 (the deviation that added the caller), US-006 and US-010 (the clip fixes the clipped rows guard).
+
+## Resolution (2026-10-06)
+- **`edgeRows` stays:** the four `LinearConvolve/gaussian clipped` rows set `edgeRows = ceil(radius)`, so the
+  `EDGE_ROWS` branch is live and gets a control instead of being removed.
+- **Tests:** `DecoraJavaGoldenTest` gains five negative controls (test-only change, +206/-3). Each asserts the kind
+  and pins its whole message, the finding count, and that the mutated peer ran:
+  - `clippedRowWithoutGoldenSseSelfIsReported`: the unchanged golden entry of an unclipped Gaussian row (no
+    `sseSelf`), judged with an in-memory copy of its corpus row that renders through a clip.
+  - `clippedResultOutsideItsUnclippedResultIsReported`: a peer that moves every unclipped pass-1 result one pixel
+    right, so the clipped bounds no longer lie inside the unclipped ones.
+  - `clippedRenderAwayFromItsUnclippedRenderIsReported`: a peer that moves one unclipped pixel two steps, inside the
+    edge rows (`SELF_CONSISTENCY` only).
+  - `clippedRenderAwayFromItsUnclippedRenderOutsideTheEdgeRowsIsReported`: the same peer moves a pixel outside the
+    edge rows (`EDGE_ROWS` plus `SELF_CONSISTENCY`, since `max(sseSelf, bound)` is one step on these rows).
+  - `clippedProductionRenderOnKernelDeviationRowAwayFromItsUnclippedRenderIsReported`: covers the US-011 caller in
+    `judgeKernelDeviation`. The peer moves a pixel only in the production `BoxRenderState` render, so only that
+    render's self-consistency check can find it.
+- **Class javadoc:** it now says each self-consistency branch, the kernel-deviation caller included, has a control.
+- **Mutants:** removing each branch makes its control fail.
+
+  | Mutant (removed) | Failing control |
+  | --- | --- |
+  | `sseSelf < 0` branch | `clippedRowWithoutGoldenSseSelfIsReported` |
+  | Bounds branch | `clippedResultOutsideItsUnclippedResultIsReported` |
+  | Distance branch | the two distance controls and the kernel-deviation control |
+  | `edgeRows >= 0` branch | `clippedRenderAwayFromItsUnclippedRenderOutsideTheEdgeRowsIsReported` |
+  | `row.clipped()` block in `judgeKernelDeviation` | `clippedProductionRenderOnKernelDeviationRowAwayFromItsUnclippedRenderIsReported` |
+- **Golden:** with `-Djfx.parity.require=true`, 370 tests before and 375 after, 0 failed and 0 skipped. The per-row
+  output is byte-identical (md5 `a2701ce7eb18aff43faf52de71b8b771`, 396 lines). The golden was not regenerated.

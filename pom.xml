@@ -246,6 +246,15 @@
                     <artifactId>maven-compiler-plugin</artifactId>
                     <version>3.14.0</version>
                     <configuration>
+                        <!-- Maven 3.10 sets project.build.outputTimestamp in its super POM, and with any
+                             timestamp set this plugin rewrites the "requires" version of every java.* and
+                             jdk.* module in module-info.class (MCOMPILER-542). Its ASM 9.7.1 cannot read
+                             release 25 class files ("Unsupported class file major version 69"), and the
+                             rewrite would also strip the version javafx.web records for jdk.jsobject, a
+                             module of this build. A single non-digit character turns the rewrite off; the
+                             plugin uses outputTimestamp for nothing else, and archive timestamps still
+                             follow project.build.outputTimestamp. -->
+                        <outputTimestamp>-</outputTimestamp>
                         <release>${jfx.jdk.target.version}</release>
                         <encoding>UTF-8</encoding>
                         <debug>true</debug>
