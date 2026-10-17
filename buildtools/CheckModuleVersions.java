@@ -54,7 +54,7 @@ import java.util.zip.ZipFile;
  * same build. The program prints one line per mismatch and exits with status 1 if there is any.
  * <p>
  * The root pom runs it for every project that has a {@code src/main/java/module-info.java}.
- * It uses only JDK APIs and the language level of {@code --release 25}, the oldest JDK that
+ * It uses only JDK APIs and the language level of {@code --release 27}, the oldest JDK that
  * may build JavaFX.
  */
 public final class CheckModuleVersions {

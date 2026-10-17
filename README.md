@@ -20,9 +20,10 @@ This codebase is a fork of the OpenJFX mainline development branch (version 28-e
 # Building
 
 The project builds with Apache Maven (3.9+) and a JDK at least as new as
-`jfx.build.jdk.version.min` (25) in [build.properties](build.properties) (CI
-builds with JDK 26.0.2; the separate `jfx.jdk.target.version` is the runtime
-target passed to `javac --release`, not the build JDK):
+`jfx.build.jdk.version.min` (27) in [build.properties](build.properties) (CI
+builds with JDK 27, Eclipse Temurin on Linux and Windows and Oracle on macOS;
+the separate `jfx.jdk.target.version` is the runtime target passed to
+`javac --release`, not the build JDK):
 
     mvn install
 

@@ -27,8 +27,10 @@
 # This GitHub actions YAML file runs a Maven build on each of the three primary
 # platforms: Linux, macOS (both x64 and aarch64), Windows. The jobs are run
 # using the default (latest) OS platform for each OS.
-# We download a specific version of the boot JDK and use the Maven and native
-# toolchains (MSVC, CMake, Xcode) that are preinstalled on each runner.
+# We download a specific version of the boot JDK (Eclipse Temurin on Linux and
+# Windows; Oracle on macOS, as Temurin dropped macOS x64 from JDK 27) and use
+# the Maven and native toolchains (MSVC, CMake, Xcode) that are preinstalled on
+# each runner.
 #
 # The native javafx.graphics and javafx.media libraries are built by the Maven
 # build on all three platforms (via CMake); the unit test suite therefore runs
@@ -64,9 +66,9 @@ jobs:
     runs-on: "ubuntu-24.04"
 
     env:
-      BOOT_JDK_VERSION: "26.0.2"
-      BOOT_JDK_FILENAME: "jdk-26.0.2_linux-x64_bin.tar.gz"
-      BOOT_JDK_URL: "https://download.oracle.com/java/26/archive/jdk-26.0.2_linux-x64_bin.tar.gz"
+      BOOT_JDK_VERSION: "27+35"
+      BOOT_JDK_FILENAME: "OpenJDK27U-jdk_x64_linux_hotspot_27_35.tar.gz"
+      BOOT_JDK_URL: "https://github.com/adoptium/temurin27-binaries/releases/download/jdk-27%2B35/OpenJDK27U-jdk_x64_linux_hotspot_27_35.tar.gz"
 
     steps:
       - name: Checkout the source
@@ -166,9 +168,9 @@ jobs:
     runs-on: "ubuntu-24.04-arm"
 
     env:
-      BOOT_JDK_VERSION: "26.0.2"
-      BOOT_JDK_FILENAME: "jdk-26.0.2_linux-aarch64_bin.tar.gz"
-      BOOT_JDK_URL: "https://download.oracle.com/java/26/archive/jdk-26.0.2_linux-aarch64_bin.tar.gz"
+      BOOT_JDK_VERSION: "27+35"
+      BOOT_JDK_FILENAME: "OpenJDK27U-jdk_aarch64_linux_hotspot_27_35.tar.gz"
+      BOOT_JDK_URL: "https://github.com/adoptium/temurin27-binaries/releases/download/jdk-27%2B35/OpenJDK27U-jdk_aarch64_linux_hotspot_27_35.tar.gz"
 
     steps:
       - name: Checkout the source
@@ -268,9 +270,9 @@ jobs:
     runs-on: "macos-15-intel"
 
     env:
-      BOOT_JDK_VERSION: "26.0.2"
-      BOOT_JDK_FILENAME: "jdk-26.0.2_macos-x64_bin.tar.gz"
-      BOOT_JDK_URL: "https://download.oracle.com/java/26/archive/jdk-26.0.2_macos-x64_bin.tar.gz"
+      BOOT_JDK_VERSION: "27"
+      BOOT_JDK_FILENAME: "jdk-27_macos-x64_bin.tar.gz"
+      BOOT_JDK_URL: "https://download.oracle.com/java/27/archive/jdk-27_macos-x64_bin.tar.gz"
 
     steps:
       - name: Checkout the source
@@ -335,9 +337,9 @@ jobs:
     runs-on: "macos-15"
 
     env:
-      BOOT_JDK_VERSION: "26.0.2"
-      BOOT_JDK_FILENAME: "jdk-26.0.2_macos-aarch64_bin.tar.gz"
-      BOOT_JDK_URL: "https://download.oracle.com/java/26/archive/jdk-26.0.2_macos-aarch64_bin.tar.gz"
+      BOOT_JDK_VERSION: "27"
+      BOOT_JDK_FILENAME: "jdk-27_macos-aarch64_bin.tar.gz"
+      BOOT_JDK_URL: "https://download.oracle.com/java/27/archive/jdk-27_macos-aarch64_bin.tar.gz"
 
     steps:
       - name: Checkout the source
@@ -402,9 +404,9 @@ jobs:
     runs-on: "windows-2022"
 
     env:
-      BOOT_JDK_VERSION: "26.0.2"
-      BOOT_JDK_FILENAME: "jdk-26.0.2_windows-x64_bin.zip"
-      BOOT_JDK_URL: "https://download.oracle.com/java/26/archive/jdk-26.0.2_windows-x64_bin.zip"
+      BOOT_JDK_VERSION: "27+35"
+      BOOT_JDK_FILENAME: "OpenJDK27U-jdk_x64_windows_hotspot_27_35.zip"
+      BOOT_JDK_URL: "https://github.com/adoptium/temurin27-binaries/releases/download/jdk-27%2B35/OpenJDK27U-jdk_x64_windows_hotspot_27_35.zip"
 
     steps:
       - name: Checkout the source
