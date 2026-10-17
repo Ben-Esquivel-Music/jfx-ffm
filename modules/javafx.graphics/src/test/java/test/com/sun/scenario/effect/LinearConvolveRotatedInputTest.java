@@ -100,10 +100,10 @@ import static test.com.sun.scenario.effect.DecoraCorpus.channelDelta;
  * the pre-rotated input's pass vectors, {@code T (1, 0)} and {@code T (0, 1)}, are not the centred {@code (1, 0)} and
  * {@code (0, 1)}, so the peer takes its vector loop with the 4-coordinate branch. With the right steps, every sample
  * of both renders lies on the same pixel centre. The steps and start points are computed in float from images of
- * different sizes and origins, so the positions can differ by float rounding: the shadow takes the pixel under the
- * sample, and a sample on a pixel centre lies half a pixel from the next pixel, a distance that rounding cannot cross;
- * the blur samples bilinearly and mixes that rounding's fraction of a neighbour into a sample, which moves a sum by far
- * less than a step but can carry its truncation across an integer.
+ * different sizes and origins, so the positions can differ by float rounding: both peers sample bilinearly (the
+ * shadow peer since its fix of JDK-8090445, {@link LinearConvolveShadowSamplingTest}) and mix that rounding's fraction
+ * of a neighbour into a sample, which moves a sum by far less than a step but can carry its truncation across an
+ * integer.
  * The bound is therefore one step per channel. Measured, the renders are bit-identical in every case but the blur
  * under the 270-degree turn, where 44 of the 1276 pixels differ by one step. The source is a hard-edged, asymmetric
  * glyph with structure along both axes, in two opaque colours and a translucent one, so that a transposed or smeared

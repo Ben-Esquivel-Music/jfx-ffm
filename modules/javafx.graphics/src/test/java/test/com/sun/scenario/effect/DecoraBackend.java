@@ -141,6 +141,29 @@ public final class DecoraBackend {
         return new DecoraBackend(name + ", box states: " + what, delegate, boxStates);
     }
 
+    /**
+     * A fresh backend with this backend's peers and box states, except that the peer key {@code peerName} creates
+     * {@code peerClass}, so a test can render a recipe with a frozen or test-side copy of one peer
+     * ({@link ShadowSamplers}) on top of whatever peers this backend substitutes already. {@code what} names the
+     * substitution in the backend's name. Like {@link #withBoxStates}, the copy records its own {@link #ranPeers()} and
+     * {@link #gaussianPassWeights()}.
+     */
+    DecoraBackend withPeer(String what, String peerName, Class<? extends EffectPeer<?>> peerClass) {
+        RendererDelegate peers = delegate;
+        RendererDelegate substituted = new RendererDelegate() {
+            @Override
+            public AccelType getAccelType() {
+                return peers.getAccelType();
+            }
+
+            @Override
+            public String getPlatformPeerName(String key, int unrollCount) {
+                return key.equals(peerName) ? peerClass.getName() : peers.getPlatformPeerName(key, unrollCount);
+            }
+        };
+        return new DecoraBackend(name + ", " + what, substituted, boxStates);
+    }
+
     public String name() {
         return name;
     }
@@ -214,9 +237,25 @@ public final class DecoraBackend {
                 srowinc, weights);
     }
 
+    /**
+     * Runs the Java {@code filterVector} shadow loop directly: the protected
+     * {@code JSWLinearConvolveShadowPeer.filterVector}, which that peer's {@code filter} runs for every pass it does
+     * not run {@code filterHV} for. Like {@link #filterHVShadow}, the probe carries a Gaussian state validated for
+     * pass 1, so the loop packs its sums with {@code shadowColor}.
+     */
+    public void filterVectorShadow(int[] dst, int dstw, int dsth, int dstscan, int[] src, int srcw, int srch,
+                                   int srcscan, float[] weights, int count, float srcx0, float srcy0, float offsetx,
+                                   float offsety, float deltax, float deltay, float dxcol, float dycol, float dxrow,
+                                   float dyrow, Color4f shadowColor) {
+        shadowVectorProbe(shadowColor).vector(dst, dstw, dsth, dstscan, src, srcw, srch, srcscan, weights, count,
+                srcx0, srcy0, offsetx, offsety, deltax, deltay, dxcol, dycol, dxrow, dyrow);
+    }
+
     private HvProbe hvProbe;
     private HvShadowProbe shadowHvProbe;
     private Color4f shadowHvColor;
+    private VectorShadowProbe shadowVectorProbe;
+    private Color4f shadowVectorColor;
 
     private HvProbe hvProbe() {
         if (hvProbe == null) {
@@ -227,13 +266,26 @@ public final class DecoraBackend {
 
     private HvShadowProbe shadowHvProbe(Color4f shadowColor) {
         if (shadowHvProbe == null || !shadowColor.equals(shadowHvColor)) {
-            GaussianRenderState state = new GaussianRenderState(1f, 1f, 0f, true, shadowColor,
-                    BaseTransform.IDENTITY_TRANSFORM);
-            state.validatePassInput(data(new Image(1, 1), 0, 0), 1);
-            shadowHvProbe = new HvShadowProbe(fctx, renderer, state);
+            shadowHvProbe = new HvShadowProbe(fctx, renderer, pass1ShadowState(shadowColor));
             shadowHvColor = shadowColor;
         }
         return shadowHvProbe;
+    }
+
+    private VectorShadowProbe shadowVectorProbe(Color4f shadowColor) {
+        if (shadowVectorProbe == null || !shadowColor.equals(shadowVectorColor)) {
+            shadowVectorProbe = new VectorShadowProbe(fctx, renderer, pass1ShadowState(shadowColor));
+            shadowVectorColor = shadowColor;
+        }
+        return shadowVectorProbe;
+    }
+
+    /** A Gaussian shadow state validated for pass 1, whose shadow colour is {@code shadowColor} (pass 0 is black). */
+    private GaussianRenderState pass1ShadowState(Color4f shadowColor) {
+        GaussianRenderState state = new GaussianRenderState(1f, 1f, 0f, true, shadowColor,
+                BaseTransform.IDENTITY_TRANSFORM);
+        state.validatePassInput(data(new Image(1, 1), 0, 0), 1);
+        return state;
     }
 
     /** Exposes the protected Java {@code filterHV} blur loop. */
@@ -260,6 +312,22 @@ public final class DecoraBackend {
         void hv(int[] dst, int dstcols, int dstrows, int dcolinc, int drowinc, int[] src, int srccols, int srcrows,
                 int scolinc, int srowinc, float[] weights) {
             filterHV(dst, dstcols, dstrows, dcolinc, drowinc, src, srccols, srcrows, scolinc, srowinc, weights);
+        }
+    }
+
+    /** Exposes the protected Java {@code filterVector} shadow loop, which reads the shadow colour from the state. */
+    private static final class VectorShadowProbe extends JSWLinearConvolveShadowPeer {
+
+        VectorShadowProbe(FilterContext fctx, Renderer renderer, LinearConvolveRenderState state) {
+            super(fctx, renderer, "LinearConvolveShadow");
+            setRenderState(state);
+        }
+
+        void vector(int[] dst, int dstw, int dsth, int dstscan, int[] src, int srcw, int srch, int srcscan,
+                    float[] weights, int count, float srcx0, float srcy0, float offsetx, float offsety, float deltax,
+                    float deltay, float dxcol, float dycol, float dxrow, float dyrow) {
+            filterVector(dst, dstw, dsth, dstscan, src, srcw, srch, srcscan, weights, count, srcx0, srcy0, offsetx,
+                    offsety, deltax, deltay, dxcol, dycol, dxrow, dyrow);
         }
     }
 

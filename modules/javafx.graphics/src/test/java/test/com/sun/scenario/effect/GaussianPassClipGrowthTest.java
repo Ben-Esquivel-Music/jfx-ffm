@@ -82,8 +82,8 @@ import static test.com.sun.scenario.effect.DecoraCorpus.channelDelta;
  * bit-identical inside the clip. Under a top cut the clipped pass 1 runs {@code filterVector}, which rounds the same
  * weighted sum differently: for the blur both loops truncate, {@code filterVector} over bilinear samples taken at
  * pixel centres; for the shadow {@code filterHV} truncates {@code c * round(sum)} and {@code filterVector}, which
- * takes the nearest pixel, truncates {@code c * sum}, with {@code c <= 1}. Either way they differ by at most one step
- * per channel. The controls pass before the fix too.
+ * interpolates the alpha bilinearly (JDK-8090445), truncates {@code c * sum}, with {@code c <= 1}. Either way they
+ * differ by at most one step per channel. The controls pass before the fix too.
  * <p>
  * The clips leave the left and right edges alone and cut a 64x64 source at row 48 and, unless the source is cut as
  * below, at row {@code ceil(radiusY)}. The bottom cut keeps the result origin, so both passes run the {@code filterHV}
