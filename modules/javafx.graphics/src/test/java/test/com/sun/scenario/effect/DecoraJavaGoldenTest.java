@@ -65,6 +65,7 @@ import test.com.sun.scenario.effect.DecoraCorpus.Cause;
 import test.com.sun.scenario.effect.DecoraCorpus.GoldenRow;
 import test.com.sun.scenario.effect.DecoraCorpus.KernelDeviation;
 import test.com.sun.scenario.effect.DecoraCorpus.NativePlatform;
+import test.com.sun.scenario.effect.DecoraCorpus.SamplerDeviation;
 import test.com.sun.scenario.effect.DecoraCorpus.TransformDeviation;
 import test.com.sun.scenario.effect.DecoraGoldens.Entry;
 import test.com.sun.scenario.effect.DecoraGoldens.Index;
@@ -110,6 +111,13 @@ import static test.com.sun.scenario.effect.DecoraCorpus.pattern;
  * the production render has to differ from that render and has to equal the render with the independently computed
  * kernel exactly, and a clipped one has to reproduce its own unclipped production render as the golden's did.
  * <p>
+ * The row of the reviewed {@link DecoraCorpus.SamplerDeviation} ({@link DecoraCorpus#SHADOW_SAMPLER_BILINEAR}, the
+ * Gaussian shadow clipped at its top at 257x129, whose golden holds the nearest-texel sampler the Gaussian shadow loop
+ * had before JDK-8090445 was fixed) is judged the same way: on a render of the same recipe with a frozen copy of that
+ * loop by every check above, while the production render has to differ from that render, has to hash to the SHA-256
+ * the deviation pins, which like the golden's hashes fails only where a moved Java frame does, and has to reproduce
+ * its own unclipped production render as the golden's did.
+ * <p>
  * How hard a moved Java frame fails depends on {@code os.arch}. On {@code amd64} and {@code x86_64} the Java output
  * was proven identical on Windows with JDK 26 and on Linux with JDK 25, so there drift and an unjudgeable row are
  * failures. On any other architecture {@code Math.exp} (the Gaussian weights) and {@code Math.pow} (the lighting and
@@ -120,12 +128,15 @@ import static test.com.sun.scenario.effect.DecoraCorpus.pattern;
  * <p>
  * The golden never moves: {@link #INDEX_MD5} pins the index, the index pins the frames file and its own data
  * lines, the bound, cause and explained columns pin what each row may tolerate, a transform deviation pins the
- * golden's transform on its rows, and a kernel deviation judges its rows' frames against the golden's own kernel. The
- * negative controls prove that the branches of the comparison can fail, those of a kernel deviation included
- * ({@link Kind#KERNEL_UNCHANGED}, {@link Kind#KERNEL_ORACLE} and its judgement against the golden), and so can each
- * branch of the self-consistency check of clipped renders ({@link Kind#SELF_CONSISTENCY} for a golden without
- * {@code sseSelf}, a clipped result outside its unclipped one and too large a distance, and {@link Kind#EDGE_ROWS}),
- * also where a kernel deviation reuses that check for its clipped rows' production renders.
+ * golden's transform on its rows, and a kernel deviation judges its rows' frames against the golden's own kernel, as a
+ * sampler deviation does against the golden's own sampler. The negative controls prove that the branches of the
+ * comparison can fail, those of a kernel deviation included ({@link Kind#KERNEL_UNCHANGED}, {@link Kind#KERNEL_ORACLE}
+ * and its judgement against the golden) and those of a sampler deviation ({@link Kind#SAMPLER_UNCHANGED},
+ * {@link Kind#SAMPLER_HASH}, its judgement against the golden, a listed row the sampler does not move and a moved row
+ * that is not listed), and so can each branch of the self-consistency check of clipped renders
+ * ({@link Kind#SELF_CONSISTENCY} for a golden without {@code sseSelf}, a clipped result outside its unclipped one and
+ * too large a distance, and {@link Kind#EDGE_ROWS}), also where a kernel or a sampler deviation reuses that check for
+ * its clipped rows' production renders.
  */
 public class DecoraJavaGoldenTest {
 
@@ -155,7 +166,8 @@ public class DecoraJavaGoldenTest {
     /** What a comparison found wrong. */
     enum Kind {
         BOUNDS, TRANSFORM, PIN_BOUND, PIN_CAUSE, PIN_TRANSFORM, RECORD, NATIVE_SHA, UNJUDGEABLE, CAUSE_SHAPE,
-        BOUND_EXCEEDED, EXPLAINED_EXCEEDS_CAPTURE, DRIFT, SELF_CONSISTENCY, EDGE_ROWS, KERNEL_UNCHANGED, KERNEL_ORACLE
+        BOUND_EXCEEDED, EXPLAINED_EXCEEDS_CAPTURE, DRIFT, SELF_CONSISTENCY, EDGE_ROWS, KERNEL_UNCHANGED, KERNEL_ORACLE,
+        SAMPLER_UNCHANGED, SAMPLER_HASH
     }
 
     record Finding(Kind kind, String message) {
@@ -176,6 +188,11 @@ public class DecoraJavaGoldenTest {
         long kernelDiffering = -1;
         /** On a clipped row of a kernel deviation, the production render against its unclipped production render. */
         int kernelSelf = -1;
+        /** On a row of a sampler deviation, the production render against the render with the golden's sampler. */
+        int samplerMaxDelta = -1;
+        long samplerDiffering = -1;
+        /** On a clipped row of a sampler deviation, the production render against its unclipped production render. */
+        int samplerSelf = -1;
         String tx = "?";
         final List<Finding> findings = new ArrayList<>();
         final List<String> warnings = new ArrayList<>();
@@ -308,6 +325,12 @@ public class DecoraJavaGoldenTest {
                 verdict += "; kernel deviates from the golden's by " + kernel.id() + " (production maxD "
                         + j.kernelMaxDelta + ", " + j.kernelDiffering + " px"
                         + (j.kernelSelf >= 0 ? ", self " + j.kernelSelf : "") + ")";
+            }
+            SamplerDeviation sampler = DecoraCorpus.samplerDeviation(row.key());
+            if (sampler != null && j.samplerMaxDelta >= 0) {
+                verdict += "; shadow sampler deviates from the golden's by " + sampler.id() + " (production maxD "
+                        + j.samplerMaxDelta + ", " + j.samplerDiffering + " px"
+                        + (j.samplerSelf >= 0 ? ", self " + j.samplerSelf : "") + ")";
             }
             text.append(String.format(Locale.ROOT, "%-34s %-44s %-8s %-4s %-3s %5s %8s%% %5d %8d %8s %s%n",
                     row.effect(), row.params(), row.size(), j.tier, j.tx,
@@ -982,15 +1005,212 @@ public class DecoraJavaGoldenTest {
                 + used.get().ranPeers());
     }
 
+    /** The row of the sampler deviation. */
+    private static final String SAMPLER_ROW =
+            "clip/LinearConvolveShadow/gaussian | radius=3.0 spread=0.5 black clip top only | 257x129";
+    /** Its 64x48 twin, which the bilinear sampler does not move. */
+    private static final String SAMPLER_ROW_TWIN =
+            "clip/LinearConvolveShadow/gaussian | radius=3.0 spread=0.5 black clip top only | 64x48";
+
+    /**
+     * The sampler deviation names exactly the Gaussian shadow clipped at its top at 257x129, a hash-only row of the
+     * corpus and the golden that is in neither other deviation, covers no other row, judges the golden with the frozen
+     * pre-fix loop, and pins a production frame that is not the golden's. The row's unclipped render, whose passes run
+     * {@code filterHV}, is the same with either sampler.
+     */
+    @Test
+    void samplerDeviationNamesExactlyTheTopClippedGaussianShadowRow() {
+        SamplerDeviation deviation = DecoraCorpus.SHADOW_SAMPLER_BILINEAR;
+        assertEquals(Set.of(SAMPLER_ROW), deviation.rows());
+        GoldenRow row = row(SAMPLER_ROW);
+        Entry e = entry(row, Tier.H, 0);
+        assertNull(DecoraCorpus.kernelDeviation(SAMPLER_ROW), "the row is in the kernel deviation as well");
+        assertNull(DecoraCorpus.transformDeviation(SAMPLER_ROW), "the row is in the transform deviation as well");
+        List<String> covered = corpus.keySet().stream().filter(k -> DecoraCorpus.samplerDeviation(k) != null)
+                .toList();
+        assertEquals(List.of(SAMPLER_ROW), covered, "rows the deviation covers");
+        assertSame(ShadowSamplers.PreFixNearestShadowPeer.class, deviation.golden());
+        assertNotEquals(e.nativeSha256(), deviation.productionSha256().get(SAMPLER_ROW), "the pin is the golden's");
+        assertNull(renderDifference(row.renderUnclipped(DecoraBackend.java()),
+                row.renderUnclipped(ShadowSamplers.preFixNearest(DecoraBackend.java()))), "the unclipped render moved");
+    }
+
+    /**
+     * The row of the sampler deviation whose production render has the golden's nearest-texel sampler again, as when
+     * the fix is reverted, is reported: the render with the golden's sampler still passes against the golden, but the
+     * production render no longer differs from it, and its frame, the golden's, is not the pinned one, which fails
+     * where a moved Java frame fails.
+     */
+    @Test
+    void revertedFixOnSamplerDeviationRowIsReported() {
+        GoldenRow row = row(SAMPLER_ROW);
+        Entry e = entries.get(SAMPLER_ROW);
+        Judgement reverted = judgeRow(row, e, frames, () -> ShadowSamplers.preFixNearest(DecoraBackend.java()),
+                MOVED_JAVA_IS_FAILURE);
+        assertTrue(reverted.message(Kind.SAMPLER_UNCHANGED).contains("sampler deviation SHADOW_SAMPLER_BILINEAR: the"
+                + " production render equals the render with the golden's sampler"), reverted::describe);
+        if (MOVED_JAVA_IS_FAILURE) {
+            assertTrue(reverted.message(Kind.SAMPLER_HASH).contains("sampler deviation SHADOW_SAMPLER_BILINEAR: the"
+                    + " production frame sha256 " + e.nativeSha256() + " is not the pinned "
+                    + DecoraCorpus.SHADOW_SAMPLER_BILINEAR.productionSha256().get(SAMPLER_ROW)), reverted::describe);
+        }
+        assertEquals(MOVED_JAVA_IS_FAILURE ? Set.of(Kind.SAMPLER_UNCHANGED, Kind.SAMPLER_HASH)
+                : Set.of(Kind.SAMPLER_UNCHANGED), kinds(reverted), reverted::describe);
+        Judgement clean = judgeRow(row, e, frames, DecoraBackend::java, MOVED_JAVA_IS_FAILURE);
+        assertTrue(clean.passed(), clean::describe);
+        assertTrue(clean.samplerMaxDelta > 0 && clean.samplerDiffering > 0, clean::describe);
+    }
+
+    /**
+     * A sampler deviation that also listed a row the bilinear sampler does not move, the 64x48 twin of its row, with
+     * the twin's own production frame pinned, is reported on that row, and for nothing else: there the production
+     * render equals the render with the golden's sampler. Unlisted, the twin passes against the golden.
+     */
+    @Test
+    void listedRowThatTheSamplerDoesNotMoveIsReported() {
+        GoldenRow twin = row(SAMPLER_ROW_TWIN);
+        Entry e = entry(twin, Tier.P, 0);
+        assertNull(DecoraCorpus.samplerDeviation(SAMPLER_ROW_TWIN));
+        SamplerDeviation deviation = DecoraCorpus.SHADOW_SAMPLER_BILINEAR;
+        SamplerDeviation overListed = new SamplerDeviation(deviation.id(), deviation.golden(), Map.of(
+                SAMPLER_ROW, deviation.productionSha256().get(SAMPLER_ROW),
+                SAMPLER_ROW_TWIN, DecoraGoldens.sha256(DecoraGoldens.frame(twin.render(DecoraBackend.java())))));
+        Judgement unmoved = judgeSamplerDeviation(twin, e, frames, DecoraBackend::java, overListed,
+                MOVED_JAVA_IS_FAILURE);
+        assertTrue(unmoved.message(Kind.SAMPLER_UNCHANGED).contains("so the deviation no longer applies to this row"),
+                unmoved::describe);
+        assertEquals(Set.of(Kind.SAMPLER_UNCHANGED), kinds(unmoved), unmoved::describe);
+        Judgement clean = judgeRow(twin, e, frames, DecoraBackend::java, MOVED_JAVA_IS_FAILURE);
+        assertTrue(clean.passed(), clean::describe);
+    }
+
+    /**
+     * The row of the sampler deviation judged as if it were not listed is reported: the production frame no longer
+     * hashes to the golden's, so the hash-only row is unjudgeable, which fails where a moved Java frame is a failure
+     * and leaves the row not compared elsewhere.
+     */
+    @Test
+    void movedRowThatIsNotListedIsReported() {
+        GoldenRow row = row(SAMPLER_ROW);
+        Entry e = entry(row, Tier.H, 0);
+        Judgement unlisted = judgeAgainstGolden(row, e, frames, DecoraBackend::java, true);
+        assertTrue(unlisted.message(Kind.UNJUDGEABLE).contains("unjudgeable"), unlisted::describe);
+        assertEquals(Set.of(Kind.UNJUDGEABLE), kinds(unlisted), unlisted::describe);
+        Judgement warned = judgeAgainstGolden(row, e, frames, DecoraBackend::java, false);
+        assertTrue(warned.passed(), warned::describe);
+        assertFalse(warned.compared(), warned::describe);
+    }
+
+    /**
+     * The golden of the sampler deviation row holds the nearest-texel sampler and not the bilinear one: judged on
+     * renders with the production loop instead, the hash-only row is unjudgeable, and the production render no longer
+     * differs from the render the golden is judged on.
+     */
+    @Test
+    void bilinearSamplerDoesNotReproduceTheGolden() {
+        GoldenRow row = row(SAMPLER_ROW);
+        Entry e = entries.get(SAMPLER_ROW);
+        SamplerDeviation deviation = DecoraCorpus.SHADOW_SAMPLER_BILINEAR;
+        SamplerDeviation bilinearAsGolden = new SamplerDeviation(deviation.id(), JSWLinearConvolveShadowPeer.class,
+                deviation.productionSha256());
+        Judgement bilinear = judgeSamplerDeviation(row, e, frames, DecoraBackend::java, bilinearAsGolden, true);
+        Set<Kind> expected = Set.of(Kind.UNJUDGEABLE, Kind.SAMPLER_UNCHANGED);
+        assertTrue(kinds(bilinear).containsAll(expected), bilinear::describe);
+        if (MOVED_JAVA_IS_FAILURE) {
+            assertEquals(expected, kinds(bilinear), bilinear::describe);
+        }
+    }
+
+    /**
+     * The row of the sampler deviation whose production frame is not the pinned one is reported where a moved Java
+     * frame fails, and nothing else is: here the production shadow peer moves the first pixel of every pass-1 result
+     * two steps.
+     */
+    @Test
+    void productionOffThePinOnSamplerDeviationRowIsReported() {
+        GoldenRow row = row(SAMPLER_ROW);
+        Entry e = entries.get(SAMPLER_ROW);
+        AtomicReference<DecoraBackend> used = new AtomicReference<>();
+        Judgement off = judgeRow(row, e, frames, mutating("LinearConvolveShadow",
+                OffByTwoLinearConvolveShadowPeer.class, used), true);
+        assertTrue(used.get().ranPeers().contains(OffByTwoLinearConvolveShadowPeer.class.getName()), () -> "ran "
+                + used.get().ranPeers());
+        assertTrue(off.message(Kind.SAMPLER_HASH).contains("sampler deviation SHADOW_SAMPLER_BILINEAR: the production"
+                + " frame sha256 "), off::describe);
+        assertTrue(kinds(off).contains(Kind.SAMPLER_HASH), off::describe);
+        if (MOVED_JAVA_IS_FAILURE) {
+            assertEquals(Set.of(Kind.SAMPLER_HASH), kinds(off), off::describe);
+        }
+        Judgement warned = judgeRow(row, e, frames, mutating("LinearConvolveShadow",
+                OffByTwoLinearConvolveShadowPeer.class, used), false);
+        assertTrue(warned.passed(), warned::describe);
+        assertTrue(warned.warnings.stream().anyMatch(w -> w.contains("is not the pinned")), warned::describe);
+    }
+
+    /**
+     * The row of the sampler deviation whose production result carries another transform than the render with the
+     * golden's sampler is reported on every architecture, and nothing else is: here the production shadow peer adds a
+     * translation to every clipped pass-1 result.
+     */
+    @Test
+    void productionTransformOffOnSamplerDeviationRowIsReported() {
+        GoldenRow row = row(SAMPLER_ROW);
+        Entry e = entries.get(SAMPLER_ROW);
+        AtomicReference<DecoraBackend> used = new AtomicReference<>();
+        Judgement off = judgeRow(row, e, frames, mutating("LinearConvolveShadow",
+                ClippedTranslatingGaussianShadowPeer.class, used), MOVED_JAVA_IS_FAILURE);
+        assertTrue(used.get().ranPeers().contains(ClippedTranslatingGaussianShadowPeer.class.getName()), () -> "ran "
+                + used.get().ranPeers());
+        assertTrue(off.message(Kind.SAMPLER_HASH).contains("sampler deviation SHADOW_SAMPLER_BILINEAR: the production"
+                + " render's bounds or transform differ from the render with the golden's sampler: transform"),
+                off::describe);
+        assertEquals(Set.of(Kind.SAMPLER_HASH), kinds(off), off::describe);
+    }
+
+    /**
+     * The clipped row of the sampler deviation whose unclipped production render is four steps off inside the clip is
+     * reported, and nothing else is: the render with the golden's sampler is untouched and the clipped production
+     * frame keeps its pin, so only the production render's own consistency check can find it. Four steps is one more
+     * than the native renders' distance the golden allows the row.
+     */
+    @Test
+    void clippedProductionRenderOnSamplerDeviationRowAwayFromItsUnclippedRenderIsReported() {
+        GoldenRow row = row(SAMPLER_ROW);
+        Entry e = entry(row, Tier.H, 0);
+        assertEquals(3, e.sseSelf());
+        AtomicReference<DecoraBackend> used = new AtomicReference<>();
+        Judgement moved = judgeRow(row, e, frames, mutating("LinearConvolveShadow",
+                UnclippedPixelMovingGaussianShadowPeer.class, used), MOVED_JAVA_IS_FAILURE);
+        assertTrue(used.get().ranPeers().contains(UnclippedPixelMovingGaussianShadowPeer.class.getName()), () -> "ran "
+                + used.get().ranPeers());
+        assertEquals("sampler deviation SHADOW_SAMPLER_BILINEAR, production render: Java clipped render differs from"
+                + " its unclipped render by 4, native by 3, bound 0", moved.message(Kind.SELF_CONSISTENCY));
+        assertEquals(Set.of(Kind.SELF_CONSISTENCY), kinds(moved), moved::describe);
+        assertEquals(4, moved.samplerSelf);
+    }
+
+    /** The kinds of a judgement's findings. */
+    private static Set<Kind> kinds(Judgement j) {
+        Set<Kind> kinds = new TreeSet<>();
+        for (Finding f : j.findings) {
+            kinds.add(f.kind());
+        }
+        return kinds;
+    }
+
     /**
      * Judges a row against its golden entry: {@link #judgeKernelDeviation} for a row of a reviewed kernel deviation,
-     * else {@link #judgeAgainstGolden}.
+     * {@link #judgeSamplerDeviation} for a row of a reviewed sampler deviation, else {@link #judgeAgainstGolden}.
      */
     static Judgement judgeRow(GoldenRow row, Entry e, byte[] frames, Supplier<DecoraBackend> backends,
                               boolean movedJavaIsFailure) {
         KernelDeviation deviation = DecoraCorpus.kernelDeviation(row.key());
-        return deviation == null ? judgeAgainstGolden(row, e, frames, backends, movedJavaIsFailure)
-                : judgeKernelDeviation(row, e, frames, backends, deviation, movedJavaIsFailure);
+        if (deviation != null) {
+            return judgeKernelDeviation(row, e, frames, backends, deviation, movedJavaIsFailure);
+        }
+        SamplerDeviation sampler = DecoraCorpus.samplerDeviation(row.key());
+        return sampler == null ? judgeAgainstGolden(row, e, frames, backends, movedJavaIsFailure)
+                : judgeSamplerDeviation(row, e, frames, backends, sampler, movedJavaIsFailure);
     }
 
     /**
@@ -1029,6 +1249,58 @@ public class DecoraJavaGoldenTest {
             j.kernelSelf = self.javaSelf;
             for (Finding f : self.findings) {
                 j.fail(f.kind(), "kernel deviation " + deviation.id() + ", production render: " + f.message());
+            }
+        }
+        return j;
+    }
+
+    /**
+     * A row of a reviewed {@link SamplerDeviation}, whose golden recorded the deviation's {@code golden} shadow loop.
+     * The golden is judged by {@link #judgeAgainstGolden} on renders whose {@code LinearConvolveShadow} peer is that
+     * loop's ({@link DecoraBackend#withPeer}). The production render, from {@code backends}, has to differ from the
+     * render with that loop ({@link Kind#SAMPLER_UNCHANGED}), and has to have its bounds and transform and a frame that
+     * hashes to the deviation's pin for the row ({@link Kind#SAMPLER_HASH}); a frame off the pin fails only where
+     * {@code movedJavaIsFailure}, like a golden row's moved frame, and is a warning elsewhere. A clipped row's
+     * production render has to reproduce its own unclipped production render as {@link #checkSelfConsistency} requires
+     * of every clipped row.
+     */
+    static Judgement judgeSamplerDeviation(GoldenRow row, Entry e, byte[] frames, Supplier<DecoraBackend> backends,
+                                           SamplerDeviation deviation, boolean movedJavaIsFailure) {
+        Supplier<DecoraBackend> goldenSampler = () -> backends.get().withPeer(deviation.id() + " golden sampler",
+                ShadowSamplers.PEER, deviation.golden());
+        Judgement j = judgeAgainstGolden(row, e, frames, goldenSampler, movedJavaIsFailure);
+        Result production = row.render(backends.get());
+        Result golden = row.render(goldenSampler.get());
+        String fromGolden = renderDifference(production, golden);
+        boolean sameBoundsAndTransform = sameShape(production, golden)
+                && DecoraGoldens.tx(production.transform()).equals(DecoraGoldens.tx(golden.transform()));
+        if (fromGolden == null) {
+            j.fail(Kind.SAMPLER_UNCHANGED, "sampler deviation " + deviation.id() + ": the production render equals"
+                    + " the render with the golden's sampler, so the deviation no longer applies to this row");
+        } else if (sameBoundsAndTransform) {
+            j.samplerMaxDelta = DecoraCorpus.maxDelta(production, golden);
+            j.samplerDiffering = differingPixels(production, golden);
+        }
+        String pinned = deviation.productionSha256().get(row.key());
+        String sha = DecoraGoldens.sha256(DecoraGoldens.frame(production));
+        if (!sameBoundsAndTransform) {
+            j.fail(Kind.SAMPLER_HASH, "sampler deviation " + deviation.id() + ": the production render's bounds or"
+                    + " transform differ from the render with the golden's sampler: " + fromGolden);
+        } else if (!sha.equals(pinned)) {
+            String moved = "sampler deviation " + deviation.id() + ": the production frame sha256 " + sha
+                    + " is not the pinned " + pinned;
+            if (movedJavaIsFailure) {
+                j.fail(Kind.SAMPLER_HASH, moved);
+            } else {
+                j.warnings.add(moved);
+            }
+        }
+        if (row.clipped()) {
+            Judgement self = new Judgement(row.key(), e.tier());
+            checkSelfConsistency(row, e, production, row.renderUnclipped(backends.get()), self);
+            j.samplerSelf = self.javaSelf;
+            for (Finding f : self.findings) {
+                j.fail(f.kind(), "sampler deviation " + deviation.id() + ", production render: " + f.message());
             }
         }
         return j;
@@ -1494,13 +1766,18 @@ public class DecoraJavaGoldenTest {
 
     /** Moves the blue channel of the result's pixel at filter-space {@code (x, y)} two steps. */
     private static void moveBlueByTwo(ImageData result, int x, int y) {
+        moveBlue(result, x, y, 2);
+    }
+
+    /** Moves the blue channel of the result's pixel at filter-space {@code (x, y)} by {@code steps}. */
+    private static void moveBlue(ImageData result, int x, int y, int steps) {
         Rectangle bounds = result.getUntransformedBounds();
         assertTrue(x >= bounds.x && y >= bounds.y && x < bounds.x + bounds.width && y < bounds.y + bounds.height,
                 () -> "(" + x + "," + y + ") lies outside the result " + bounds);
         HeapImage image = (HeapImage) result.getUntransformedImage();
         int[] pixels = image.getPixelArray();
         int i = (y - bounds.y) * image.getScanlineStride() + x - bounds.x;
-        pixels[i] = changeBlue(pixels[i], 2);
+        pixels[i] = changeBlue(pixels[i], steps);
     }
 
     /** {@code JSWLinearConvolvePeer} returning every unclipped pass-1 result one pixel right of its bounds. */
@@ -1580,6 +1857,50 @@ public class DecoraJavaGoldenTest {
                 moveBlueByTwo(result, 20, 30);
             }
             return result;
+        }
+    }
+
+    /**
+     * {@code JSWLinearConvolveShadowPeer} with pixel (100,60) of every unclipped pass-1 result four steps off. The
+     * renders of a sampler deviation with the golden's sampler replace this peer and are left alone.
+     */
+    public static final class UnclippedPixelMovingGaussianShadowPeer extends JSWLinearConvolveShadowPeer {
+
+        public UnclippedPixelMovingGaussianShadowPeer(FilterContext fctx, Renderer r, String uniqueName) {
+            super(fctx, r, uniqueName);
+        }
+
+        @Override
+        public ImageData filter(Effect effect, LinearConvolveRenderState state, BaseTransform transform,
+                                Rectangle outputClip, ImageData... inputs) {
+            ImageData result = super.filter(effect, state, transform, outputClip, inputs);
+            if (getPass() == 1 && outputClip == null) {
+                moveBlue(result, 100, 60, 4);
+            }
+            return result;
+        }
+    }
+
+    /**
+     * {@code JSWLinearConvolveShadowPeer} returning every clipped pass-1 result with a translation by one pixel to the
+     * right instead of its transform. The renders of a sampler deviation with the golden's sampler replace this peer
+     * and are left alone.
+     */
+    public static final class ClippedTranslatingGaussianShadowPeer extends JSWLinearConvolveShadowPeer {
+
+        public ClippedTranslatingGaussianShadowPeer(FilterContext fctx, Renderer r, String uniqueName) {
+            super(fctx, r, uniqueName);
+        }
+
+        @Override
+        public ImageData filter(Effect effect, LinearConvolveRenderState state, BaseTransform transform,
+                                Rectangle outputClip, ImageData... inputs) {
+            ImageData result = super.filter(effect, state, transform, outputClip, inputs);
+            if (getPass() != 1 || outputClip == null) {
+                return result;
+            }
+            return new ImageData(result.getFilterContext(), result.getUntransformedImage(),
+                    result.getUntransformedBounds(), BaseTransform.getTranslateInstance(1, 0));
         }
     }
 }

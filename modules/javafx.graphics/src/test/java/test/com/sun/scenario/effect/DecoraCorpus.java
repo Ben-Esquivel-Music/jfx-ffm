@@ -41,6 +41,7 @@ import com.sun.scenario.effect.InvertMask;
 import com.sun.scenario.effect.PerspectiveTransform;
 import com.sun.scenario.effect.PhongLighting;
 import com.sun.scenario.effect.SepiaTone;
+import com.sun.scenario.effect.impl.sw.java.JSWLinearConvolveShadowPeer;
 import com.sun.scenario.effect.light.DistantLight;
 import com.sun.scenario.effect.light.Light;
 import com.sun.scenario.effect.light.PointLight;
@@ -49,6 +50,7 @@ import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 import java.util.Set;
 import java.util.function.BiFunction;
 import java.util.function.IntPredicate;
@@ -171,6 +173,33 @@ final class DecoraCorpus {
      */
     static final KernelDeviation BOX_KERNEL_TAP_COUNT = new KernelDeviation("BOX_KERNEL_TAP_COUNT",
             BoxKernels.PRE_FIX, BoxKernels.ORACLE, multiPassBoxSpreadRows());
+
+    /**
+     * The Gaussian shadow of radius 3 clipped at its top, at 257x129, renders with the bilinear shadow sampler. A clip
+     * that cuts the result's top or left edge sends the Gaussian shadow peer to its {@code filterVector} loop
+     * (JDK-8092042), which read the alpha of the texel under each sample until it was made to interpolate the alpha
+     * bilinearly at the sample positions of the blur's loop (JDK-8090445). The golden recorded the native
+     * {@code SSELinearConvolveShadowPeer}, whose {@code filterVector} read the texel under each sample as well (deleted
+     * in commit 26ce75d02f). The inputs of the clip matrix carry no transform, so every sample falls on a texel centre
+     * give or take the float rounding of its position. Exactly on a centre the bilinear sampler reads that texel's
+     * alpha exactly, as the old loop did; off it by a rounding error it mixes that fraction of a neighbour into the
+     * sample. On this row that carries 7 pixels across an integer, by one step, and on no other row of the golden; the
+     * row is stored as a hash only, so its moved frame cannot be judged against the golden at all.
+     * <p>
+     * The row is judged three ways by {@link DecoraJavaGoldenTest}, like the rows of {@link #BOX_KERNEL_TAP_COUNT}.
+     * Rendered by the same recipe with the frozen pre-fix loop ({@link ShadowSamplers.PreFixNearestShadowPeer}), it has
+     * to pass every check against the golden, its hash included. The production render has to differ from that render,
+     * so the fix is in effect on the row. And the production frame has to hash to the SHA-256 pinned here, whose first
+     * eight digits, {@code 2657de54}, were measured from a bilinear patch written independently while backlog story
+     * US-014 was investigated and recorded in backlog story US-060 before this loop was written. Like the golden's own
+     * hashes, the pin fails only on x64, where the Java output was proven platform independent, and warns elsewhere.
+     * Every other row is judged against the golden as before, so a row that the sampler moves without being listed
+     * here fails.
+     */
+    static final SamplerDeviation SHADOW_SAMPLER_BILINEAR = new SamplerDeviation("SHADOW_SAMPLER_BILINEAR",
+            ShadowSamplers.PreFixNearestShadowPeer.class, Map.of(
+                    key("clip/LinearConvolveShadow/gaussian", "radius=3.0 spread=0.5 black clip top only", 257, 129),
+                    "2657de5451587c2220b6c26dda8cda061227f0311ddb02a00f63b2ed46baca35"));
 
     private DecoraCorpus() {
     }
@@ -308,6 +337,28 @@ final class DecoraCorpus {
     /** The reviewed kernel deviation of the golden row {@code key}, or null when its golden kernel is production's. */
     static KernelDeviation kernelDeviation(String key) {
         return BOX_KERNEL_TAP_COUNT.rows().contains(key) ? BOX_KERNEL_TAP_COUNT : null;
+    }
+
+    /**
+     * A reviewed change of the Gaussian shadow peer's {@code filterVector} sampler on exactly the golden rows that key
+     * {@code productionSha256}: the golden recorded them with the loop of {@code golden}, and the production frame of
+     * each row now has to hash to the row's entry. On these rows the golden is judged against renders of the same
+     * recipe whose {@code LinearConvolveShadow} peer is {@code golden} ({@link DecoraBackend#withPeer}). It is not a
+     * {@link Cause}, which explains pixels of a render compared with the golden itself. {@code id} names it in findings
+     * and in the report.
+     */
+    record SamplerDeviation(String id, Class<? extends JSWLinearConvolveShadowPeer> golden,
+                            Map<String, String> productionSha256) {
+
+        /** The keys of the rows the deviation covers. */
+        Set<String> rows() {
+            return productionSha256.keySet();
+        }
+    }
+
+    /** The reviewed sampler deviation of the golden row {@code key}, or null when its golden sampler is current. */
+    static SamplerDeviation samplerDeviation(String key) {
+        return SHADOW_SAMPLER_BILINEAR.rows().contains(key) ? SHADOW_SAMPLER_BILINEAR : null;
     }
 
     /**
@@ -458,6 +509,10 @@ final class DecoraCorpus {
         if (!keys.containsAll(BOX_KERNEL_TAP_COUNT.rows())) {
             throw new IllegalStateException("BOX_KERNEL_TAP_COUNT names rows the corpus does not have: "
                     + BOX_KERNEL_TAP_COUNT.rows());
+        }
+        if (!keys.containsAll(SHADOW_SAMPLER_BILINEAR.rows())) {
+            throw new IllegalStateException("SHADOW_SAMPLER_BILINEAR names rows the corpus does not have: "
+                    + SHADOW_SAMPLER_BILINEAR.rows());
         }
         return rows;
     }

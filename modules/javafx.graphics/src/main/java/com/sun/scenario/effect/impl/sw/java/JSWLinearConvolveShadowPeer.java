@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2009, 2024, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2009, 2026, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -53,6 +53,12 @@ public class JSWLinearConvolveShadowPeer extends JSWLinearConvolvePeer {
     {
         float shadowColor[] = getShadowColor();
 
+        // Each sample's alpha is interpolated bilinearly from the four texels around it, with texel centres at
+        // i + 0.5 and transparent texels outside the source, at the positions and with the edge tests of the
+        // laccumsample that JSWLinearConvolvePeer.filterVector samples through (JDK-8090445). Reading the texel under
+        // the sample instead follows the float rounding of a position that falls on a texel boundary, and that
+        // rounding differs between a full and a clipped render. A sample exactly on a texel centre gets the weights
+        // 1 and 0, so it reads that texel's alpha exactly.
         int dstrow = 0;
         // srcxy0 point at UL corner, shift them to center of 1st dest pixel:
         srcx0 += (dxrow + dxcol) * 0.5f;
@@ -65,14 +71,33 @@ public class JSWLinearConvolveShadowPeer extends JSWLinearConvolvePeer {
                 float sampx = srcx + offsetx;
                 float sampy = srcy + offsety;
                 for (int i = 0; i < count; ++i) {
-                    if (sampx >= 0 && sampy >= 0) {
-                        int ix = (int) sampx;
-                        int iy = (int) sampy;
-                        if (ix < srcw && iy < srch) {
-                            // TODO: Usine linear interpolation here... (JDK-8090445)
-                            int argb = srcPixels[iy * srcscan + ix];
-                            sum += (argb >>> 24) * weights[i];
+                    float fx = sampx + 0.5f;
+                    float fy = sampy + 0.5f;
+                    int ix = (int) fx;
+                    int iy = (int) fy;
+                    if (fx > 0 && fy > 0 && ix <= srcw && iy <= srch) {
+                        // the box from texel (ix - 1, iy - 1) to texel (ix, iy), weighted by the fractions
+                        fx -= ix;
+                        fy -= iy;
+                        float alpha = 0.0f;
+                        int offset = iy * srcscan + ix;
+                        if (iy < srch) {
+                            if (ix < srcw) {
+                                alpha += (srcPixels[offset] >>> 24) * (fx * fy);
+                            }
+                            if (ix > 0) {
+                                alpha += (srcPixels[offset - 1] >>> 24) * ((1f - fx) * fy);
+                            }
                         }
+                        if (iy > 0) {
+                            if (ix < srcw) {
+                                alpha += (srcPixels[offset - srcscan] >>> 24) * (fx * (1f - fy));
+                            }
+                            if (ix > 0) {
+                                alpha += (srcPixels[offset - srcscan - 1] >>> 24) * ((1f - fx) * (1f - fy));
+                            }
+                        }
+                        sum += alpha * weights[i];
                     }
                     sampx += deltax;
                     sampy += deltay;

@@ -120,9 +120,8 @@ import static test.com.sun.scenario.effect.DecoraCorpus.channelDelta;
  * mirrored axis; the identity control is cut on the right and at the bottom, the {@code MotionBlur} control everywhere
  * but on the left. {@link #bothRendersRunTheSameLoops} records the loops. Two {@code filterHV} passes over the same
  * pixels are bit-identical. The {@code filterVector} sample positions and steps are computed from each render's own
- * image, whose size and origin differ between the renders, so they can differ by float rounding. The shadow takes the
- * pixel under its sample position, which that rounding cannot change here: the kernels sample at pixel centres or,
- * rotated by 45 degrees, at least 0.03 pixels away from a pixel edge. The blur samples bilinearly and mixes that
+ * image, whose size and origin differ between the renders, so they can differ by float rounding. Both peers sample
+ * bilinearly (the shadow peer since its fix of JDK-8090445, {@link LinearConvolveShadowSamplingTest}) and mix that
  * rounding's fraction of a neighbour into a sample, which moves a sum far less than a step but can carry its truncation
  * across an integer: one step. A second pass averages such inputs with weights that sum to one, which keeps the
  * difference of its sums below one step before it truncates. Measured, the renders are bit-identical in every case but
