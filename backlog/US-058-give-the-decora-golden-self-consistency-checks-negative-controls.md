@@ -1,6 +1,6 @@
 # US-058 — Give the Decora golden test's self-consistency checks negative controls
 
-**Status:** ✅ Done (2026-10-06, PR pending; filed 2026-10-02 from the independent review of US-011;
+**Status:** ✅ Done (2026-10-06, PR #28; filed 2026-10-02 from the independent review of US-011;
 read: `DecoraJavaGoldenTest`
 `checkSelfConsistency`, `enum Kind`, the class javadoc, `DecoraCorpus.GoldenRow`; whether any row still sets
 `edgeRows >= 0` was not checked) · **Found:** 2026-10-02, review of US-011 (finding L4)

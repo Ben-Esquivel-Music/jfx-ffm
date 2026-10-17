@@ -350,18 +350,10 @@ static INLINE jint interpolate4pointsNoAlpha(jint p00, jint p01, jint p10, jint 
     return (0xff000000) | (rr << 16) | (gg << 8) | bb;
 }
 
-static INLINE jboolean isInBoundsNoRepeat(jint *a, jlong *la, jint min, jint max) {
-    jboolean inBounds = XNI_TRUE;
-    jint aval = *a;
-    if (aval < min || aval > max) {
-        inBounds = XNI_FALSE;
-    }
-    return inBounds;
-}
-
 //
-// this function is called when transform is translate or scale
-// because the bounding box will be always fully filled
+// REPEAT: a texel coordinate outside [min, max] is wrapped modulo max + 1 into [0, max] (to 0 when
+// max < 0); min only decides which coordinates are left as they are, so a bilinear footprint may
+// start at txMin - 1 unwrapped. Used by every transform branch.
 //
 static INLINE void checkBoundsRepeat(jint *a, jlong *la, jint min, jint max) {
     jint aval = *a;
@@ -396,7 +388,10 @@ static INLINE void checkBoundsNoRepeat(jint *a, jlong *la, jint min, jint max,
 /*
  * Edge rule of the bilinear footprint. The footprint of (tx, ty) is the texels (tx, ty),
  * (tx+1, ty), (tx, ty+1) and (tx+1, ty+1), with tx and ty already bounded to [txMin-1, txMax] and
- * [tyMin-1, tyMax], or kept outside the content (checkBoundsNoRepeat). A texel inside the content
+ * [tyMin-1, tyMax], or kept outside the content (checkBoundsNoRepeat), the same way in every
+ * transform branch; nearest sampling bounds its one texel to the drawn sub-rectangle instead, and
+ * GENERIC without REPEAT paints a pixel that lies too far from that sub-rectangle transparent
+ * before either bound applies (see genTexturePaintTarget). A texel inside the content
  * [0, txLast] x [0, tyLast] (width - 1, height - 1) is always read as it is, also outside the drawn
  * sub-rectangle txMin..txMax, as a GPU samples it.
  * A texel outside the content follows the texture's com.sun.prism.Texture.WrapMode, as on the GPU
@@ -468,8 +463,18 @@ genTexturePaintTarget(Renderer *rdr, jint *paint, jint height) {
     jint tyMax = rdr->_texture_tyMax;
     jint wrapMode = rdr->_texture_wrapMode;
     jboolean repeat = (wrapMode == TEXTURE_WRAP_REPEAT);
-    // never true for nearest sampling, whose NO_REPEAT reads stay inside txMin-1..txMax
+    // never true for nearest sampling, whose NO_REPEAT reads stay inside nxMin..nxMax x nyMin..nyMax
     jboolean zeroEdge = (wrapMode == TEXTURE_WRAP_CLAMP_TO_ZERO) && rdr->_texture_interpolate;
+    // Nearest sampling without REPEAT clamps the texel under the pixel centre to the drawn
+    // sub-rectangle txMin..txMax x tyMin..tyMax, in every transform branch and both clamp modes: a
+    // pixel whose centre lies outside the drawn quad gets the edge texel, in GENERIC only while it
+    // lies inside the band set up there (further out it is transparent). A source of zero width
+    // (txMax == txMin - 1, which SWGraphics.drawTexture produces) reads texel txMax: txMin is the
+    // content width when such a source sits at the right edge. No index is below 0.
+    jint nxMin = MAX(0, MIN(txMin, txMax));
+    jint nxMax = MAX(0, txMax);
+    jint nyMin = MAX(0, MIN(tyMin, tyMax));
+    jint nyMax = MAX(0, tyMax);
     jint repeatInterpolateMode;
 
     if (rdr->_texture_interpolate) {
@@ -530,8 +535,10 @@ genTexturePaintTarget(Renderer *rdr, jint *paint, jint height) {
             if (repeat) {
                 // only a bilinear footprint may start at tyMin - 1 unwrapped
                 checkBoundsRepeat(&ty, &lty, (rdr->_texture_interpolate) ? tyMin-1 : tyMin, tyMax);
-            } else {
+            } else if (rdr->_texture_interpolate) {
                 checkBoundsNoRepeat(&ty, &lty, tyMin-1, tyMax, txtHeight-1, zeroEdge);
+            } else {
+                checkBoundsNoRepeat(&ty, &lty, nyMin, nyMax, txtHeight-1, zeroEdge);
             }
 
             a = paint + pidx;
@@ -545,17 +552,17 @@ genTexturePaintTarget(Renderer *rdr, jint *paint, jint height) {
                 jint *txtRow = txtData + (MAX(0, ty) * txtStride);
                 jint len;
                 tx = (jint)(ltx >> 16);
-                while (tx < txMin && a < am) {
-                    *a++ = txtRow[txMin];
+                while (tx < nxMin && a < am) {
+                    *a++ = txtRow[nxMin];
                     ++tx;
                 }
-                len = MIN(am-a, txMax-tx+1);
+                len = MIN(am-a, nxMax-tx+1);
                 if (len > 0) {
                     memcpy(a, txtRow + tx, sizeof(jint) * len);
                     a += len;
                 }
                 while (a < am) {
-                    *a++ = txtRow[txMax];
+                    *a++ = txtRow[nxMax];
                 }
                 break;
             }
@@ -713,8 +720,8 @@ genTexturePaintTarget(Renderer *rdr, jint *paint, jint height) {
                     ty = (jint)(lty >> 16);
                     hfrac = (jint)(ltx & 0xffff);
                     vfrac = (jint)(lty & 0xffff);
-                    checkBoundsNoRepeat(&tx, &ltx, txMin-1, txMax, txtWidth-1, zeroEdge);
-                    checkBoundsNoRepeat(&ty, &lty, tyMin-1, tyMax, txtHeight-1, zeroEdge);
+                    checkBoundsNoRepeat(&tx, &ltx, nxMin, nxMax, txtWidth-1, zeroEdge);
+                    checkBoundsNoRepeat(&ty, &lty, nyMin, nyMax, txtHeight-1, zeroEdge);
                     PISCES_DEBUG("[%d, %d, h:%d, v:%d] ", tx, ty, hfrac, vfrac);
                     sidx = MAX(0, ty) * txtStride + MAX(0, tx);
                     assert(pidx >= 0);
@@ -886,7 +893,26 @@ genTexturePaintTarget(Renderer *rdr, jint *paint, jint height) {
         jint paintOffset = 0;
         jint pts[3];
         jint sidx, p00;
-        jboolean inBounds;
+        // Without REPEAT a pixel is sampled, bounded as in the other branches, only while its centre
+        // lies within bu (bv) of the drawn sub-rectangle; further out it is transparent. bu = bv = 1/2
+        // texel: the bilinear test is then the footprint bound txMin - 1..txMax exactly, nearest
+        // sampling gets the same band around the pixel centre, and a source of zero width keeps a band
+        // one texel wide. Under a rotation other than a multiple of 90 degrees, or a shear,
+        // SWGraphics.drawTexture fills the axis-aligned bounding box of the quad at full coverage, and
+        // the part of its corners outside the band stays transparent. Quarter turns and mirror
+        // diagonals (m00 == m11 == 0) are the GENERIC transforms that map that box onto the quad: there
+        // bu (bv) widens to half the pixel's extent in texture space, at least half a texel, so every
+        // pixel whose texture-space bounds meet the sub-rectangle lies inside the band, and the rule
+        // equals the clamp of the other branches on every pixel that touches the quad.
+        jboolean quarter = (rdr->_texture_m00 == 0 && rdr->_texture_m11 == 0);
+        jlong bu = (quarter) ? MAX(0x8000, ABS(rdr->_texture_m01) >> 1) : 0x8000;
+        jlong bv = (quarter) ? MAX(0x8000, ABS(rdr->_texture_m10) >> 1) : 0x8000;
+        // ltx and lty are the pixel centre for nearest sampling and half a texel less for bilinear
+        jlong half = (rdr->_texture_interpolate) ? 0x8000 : 0;
+        jlong uLo = ((jlong) txMin << 16) - bu - half;
+        jlong uHi = ((jlong) (txMax + 1) << 16) + bu - half;
+        jlong vLo = ((jlong) tyMin << 16) - bv - half;
+        jlong vHi = ((jlong) (tyMax + 1) << 16) + bv - half;
 
         y = rdr->_currY;
 
@@ -910,22 +936,18 @@ genTexturePaintTarget(Renderer *rdr, jint *paint, jint height) {
                     ty = (jint)(lty >> 16);
                     hfrac = (jint)(ltx & 0xffff);
                     vfrac = (jint)(lty & 0xffff);
-
-                    inBounds =
-                        isInBoundsNoRepeat(&tx, &ltx, txMin-1, txMax) &&
-                        isInBoundsNoRepeat(&ty, &lty, tyMin-1, tyMax);
-                    PISCES_DEBUG("[%d, %d, h:%d, v:%d] ", tx, ty, hfrac, vfrac);
-                    if (inBounds) {
+                    if (ltx >= uLo && ltx < uHi && lty >= vLo && lty < vHi) {
+                        checkBoundsNoRepeat(&tx, &ltx, nxMin, nxMax, txtWidth-1, zeroEdge);
+                        checkBoundsNoRepeat(&ty, &lty, nyMin, nyMax, txtHeight-1, zeroEdge);
                         sidx = MAX(0, ty) * txtStride + MAX(0, tx);
                         p00 = txtData[sidx];
-                        assert(pidx >= 0);
-                        assert(pidx < rdr->_paint_length);
-                        paint[pidx] = p00;
                     } else {
-                        assert(pidx >= 0);
-                        assert(pidx < rdr->_paint_length);
-                        paint[pidx] = 0x00000000;
+                        p00 = 0x00000000;
                     }
+                    PISCES_DEBUG("[%d, %d, h:%d, v:%d] ", tx, ty, hfrac, vfrac);
+                    assert(pidx >= 0);
+                    assert(pidx < rdr->_paint_length);
+                    paint[pidx] = p00;
                     ++a;
                     ++pidx;
                     ltx += rdr->_texture_m00;
@@ -958,12 +980,9 @@ genTexturePaintTarget(Renderer *rdr, jint *paint, jint height) {
                     ty = (jint)(lty >> 16);
                     hfrac = (jint)(ltx & 0xffff);
                     vfrac = (jint)(lty & 0xffff);
-
-                    inBounds =
-                        isInBoundsNoRepeat(&tx, &ltx, txMin-1, txMax) &&
-                        isInBoundsNoRepeat(&ty, &lty, tyMin-1, tyMax);
-                    PISCES_DEBUG("[%d, %d, h:%d, v:%d] ", tx, ty, hfrac, vfrac);
-                    if (inBounds) {
+                    if (ltx >= uLo && ltx < uHi && lty >= vLo && lty < vHi) {
+                        checkBoundsNoRepeat(&tx, &ltx, txMin-1, txMax, txtWidth-1, zeroEdge);
+                        checkBoundsNoRepeat(&ty, &lty, tyMin-1, tyMax, txtHeight-1, zeroEdge);
                         p00 = getPointsToInterpolate(pts, txtData, txtStride,
                             tx, txtWidth-1, ty, txtHeight-1, wrapMode);
                         PISCES_DEBUG("cols[%x, %x, %x, %x] ", p00, pts[0], pts[1], pts[2]);
@@ -976,14 +995,13 @@ genTexturePaintTarget(Renderer *rdr, jint *paint, jint height) {
                         } else {
                             cval = p00;
                         }
-                        assert(pidx >= 0);
-                        assert(pidx < rdr->_paint_length);
-                        paint[pidx] = cval;
                     } else {
-                        assert(pidx >= 0);
-                        assert(pidx < rdr->_paint_length);
-                        paint[pidx] = 0x00000000;
+                        cval = 0x00000000;
                     }
+                    PISCES_DEBUG("[%d, %d, h:%d, v:%d] ", tx, ty, hfrac, vfrac);
+                    assert(pidx >= 0);
+                    assert(pidx < rdr->_paint_length);
+                    paint[pidx] = cval;
                     ++a;
                     ++pidx;
                     ltx += rdr->_texture_m00;
@@ -1026,12 +1044,9 @@ genTexturePaintTarget(Renderer *rdr, jint *paint, jint height) {
                     ty = (jint)(lty >> 16);
                     hfrac = (jint)(ltx & 0xffff);
                     vfrac = (jint)(lty & 0xffff);
-
-                    inBounds =
-                        isInBoundsNoRepeat(&tx, &ltx, txMin-1, txMax) &&
-                        isInBoundsNoRepeat(&ty, &lty, tyMin-1, tyMax);
-                    PISCES_DEBUG("[%d, %d, h:%d, v:%d] ", tx, ty, hfrac, vfrac);
-                    if (inBounds) {
+                    if (ltx >= uLo && ltx < uHi && lty >= vLo && lty < vHi) {
+                        checkBoundsNoRepeat(&tx, &ltx, txMin-1, txMax, txtWidth-1, zeroEdge);
+                        checkBoundsNoRepeat(&ty, &lty, tyMin-1, tyMax, txtHeight-1, zeroEdge);
                         p00 = getPointsToInterpolate(pts, txtData, txtStride,
                             tx, txtWidth-1, ty, txtHeight-1, wrapMode);
                         PISCES_DEBUG("cols[%x, %x, %x, %x] ", p00, pts[0], pts[1], pts[2]);
@@ -1044,14 +1059,13 @@ genTexturePaintTarget(Renderer *rdr, jint *paint, jint height) {
                         } else {
                             cval = p00;
                         }
-                        assert(pidx >= 0);
-                        assert(pidx < rdr->_paint_length);
-                        paint[pidx] = cval;
                     } else {
-                        assert(pidx >= 0);
-                        assert(pidx < rdr->_paint_length);
-                        paint[pidx] = 0x00000000;
+                        cval = 0x00000000;
                     }
+                    PISCES_DEBUG("[%d, %d, h:%d, v:%d] ", tx, ty, hfrac, vfrac);
+                    assert(pidx >= 0);
+                    assert(pidx < rdr->_paint_length);
+                    paint[pidx] = cval;
                     ++a;
                     ++pidx;
                     ltx += rdr->_texture_m00;

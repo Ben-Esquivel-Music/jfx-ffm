@@ -1,6 +1,6 @@
 # US-056 — Reuse the box-blur pass weights instead of rebuilding them on every call
 
-**Status:** ✅ Done (2026-10-06, PR pending; filed 2026-10-02 from the implementation of US-011; the rebuild cost
+**Status:** ✅ Done (2026-10-06, PR #27; filed 2026-10-02 from the implementation of US-011; the rebuild cost
 was not measured) · **Found:** 2026-10-02, while
 writing the weights test of US-011
 
