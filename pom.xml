@@ -61,10 +61,10 @@
         <jfx.release.security.version>0</jfx.release.security.version>
         <jfx.release.patch.version>0</jfx.release.patch.version>
         <jfx.release.version>28</jfx.release.version>
-        <jfx.jdk.target.version>25</jfx.jdk.target.version>
+        <jfx.jdk.target.version>27</jfx.jdk.target.version>
         <!-- Gradle parity: the verifyJava task failed the build when the JDK running
              the build was older than jfx.build.jdk.version.min (build.properties) -->
-        <jfx.build.jdk.version.min>25</jfx.build.jdk.version.min>
+        <jfx.build.jdk.version.min>27</jfx.build.jdk.version.min>
         <!-- Minimum Apache Maven version, as documented in README.md -->
         <jfx.maven.version.min>3.9</jfx.maven.version.min>
 
@@ -114,7 +114,7 @@
              javadoc.title / javadoc.header / javadoc.bottom / javadoc.top, with the
              @TOKEN@ placeholders resolved the way the Gradle javadoc task resolved
              them). Only read by the opt-in "javadoc" profile below (mvn -Pjavadoc). -->
-        <jfx.jdk.docs.version>26</jfx.jdk.docs.version>
+        <jfx.jdk.docs.version>27</jfx.jdk.docs.version>
         <!-- Gradle: JDK_DOCS, the URL handed to javadoc's -link option. Gradle's
              separate JDK_DOCS_LINK (the offline linkoffline location, empty by
              default) is deliberately not modelled here. -->
@@ -392,9 +392,9 @@
                  matches the version documented in README.md. Declared as not inherited so
                  that it runs once for the whole reactor, as verifyJava did.
                  Gradle also compared the JDK build number against
-                 jfx.build.jdk.buildnum.min (25+36). requireJavaVersion cannot see the
+                 jfx.build.jdk.buildnum.min (27+35). requireJavaVersion cannot see the
                  build number, so only the feature version is checked here; every GA build
-                 of JDK 25 is 25+36 or later, so only JDK 25 early access builds slip
+                 of JDK 27 is 27+35 or later, so only JDK 27 early access builds slip
                  through the Maven check. -->
             <plugin>
                 <groupId>org.apache.maven.plugins</groupId>

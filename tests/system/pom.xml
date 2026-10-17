@@ -195,8 +195,8 @@
                         <configuration>
                             <compilerArgs combine.children="append">
                                 <!-- Resolve netscape.javascript.JSObject against this
-                                     repository's jdk.jsobject instead of the JDK 25 system
-                                     module, where the type is deprecated for removal. -->
+                                     repository's jdk.jsobject; the JDK 27 runtime image has
+                                     no jdk.jsobject module. -->
                                 <arg>--upgrade-module-path</arg>
                                 <arg>${jfx.root}/modules/jdk.jsobject/target/classes</arg>
                                 <arg>--add-exports</arg>

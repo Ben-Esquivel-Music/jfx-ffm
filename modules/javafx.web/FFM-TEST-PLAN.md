@@ -289,7 +289,7 @@ rejected: it makes "which library did I just test?" unanswerable from a log.
 
 Rules for every class below: package `test.com.sun.webkit.ffm`, JUnit 5, `@Tag("ffm")` on the
 class, GPLv2+CPE header, no wildcard imports except static assertion imports, <= 120 columns,
-`--release 25`. Each class begins with
+`--release 27`. Each class begins with
 
 ```java
 @BeforeAll static void loadLibrary() { assumeTrue(WkjStubShim.load(), WkjStubShim.loadFailure()); }
