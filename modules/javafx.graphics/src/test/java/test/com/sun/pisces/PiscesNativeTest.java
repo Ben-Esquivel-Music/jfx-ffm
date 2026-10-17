@@ -255,6 +255,68 @@ public class PiscesNativeTest {
     }
 
     /**
+     * {@code drawImage} samples the caller's array in place, so the sub-rectangle {@code txMin..txMax} x
+     * {@code tyMin..tyMax} has to lie inside the {@code width x height} texture; it is rejected in Java before the
+     * downcall. {@code txMax < txMin} is not an error: {@code SWGraphics.drawTexture} produces it for a source
+     * rectangle of zero width.
+     */
+    @Test
+    public void drawImageRejectsASubRectangleOutsideTheTexture() {
+        int[] pixels = new int[64 * 64];
+        PiscesRenderer pr = new PiscesRenderer(new JavaSurface(pixels, RendererBase.TYPE_INT_ARGB_PRE, 64, 64));
+        pr.setClip(0, 0, 64, 64);
+        int[] texture = PiscesGoldenRenderTest.opaqueTexture();
+        int[][] outside = {{-1, 0, 15, 15}, {0, -1, 15, 15}, {0, 0, 16, 15}, {0, 0, 15, 16}};
+        for (int[] range : outside) {
+            IllegalArgumentException e = assertThrows(IllegalArgumentException.class,
+                    () -> drawSubRectangle(pr, texture, range), "drawImage, range " + Arrays.toString(range));
+            String expected = range[0] < 0 || range[1] < 0 ? "TXMIN and TYMIN must not be negative"
+                    : "TXMAX and TYMAX must be less than WIDTH and HEIGHT";
+            assertEquals(expected, e.getMessage(), "range " + Arrays.toString(range));
+        }
+        assertArrayEquals(new int[64 * 64], pixels, "a rejected call must not have touched the pixels");
+        drawSubRectangle(pr, texture, new int[] {3, 2, 2, 1});
+        assertTrue(Arrays.stream(pixels).anyMatch(pixel -> pixel != 0),
+                "txMax < txMin and tyMax < tyMin are allowed and render");
+    }
+
+    /** Draws the 16x16 {@code texture} 1:1 at the origin, sampling the sub-rectangle {@code range}. */
+    private static void drawSubRectangle(PiscesRenderer pr, int[] texture, int[] range) {
+        pr.drawImage(RendererBase.TYPE_INT_ARGB_PRE, RendererBase.IMAGE_MODE_NORMAL, texture, 16, 16, 0, 16,
+                new Transform6(), RendererBase.WRAP_CLAMP_TO_EDGE, true, 0, 0, 16 << 16, 16 << 16,
+                RendererBase.IMAGE_FRAC_EDGE_KEEP, RendererBase.IMAGE_FRAC_EDGE_KEEP,
+                RendererBase.IMAGE_FRAC_EDGE_KEEP, RendererBase.IMAGE_FRAC_EDGE_KEEP,
+                range[0], range[1], range[2], range[3], true);
+    }
+
+    /**
+     * An empty texture has no texel to sample, so {@code drawImage} rejects a width or a height of 0 in Java,
+     * before the downcall. Each case samples a source of zero width or height, which the range check allows, and
+     * fills a 16 x 16 box: only the emptiness test can reject it, and without that test the paint would read
+     * texel 0 of the empty texture.
+     */
+    @Test
+    public void drawImageRejectsAnEmptyTexture() {
+        int[] pixels = new int[64 * 64];
+        PiscesRenderer pr = new PiscesRenderer(new JavaSurface(pixels, RendererBase.TYPE_INT_ARGB_PRE, 64, 64));
+        pr.setClip(0, 0, 64, 64);
+        int[] texture = PiscesGoldenRenderTest.opaqueTexture();
+        int[][] sizes = {{0, 16}, {16, 0}, {0, 0}};
+        for (int[] size : sizes) {
+            IllegalArgumentException e = assertThrows(IllegalArgumentException.class,
+                    () -> pr.drawImage(RendererBase.TYPE_INT_ARGB_PRE, RendererBase.IMAGE_MODE_NORMAL, texture,
+                            size[0], size[1], 0, 16, new Transform6(), RendererBase.WRAP_CLAMP_TO_EDGE, false,
+                            0, 0, 16 << 16, 16 << 16,
+                            RendererBase.IMAGE_FRAC_EDGE_KEEP, RendererBase.IMAGE_FRAC_EDGE_KEEP,
+                            RendererBase.IMAGE_FRAC_EDGE_KEEP, RendererBase.IMAGE_FRAC_EDGE_KEEP,
+                            0, 0, size[0] - 1, size[1] - 1, true),
+                    "drawImage, size " + Arrays.toString(size));
+            assertEquals("WIDTH and HEIGHT must be greater than zero", e.getMessage(), "size " + Arrays.toString(size));
+        }
+        assertArrayEquals(new int[64 * 64], pixels, "a rejected call must not have touched the pixels");
+    }
+
+    /**
      * The width/height test of the JNI {@code surface_acquire} survives in {@code psw_surface_bind}, and
      * the facade is the only way to reach it: {@code AbstractSurface} rejects a negative size in Java,
      * so the descriptor is created directly. The first pixel-touching call fails with the generic

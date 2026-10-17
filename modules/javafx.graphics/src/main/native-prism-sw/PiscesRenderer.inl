@@ -349,15 +349,25 @@ renderer_setTexture(Renderer* rdr, jint renderMode, jint* data, jint width, jint
     rdr->_texture_m02 = compoundTransform.m02;
     rdr->_texture_m12 = compoundTransform.m12;
 
-    if (smooth == XNI_TRUE) { 
+    // Both filters sample the texture at the pixel centre (x + 1/2, y + 1/2), as the GPU pipelines
+    // do: the origin moves by half a column and half a row of the inverse transform. Bilinear
+    // sampling then subtracts half a texel (32768) to measure the sample from the texel centres:
+    // tx and tx + 1 are the texels whose centres bracket it, the fraction is the weight of tx + 1.
+    // Nearest sampling reads the texel the pixel centre falls in.
+    if (smooth == XNI_TRUE) {
         rdr->_texture_interpolate = XNI_TRUE;
         rdr->_texture_m02 += (rdr->_texture_m00 >> 1) + (rdr->_texture_m01 >> 1) - 32768;   // interpolate == true
         rdr->_texture_m12 += (rdr->_texture_m10 >> 1) + (rdr->_texture_m11 >> 1) - 32768;   // interpolate == true
     } else {
         rdr->_texture_interpolate = XNI_FALSE;
+        rdr->_texture_m02 += (rdr->_texture_m00 >> 1) + (rdr->_texture_m01 >> 1);
+        rdr->_texture_m12 += (rdr->_texture_m10 >> 1) + (rdr->_texture_m11 >> 1);
     }
 
-    //Do we have identity matrix? Actualy even translate is not bad for us ...
+    // Classify the sampling transform, shift included. Under a unit scale the bilinear shift is 0,
+    // and the nearest one gives an integer translation k the fraction 0x8000: nearest sampling is
+    // then TRANSLATE rather than IDENTITY, and floor(x + k + 1/2) = x + k picks the texels it picked
+    // without the shift. IDENTITY falls through to TRANSLATE in genTexturePaintTarget anyway.
     if (rdr->_texture_m00 == 65536 &&
         rdr->_texture_m11 == 65536 &&
         rdr->_texture_m01 == 0 &&

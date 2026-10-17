@@ -403,9 +403,16 @@ public final class PiscesRenderer {
 
     /**
      * Fills the rectangle {@code bbox} with the texture, sampled over {@code [txMin..txMax] x [tyMin..tyMax]}.
+     * The paint reads the texture in place and never outside {@code [0, width - 1] x [0, height - 1]}, so the
+     * texture must not be empty and the sub-rectangle has to lie inside it: {@code width} and {@code height}
+     * above 0, {@code txMin} and {@code tyMin} at or above 0, {@code txMax} below {@code width} and
+     * {@code tyMax} below {@code height}. {@code txMax < txMin} (or {@code tyMax < tyMin}) is allowed:
+     * {@code SWGraphics.drawTexture} produces it for a source rectangle of zero width or height.
      *
      * @param wrapMode {@link RendererBase#WRAP_CLAMP_TO_EDGE}, {@link RendererBase#WRAP_REPEAT} or
      *        {@link RendererBase#WRAP_CLAMP_TO_ZERO}
+     * @throws IllegalArgumentException if the texture is empty or the sub-rectangle leaves
+     *         {@code [0, width - 1] x [0, height - 1]}
      */
     public void drawImage(int imageType, int imageMode, int data[],  int width, int height, int offset, int stride,
         Transform6 textureTransform, int wrapMode, boolean linearFiltering,
@@ -415,6 +422,7 @@ public final class PiscesRenderer {
         boolean hasAlpha)
     {
         this.inputImageCheck(width, height, offset, stride, data.length);
+        this.textureRangeCheck(width, height, txMin, tyMin, txMax, tyMax);
         PiscesNative.rendererDrawImage(nativePtr, surface.pixels(), imageType, imageMode, data, width, height,
             offset, stride, transform(textureTransform), wrapMode, linearFiltering,
             bboxX, bboxY, bboxW, bboxH,
@@ -445,6 +453,18 @@ public final class PiscesRenderer {
         }
         if ((offset + stride*(height-1) + width) > data_length) {
             throw new IllegalArgumentException("STRIDE * HEIGHT exceeds length of data");
+        }
+    }
+
+    private void textureRangeCheck(int width, int height, int txMin, int tyMin, int txMax, int tyMax) {
+        if (width <= 0 || height <= 0) {
+            throw new IllegalArgumentException("WIDTH and HEIGHT must be greater than zero");
+        }
+        if (txMin < 0 || tyMin < 0) {
+            throw new IllegalArgumentException("TXMIN and TYMIN must not be negative");
+        }
+        if (txMax >= width || tyMax >= height) {
+            throw new IllegalArgumentException("TXMAX and TYMAX must be less than WIDTH and HEIGHT");
         }
     }
 

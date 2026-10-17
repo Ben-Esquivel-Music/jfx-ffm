@@ -944,6 +944,12 @@ psw_renderer_draw_image(void* rdr, int32_t* pixels,
     if (data == NULL || tx == NULL || !psw_wrap_mode_valid(wrap_mode)) {
         return PSW_ERR_ARG;
     }
+    // the texture is sampled in place, so it must not be empty (it has no texel to read) and the
+    // sampling bounds have to lie inside it; tx_max < tx_min (ty_max < ty_min) is a source of zero
+    // width (height), which SWGraphics.drawTexture produces
+    if (w <= 0 || h <= 0 || tx_min < 0 || ty_min < 0 || tx_max >= w || ty_max >= h) {
+        return PSW_ERR_ARG;
+    }
     surface = r->_surface;
     status = psw_surface_bind(surface, pixels);
     if (status != PSW_OK) {

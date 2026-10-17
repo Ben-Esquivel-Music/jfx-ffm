@@ -63,10 +63,22 @@ import static org.junit.jupiter.api.Assertions.fail;
  * software pipeline ({@code com.sun.prism.sw}) uses, on a 64x64 {@code TYPE_INT_ARGB_PRE} surface, and
  * takes a full-frame snapshot of the surface after every step. The golden resource
  * {@value #GOLDEN_RESOURCE} is the raw big-endian concatenation of those snapshots, captured on Windows x64
- * from commit {@code 820a4c35d7} (PR #23), the commit that contains the US-013 fix of
- * {@code native-prism-sw/PiscesPaint.c}.
+ * from the US-059 change on top of commit {@code c9883c820b}: nearest-neighbour texture sampling at the pixel
+ * centre ({@code renderer_setTexture} in {@code native-prism-sw/PiscesRenderer.inl}). The name is a
+ * placeholder: the file is renamed to the hash of the commit that lands that change, as
+ * {@code pisces-golden-820a4c35d7.bin} was named after the US-013 commit it was captured on.
  * <p>
- * It replaced {@code pisces-golden-a544256444.bin}, captured from the <b>JNI build</b> at commit
+ * It replaced {@code pisces-golden-820a4c35d7.bin}, captured from commit {@code 820a4c35d7} (PR #23), the
+ * commit that contains the US-013 fix of {@code native-prism-sw/PiscesPaint.c}. The US-059 fix moved two
+ * steps, the two nearest-neighbour {@code setTexture} paints, which now take the texel under the pixel centre
+ * instead of the one under its top-left corner: step 12 (clamp to edge, inverse scale 2) in the 295 pixels of
+ * the fill whose column or row reaches into the texture (x or y at most 6), and step 14 (REPEAT under a
+ * slightly sheared scale) in 502 of its 812 pixels. Steps 13 and 15 to 25 carry those pixels, and 15, 18, 20
+ * and 23 paint over some of them. No other step moved: the bilinear arithmetic is unchanged, and the band
+ * that keeps the corners of a rotated {@code drawImage} clear changes nothing here, because steps 16, 17 and 19
+ * paint no pixel in either golden (their transform maps every pixel of the box outside the texture, US-061).
+ * <p>
+ * That file replaced {@code pisces-golden-a544256444.bin}, captured from the <b>JNI build</b> at commit
  * {@code a544256444}, which the FFM build reproduced byte for byte. The US-013 fix moved 22 of its pixels, at
  * x = 2, y = 40 to 61: step 14 (the REPEAT, nearest-neighbour {@code setTexture} paint) fills that column
  * from pixel corners left of the tile, which sample tile texel -1. Nearest-neighbour REPEAT now wraps it to
@@ -97,9 +109,9 @@ import static org.junit.jupiter.api.Assertions.fail;
  * the Java side, and is reported as such even when float steps differ alongside it.
  * <p>
  * The JNI glue that produced the first golden ({@code native-prism-sw/JPiscesRenderer.c} and its siblings) was
- * deleted in commit {@code 45f18c168a}. To extend or re-verify this corpus, capture on commit
- * {@code 820a4c35d7}, whose C produced {@value #GOLDEN_RESOURCE}; capturing on a later commit proves only
- * that the build agrees with itself. The
+ * deleted in commit {@code 45f18c168a}. To extend or re-verify this corpus, capture on the commit whose C
+ * produced {@value #GOLDEN_RESOURCE}, the commit that lands US-059 and names the file; capturing on a later
+ * commit proves only that the build agrees with itself. The
  * per-step comparisons are counted, and a run that compared none of them fails at the end of the class
  * ({@link ParityGate}); a capture run compares nothing by design and is reported as skipped.
  * <p>
@@ -110,7 +122,7 @@ import static org.junit.jupiter.api.Assertions.fail;
  */
 public class PiscesGoldenRenderTest {
 
-    static final String GOLDEN_RESOURCE = "pisces-golden-820a4c35d7.bin";
+    static final String GOLDEN_RESOURCE = "pisces-golden-US-059-pending.bin";
     static final String CAPTURE_PROPERTY = "pisces.golden.capture";
 
     private static final ParityGate.Ledger LEDGER = ParityGate.ledger(PiscesGoldenRenderTest.class);

@@ -775,6 +775,13 @@ final class SWGraphics implements ReadbackGraphics {
             System.out.println("Composite rule: " + compositeMode);
         }
 
+        // An empty texture has no texel to sample, and PiscesRenderer.drawImage rejects it. NGSubScene
+        // creates one when the SubScene is less than 1/256 of a device pixel wide or tall; the quad it
+        // draws is empty too, so skipping the draw changes no pixel.
+        if (tex.getContentWidth() <= 0 || tex.getContentHeight() <= 0) {
+            return;
+        }
+
         final SWArgbPreTexture swTex = (SWArgbPreTexture) tex;
         int data[] = swTex.getDataNoClone();
 

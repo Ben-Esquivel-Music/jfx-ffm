@@ -42,7 +42,8 @@
  * Errors. Nothing is thrown across the boundary: functions return a PSW_* status. PSW_ERR_OOM is
  * the former process-global mem_Error_Flag, read and cleared at the end of every call that can
  * allocate; PSW_ERR_ARG is returned for exactly the conditions where the JNI code threw
- * IllegalArgumentException, plus NULL pointer arguments; PSW_ERR_STATE stands for the
+ * IllegalArgumentException, plus NULL pointer arguments and a psw_renderer_draw_image texture
+ * that is empty or a sampling sub-rectangle outside it; PSW_ERR_STATE stands for the
  * IllegalStateException a not-yet-initialized peer produced and is returned for a NULL renderer
  * handle. The blits are integer-only and short, so every function here may be bound with
  * Linker.Option.critical(true) and heap segments.
@@ -265,7 +266,17 @@ PRISM_SW_EXPORT int32_t psw_renderer_fill_lcd_alpha_mask(void* rdr, int32_t* pix
  * `image_type` is accepted and ignored as in the JNI code; `image_mode` is PSW_IMAGE_MODE_*.
  * `wrap_mode` is PSW_WRAP_* (any other value -> PSW_ERR_ARG): with linear filtering, a texel
  * inside the w x h content is always read as it is, also outside tx_min..ty_max, and one outside it
- * follows the wrap mode, so nothing beyond the content is ever read.
+ * follows the wrap mode, so nothing beyond the content is ever read. Nearest sampling reads the
+ * texel under the pixel centre, clamped to tx_min..tx_max x ty_min..ty_max unless `wrap_mode` is
+ * PSW_WRAP_REPEAT. Without PSW_WRAP_REPEAT, a `tx` with a rotation or shear part paints
+ * transparent 0, with either filter, where the texture coordinate of the pixel centre lies more
+ * than half a texel outside that sub-rectangle. For a quarter turn or a mirror diagonal (a `tx`
+ * with a zero diagonal) that margin is half the pixel's extent in texture space, at least half a
+ * texel, so there the rule equals the clamp of an axis-aligned `tx` on every pixel that touches
+ * the drawn quad. The texture must not be empty and the bounds have to lie inside it - w > 0,
+ * h > 0, tx_min >= 0, ty_min >= 0, tx_max < w, ty_max < h - or this returns PSW_ERR_ARG before
+ * anything is drawn; tx_max < tx_min (ty_max < ty_min), a source of zero width (height), is
+ * allowed.
  */
 PRISM_SW_EXPORT int32_t psw_renderer_draw_image(void* rdr, int32_t* pixels,
                                                 int32_t image_type, int32_t image_mode,
