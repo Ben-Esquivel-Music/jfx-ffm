@@ -1,8 +1,7 @@
 # US-046 — Port the Pisces software compositor from C to Java and delete prism_sw
 
-**Status:** 📋 Ready (drafted 2026-09-30 from a read-only survey; read `prism_sw_api.h`, `PiscesGoldenRenderTest`,
-US-013; counts by `wc -l`; the gradient bound and the `pow` tables NOT tested; nothing built) · **Epic:** Less
-native code in favour of pure Java (goal 1) · **Blocked by:** US-013
+**Status:** ✅ Done (2026-10-18, PR pending) · **Epic:** Less native code in favour of pure Java (goal 1) ·
+**Blocked by:** US-013
 
 ## Story
 As a platform maintainer, I want the software pipeline's compositor in Java, reproducing the C byte for byte on
@@ -58,4 +57,64 @@ Merged PR, verified on Windows and WSL Linux; the C deleted; `backlog/README.md`
 | --- | --- | --- |
 | 1 | Java float order, widths or `pow` differ from the C | Copy types and order (no FMA contraction in Java); the float steps and slice 5 decide |
 | 2 | Hot loops are slower in Java | Slice 6 A/B; a regression blocks the flip |
+
+## Resolution (2026-10-18)
+- **What landed.** The compositor is Java: package-private `PiscesSurfaceState`, `PiscesRendererState`, `PiscesBlit`,
+  `PiscesPaint`, `PiscesTransform` and `PiscesStatus` in `com.sun.pisces`, one method per C function, on heap
+  `int[]`/`byte[]` (no FFM, no `Unsafe`, no preview or incubator API). The public `PiscesRenderer`, `JavaSurface`,
+  `AbstractSurface` and `Transform6` API is unchanged, and `SWPipeline` loads no library.
+  - It is a faithful port of the C of 42a5072596: every quirk stays, US-062's two edge cases included.
+  - Until the flip, a system property chose the C or the Java compositor, and a differential test drove both in one
+    JVM: 4,000 seeds of 100 operations against the MSVC C on Windows and the gcc C in WSL, plus a sweep of 24,906
+    gammas over the LCD tables. The switch, the differential test and its shim went with the C.
+  - Deleted: `native-prism-sw/` (16 files, 5,342 lines), the `prismSW` targets of `native/{win,linux,mac}.cmake`,
+    `PiscesNative`, `PiscesNativeShim`, `PiscesNativeTest` (20 tests) and `PiscesNatives`. A from-scratch native
+    build on Windows and Linux produces no `prism_sw` library, and no remaining library exports or imports a `psw_*`
+    symbol (`dumpbin`, `nm`, `readelf`).
+- **Parity tests.**
+  - New `test.com.sun.pisces.PiscesCorpusGoldenTest` with `pisces-corpus-42a5072596.bin` (775,099 bytes, 3,817 steps,
+    SHA-256 `59c86968aae87c6925860842680514b46b3c312ccf2dbe14d52b3ab4cab6724a`), captured through the public API from
+    the C of 42a5072596 on Windows x64. 3,662 steps end normally and 155 in an exception (147
+    `IllegalArgumentException`, 4 `OutOfMemoryError`, 2 `NullPointerException`, 2 `ArithmeticException`).
+    - Its first 3,778 steps cover 96.36 % of the C's lines and 84.50 % of its branches (gcov in WSL), and a capture
+      from the Linux gcc build equals the Windows one. The last 39 steps pin the shortcuts of the optimised Java hot
+      loops and the in-range twins of Issue D; appending them left every earlier step byte-identical.
+    - It covers in-texture `drawImage` and `setTexture` sampling under rotated, sheared and mirrored transforms,
+      which the golden lacks (US-061).
+  - The golden `pisces-golden-US-059-pending.bin` is renamed `pisces-golden-42a5072596.bin`, after the commit that
+    landed US-059 (PR #29). Its bytes are unchanged (SHA-256
+    `69572218d1e84249425919812360b3260c50ce31338bd53e38a20f2329385a29`), and a capture from that C reproduces them.
+  - Java-only tests pin outcomes that no corpus step can hold: `PiscesNullArgumentTest` (4),
+    `PiscesDeltaRangeAtArrayEndTest` (7), `PiscesNanLcdGammaTest` (3) and `PiscesMultiplyRowGuardTest` (1). The last
+    one reaches the row-size guard of the multiply paint and its standard-error line through the new shim
+    `PiscesPaintShim`, without the 4.6 GiB heap the corpus needs for that branch, so it runs on CI.
+- **Exactness.** No tolerance anywhere: the gradients and the LCD gamma tables are exact too (`StrictMath.pow` with
+  C99's `pow(1, y) = 1`, and the x86-64 float-to-int conversion reproduced; the C has no FMA). The corpus and the
+  golden are exact and strict, float steps included, on Windows x64 and WSL Linux x64; the golden's `FLOAT_STEPS`
+  policy is gone. The compositor uses no platform-dependent math (`Math.sqrt` and `StrictMath.pow` only), so aarch64
+  and macOS are verified by CI only. 66 `Node.snapshot` scenes through the real SW pipeline were byte-identical to
+  the C, and `SWTextureEdgeSnapshotTest` passes on both.
+- **Frame time.** The A/B (Windows x64, SW pipeline, six scenes, criterion fixed before measuring) failed in five
+  scenes at first; after one round of pixel-neutral hot-loop changes the java/native medians are S1 1.024, S2 1.008,
+  S3 1.038, S4 0.992, S5 0.827 and S6 0.838, all under the 1.05 limit. The full report is in the PR.
+- **Behaviour changes.**
+  - Where the C crashed or went outside an array, the Java compositor throws, or in one overflow case draws nothing:
+    crash classes A to F, Issue D, G and H. US-062 lists them, with the renderer state each leaves behind.
+  - The renderer buffers, including the w x h `int` copy that `setTexture` makes, now live on the Java heap. An app
+    near its heap limit needs w x h x 4 bytes of headroom per textured paint, or it gets
+    `OutOfMemoryError("Allocation of internal renderer buffer failed.")` where the C's `malloc` rendered (measured: a
+    320x240 fill with a 2048x2048 `ImagePattern` at `-Xmx64m`). The one-row paint buffers fail with the JVM's own
+    `OutOfMemoryError`. Accepted: heap arrays are the port's design, and dropping the copy would change an error
+    outcome.
+  - `new PiscesRenderer(null)` still throws `NullPointerException`, but the JVM's message names
+    `AbstractSurface.state()` where it named `nativeSurface()`. Accepted: the text is generated by the JVM, no caller
+    passes null, and no test pinned it.
+- **Deviations from this story's text.**
+  - The C had 16 files and 5,342 lines, not 5,240: US-013 and US-059 added 102 lines after the survey.
+    `PSW_ABI_VERSION` was 2 (since US-013), not 1.
+  - Slice 6 deleted more than it names: `PiscesNativeShim`, `PiscesNatives`, the Disposer records of
+    `AbstractSurface` and `PiscesRenderer` (the Java compositor holds nothing to dispose) and the status code that no
+    call returned.
+  - US-061 was not done first, as the README planned: it stays a separate test-only story. The corpus covers the
+    sampling it is about, so the parity proof does not depend on it.
 

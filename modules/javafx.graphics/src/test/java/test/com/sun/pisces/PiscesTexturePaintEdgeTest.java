@@ -40,7 +40,6 @@ import java.util.Map;
 import java.util.TreeMap;
 import java.util.function.Supplier;
 import java.util.stream.Stream;
-import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.Arguments;
@@ -52,11 +51,11 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.junit.jupiter.api.Assertions.fail;
 
 /**
- * The edges of a linear-filtered texture paint ({@code genTexturePaintTarget} in
- * {@code native-prism-sw/PiscesPaint.c}), driven through {@link PiscesRenderer} on a heap surface. Both entry
- * points are covered - {@code drawImage}, and {@code setTexture} followed by {@code fillRect} - and every
- * interpolating branch: {@code TEXTURE_TRANSFORM_TRANSLATE} (scale 1, fractional translation),
- * {@code TEXTURE_TRANSFORM_SCALE_TRANSLATE} (scales 1.5, 2 and 3, and a mirror) and
+ * The edges of a linear-filtered texture paint ({@code genTexturePaintTarget}, the Java port of
+ * {@code native-prism-sw/PiscesPaint.c:451} at {@code 42a5072596}), driven through {@link PiscesRenderer} on a
+ * heap surface. Both entry points are covered - {@code drawImage}, and {@code setTexture} followed by
+ * {@code fillRect} - and every interpolating branch: {@code TEXTURE_TRANSFORM_TRANSLATE} (scale 1, fractional
+ * translation), {@code TEXTURE_TRANSFORM_SCALE_TRANSLATE} (scales 1.5, 2 and 3, and a mirror) and
  * {@code TEXTURE_TRANSFORM_GENERIC} (a 90-degree rotation), each with and without alpha.
  * <p>
  * The main oracle is padding, which is how GPU Prism simulates a wrap mode the hardware lacks. A {@code W x H}
@@ -145,11 +144,6 @@ public class PiscesTexturePaintEdgeTest {
                     "195058fd7733daf1ad0b7e8ef3e706b3525fa92634e61777b32b17078f3db1b4",
             "drawTexture3SliceH shape",
                     "78b18568cd6e164a4e01806e0368c8209292f367a4e93252a4ff33104a8f8c33");
-
-    @BeforeAll
-    static void requireNatives() {
-        PiscesNatives.require();
-    }
 
     static Stream<Arguments> interpolatingCases() {
         List<Arguments> cases = new ArrayList<>();
@@ -556,7 +550,7 @@ public class PiscesTexturePaintEdgeTest {
     enum Entry {
         /** {@code SWGraphics.drawTexture}, and the {@code IMAGE_PATTERN} branch of {@code SWGraphics.fillRect}. */
         DRAW_IMAGE,
-        /** {@code SWPaint.setPaintBeforeDraw} for an {@code ImagePattern}: the C copies the texels first. */
+        /** {@code SWPaint.setPaintBeforeDraw} for an {@code ImagePattern}: the renderer copies the texels first. */
         SET_TEXTURE
     }
 

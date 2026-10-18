@@ -34,14 +34,14 @@ and proves it by moving one real export into Rust, not by adding a hello-world c
     writes no PDB in Release (`:76-77`).
   - Linux compiles and links with `-fPIC`, `-static-libgcc -static-libstdc++`, `-z,relro`, `--gc-sections` and
     `LINKER_LANGUAGE CXX` (`linux.cmake:66-89,119`; media `:88-106,137`). Only `iio` uses `-fvisibility=hidden`
-    (`:242`). Release has no `-g` (`:76-77`) and the `.so` stays unstripped (`:33-35`).
+    (`:234`). Release has no `-g` (`:76-77`) and the `.so` stays unstripped (`:33-35`).
 - **Exports.**
   - Each ABI header defines `<LIB>_EXPORT` as `__declspec(dllexport)` or `visibility("default")` inside
     `extern "C"` (e.g. `native-iio/iio_api.h:114-122`). Only `glib-lite` and `gstreamer-lite` use `.def` files
     (media `win.cmake:420,681`).
-  - In all seven headers each export is one line that starts with the macro and names the function (iio 9, prism_sw
-    22, prism_d3d 59, prism_es2 77, glass_win 106, glass_gtk 64, jfxmedia 58; no data exports), so the export list
-    can be parsed from the header.
+  - In all seven headers (six since US-046 deleted `prism_sw_api.h`) each export is one line that starts with the
+    macro and names the function (iio 9, prism_sw 22, prism_d3d 59, prism_es2 77, glass_win 106, glass_gtk 64,
+    jfxmedia 58; no data exports), so the export list can be parsed from the header.
   - Each header has an ABI-version function that the facade binds first (`iio_api.h:221`, `prism_sw_api.h:130`,
     `prism_d3d_api.h:160`, `prism_es2_api.h:167`, `glass_win_api.h:232`, `glass_gtk_api.h:155`,
     `jfxmedia_api.h:152`; tested e.g. in `JPEGNativeTest.java:94,106-108`).

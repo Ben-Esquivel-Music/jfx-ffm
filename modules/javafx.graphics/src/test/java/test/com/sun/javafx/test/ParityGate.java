@@ -37,8 +37,8 @@ import static org.junit.jupiter.api.Assumptions.abort;
  * The "oracle must have run" rule for the parity tests of this module: a test that could not compare is
  * not the same as a test that compared and passed, and must never be reported as one.
  * <p>
- * The {@code *Natives} gate classes ({@code test.com.sun.pisces.PiscesNatives},
- * {@code test.com.sun.prism.d3d.D3DNatives}, ...) decide <em>library</em> availability: skip only when this
+ * The {@code *Natives} gate classes ({@code test.com.sun.prism.d3d.D3DNatives},
+ * {@code test.com.sun.javafx.iio.JpegNatives}, ...) decide <em>library</em> availability: skip only when this
  * build has no natives at all, fail when a library is reachable and broken. This class lifts the same rule
  * one level up, to <em>comparison</em> availability. A golden captured from the JNI build is an oracle only
  * on the machine whose fonts, DirectWrite, adapter or window station it describes; a device test only

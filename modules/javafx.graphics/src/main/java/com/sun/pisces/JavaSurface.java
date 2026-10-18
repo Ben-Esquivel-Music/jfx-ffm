@@ -35,7 +35,7 @@ public final class JavaSurface extends AbstractSurface {
 
     public JavaSurface(int[] dataInt, int dataType, int width, int height) {
         super(width, height);
-        // The C side trusts pixels() to hold width * height ints and does not re-check the length,
+        // The compositor does not re-check that pixels() holds width * height ints,
         // so this test is the one guard on it; dataInt is never reassigned afterwards.
         if (dataInt.length / width < height) {
             throw new IllegalArgumentException("width(=" + width + ") * height(="
@@ -44,12 +44,7 @@ public final class JavaSurface extends AbstractSurface {
         this.dataInt = dataInt;
         this.dataBuffer = IntBuffer.wrap(this.dataInt);
 
-        createNativeSurface(dataType);
-        // createNativeSurface() stores the native surface handle in the super class member
-        // AbstractSurface.nativePtr. This handle is needed for creating the disposer record,
-        // hence the below call to addDisposerRecord() is needed here and cannot be made in
-        // the super class constructor.
-        addDisposerRecord();
+        createState(dataType);
     }
 
     public IntBuffer getDataIntBuffer() {

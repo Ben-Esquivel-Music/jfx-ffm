@@ -182,13 +182,6 @@ add_jfx_library(glass
         /DELAYLOAD:version.dll)
 
 # ---------------------------------------------------------------------------
-# prism_sw.dll
-# ---------------------------------------------------------------------------
-add_jfx_library(prismSW
-    OUTPUT_NAME prism_sw
-    SOURCE_DIRS "${GRAPHICS_SRC}/native-prism-sw")
-
-# ---------------------------------------------------------------------------
 # prism_d3d.dll (needs fxc-generated shader headers)
 # ---------------------------------------------------------------------------
 set(D3D_HEADER_DIR "${CMAKE_CURRENT_BINARY_DIR}/headers/PrismD3D")

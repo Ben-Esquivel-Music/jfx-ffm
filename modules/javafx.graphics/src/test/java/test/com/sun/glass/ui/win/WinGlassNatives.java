@@ -44,8 +44,8 @@ import static org.junit.jupiter.api.Assumptions.abort;
  * {@code process-classes}), so a library that is reachable and does not work is a broken build, never
  * an environment fact. A missing {@code gwin_*} export, a {@code gwin_abi_version} that moved, or the
  * module left out of {@code --enable-native-access} are all failures and must not turn into skips,
- * which is how a green run comes to report zero binding tests. This is
- * {@code test.com.sun.pisces.PiscesNatives} with another library name.
+ * which is how a green run comes to report zero binding tests. Modelled, like
+ * {@code test.com.sun.prism.d3d.D3DNatives}, on {@code test.com.sun.media.jfxmediaimpl.MediaNatives}.
  * <p>
  * The rule: <em>skip only when no {@code glass} exists on {@code java.library.path} and no other
  * javafx.graphics native library does either; otherwise it has to load and work.</em>
@@ -58,11 +58,12 @@ public final class WinGlassNatives {
     private static final String LIBRARY_FILE = System.mapLibraryName(LIBRARY_NAME);
 
     /**
-     * Other libraries the javafx.graphics CMake build writes into the same directory on every
-     * platform. Any of them next to no {@code glass} is a broken build, not a tree without natives.
+     * Other libraries the javafx.graphics CMake build always writes into the same directory on Windows,
+     * where these tests run ({@code modules/javafx.graphics/native/win.cmake}). Any of them next to no
+     * {@code glass} is a broken build, not a tree without natives.
      */
     private static final List<String> SIBLING_FILES = List.of(
-            System.mapLibraryName("prism_sw"),
+            System.mapLibraryName("prism_d3d"),
             System.mapLibraryName("javafx_iio"));
 
     private static boolean decided;

@@ -40,13 +40,13 @@ import static org.junit.jupiter.api.Assumptions.abort;
  * The one decision the ES2 tests make about the native layer: is the library the facade binds present in
  * this JVM?
  * <p>
- * This is {@code test.com.sun.pisces.PiscesNatives} for the ES2 libraries, with one difference that
- * matters: they are <em>optional</em>. {@code INCLUDE_ES2} defaults off on Windows (see
+ * This is the rule of {@code test.com.sun.javafx.iio.JpegNatives} applied to the ES2 libraries, with one
+ * difference that matters: they are <em>optional</em>. {@code INCLUDE_ES2} defaults off on Windows (see
  * {@code modules/javafx.graphics/native/CMakeLists.txt}) and can be turned off on Linux and macOS, and
  * {@code prism_es2_monocle} - the library {@code ES2Native} binds when {@code -Dglass.platform=Monocle}
  * selected the Monocle embedded type - is built on Linux only when {@code INCLUDE_ES2_MONOCLE} resolves to
  * on ({@code AUTO}: {@code INCLUDE_ES2} and a {@code glesv2} pkg-config, i.e. libgles-dev). A build with no
- * such library is a legitimate configuration, not the broken build that a missing {@code prism_sw} or
+ * such library is a legitimate configuration, not the broken build that a missing {@code javafx_iio} or
  * {@code prism_d3d} would be. Nothing here can tell "left out" from "the native target broke", and a spurious
  * failure on every default Windows build is the worse error, so the absence of the library is always a skip.
  * What is never a skip is a library that is present and does not load, bind or match its ABI version: that is
@@ -100,8 +100,8 @@ public final class ES2Natives {
 
     private static List<String> siblingFiles() {
         List<String> files = new ArrayList<>(List.of(
-                System.mapLibraryName("prism_sw"), System.mapLibraryName("glass"),
-                System.mapLibraryName("javafx_font"), System.mapLibraryName("javafx_iio")));
+                System.mapLibraryName("glass"), System.mapLibraryName("javafx_font"),
+                System.mapLibraryName("javafx_iio")));
         if (!DESKTOP_LIBRARY_NAME.equals(LIBRARY_NAME)) {
             files.add(System.mapLibraryName(DESKTOP_LIBRARY_NAME));
         }

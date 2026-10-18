@@ -142,7 +142,7 @@ endfunction()
 # include no jni.h, but they do include the javac -h constant headers of
 # com.sun.glass.events.* and com.sun.glass.ui.* (glass_key.cpp and
 # glass_window.cpp alone read most of them), and every javac -h header starts
-# with #include <jni.h>. prismSW, prismES2 and iio need neither, so both sets
+# with #include <jni.h>. The other targets need neither, so both sets
 # are named here instead of in add_jfx_library.
 # ---------------------------------------------------------------------------
 add_jfx_library(glassgtk3
@@ -154,14 +154,6 @@ add_jfx_library(glassgtk3
         -DGTK_3_MIN_MINOR_VERSION=${GTK3_MIN_MINOR_VERSION}
         -DGTK_3_MIN_MICRO_VERSION=${GTK3_MIN_MICRO_VERSION}
     LINK_LIBS PkgConfig::GTK3)
-
-# ---------------------------------------------------------------------------
-# libprism_sw.so
-# ---------------------------------------------------------------------------
-add_jfx_library(prismSW
-    OUTPUT_NAME prism_sw
-    SOURCE_DIRS "${GRAPHICS_SRC}/native-prism-sw"
-    COMPILE_OPTIONS ${JFX_C_STRICT_OPTIONS} -DINLINE=inline)
 
 # ---------------------------------------------------------------------------
 # libprism_es2.so (optional, mirrors IS_INCLUDE_ES2; default true on Linux)

@@ -45,8 +45,8 @@ import static org.junit.jupiter.api.Assumptions.abort;
  * {@code process-classes}) on Windows, so a library that is reachable and does not work is a broken
  * build, never an environment fact. A missing export, a {@code d3d_abi_version} that moved, or the
  * module left out of {@code --enable-native-access} are all failures and must not turn into skips,
- * which is how a green run comes to report zero binding tests. This is
- * {@code test.com.sun.pisces.PiscesNatives} for the Direct3D library.
+ * which is how a green run comes to report zero binding tests. Modelled on
+ * {@code test.com.sun.media.jfxmediaimpl.MediaNatives}.
  * <p>
  * The rule: <em>skip on any platform but Windows; on Windows skip only when no {@code prism_d3d.dll}
  * exists on {@code java.library.path} and no other javafx.graphics native library does either;
@@ -65,8 +65,7 @@ public final class D3DNatives {
      * of them next to no {@code prism_d3d} is a broken build, not a tree without natives.
      */
     private static final List<String> SIBLING_FILES = List.of(
-            System.mapLibraryName("prism_sw"), System.mapLibraryName("glass"),
-            System.mapLibraryName("javafx_iio"));
+            System.mapLibraryName("glass"), System.mapLibraryName("javafx_iio"));
 
     private static boolean decided;
     private static String skipReason;
