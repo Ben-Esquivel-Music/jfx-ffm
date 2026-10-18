@@ -33,7 +33,6 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
 import java.util.stream.Stream;
-import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Named;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
@@ -44,9 +43,10 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
- * Where a texture paint ({@code genTexturePaintTarget} in {@code native-prism-sw/PiscesPaint.c}) samples, driven
- * through {@link PiscesRenderer} on a heap surface as {@link PiscesTexturePaintEdgeTest} does. Three properties
- * of the GPU pipelines that the software pipeline has to share:
+ * Where a texture paint ({@code genTexturePaintTarget}, the Java port of {@code native-prism-sw/PiscesPaint.c:451}
+ * at {@code 42a5072596}) samples, driven through {@link PiscesRenderer} on a heap surface as
+ * {@link PiscesTexturePaintEdgeTest} does. Three properties of the GPU pipelines that the software pipeline has
+ * to share:
  * <ul>
  * <li>Nearest-neighbour sampling takes the texel under the <em>centre</em> of the device pixel. A 7 x 5 texture
  * with one distinct opaque colour per texel is drawn without filtering, axis-aligned at scales 1, 1.5 and 2.5 and
@@ -134,11 +134,6 @@ public class PiscesTextureSamplingTest {
      */
     private static final double BAND_CENTRE_X = 28.34375;
     private static final double BAND_CENTRE_Y = 20.5;
-
-    @BeforeAll
-    static void requireNatives() {
-        PiscesNatives.require();
-    }
 
     static Stream<Arguments> centreCases() {
         List<Arguments> cases = new ArrayList<>();
@@ -477,7 +472,7 @@ public class PiscesTextureSamplingTest {
     enum Entry {
         /** {@code SWGraphics.drawTexture}, and the {@code IMAGE_PATTERN} branch of {@code SWGraphics.fillRect}. */
         DRAW_IMAGE,
-        /** {@code SWPaint.setPaintBeforeDraw} for an {@code ImagePattern}: the C copies the texels first. */
+        /** {@code SWPaint.setPaintBeforeDraw} for an {@code ImagePattern}: the renderer copies the texels first. */
         SET_TEXTURE
     }
 

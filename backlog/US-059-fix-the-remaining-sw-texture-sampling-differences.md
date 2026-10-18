@@ -1,6 +1,6 @@
 # US-059 — Fix the remaining software texture-sampling differences from D3D/ES2
 
-**Status:** ✅ Done (2026-10-16, uncommitted) · **Found:** 2026-10-03, while implementing and hardware-checking US-013
+**Status:** ✅ Done (2026-10-16, 42a5072596, PR #29) · **Found:** 2026-10-03, while implementing and hardware-checking US-013
 
 ## Story
 As a JavaFX app developer whose app runs on the software pipeline,
@@ -292,8 +292,8 @@ under a 90-degree rotation. US-013 made the two agree for clamp-to-zero textures
     device-to-texture transform: filed as US-061.
   - This matches the C side's expectation (steps 12 and 14). No C mutant was built; the attribution is the
     per-step frame comparison plus the model.
-  - The new golden `pisces-golden-US-059-pending.bin` was captured once from the fixed build (Maven-built
-    `prism_sw.dll`): 425,984 bytes, 26 steps, SHA-256
+  - The new golden `pisces-golden-42a5072596.bin` (renamed by US-046 after the landing commit) was captured once
+    from the fixed build (Maven-built `prism_sw.dll`): 425,984 bytes, 26 steps, SHA-256
     `69572218d1e84249425919812360b3260c50ce31338bd53e38a20f2329385a29`. It replaces
     `pisces-golden-820a4c35d7.bin` (`3b0ba8b0...`).
   - `GOLDEN_RESOURCE` and the class comment name it, list the moved steps and say why. They also say that the file

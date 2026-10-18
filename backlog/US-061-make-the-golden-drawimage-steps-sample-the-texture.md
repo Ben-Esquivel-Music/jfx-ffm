@@ -22,7 +22,7 @@ instead of three steps that paint nothing.
 ### Measured (2026-10-16, Windows x64)
 - **Golden files.** Pixels each step changes against the step before:
   - steps 16, 17 and 19 change 0 pixels in `pisces-golden-820a4c35d7.bin` and in the US-059 capture
-    `pisces-golden-US-059-pending.bin`;
+    `pisces-golden-42a5072596.bin`;
   - step 18 changes 454 in both.
 - **Same geometry, drawn directly** through `psw_renderer_draw_image` (US-059 C harness):
   - HEAD `prism_sw` and the US-059 fix paint 0, 0 and 0 pixels for steps 16, 17 and 19;
@@ -48,3 +48,10 @@ instead of three steps that paint nothing.
   `j2/golden/steps.pl` and `steps.txt`.
 - Related: US-046 (the Java port takes this golden as its baseline), US-059 (the `GENERIC` band).
 - Test-only. The paint is right: the transform is wrong in the test.
+- Since US-046 the C is gone and the Java compositor reproduces it byte for byte. The golden is therefore
+  re-captured from the Java compositor (capture mode, `-Dpisces.golden.capture=<absolute path>`) in its own commit
+  that lists the moved steps, and renamed after that commit as before; "no C change" in the criteria now means no
+  compositor change. `FLOAT_STEPS` went with the C (the golden is exact on every platform), so the third criterion
+  applies to the class comment only. US-046's `PiscesCorpusGoldenTest` does not run this script; should a change
+  move one of its steps, the corpus is re-captured the same way in its own commit (`-Dpisces.corpus.capture`, with
+  `-Dpisces.corpus.producer` naming the producer in its header, `java` by default).

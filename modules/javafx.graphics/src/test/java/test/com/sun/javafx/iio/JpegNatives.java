@@ -67,16 +67,16 @@ public final class JpegNatives {
     /**
      * Other libraries the javafx.graphics CMake build writes into the same directory. Any of them next
      * to no {@code javafx_iio} means the native build ran and reported success without producing the
-     * library these tests exist for. {@code prism_sw} is the one built on every platform. The list is a
-     * union of witnesses, so an entry a platform does not build only shrinks it: {@code javafx_font} is
-     * built on macOS only (its CoreText sources). Windows lost its {@code font} target with
-     * {@code directwrite.cpp}; Linux lost it when {@code fontpath_linux.c}, {@code freetype.c} and
-     * {@code pango.c} of commit {@code 7b43255b30} were replaced by Java bindings of the system
-     * libraries, and lost {@code glass} with {@code launcher.c}, the library that held its
-     * {@code Java_com_sun_glass_ui_gtk_GtkApplication__1queryLibrary} at commit {@code 033187ad90}.
+     * library these tests exist for. No other library of this module is built on every platform, so the list is
+     * a union of witnesses, and an entry a platform does not build only shrinks it: {@code glass} is built on
+     * Windows and macOS, {@code glassgtk3} on Linux, {@code javafx_font} on macOS only (its CoreText sources).
+     * Windows lost its {@code font} target with {@code directwrite.cpp}; Linux lost it when
+     * {@code fontpath_linux.c}, {@code freetype.c} and {@code pango.c} of commit {@code 7b43255b30} were replaced
+     * by Java bindings of the system libraries, and lost {@code glass} with {@code launcher.c}, the library that
+     * held its {@code Java_com_sun_glass_ui_gtk_GtkApplication__1queryLibrary} at commit {@code 033187ad90}.
      */
     private static final List<String> SIBLING_FILES = List.of(
-            System.mapLibraryName("prism_sw"), System.mapLibraryName("glass"),
+            System.mapLibraryName("glass"), System.mapLibraryName("glassgtk3"),
             System.mapLibraryName("javafx_font"));
 
     private static boolean decided;

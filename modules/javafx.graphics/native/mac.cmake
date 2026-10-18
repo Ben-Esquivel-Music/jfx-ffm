@@ -106,8 +106,7 @@ set(JFX_CC_OPTIONS
     "$<$<NOT:$<CONFIG:Debug>>:-O3;-DNDEBUG>")
 
 # Gradle dynamicLinkFlags (CMake adds -dynamiclib itself); used by glass, iio,
-# prismES2, prismMTL and font. prism and prismSW linked with
-# dynamicLinkFlagsAlt (no frameworks, no -lobjc), i.e. an empty LINK_LIBS.
+# prismES2, prismMTL and font.
 set(JFX_FRAMEWORK_LINK_LIBS
     "-framework AppKit"
     "-framework ApplicationServices"
@@ -166,14 +165,6 @@ add_jfx_library(glass
         -DMACOS_MIN_VERSION_MINOR=${MACOS_MIN_VERSION_MINOR}
         -Werror
     LINK_LIBS ${JFX_FRAMEWORK_LINK_LIBS})
-
-# ---------------------------------------------------------------------------
-# libprism_sw.dylib
-# ---------------------------------------------------------------------------
-add_jfx_library(prismSW
-    OUTPUT_NAME prism_sw
-    SOURCE_DIRS "${GRAPHICS_SRC}/native-prism-sw"
-    COMPILE_OPTIONS -O3 -DINLINE=inline)
 
 # ---------------------------------------------------------------------------
 # libprism_es2.dylib (optional, mirrors IS_INCLUDE_ES2; default true on macOS)

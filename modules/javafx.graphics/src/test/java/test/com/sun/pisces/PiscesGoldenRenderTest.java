@@ -41,32 +41,29 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Set;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.Assumptions;
-import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 import test.com.sun.javafx.test.ParityGate;
 
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.junit.jupiter.api.Assertions.fail;
 
 /**
- * Pixel-exact parity harness for the {@code prism_sw} (Pisces) compositor.
+ * Pixel-exact parity harness for the Pisces software compositor ({@code com.sun.pisces}).
  * <p>
  * A fixed script drives {@link PiscesRenderer} and {@link JavaSurface} through every operation the
  * software pipeline ({@code com.sun.prism.sw}) uses, on a 64x64 {@code TYPE_INT_ARGB_PRE} surface, and
  * takes a full-frame snapshot of the surface after every step. The golden resource
  * {@value #GOLDEN_RESOURCE} is the raw big-endian concatenation of those snapshots, captured on Windows x64
- * from the US-059 change on top of commit {@code c9883c820b}: nearest-neighbour texture sampling at the pixel
- * centre ({@code renderer_setTexture} in {@code native-prism-sw/PiscesRenderer.inl}). The name is a
- * placeholder: the file is renamed to the hash of the commit that lands that change, as
- * {@code pisces-golden-820a4c35d7.bin} was named after the US-013 commit it was captured on.
+ * from the C of commit {@code 42a5072596} (PR #29), the commit that landed US-059: nearest-neighbour texture
+ * sampling at the pixel centre ({@code renderer_setTexture} in {@code native-prism-sw/PiscesRenderer.inl}).
+ * It is named after that commit, as {@code pisces-golden-820a4c35d7.bin} was named after the US-013 commit
+ * it was captured on; a capture from the C of {@code 42a5072596} reproduces it byte for byte.
  * <p>
  * It replaced {@code pisces-golden-820a4c35d7.bin}, captured from commit {@code 820a4c35d7} (PR #23), the
  * commit that contains the US-013 fix of {@code native-prism-sw/PiscesPaint.c}. The US-059 fix moved two
@@ -86,33 +83,28 @@ import static org.junit.jupiter.api.Assertions.fail;
  * before; steps 15 to 25 carry those pixels unchanged. No other pixel and no other step moved: the
  * linear-filtering edge fix of US-013 changes none of the script's texture paints.
  * <p>
- * Every later change to the Java side of Pisces - the JNI to FFM flip first of all - has to reproduce
- * this file byte for byte: the C bodies do not change in a migration, so any difference is a
- * marshalling bug in Java and is fixed there, never by regenerating the golden. Regenerating it is a
- * behaviour change and needs its own commit with the reason stated.
- * <p>
- * The golden is exact across platforms only where the C is integer-only, which is most of it: blits,
- * masks, fill and clear, get and set RGB. Four groups of steps are not ({@link #FLOAT_STEPS}). Steps 6
- * to 11 (the linear and radial gradients) and 24 (alpha rows under a gradient paint) run float set-up
- * in {@code PiscesRenderer.inl} and a per-pixel {@code sqrt} and {@code frac += mx} in
- * {@code PiscesPaint.c}, contractable to FMA on aarch64; steps 12 to 19 (the four {@code setTexture}
- * paints and the four {@code drawImage} calls) invert their texture transform in
- * {@code pisces_transform_invert} ({@code native-prism-sw/PiscesTransform.c:55}, {@code :61-62} at commit
- * {@code a544256444}, the same lines at {@code 8492cb03b0}: {@code fdet} and the two
- * translation terms are float products and differences, divided by {@code fdet} and truncated back to
- * 16.16, so one ulp there moves the sampling grid) - texture sampling is integer, but only once the
- * inverse is; step 22 (the LCD mask at gamma 1.4) reads a lookup table built with libm {@code pow} in
- * {@code PiscesBlit.c}. The comparison runs every step and reports every mismatch in one failure, each
- * named with its class: a mismatch on another platform that is confined to float steps is C float
- * variance, not a Java marshalling bug, and is handled by a per-platform golden added in its own commit,
- * never by regenerating this one; a mismatch in an integer step, or on Windows x64 at all, is a bug on
- * the Java side, and is reported as such even when float steps differ alongside it.
+ * The C of {@code 42a5072596} produced this file, and the Java compositor that replaced the C (US-046) has to
+ * reproduce it byte for byte on every platform, float steps included. Most of the script is integer arithmetic:
+ * blits, masks, fill and clear, get and set RGB. Four groups of steps are not. Steps 6 to 11 (the linear and
+ * radial gradients) and 24 (alpha rows under a gradient paint) run the float set-up of
+ * {@code PiscesRenderer.inl} and the per-pixel {@code sqrt} and {@code frac += mx} of {@code PiscesPaint.c};
+ * steps 12 to 19 (the four {@code setTexture} paints and the four {@code drawImage} calls) invert their texture
+ * transform in {@code pisces_transform_invert} ({@code native-prism-sw/PiscesTransform.c:55} and {@code :61-62}
+ * at {@code 42a5072596}: {@code fdet} and the two translation terms are float products and differences, divided
+ * by {@code fdet} and truncated back to 16.16, so one ulp there moves the sampling grid); step 22 (the LCD mask
+ * at gamma 1.4) reads lookup tables built with {@code pow} ({@code native-prism-sw/PiscesBlit.c:1028-1029} at
+ * {@code 42a5072596}). The Java compositor runs all of them in the C's order and widths, without FMA
+ * contraction, with a {@link StrictMath}-based {@code pow} and with the float-to-int conversion of the x86-64
+ * build, so none of its results depends on the platform it runs on. A difference is therefore a bug in the
+ * Java compositor and is fixed there, never by regenerating the golden; regenerating it is a behaviour change
+ * and needs its own commit with the reason stated. The comparison runs every step and reports every differing
+ * step in one failure, in step order.
  * <p>
  * The JNI glue that produced the first golden ({@code native-prism-sw/JPiscesRenderer.c} and its siblings) was
- * deleted in commit {@code 45f18c168a}. To extend or re-verify this corpus, capture on the commit whose C
- * produced {@value #GOLDEN_RESOURCE}, the commit that lands US-059 and names the file; capturing on a later
- * commit proves only that the build agrees with itself. The
- * per-step comparisons are counted, and a run that compared none of them fails at the end of the class
+ * deleted in commit {@code 45f18c168a}, and the C compositor itself by US-046. To extend or re-verify this
+ * corpus, capture on the commit whose C produced {@value #GOLDEN_RESOURCE}, commit {@code 42a5072596}, which
+ * landed US-059 and names the file; capturing on a later commit proves only that the build agrees with itself.
+ * The per-step comparisons are counted, and a run that compared none of them fails at the end of the class
  * ({@link ParityGate}); a capture run compares nothing by design and is reported as skipped.
  * <p>
  * Capture mode: with {@code -Dpisces.golden.capture=<absolute path>} the test writes the file to that
@@ -122,7 +114,7 @@ import static org.junit.jupiter.api.Assertions.fail;
  */
 public class PiscesGoldenRenderTest {
 
-    static final String GOLDEN_RESOURCE = "pisces-golden-US-059-pending.bin";
+    static final String GOLDEN_RESOURCE = "pisces-golden-42a5072596.bin";
     static final String CAPTURE_PROPERTY = "pisces.golden.capture";
 
     private static final ParityGate.Ledger LEDGER = ParityGate.ledger(PiscesGoldenRenderTest.class);
@@ -132,19 +124,6 @@ public class PiscesGoldenRenderTest {
 
     /** Coverage maximum of the synthetic alpha rows; independent of Marlin's configured subpixel grid. */
     static final int MAX_ALPHA = 64;
-
-    /**
-     * The steps whose C runs float arithmetic (see the class comment): 6-11 the gradients, 12-19 the
-     * texture paints and {@code drawImage} calls through {@code pisces_transform_invert}, 22 the LCD mask at
-     * gamma 1.4, 24 the alpha rows under a gradient paint. Every other step is integer-only and has to match
-     * on every platform.
-     */
-    static final Set<Integer> FLOAT_STEPS = Set.of(6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 22, 24);
-
-    @BeforeAll
-    static void requireNatives() {
-        PiscesNatives.require();
-    }
 
     /** The golden runs on every machine: once the comparison started, every step must have been compared. */
     @AfterAll
@@ -166,46 +145,38 @@ public class PiscesGoldenRenderTest {
     }
 
     /**
-     * The report has to name an integer step that differs even when float steps differ too, and has to
-     * class each. The script's own frames stand in for the golden; in a copy, one pixel of step 0
-     * (integer), one of step 7 (a gradient) and one of step 13 (a texture paint, float through
-     * {@code pisces_transform_invert}) are perturbed; the comparison must list all three, class them, and
-     * count the integer one in the verdict rather than stop at, or fold it into, the float ones. The
-     * golden resource is not involved.
+     * The report has to name every step that differs, in step order, with where it first differs and how many
+     * of its pixels do, rather than stop at the first one. The script's own frames stand in for the golden; in a
+     * copy, one pixel each of steps 13 (a texture paint), 0 and 7 (a gradient) is perturbed, in that order, and
+     * the comparison must list all three in step order. The golden resource is not involved.
      */
     @Test
-    public void anIntegerStepMismatchIsReportedEvenWhenFloatStepsAlsoDiffer() {
+    public void everyDifferingStepIsReportedInStepOrder() {
         Script script = new Script();
         script.run();
         List<int[]> golden = script.steps.stream().map(step -> step.snapshot().clone()).toList();
         List<Step> perturbed = new ArrayList<>(script.steps);
+        perturb(perturbed, 13, 2049);
         perturb(perturbed, 0, 4095);
         perturb(perturbed, 7, 100);
-        perturb(perturbed, 13, 2049);
         assertEquals(List.of(), compare(script.steps, golden), "unperturbed frames compare clean");
 
         List<Mismatch> mismatches = compare(perturbed, golden);
         assertEquals(List.of(0, 7, 13), mismatches.stream().map(Mismatch::step).toList(),
                 "every differing step, in step order");
-        Mismatch integer = mismatches.get(0);
-        assertFalse(integer.floatStep(), "step 0 is integer-only");
-        assertEquals(4095, integer.firstPixel());
-        assertEquals(1, integer.differing());
-        assertEquals(golden.get(0)[4095], integer.expected());
-        assertEquals(perturbed.get(0).snapshot()[4095], integer.actual());
-        assertTrue(mismatches.get(1).floatStep(), "step 7 is a gradient");
-        assertTrue(mismatches.get(2).floatStep(), "step 13 is a texture paint: pisces_transform_invert");
+        Mismatch first = mismatches.get(0);
+        assertEquals(4095, first.firstPixel());
+        assertEquals(1, first.differing());
+        assertEquals(golden.get(0)[4095], first.expected());
+        assertEquals(perturbed.get(0).snapshot()[4095], first.actual());
 
         String message = describe(mismatches, perturbed.size());
-        String verdict = "3 of " + perturbed.size() + " steps differ from the golden: 1 in integer steps";
-        assertTrue(message.startsWith(verdict), message);
-        assertTrue(message.contains("step 0 '" + perturbed.get(0).name() + "' [integer]: pixel (63,63)"), message);
-        assertTrue(message.contains("step 7 '" + perturbed.get(7).name() + "' [float]"), message);
-        assertTrue(message.contains("step 13 '" + perturbed.get(13).name() + "' [float]"), message);
-        assertTrue(message.indexOf("step 0 '") < message.indexOf("step 7 '"), "integer steps are listed first");
-
-        assertTrue(describe(mismatches.subList(1, 3), perturbed.size()).contains("all in float steps"),
-                "float-only mismatches are called out as such");
+        assertTrue(message.startsWith("3 of " + perturbed.size() + " steps differ from the golden"), message);
+        assertTrue(message.contains("step 0 '" + perturbed.get(0).name() + "': pixel (63,63)"), message);
+        assertTrue(message.contains("step 7 '" + perturbed.get(7).name() + "': pixel (36,1)"), message);
+        assertTrue(message.contains("step 13 '" + perturbed.get(13).name() + "': pixel (1,32)"), message);
+        assertTrue(message.indexOf("step 0 '") < message.indexOf("step 7 '")
+                && message.indexOf("step 7 '") < message.indexOf("step 13 '"), "steps are listed in step order");
     }
 
     /** Replaces step {@code index} with a copy whose pixel {@code pixel} has one colour bit flipped. */
@@ -246,10 +217,11 @@ public class PiscesGoldenRenderTest {
     }
 
     /**
-     * A range the Java-side {@code AbstractSurface.rgbCheck} rejects. The one check only the C side
-     * made ({@code offset + height * scanLength} elements) is exercised in {@code PiscesNativeTest}: the
-     * JNI build could not run it, because its {@code JNI_ThrowNew} treated the exception it had just
-     * raised as a failure and aborted the JVM ({@code FatalError("Failed to throw an exception!")}).
+     * A range the Java-side {@code AbstractSurface.rgbCheck} rejects. The one check only the compositor makes
+     * ({@code offset + height * scanLength} elements, {@code native-prism-sw/prism_sw_api.c:460-462} at
+     * {@code 42a5072596}) is pinned by {@link PiscesCorpusGoldenTest}; the JNI build could not run it, because its
+     * {@code JNI_ThrowNew} treated the exception it had just raised as a failure and aborted the JVM
+     * ({@code FatalError("Failed to throw an exception!")}).
      */
     @Test
     public void getRGBOutsideSurfaceThrowsTheJavaMessage() {
@@ -351,21 +323,16 @@ public class PiscesGoldenRenderTest {
     /** One step whose snapshot differs from its golden frame: where it first differs, and by how much. */
     record Mismatch(int step, String name, int firstPixel, int expected, int actual, int differing) {
 
-        boolean floatStep() {
-            return FLOAT_STEPS.contains(step);
-        }
-
         String describe() {
-            return String.format("step %d '%s' [%s]: pixel (%d,%d) expected 0x%08X but was 0x%08X"
-                    + " (first of %d differing pixels)", step, name, floatStep() ? "float" : "integer",
+            return String.format("step %d '%s': pixel (%d,%d) expected 0x%08X but was 0x%08X"
+                    + " (first of %d differing pixels)", step, name,
                     firstPixel % W, firstPixel / W, expected, actual, differing);
         }
     }
 
     /**
      * Compares every snapshot with its golden frame and reports every step that differs, in step order,
-     * so that one run names every broken operation and an integer-step regression is never hidden behind
-     * a float-step difference that happens to come first.
+     * so that one run names every broken operation, not only the first.
      */
     static List<Mismatch> compare(List<Step> steps, List<int[]> golden) {
         List<Mismatch> mismatches = new ArrayList<>();
@@ -390,26 +357,12 @@ public class PiscesGoldenRenderTest {
         return mismatches;
     }
 
-    /** The one failure message: the verdict, then every mismatch, integer steps before float steps. */
+    /** The one failure message: the verdict, then every mismatch in step order. */
     static String describe(List<Mismatch> mismatches, int stepCount) {
-        List<Mismatch> integer = mismatches.stream().filter(m -> !m.floatStep()).toList();
-        List<Mismatch> floating = mismatches.stream().filter(Mismatch::floatStep).toList();
         StringBuilder message = new StringBuilder();
-        message.append(mismatches.size()).append(" of ").append(stepCount).append(" steps differ from the golden: ");
-        if (integer.isEmpty()) {
-            message.append("all in float steps, which on a platform other than Windows x64 is C float variance"
-                    + " (per-platform golden in its own commit, never a regeneration) and on Windows x64 is a"
-                    + " Java-side bug");
-        } else {
-            message.append(integer.size()).append(" in integer steps, which is a Java-side bug on every platform");
-            if (!floating.isEmpty()) {
-                message.append(", and ").append(floating.size()).append(" in float steps");
-            }
-        }
-        for (Mismatch mismatch : integer) {
-            message.append(System.lineSeparator()).append("  ").append(mismatch.describe());
-        }
-        for (Mismatch mismatch : floating) {
+        message.append(mismatches.size()).append(" of ").append(stepCount).append(" steps differ from the golden,")
+                .append(" which is a bug in the Java compositor on every platform");
+        for (Mismatch mismatch : mismatches) {
             message.append(System.lineSeparator()).append("  ").append(mismatch.describe());
         }
         return message.toString();

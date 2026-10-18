@@ -133,8 +133,8 @@ public final class Transform6 {
 
     /**
      * Writes the six entries into {@code dst[0..5]} in the {@code PswTransform6} field order of
-     * {@code prism_sw_api.h} - m00, m01, m10, m11, m02, m12 - which is how {@link PiscesNative} hands
-     * a transform to the C side.
+     * {@code prism_sw_api.h} at commit {@code 42a5072596} - m00, m01, m10, m11, m02, m12 - which is the
+     * {@code int[6]} form of a transform that {@link PiscesTransform} computes with.
      */
     void fill(int[] dst) {
         dst[0] = m00;
