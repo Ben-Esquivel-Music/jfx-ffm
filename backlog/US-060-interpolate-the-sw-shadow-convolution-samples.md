@@ -1,6 +1,6 @@
 # US-060 — Interpolate the samples of the software shadow convolution
 
-**Status:** ✅ Done (2026-10-17, PR pending) · **Found:** 2026-10-03, the rotate-45 residual of US-014
+**Status:** ✅ Done (2026-10-17, 7d5ffd66f0, PR #31) · **Found:** 2026-10-03, the rotate-45 residual of US-014
 
 ## Story
 As a JavaFX app developer whose app runs on the software pipeline,

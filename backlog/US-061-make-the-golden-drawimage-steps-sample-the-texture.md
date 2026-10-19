@@ -1,7 +1,7 @@
 # US-061 — Make the golden `drawImage` steps sample the texture
 
-**Status:** 📋 Ready (filed 2026-10-16 from US-059; measured on the golden files and on the paint driven directly,
-not fixed) · **Found:** 2026-10-16, while attributing the golden steps that US-059 moved
+**Status:** ✅ Done (2026-10-18, PR pending) · **Found:** 2026-10-16, while attributing the golden steps that
+US-059 moved
 
 ## Story
 As the maintainer of the software pipeline and of its planned Java port (US-046),
@@ -55,3 +55,43 @@ instead of three steps that paint nothing.
   applies to the class comment only. US-046's `PiscesCorpusGoldenTest` does not run this script; should a change
   move one of its steps, the corpus is re-captured the same way in its own commit (`-Dpisces.corpus.capture`, with
   `-Dpisces.corpus.producer` naming the producer in its header, `java` by default).
+
+## Resolution (2026-10-18)
+- **Transforms.** Each `drawImage` step has its own texture-to-device transform, taken from one definition that the
+  script and the guard share (`ImageStep` and `Box` in `IMAGE_STEPS`). Scale = box size / source size and
+  translation = box origin, as `SWPaint.computeDrawTexturePaintTransform` builds the transform that
+  `SWGraphics.drawTexture` hands `drawImage`. A shear of 0.05 and -0.03 pixel per texel (`SHEAR_X`, `SHEAR_Y`) keeps
+  every step on `GENERIC`: the inverse's off-diagonals are -1648/989 in 16.16 for steps 16 and 17, -6579/3948 for 18
+  and -928/557 for 19. Steps 16, 17 and 19 map their sub-rectangle onto their box, step 19 its 12x12 sub-rectangle at
+  offset 34, stride 16. Step 18 maps the texture onto a centred tile half as wide and high as its box, so its box
+  samples u from -9.1 to 24.1 and v from -7.2 to 23.5, and REPEAT wraps on every side. Step order, names, textures,
+  modes, edges, flags, colours and boxes are unchanged, and the compositor is not touched.
+- **Golden.** `pisces-golden-US-061-pending.bin`, captured from the Java compositor of 410b8036c1 (SHA-256
+  `dadef48365b2f438153325485164aa05d295bbcd57a7f9d51f4fa281b84d7e0a`), replaces `pisces-golden-42a5072596.bin`.
+  Frames 0 to 15 are byte-identical. Steps 16 to 19 change 488, 525, 457 and 500 pixels against the step before
+  (0, 0, 454 and 0 before) and differ from the old golden in 488, 806, 1011 and 1019; steps 20 to 25 carry them
+  (20 and 21 paint over some) and differ in 1017 each.
+- **C cross-check.** A capture of the US-061 script from the C of 42a5072596 (`prism_sw` built from 7d5ffd66f0, the
+  script carried over, the library load logged; without the library the run aborts and captures nothing) is
+  byte-identical to the Java capture and to the new golden, so the golden stays a C baseline.
+- **Guard** `theDrawImageStepsPaintTheirBoxFromInsideTheTexture`, per step: a pixel of the box changes against the
+  frame before; the inverse keeps a 16.16 shear (`GENERIC`); for 16, 17 and 19 every quad corner lies within one
+  pixel of its box corner (the shear moves one by at most 0.8 px, a texel spans at least 1.29 px), and every pixel
+  clear of the fractional box edges whose centre lies half a texel inside the quad is painted when the step is
+  replayed with opaque texels on a transparent surface (436, 436 and 420 pixels); for 18 the box samples u and v
+  below 0 and at or above 16. The oracle is geometry in doubles from the `Transform6` ints plus that replay, in
+  which the paint leaves a pixel sampled outside its half-texel band transparent; it reuses none of the
+  compositor's fixed-point arithmetic. Mutant proof, on copies outside the repository: M1 (the old device-to-texture
+  transform, 19 checks fail), M2 and M3 (translation one texel off in u, in v: corner checks), M4 (no shear:
+  `GENERIC`), M5 (step 18 on its whole box: no wrap) and M6 (a half-width sub-rectangle: replay) fail; M0, the
+  unmutated copy, passes.
+- **Criteria.** 1 is met by the guard and the counts above. 2 is met: the golden is re-captured with no compositor
+  change, as its own change, and the class comment lists the moved steps and why. 3 is met in the class comment,
+  which still classifies every step; `FLOAT_STEPS` went with the C in US-046.
+- **Tests** (Windows x64, Maven 3.10.0, JDK 27): `PiscesGoldenRenderTest` 7, 0 failures; `test.com.sun.pisces` and
+  `test.com.sun.prism.sw` 289, 0 failures, 0 skipped (`-Xmx6g`); the module run, javafx.graphics 26,028, 0 failures,
+  0 errors, 356 skipped, javafx.base 5,510, 0 failures, 22 skipped, jslc 159, 0 failures.
+- **Follow-up.** After this lands, a later commit renames the pending file to the landing commit's hash in
+  `GOLDEN_RESOURCE` and the class comment, as US-046 did for US-059's golden.
+- **Evidence:** Claude scratchpad of session 59a420f9, `us061/` (`notes/A.md`, `golden/`, `mutants/`, `c-check/`,
+  `logs/`).

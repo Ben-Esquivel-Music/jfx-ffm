@@ -1,6 +1,6 @@
 # US-046 — Port the Pisces software compositor from C to Java and delete prism_sw
 
-**Status:** ✅ Done (2026-10-18, PR pending) · **Epic:** Less native code in favour of pure Java (goal 1) ·
+**Status:** ✅ Done (2026-10-18, 410b8036c1, PR #32) · **Epic:** Less native code in favour of pure Java (goal 1) ·
 **Blocked by:** US-013
 
 ## Story
