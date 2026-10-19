@@ -40,6 +40,7 @@ import java.nio.IntBuffer;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.List;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.Assumptions;
@@ -60,20 +61,41 @@ import static org.junit.jupiter.api.Assertions.fail;
  * software pipeline ({@code com.sun.prism.sw}) uses, on a 64x64 {@code TYPE_INT_ARGB_PRE} surface, and
  * takes a full-frame snapshot of the surface after every step. The golden resource
  * {@value #GOLDEN_RESOURCE} is the raw big-endian concatenation of those snapshots, captured on Windows x64
- * from the C of commit {@code 42a5072596} (PR #29), the commit that landed US-059: nearest-neighbour texture
- * sampling at the pixel centre ({@code renderer_setTexture} in {@code native-prism-sw/PiscesRenderer.inl}).
- * It is named after that commit, as {@code pisces-golden-820a4c35d7.bin} was named after the US-013 commit
- * it was captured on; a capture from the C of {@code 42a5072596} reproduces it byte for byte.
+ * from the Java compositor of commit {@code 410b8036c1} (PR #32), the commit that landed US-046, running the
+ * script of US-061. A capture of the same script from the C of commit {@code 42a5072596} (PR #29, the commit
+ * that landed US-059: nearest-neighbour texture sampling at the pixel centre, {@code renderer_setTexture} in
+ * {@code native-prism-sw/PiscesRenderer.inl}), with {@code prism_sw} built from commit {@code 7d5ffd66f0}, whose
+ * C is the same, reproduces it byte for byte on Windows x64: every frame, 16 to 25 included, is the C's. The
+ * name is a placeholder: the file is renamed to the hash of the commit that lands US-061, as
+ * {@code pisces-golden-US-059-pending.bin} became {@code pisces-golden-42a5072596.bin} (US-046).
  * <p>
- * It replaced {@code pisces-golden-820a4c35d7.bin}, captured from commit {@code 820a4c35d7} (PR #23), the
+ * It replaced {@code pisces-golden-42a5072596.bin}, captured from the C of commit {@code 42a5072596}. Its four
+ * {@code drawImage} steps, 16 to 19, passed one device-to-texture transform, u = 16 / bw * (x - bx) plus a shear,
+ * but {@code PiscesRenderer.drawImage} takes the texture-to-device transform and inverts it, so every pixel of the
+ * boxes sampled far outside the 16-texel texture (u of about 52 to 89 in step 16): steps 16, 17 and 19 painted no
+ * pixel, and the REPEAT step 18 painted 454, tiled from far outside the image. US-061 gives each step its own
+ * texture-to-device transform ({@link ImageStep#transform()}), built the way {@code SWGraphics.drawTexture} builds
+ * the one it hands {@code drawImage}: scale = box size / source size, translation = box origin, plus the shear
+ * {@link #SHEAR_X} and {@link #SHEAR_Y} (0.05 and -0.03 pixel per texel), which keeps every step on the
+ * {@code GENERIC} branch of the texture paint. Steps 16, 17 and 19 map their sub-rectangle onto their box (step 19
+ * its 12x12 sub-rectangle at offset 34, stride 16), so the drawn quad nearly coincides with the box. Step 18 maps
+ * the texture onto a tile half as wide and half as high as its box, centred in it, so its box samples u and v
+ * below 0 and at or above 16 on every side, and REPEAT wraps them. That moved steps 16 to 19: they now change 488,
+ * 525, 457 and 500 pixels against the step before (0, 0, 454 and 0 before) and differ from the old golden in 488,
+ * 806, 1011 and 1019 pixels. Steps 20 to 25 carry those pixels, and 20 and 21 paint over some of them, which
+ * leaves 1017 differing pixels in each; frames 0 to 15 did not move.
+ * {@link #theDrawImageStepsPaintTheirBoxFromInsideTheTexture} pins the new geometry.
+ * <p>
+ * That file replaced {@code pisces-golden-820a4c35d7.bin}, captured from commit {@code 820a4c35d7} (PR #23), the
  * commit that contains the US-013 fix of {@code native-prism-sw/PiscesPaint.c}. The US-059 fix moved two
  * steps, the two nearest-neighbour {@code setTexture} paints, which now take the texel under the pixel centre
  * instead of the one under its top-left corner: step 12 (clamp to edge, inverse scale 2) in the 295 pixels of
  * the fill whose column or row reaches into the texture (x or y at most 6), and step 14 (REPEAT under a
  * slightly sheared scale) in 502 of its 812 pixels. Steps 13 and 15 to 25 carry those pixels, and 15, 18, 20
  * and 23 paint over some of them. No other step moved: the bilinear arithmetic is unchanged, and the band
- * that keeps the corners of a rotated {@code drawImage} clear changes nothing here, because steps 16, 17 and 19
- * paint no pixel in either golden (their transform maps every pixel of the box outside the texture, US-061).
+ * that keeps the corners of a rotated {@code drawImage} clear changed nothing there, because steps 16, 17 and 19
+ * painted no pixel in either of those goldens: their transform mapped every pixel of the box outside the texture,
+ * which US-061 corrected.
  * <p>
  * That file replaced {@code pisces-golden-a544256444.bin}, captured from the <b>JNI build</b> at commit
  * {@code a544256444}, which the FFM build reproduced byte for byte. The US-013 fix moved 22 of its pixels, at
@@ -83,8 +105,8 @@ import static org.junit.jupiter.api.Assertions.fail;
  * before; steps 15 to 25 carry those pixels unchanged. No other pixel and no other step moved: the
  * linear-filtering edge fix of US-013 changes none of the script's texture paints.
  * <p>
- * The C of {@code 42a5072596} produced this file, and the Java compositor that replaced the C (US-046) has to
- * reproduce it byte for byte on every platform, float steps included. Most of the script is integer arithmetic:
+ * The Java compositor that replaced the C (US-046) has to reproduce this file byte for byte on every
+ * platform, float steps included. Most of the script is integer arithmetic:
  * blits, masks, fill and clear, get and set RGB. Four groups of steps are not. Steps 6 to 11 (the linear and
  * radial gradients) and 24 (alpha rows under a gradient paint) run the float set-up of
  * {@code PiscesRenderer.inl} and the per-pixel {@code sqrt} and {@code frac += mx} of {@code PiscesPaint.c};
@@ -101,9 +123,12 @@ import static org.junit.jupiter.api.Assertions.fail;
  * step in one failure, in step order.
  * <p>
  * The JNI glue that produced the first golden ({@code native-prism-sw/JPiscesRenderer.c} and its siblings) was
- * deleted in commit {@code 45f18c168a}, and the C compositor itself by US-046. To extend or re-verify this
- * corpus, capture on the commit whose C produced {@value #GOLDEN_RESOURCE}, commit {@code 42a5072596}, which
- * landed US-059 and names the file; capturing on a later commit proves only that the build agrees with itself.
+ * deleted in commit {@code 45f18c168a}, and the C compositor itself by US-046. To check this corpus against the
+ * C, capture it on a commit that still has the C of {@code 42a5072596}, such as {@code 7d5ffd66f0}. The script
+ * there predates US-061, so carry this one over first: the four {@code drawImage} steps of {@code Script.run},
+ * {@code Script.drawImage}, and the definitions they read ({@link #SHEAR_X}, {@link #SHEAR_Y},
+ * {@link #IMAGE_STEPS}, {@link Box}, {@link ImageStep}); the rest of the script is the same there. A capture
+ * from the Java compositor proves only that the build agrees with itself.
  * The per-step comparisons are counted, and a run that compared none of them fails at the end of the class
  * ({@link ParityGate}); a capture run compares nothing by design and is reported as skipped.
  * <p>
@@ -114,7 +139,7 @@ import static org.junit.jupiter.api.Assertions.fail;
  */
 public class PiscesGoldenRenderTest {
 
-    static final String GOLDEN_RESOURCE = "pisces-golden-42a5072596.bin";
+    static final String GOLDEN_RESOURCE = "pisces-golden-US-061-pending.bin";
     static final String CAPTURE_PROPERTY = "pisces.golden.capture";
 
     private static final ParityGate.Ledger LEDGER = ParityGate.ledger(PiscesGoldenRenderTest.class);
@@ -184,6 +209,182 @@ public class PiscesGoldenRenderTest {
         int[] snapshot = steps.get(index).snapshot().clone();
         snapshot[pixel] ^= 0x00010000;
         steps.set(index, new Step(steps.get(index).name(), snapshot));
+    }
+
+    /**
+     * The four {@code drawImage} steps (16 to 19) draw their texture into their box (US-061). Their geometry is
+     * {@link #IMAGE_STEPS}, which the script draws; the oracle is geometry in doubles and a replay of each step,
+     * not the compositor's fixed-point arithmetic.
+     * <ul>
+     * <li>Each step changes at least one pixel inside its box against the frame before.</li>
+     * <li>The inverse of each transform keeps a shear of at least 1/65536, so the paint takes its {@code GENERIC}
+     * branch.</li>
+     * <li>Steps 16, 17 and 19 map their sub-rectangle onto their box: every corner of the drawn quad lies within
+     * one pixel of its box corner on both axes. The shear moves a corner by at most 0.8 pixel, one texel spans at
+     * least 1.29 pixels.</li>
+     * <li>In steps 16, 17 and 19 every pixel clear of the box's fractional edges whose centre lies at least half a
+     * texel inside the quad (mapped through the inverse of the step's transform) is sampled from inside the
+     * texture. Replayed with the step's geometry, edges, wrap mode, filter and image mode, but with opaque texels
+     * under an opaque white paint and on a transparent surface, it is painted: the paint leaves a pixel it samples
+     * further than half a texel outside the sub-rectangle transparent. Half a texel inside the quad, a bilinear
+     * footprint lies inside the texture as well.</li>
+     * <li>The REPEAT step 18 maps the texture onto a tile smaller than its box, so its box samples u and v below 0
+     * and at or above the texture size, and they wrap.</li>
+     * </ul>
+     */
+    @Test
+    public void theDrawImageStepsPaintTheirBoxFromInsideTheTexture() {
+        Script script = new Script();
+        script.run();
+        List<String> failures = new ArrayList<>();
+        for (ImageStep image : IMAGE_STEPS) {
+            String label = "step " + image.step() + " '" + script.steps.get(image.step()).name() + "'";
+            Box box = image.box();
+            int changed = changedInBox(script.steps.get(image.step() - 1).snapshot(),
+                    script.steps.get(image.step()).snapshot(), box);
+            if (changed == 0) {
+                failures.add(label + " changes no pixel inside its box");
+            }
+            System.out.printf("%s: %d pixels of the box changed%n", label, changed);
+            double[] inverse = inverse(image.matrix());
+            if (Math.max(Math.abs(inverse[1]), Math.abs(inverse[2])) * 65536 < 1) {
+                failures.add(label + ": the inverse of its transform keeps no shear in 16.16, so the paint does"
+                        + " not take its GENERIC branch");
+            }
+            if (image.repeat()) {
+                failures.addAll(wrapFailures(image, inverse, label));
+            } else {
+                failures.addAll(cornerFailures(image, label));
+                failures.addAll(replayFailures(image, inverse, label));
+            }
+        }
+        if (!failures.isEmpty()) {
+            fail(failures.size() + " drawImage checks failed:" + System.lineSeparator()
+                    + String.join(System.lineSeparator(), failures));
+        }
+    }
+
+    /** A REPEAT step: the pixel centres of its box sample u and v below 0 and at or above the texture size. */
+    private static List<String> wrapFailures(ImageStep image, double[] inverse, String label) {
+        double[] range = textureRange(inverse, image.box());
+        System.out.printf("%s: its pixel centres sample u %.2f to %.2f and v %.2f to %.2f%n", label,
+                range[0], range[1], range[2], range[3]);
+        if (range[0] < 0 && range[1] >= image.width() && range[2] < 0 && range[3] >= image.height()) {
+            return List.of();
+        }
+        return List.of(String.format("%s: its box samples u %.2f to %.2f and v %.2f to %.2f, which do not leave the"
+                + " %dx%d texture on both sides", label, range[0], range[1], range[2], range[3], image.width(),
+                image.height()));
+    }
+
+    /** Every corner of the drawn quad lies within one pixel of its box corner, on both axes. */
+    private static List<String> cornerFailures(ImageStep image, String label) {
+        double[] m = image.matrix();
+        Box box = image.box();
+        List<String> failures = new ArrayList<>();
+        for (int[] corner : new int[][] {{0, 0}, {image.width(), 0}, {0, image.height()},
+            {image.width(), image.height()}}) {
+            double x = m[0] * corner[0] + m[1] * corner[1] + m[4];
+            double y = m[2] * corner[0] + m[3] * corner[1] + m[5];
+            double boxX = box.x() + (double) box.w() * corner[0] / image.width();
+            double boxY = box.y() + (double) box.h() * corner[1] / image.height();
+            if (Math.max(Math.abs(x - boxX), Math.abs(y - boxY)) > 1) {
+                failures.add(String.format("%s: texture corner (%d,%d) maps to (%.3f,%.3f), more than one pixel from"
+                        + " its box corner (%.3f,%.3f)", label, corner[0], corner[1], x, y, boxX, boxY));
+            }
+        }
+        return failures;
+    }
+
+    /**
+     * Every pixel clear of the box's fractional edges whose centre lies at least half a texel inside the quad is
+     * painted when the step is replayed with opaque texels.
+     */
+    private static List<String> replayFailures(ImageStep image, double[] inverse, String label) {
+        int[] replay = replayWithOpaqueTexels(image);
+        Box box = image.box();
+        int inside = 0;
+        List<String> blank = new ArrayList<>();
+        for (int y = Math.max(0, (int) Math.ceil(box.y())); y < H && y + 1 <= box.y() + box.h(); y++) {
+            for (int x = Math.max(0, (int) Math.ceil(box.x())); x < W && x + 1 <= box.x() + box.w(); x++) {
+                double u = inverse[0] * (x + 0.5) + inverse[1] * (y + 0.5) + inverse[4];
+                double v = inverse[2] * (x + 0.5) + inverse[3] * (y + 0.5) + inverse[5];
+                if (u < 0.5 || u > image.width() - 0.5 || v < 0.5 || v > image.height() - 0.5) {
+                    continue;
+                }
+                inside++;
+                if ((replay[y * W + x] >>> 24) == 0) {
+                    blank.add(String.format("(%d,%d) at (u,v)=(%.3f,%.3f)", x, y, u, v));
+                }
+            }
+        }
+        System.out.printf("%s: %d pixels lie half a texel inside the quad and clear of the fractional box edges,"
+                + " %d of them painted by the opaque replay%n", label, inside, inside - blank.size());
+        if (inside == 0) {
+            return List.of(label + ": no pixel clear of the fractional box edges lies half a texel inside the quad");
+        }
+        if (blank.isEmpty()) {
+            return List.of();
+        }
+        return List.of(String.format("%s: %d of the %d pixels half a texel inside the quad are transparent in the"
+                + " opaque replay, so the paint sampled them outside the texture; first: %s", label, blank.size(),
+                inside, blank.subList(0, Math.min(4, blank.size()))));
+    }
+
+    /** The pixels touching {@code box} that differ between two frames. */
+    private static int changedInBox(int[] before, int[] after, Box box) {
+        int changed = 0;
+        for (int y = Math.max(0, (int) Math.floor(box.y())); y < H && y < box.y() + box.h(); y++) {
+            for (int x = Math.max(0, (int) Math.floor(box.x())); x < W && x < box.x() + box.w(); x++) {
+                if (before[y * W + x] != after[y * W + x]) {
+                    changed++;
+                }
+            }
+        }
+        return changed;
+    }
+
+    /** The inverse of the affine map {@code m} (m00, m01, m10, m11, m02, m12), in the same order. */
+    private static double[] inverse(double[] m) {
+        double det = m[0] * m[3] - m[1] * m[2];
+        return new double[] {m[3] / det, -m[1] / det, -m[2] / det, m[0] / det,
+            (m[1] * m[5] - m[4] * m[3]) / det, (m[4] * m[2] - m[0] * m[5]) / det};
+    }
+
+    /** The texture coordinates the pixel centres inside {@code box} map to: min u, max u, min v, max v. */
+    private static double[] textureRange(double[] inverse, Box box) {
+        double[] range = {Double.MAX_VALUE, -Double.MAX_VALUE, Double.MAX_VALUE, -Double.MAX_VALUE};
+        for (int y = 0; y < H; y++) {
+            for (int x = 0; x < W; x++) {
+                double cx = x + 0.5;
+                double cy = y + 0.5;
+                if (cx < box.x() || cx >= box.x() + box.w() || cy < box.y() || cy >= box.y() + box.h()) {
+                    continue;
+                }
+                double u = inverse[0] * cx + inverse[1] * cy + inverse[4];
+                double v = inverse[2] * cx + inverse[3] * cy + inverse[5];
+                range[0] = Math.min(range[0], u);
+                range[1] = Math.max(range[1], u);
+                range[2] = Math.min(range[2], v);
+                range[3] = Math.max(range[3], v);
+            }
+        }
+        return range;
+    }
+
+    /**
+     * {@code image} drawn alone, with every texel opaque white under an opaque white paint (which
+     * {@code IMAGE_MODE_MULTIPLY} multiplies by), {@code SRC_OVER} on a transparent surface.
+     */
+    private static int[] replayWithOpaqueTexels(ImageStep image) {
+        int[] pixels = new int[W * H];
+        PiscesRenderer pr = new PiscesRenderer(new JavaSurface(pixels, RendererBase.TYPE_INT_ARGB_PRE, W, H));
+        pr.setCompositeRule(RendererBase.COMPOSITE_SRC_OVER);
+        pr.setColor(255, 255, 255, 255);
+        int[] texels = new int[image.offset() + (image.height() - 1) * image.stride() + image.width()];
+        Arrays.fill(texels, 0xFFFFFFFF);
+        image.draw(pr, texels);
+        return pixels;
     }
 
     @Test
@@ -315,6 +516,87 @@ public class PiscesGoldenRenderTest {
             }
         }
         return mask;
+    }
+
+    /** The shear of every {@code drawImage} transform, in pixels per texel: x per texel of v, y per texel of u. */
+    static final float SHEAR_X = 0.05f;
+    static final float SHEAR_Y = -0.03f;
+
+    /**
+     * Steps 16 to 19, the four {@code drawImage} calls, in script order. The script draws them and
+     * {@link #theDrawImageStepsPaintTheirBoxFromInsideTheTexture} replays and measures them, so both take their
+     * geometry from here.
+     */
+    static final List<ImageStep> IMAGE_STEPS = imageSteps();
+
+    private static List<ImageStep> imageSteps() {
+        float bx = 20.5f;
+        float by = 20.25f;
+        float bw = 24.5f;
+        float bh = 20.75f;
+        int keep = RendererBase.IMAGE_FRAC_EDGE_KEEP;
+        int pad = RendererBase.IMAGE_FRAC_EDGE_PAD;
+        int trim = RendererBase.IMAGE_FRAC_EDGE_TRIM;
+        Box box16 = new Box(bx, by, bw, bh);
+        Box box17 = new Box(bx + 0.5f, by + 12f, bw, bh);
+        Box box18 = new Box(bx - 10.25f, by + 6.5f, bw, bh);
+        // steps 16, 17 and 19 map the texture onto their box; the REPEAT step 18 onto the middle of its box, half
+        // as wide and half as high, so that it wraps on every side
+        return List.of(
+                new ImageStep(16, RendererBase.IMAGE_MODE_NORMAL, 16, 16, 0, 16, false, true,
+                        box16, box16, keep, keep, keep, keep),
+                new ImageStep(17, RendererBase.IMAGE_MODE_NORMAL, 16, 16, 0, 16, false, false,
+                        box17, box17, pad, pad, pad, pad),
+                new ImageStep(18, RendererBase.IMAGE_MODE_NORMAL, 16, 16, 0, 16, true, true,
+                        box18, box18.centredHalf(), trim, trim, trim, trim),
+                new ImageStep(19, RendererBase.IMAGE_MODE_MULTIPLY, 12, 12, 34, 16, false, true,
+                        box16, box16, keep, pad, trim, keep));
+    }
+
+    /** An axis-aligned rectangle in surface coordinates. */
+    record Box(float x, float y, float w, float h) {
+
+        /** The rectangle half as wide and half as high, with the same centre. */
+        Box centredHalf() {
+            return new Box(x + w / 4, y + h / 4, w / 2, h / 2);
+        }
+    }
+
+    /**
+     * One {@code drawImage} step: the frame it produces, its image mode, its {@code width x height} texels at
+     * {@code offset} with {@code stride} (the sub-rectangle {@code 0..width - 1 x 0..height - 1} is all of them),
+     * its wrap mode and filter, the box it fills with its four edge rules, and the rectangle its texture is mapped
+     * onto: the box itself, or for the REPEAT step a tile inside it.
+     */
+    record ImageStep(int step, int mode, int width, int height, int offset, int stride, boolean repeat,
+            boolean linear, Box box, Box tile, int lEdge, int rEdge, int tEdge, int bEdge) {
+
+        /**
+         * The texture-to-device transform that {@code PiscesRenderer.drawImage} takes and inverts. It maps the
+         * sub-rectangle onto {@link #tile()} the way {@code SWGraphics.drawTexture} builds the transform it hands
+         * {@code drawImage} ({@code SWPaint.computeDrawTexturePaintTransform}: scale = destination size / source
+         * size, translation = destination origin), plus the shear {@link PiscesGoldenRenderTest#SHEAR_X} and
+         * {@link PiscesGoldenRenderTest#SHEAR_Y}, which the inverse keeps, so that the paint takes its
+         * {@code GENERIC} branch.
+         */
+        Transform6 transform() {
+            return new Transform6(toS(tile.w() / width), toS(SHEAR_X), toS(SHEAR_Y), toS(tile.h() / height),
+                    toS(tile.x()), toS(tile.y()));
+        }
+
+        /** {@link #transform()} as doubles, in the order of {@link Transform6}: m00, m01, m10, m11, m02, m12. */
+        double[] matrix() {
+            Transform6 t = transform();
+            return new double[] {t.m00 / 65536.0, t.m01 / 65536.0, t.m10 / 65536.0, t.m11 / 65536.0,
+                t.m02 / 65536.0, t.m12 / 65536.0};
+        }
+
+        void draw(PiscesRenderer pr, int[] data) {
+            pr.drawImage(RendererBase.TYPE_INT_ARGB_PRE, mode, data, width, height, offset, stride, transform(),
+                    repeat ? RendererBase.WRAP_REPEAT : RendererBase.WRAP_CLAMP_TO_EDGE, linear,
+                    toS(box.x()), toS(box.y()), toS(box.w()), toS(box.h()), lEdge, rEdge, tEdge, bEdge,
+                    0, 0, width - 1, height - 1, true);
+        }
     }
 
     private record Step(String name, int[] snapshot) {
@@ -487,28 +769,17 @@ public class PiscesGoldenRenderTest {
             snapshot("setTexture repeat=false linear=true alpha=true");
 
             pr.setColor(0, 0, 0, 255);
-            float bx = 20.5f;
-            float by = 20.25f;
-            float bw = 24.5f;
-            float bh = 20.75f;
-            Transform6 imageTx = new Transform6(toS(16f / bw), toS(0.05f), toS(-0.03f), toS(16f / bh),
-                    toS(-bx * 16f / bw), toS(-by * 16f / bh));
-            drawImage(RendererBase.IMAGE_MODE_NORMAL, translucent, 16, 16, 0, 16, imageTx, false, true,
-                    bx, by, bw, bh, RendererBase.IMAGE_FRAC_EDGE_KEEP);
+            drawImage(IMAGE_STEPS.get(0), translucent);
             snapshot("drawImage NORMAL, edges KEEP");
 
-            drawImage(RendererBase.IMAGE_MODE_NORMAL, opaque, 16, 16, 0, 16, imageTx, false, false,
-                    bx + 0.5f, by + 12f, bw, bh, RendererBase.IMAGE_FRAC_EDGE_PAD);
+            drawImage(IMAGE_STEPS.get(1), opaque);
             snapshot("drawImage NORMAL, edges PAD");
 
-            drawImage(RendererBase.IMAGE_MODE_NORMAL, translucent, 16, 16, 0, 16, imageTx, true, true,
-                    bx - 10.25f, by + 6.5f, bw, bh, RendererBase.IMAGE_FRAC_EDGE_TRIM);
+            drawImage(IMAGE_STEPS.get(2), translucent);
             snapshot("drawImage NORMAL repeat, edges TRIM");
 
             pr.setColor(255, 255, 255, 128);
-            drawImage(RendererBase.IMAGE_MODE_MULTIPLY, opaque, 12, 12, 34, 16, imageTx, false, true,
-                    bx, by, bw, bh, RendererBase.IMAGE_FRAC_EDGE_KEEP, RendererBase.IMAGE_FRAC_EDGE_PAD,
-                    RendererBase.IMAGE_FRAC_EDGE_TRIM, RendererBase.IMAGE_FRAC_EDGE_KEEP, 0, 0, 11, 11);
+            drawImage(IMAGE_STEPS.get(3), opaque);
             snapshot("drawImage MULTIPLY with composite alpha, offset and stride > width, mixed edges");
 
             pr.setColor(10, 200, 90, 255);
@@ -561,19 +832,10 @@ public class PiscesGoldenRenderTest {
             snapshot("setRGB block");
         }
 
-        private void drawImage(int mode, int[] data, int w, int h, int offset, int stride, Transform6 tx,
-                boolean repeat, boolean linear, float bx, float by, float bw, float bh, int edge) {
-            drawImage(mode, data, w, h, offset, stride, tx, repeat, linear, bx, by, bw, bh,
-                    edge, edge, edge, edge, 0, 0, w - 1, h - 1);
-        }
-
-        private void drawImage(int mode, int[] data, int w, int h, int offset, int stride, Transform6 tx,
-                boolean repeat, boolean linear, float bx, float by, float bw, float bh,
-                int lEdge, int rEdge, int tEdge, int bEdge, int txMin, int tyMin, int txMax, int tyMax) {
-            pr.drawImage(RendererBase.TYPE_INT_ARGB_PRE, mode, data, w, h, offset, stride, tx,
-                    repeat ? RendererBase.WRAP_REPEAT : RendererBase.WRAP_CLAMP_TO_EDGE, linear,
-                    toS(bx), toS(by), toS(bw), toS(bh), lEdge, rEdge, tEdge, bEdge, txMin, tyMin, txMax, tyMax,
-                    true);
+        /** Draws {@code image} with the texels {@code data}; the snapshot taken next is frame {@code image.step()}. */
+        private void drawImage(ImageStep image, int[] data) {
+            assertEquals(image.step(), steps.size(), "IMAGE_STEPS names the frame each drawImage step produces");
+            image.draw(pr, data);
         }
 
         void writeGolden(Path path) throws IOException {
