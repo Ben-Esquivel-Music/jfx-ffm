@@ -51,9 +51,23 @@ import static org.junit.jupiter.api.Assumptions.assumeTrue;
  * The GTK glass tests need the real toolkit on an X11 display, which the module's own test JVM never has
  * ({@code StubToolkit}), so every scenario runs in a child with the parent's module path, exports,
  * {@code java.library.path} (this build's {@code target/native/bin}) and native access, the parent's
- * {@code DISPLAY} and no {@code WAYLAND_DISPLAY}. {@link #requireDisplay()} skips a test class on a host that is not
- * Linux or has no {@code DISPLAY}; {@link #requireRobot()} additionally requires {@code -DUSE_ROBOT=true}, for
- * scenarios that move the pointer or press keys and so must only run on a private display.
+ * {@code DISPLAY} and no {@code WAYLAND_DISPLAY}.
+ * <p>
+ * The display classes show windows and dialogs and change the display's state - root window properties, the
+ * clipboard - so they are opt-in: {@link #requireDisplay()} skips a test class on a host that is not Linux, has no
+ * {@code DISPLAY}, or runs without {@code -DPRIVATE_DISPLAY=true}, the flag that says {@code DISPLAY} names a
+ * private X server that may be changed. {@link #requireRobot()} additionally requires {@code -DUSE_ROBOT=true},
+ * for scenarios that move the pointer or press keys. To run them:
+ * <ul>
+ * <li>start a private X server, for example {@code Xvfb :99 -screen 0 1920x1080x24}, and export
+ * {@code DISPLAY=:99} with {@code WAYLAND_DISPLAY} unset - a shell started by {@code wsl.exe} exports WSLg's
+ * {@code DISPLAY=:0}, which is the developer's Windows desktop, so it has to be overridden;</li>
+ * <li>pass {@code -DPRIVATE_DISPLAY=true} to Maven, plus {@code -DUSE_ROBOT=true} for the input-injecting
+ * classes;</li>
+ * <li>run openbox on that display for the window-manager coverage, and nothing for the no-window-manager
+ * goldens ({@link GtkTraceGolden#requireNoWindowManager}).</li>
+ * </ul>
+ * Both flags reach the test JVM as Maven user properties, which surefire forwards as system properties.
  * <p>
  * A child is given at most {@link #CHILD_SECONDS} seconds. JUnit's default timeout for lifecycle methods is
  * shorter, and a class-level {@code @Timeout} does not apply to them, so every {@code @BeforeAll} that launches
@@ -103,11 +117,20 @@ final class GtkGlassChildJvm {
     private GtkGlassChildJvm() {
     }
 
-    /** Skips the calling test class unless this is Linux with an X11 {@code DISPLAY}. */
+    /** The system property that says {@code DISPLAY} names a private X server the tests may show on and change. */
+    static final String PRIVATE_DISPLAY_PROPERTY = "PRIVATE_DISPLAY";
+
+    /**
+     * Skips the calling test class unless this is Linux with an X11 {@code DISPLAY} that
+     * {@code -DPRIVATE_DISPLAY=true} declares private.
+     */
     static void requireDisplay() {
         assumeTrue(PlatformUtil.isLinux(), "GTK glass runs on Linux only");
         String display = System.getenv("DISPLAY");
         assumeTrue(display != null && !display.isBlank(), "no DISPLAY: the GTK glass tests need an X11 display");
+        assumeTrue(Boolean.getBoolean(PRIVATE_DISPLAY_PROPERTY), "the GTK glass display tests show windows and"
+                + " change the display (root window properties, the clipboard), so they run only on a private X"
+                + " server, which -DPRIVATE_DISPLAY=true says DISPLAY names");
     }
 
     /** {@link #requireDisplay()}, plus {@code -DUSE_ROBOT=true} for scenarios that inject input. */
@@ -146,7 +169,19 @@ final class GtkGlassChildJvm {
 
     /** {@link #launch} that must exit with status 0 and leave no fatal error log. */
     static Run run(Class<?> scenarioClass, String method, List<String> jvmOptions) {
-        return checked(await(start(scenarioClass, method, jvmOptions, CHILD_SECONDS, true), CHILD_SECONDS));
+        return run(scenarioClass, method, jvmOptions, Map.of());
+    }
+
+    /**
+     * {@link #run} with {@code environment} added to the child's environment - for a scenario that must keep its
+     * writes out of the account that runs the tests, such as a file chooser's settings and recent files under
+     * {@code XDG_DATA_HOME} and {@code XDG_CONFIG_HOME}. Any directory an entry names is the caller's to create.
+     * {@code DISPLAY} and {@code WAYLAND_DISPLAY} cannot be set through it (an {@link IllegalArgumentException}):
+     * which display a child gets is this class's decision alone.
+     */
+    static Run run(Class<?> scenarioClass, String method, List<String> jvmOptions, Map<String, String> environment) {
+        return checked(await(start(scenarioClass, method, jvmOptions, CHILD_SECONDS, true, environment),
+                CHILD_SECONDS));
     }
 
     /**
@@ -205,6 +240,12 @@ final class GtkGlassChildJvm {
     /** Starts {@code scenarioClass#method} in a child JVM without waiting for it. */
     static Pending start(Class<?> scenarioClass, String method, List<String> jvmOptions, long timeoutSeconds,
                          boolean keepDisplay) {
+        return start(scenarioClass, method, jvmOptions, timeoutSeconds, keepDisplay, Map.of());
+    }
+
+    /** {@link #start}, with {@code environment} added to the child's environment (see {@link #run}). */
+    static Pending start(Class<?> scenarioClass, String method, List<String> jvmOptions, long timeoutSeconds,
+                         boolean keepDisplay, Map<String, String> environment) {
         String scenario = scenarioClass.getSimpleName() + "." + method;
         try {
             Path work = Path.of("target", "gtk-glass-child", scenario).toAbsolutePath();
@@ -236,6 +277,11 @@ final class GtkGlassChildJvm {
             ProcessBuilder builder = new ProcessBuilder(command)
                     .redirectOutput(stdout.toFile())
                     .redirectError(stderr.toFile());
+            if (environment.containsKey("DISPLAY") || environment.containsKey("WAYLAND_DISPLAY")) {
+                throw new IllegalArgumentException("DISPLAY and WAYLAND_DISPLAY are this class's to set: "
+                        + environment);
+            }
+            builder.environment().putAll(environment);
             builder.environment().remove("WAYLAND_DISPLAY");
             if (!keepDisplay) {
                 builder.environment().remove("DISPLAY");

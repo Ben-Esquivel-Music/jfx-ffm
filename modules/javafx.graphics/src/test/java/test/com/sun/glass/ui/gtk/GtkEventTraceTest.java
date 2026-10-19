@@ -411,8 +411,15 @@ public class GtkEventTraceTest {
         t.act(() -> w2.setResizable(true));
 
         t.step("screen settings: _NET_WORKAREA set and removed");
-        t.act(() -> GtkGlassShim.setRootCardinals("_NET_WORKAREA", new long[] {0, 0, 1800, 1000}));
-        t.act(() -> GtkGlassShim.setRootCardinals("_NET_WORKAREA", null));
+        // a window manager owns _NET_WORKAREA: it is saved first and put back exactly (deleted, where there was
+        // none - the step's "removed" of the no-window-manager golden)
+        GtkGlassShim.RootProperty savedWorkarea = GtkGlassChild.onFx(
+                () -> GtkGlassShim.readRootProperty("_NET_WORKAREA"));
+        try {
+            t.act(() -> GtkGlassShim.setRootCardinals("_NET_WORKAREA", new long[] {0, 0, 1800, 1000}));
+        } finally {
+            t.act(() -> GtkGlassShim.restoreRootProperty("_NET_WORKAREA", savedWorkarea));
+        }
 
         t.step("second screen");
         int monitors = GtkGlassChild.onFx(GtkGlassShim::gdkMonitorCount);

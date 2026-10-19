@@ -922,6 +922,149 @@ public final class GtkGlassShim {
     }
 
     /**
+     * A property of the X11 root window as {@code XGetWindowProperty} answered it - its type atom, its format and
+     * every item as a {@code long} ({@code 8}: bytes, {@code 16}: shorts, {@code 32}: the C {@code long}s Xlib hands
+     * back for 32-bit items) - so that {@link #restoreRootProperty} can put it back exactly. A test that is about
+     * to change a property a window manager owns ({@code _NET_WORKAREA}, {@code _NET_CURRENT_DESKTOP}) saves it with
+     * {@link #readRootProperty} first.
+     */
+    public record RootProperty(long type, int format, long[] items) {
+
+        /** {@code type=<atom> format=<format> items=<a,b,...>}, for the record of what was saved. */
+        public String describe() {
+            StringBuilder sb = new StringBuilder("type=").append(type).append(" format=").append(format)
+                    .append(" items=");
+            for (int i = 0; i < items.length; i++) {
+                sb.append(i == 0 ? "" : ",").append(items[i]);
+            }
+            return sb.toString();
+        }
+    }
+
+    /**
+     * Reads the property {@code name} of the X11 root window whole, whatever its type and format, or answers
+     * {@code null} when the root window has no such property; FX thread. The read generates no X event.
+     */
+    @SuppressWarnings("restricted")
+    public static RootProperty readRootProperty(String name) {
+        try (Arena arena = Arena.ofConfined()) {
+            MemorySegment display = (MemorySegment) Readback.GDK_X11_GET_DEFAULT_XDISPLAY.invokeExact();
+            long root = (long) Readback.GDK_X11_GET_DEFAULT_ROOT_XWINDOW.invokeExact();
+            long property = (long) Readback.X_INTERN_ATOM.invokeExact(display, arena.allocateFrom(name), 1);
+            if (property == 0) {
+                return null;
+            }
+            MemorySegment type = arena.allocate(JAVA_LONG);
+            MemorySegment format = arena.allocate(JAVA_INT);
+            MemorySegment count = arena.allocate(JAVA_LONG);
+            MemorySegment after = arena.allocate(JAVA_LONG);
+            MemorySegment data = arena.allocate(ADDRESS);
+            // long_length counts 32-bit units: a first request for none answers the size in bytes_after, the next
+            // asks for all of it, and again should the property have grown in between
+            long length = 0;
+            while (true) {
+                int status = (int) Readback.X_GET_WINDOW_PROPERTY.invokeExact(display, root, property, 0L, length,
+                        0, ANY_PROPERTY_TYPE, type, format, count, after, data);
+                MemorySegment items = data.get(ADDRESS, 0);
+                try {
+                    if (status != 0 || type.get(JAVA_LONG, 0) == ANY_PROPERTY_TYPE) {
+                        return null;
+                    }
+                    long remaining = after.get(JAVA_LONG, 0);
+                    if (remaining == 0) {
+                        int actualFormat = format.get(JAVA_INT, 0);
+                        return new RootProperty(type.get(JAVA_LONG, 0), actualFormat,
+                                propertyItems(items, actualFormat, (int) count.get(JAVA_LONG, 0)));
+                    }
+                    length += (remaining + 3) / 4;
+                } finally {
+                    if (items.address() != 0) {
+                        int freed = (int) Readback.X_FREE.invokeExact(items);
+                    }
+                }
+            }
+        } catch (RuntimeException | Error e) {
+            throw e;
+        } catch (Throwable t) {
+            throw new IllegalStateException(t);
+        }
+    }
+
+    /** The {@code n} items Xlib returned for a property of {@code format}, each widened to a {@code long}. */
+    private static long[] propertyItems(MemorySegment data, int format, int n) {
+        long[] values = new long[n];
+        if (n == 0) {
+            return values;
+        }
+        switch (format) {
+            case 8 -> {
+                MemorySegment block = data.reinterpret(n);
+                for (int i = 0; i < n; i++) {
+                    values[i] = Byte.toUnsignedLong(block.get(JAVA_BYTE, i));
+                }
+            }
+            case 16 -> {
+                MemorySegment block = data.reinterpret((long) n * JAVA_SHORT.byteSize());
+                for (int i = 0; i < n; i++) {
+                    values[i] = Short.toUnsignedLong(block.getAtIndex(JAVA_SHORT, i));
+                }
+            }
+            case 32 -> {
+                MemorySegment block = data.reinterpret((long) n * JAVA_LONG.byteSize());
+                for (int i = 0; i < n; i++) {
+                    values[i] = block.getAtIndex(JAVA_LONG, i);
+                }
+            }
+            default -> throw new IllegalStateException("property format " + format);
+        }
+        return values;
+    }
+
+    /**
+     * Puts the property {@code name} of the X11 root window back as {@link #readRootProperty} found it: an
+     * {@code XChangeProperty} in replace mode with the saved type, format and items, or - for a {@code null}
+     * {@code saved}, a property that was absent - an {@code XDeleteProperty}; then waits for the server. FX thread.
+     */
+    @SuppressWarnings("restricted")
+    public static void restoreRootProperty(String name, RootProperty saved) {
+        if (saved == null) {
+            setRootCardinals(name, null);
+            return;
+        }
+        try (Arena arena = Arena.ofConfined()) {
+            MemorySegment display = (MemorySegment) Readback.GDK_X11_GET_DEFAULT_XDISPLAY.invokeExact();
+            long root = (long) Readback.GDK_X11_GET_DEFAULT_ROOT_XWINDOW.invokeExact();
+            long atom = (long) Readback.X_INTERN_ATOM.invokeExact(display, arena.allocateFrom(name), 0);
+            long[] items = saved.items();
+            MemorySegment data = switch (saved.format()) {
+                case 8 -> {
+                    MemorySegment block = arena.allocate(Math.max(1, items.length));
+                    for (int i = 0; i < items.length; i++) {
+                        block.set(JAVA_BYTE, i, (byte) items[i]);
+                    }
+                    yield block;
+                }
+                case 16 -> {
+                    MemorySegment block = arena.allocate(JAVA_SHORT, Math.max(1, items.length));
+                    for (int i = 0; i < items.length; i++) {
+                        block.setAtIndex(JAVA_SHORT, i, (short) items[i]);
+                    }
+                    yield block;
+                }
+                case 32 -> arena.allocateFrom(JAVA_LONG, items.length == 0 ? new long[1] : items);
+                default -> throw new IllegalArgumentException("property format " + saved.format());
+            };
+            int status = (int) Readback.X_CHANGE_PROPERTY.invokeExact(display, root, atom, saved.type(),
+                    saved.format(), PROP_MODE_REPLACE, data, items.length);
+            int synced = (int) Readback.X_SYNC.invokeExact(display, 0);
+        } catch (RuntimeException | Error e) {
+            throw e;
+        } catch (Throwable t) {
+            throw new IllegalStateException(t);
+        }
+    }
+
+    /**
      * The one {@code GtkSystemClipboard} of the process, which {@code Clipboard.get("SYSTEM")} creates on first
      * use; reached reflectively because that factory is {@code protected} in another package. Everything below
      * calls the peer methods themselves, not {@code SystemClipboard.getData}, which short-circuits to the local

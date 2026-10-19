@@ -144,6 +144,9 @@
         <!-- Test control flags (Gradle: FULL_TEST, USE_ROBOT, HEADLESS_TEST, UNSTABLE_TEST, TEST_SCREENSHOT, AWT_TEST) -->
         <FULL_TEST>false</FULL_TEST>
         <USE_ROBOT>false</USE_ROBOT>
+        <!-- GTK glass display tests (test/com/sun/glass/ui/gtk): true says DISPLAY names a private X server
+             (an Xvfb) that they may show windows on and change; they skip without it, whatever DISPLAY is -->
+        <PRIVATE_DISPLAY>false</PRIVATE_DISPLAY>
         <HEADLESS_TEST>false</HEADLESS_TEST>
         <UNSTABLE_TEST>false</UNSTABLE_TEST>
         <TEST_SCREENSHOT>false</TEST_SCREENSHOT>

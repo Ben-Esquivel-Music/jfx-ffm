@@ -252,8 +252,14 @@ public class GtkUpcallExceptionTest {
         // application table
         t.step("_NET_WORKAREA set with Screen.notifySettingsChanged throwing, then removed");
         t.arm("screen.handleSettingsChanged", 1);
-        t.act(() -> GtkGlassShim.setRootCardinals("_NET_WORKAREA", new long[] {0, 0, 1800, 1000}));
-        t.act(() -> GtkGlassShim.setRootCardinals("_NET_WORKAREA", null));
+        // saved and put back exactly, as in GtkEventTraceTest: on this window-manager-less display, deleted
+        GtkGlassShim.RootProperty savedWorkarea = GtkGlassChild.onFx(
+                () -> GtkGlassShim.readRootProperty("_NET_WORKAREA"));
+        try {
+            t.act(() -> GtkGlassShim.setRootCardinals("_NET_WORKAREA", new long[] {0, 0, 1800, 1000}));
+        } finally {
+            t.act(() -> GtkGlassShim.restoreRootProperty("_NET_WORKAREA", savedWorkarea));
+        }
 
         t.step("close w2 with notifyDestroy throwing, then w1");
         t.arm("w2.notifyDestroy", 1);
