@@ -36,6 +36,15 @@ import java.util.Arrays;
  * not overflow {@code int} (a C pointer cannot overflow there; an overflowing index can end a loop before it
  * reads).
  * <p>
+ * US-062 departs from that C at one point. In a row that a box covers only in part, the C decided from the edge
+ * fractions scaled by the row's coverage whether the first and the last column are edge columns, and a
+ * 1/65536 px sliver, whose fraction that scaling truncates to 0, was painted as an interior column; the colour
+ * {@code SRC} routine, which counts its interior columns from the unscaled fractions, began its interior run one
+ * column early in a left sliver and left a right sliver as it was. {@link #emitLineSource8888Pre},
+ * {@link #emitLinePTSource8888Pre} and {@link #emitLinePTSourceOver8888Pre} decide from the unscaled fractions
+ * ({@code elLfrac}, {@code elRfrac}), as {@link #emitLineSourceOver8888Pre} already did, and blend the sliver
+ * at its scaled fraction, 0; in a row where no edge fraction scales to 0 they give the C's pixels.
+ * <p>
  * Every surface has a pixel stride of 1 ({@link PiscesSurfaceState}), and every renderer call
  * sets {@code imagePixelStride} to it before a routine here runs, so the C's {@code a += imagePixelStride}
  * steps are unit index steps here. The loops keep the C's bounds ({@code am = a + w}) and the order of their
@@ -136,7 +145,8 @@ final class PiscesBlit {
             rfrac = (int) (lrfrac >> 16);
             for (int j = 0; j < height; j++) {
                 int a = imageOffset + minX;
-                if (lfrac != 0) {
+                // the unscaled fractions decide the edge columns, as they decided w (US-062)
+                if (rdr.elLfrac != 0) {
                     blendSrc8888Pre(intData, a, calpha, 255 - (lfrac >> 8), cred, cgreen, cblue);
                     a++;
                 }
@@ -144,7 +154,7 @@ final class PiscesBlit {
                 for (; a < am; a++) {
                     blendSrc8888Pre(intData, a, calpha, compFrac, cred, cgreen, cblue);
                 }
-                if (rfrac != 0) {
+                if (rdr.elRfrac != 0) {
                     blendSrc8888Pre(intData, a, calpha, 255 - (rfrac >> 8), cred, cgreen, cblue);
                 }
                 imageOffset += imageScanlineStride;
@@ -173,13 +183,15 @@ final class PiscesBlit {
         int minX = rdr.minTouched;
         int w = rdr.alphaWidth;
         paintStride = w;
-        w -= (lfrac != 0) ? 1 : 0;
-        w -= (rfrac != 0) ? 1 : 0;
+        // the unscaled fractions decide the edge columns: a sliver whose fraction the row's coverage scales
+        // to 0 is blended at 0, not painted as an interior column (US-062)
+        w -= (rdr.elLfrac != 0) ? 1 : 0;
+        w -= (rdr.elRfrac != 0) ? 1 : 0;
 
         for (int j = 0; j < height; j++) {
             int aidx = paintOffset;
             int a = imageOffset + minX;
-            if (lfrac != 0) {
+            if (rdr.elLfrac != 0) {
                 cval = paint[aidx];
                 blendSrc8888PrePre(intData, a, a(cval), 255 - (lfrac >> 8), r(cval), g(cval), b(cval));
                 a++;
@@ -196,7 +208,7 @@ final class PiscesBlit {
                     blendSrc8888PrePre(intData, a, a(cval), compFrac, r(cval), g(cval), b(cval));
                 }
             }
-            if (rfrac != 0) {
+            if (rdr.elRfrac != 0) {
                 cval = paint[aidx];
                 blendSrc8888PrePre(intData, a, a(cval), 255 - (rfrac >> 8), r(cval), g(cval), b(cval));
             }
@@ -283,13 +295,15 @@ final class PiscesBlit {
         int minX = rdr.minTouched;
         int w = rdr.alphaWidth;
         paintStride = w;
-        w -= (lfrac != 0) ? 1 : 0;
-        w -= (rfrac != 0) ? 1 : 0;
+        // the unscaled fractions decide the edge columns: a sliver whose fraction the row's coverage scales
+        // to 0 is blended at 0, not painted as an interior column (US-062)
+        w -= (rdr.elLfrac != 0) ? 1 : 0;
+        w -= (rdr.elRfrac != 0) ? 1 : 0;
 
         for (int j = 0; j < height; j++) {
             int aidx = paintOffset;
             int a = imageOffset + minX;
-            if (lfrac != 0) {
+            if (rdr.elLfrac != 0) {
                 cval = paint[aidx];
                 blendSrcOver8888PrePre(intData, a, lfrac >> 8, a(cval), r(cval), g(cval), b(cval));
                 a++;
@@ -310,7 +324,7 @@ final class PiscesBlit {
                     blendSrcOver8888PrePre(intData, a, sfrac, a(cval), r(cval), g(cval), b(cval));
                 }
             }
-            if (rfrac != 0) {
+            if (rdr.elRfrac != 0) {
                 cval = paint[aidx];
                 blendSrcOver8888PrePre(intData, a, rfrac >> 8, a(cval), r(cval), g(cval), b(cval));
             }

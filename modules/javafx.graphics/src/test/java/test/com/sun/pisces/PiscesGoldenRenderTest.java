@@ -65,9 +65,10 @@ import static org.junit.jupiter.api.Assertions.fail;
  * script of US-061. A capture of the same script from the C of commit {@code 42a5072596} (PR #29, the commit
  * that landed US-059: nearest-neighbour texture sampling at the pixel centre, {@code renderer_setTexture} in
  * {@code native-prism-sw/PiscesRenderer.inl}), with {@code prism_sw} built from commit {@code 7d5ffd66f0}, whose
- * C is the same, reproduces it byte for byte on Windows x64: every frame, 16 to 25 included, is the C's. The
- * name is a placeholder: the file is renamed to the hash of the commit that lands US-061, as
- * {@code pisces-golden-US-059-pending.bin} became {@code pisces-golden-42a5072596.bin} (US-046).
+ * C is the same, reproduces it byte for byte on Windows x64: every frame, 16 to 25 included, is the C's. It is
+ * named after commit {@code ee923ace41} (PR #33), the commit that landed US-061:
+ * {@code pisces-golden-US-061-pending.bin} became {@code pisces-golden-ee923ace41.bin} (US-062), bytes unchanged,
+ * as {@code pisces-golden-US-059-pending.bin} became {@code pisces-golden-42a5072596.bin} (US-046).
  * <p>
  * It replaced {@code pisces-golden-42a5072596.bin}, captured from the C of commit {@code 42a5072596}. Its four
  * {@code drawImage} steps, 16 to 19, passed one device-to-texture transform, u = 16 / bw * (x - bx) plus a shear,
@@ -139,7 +140,7 @@ import static org.junit.jupiter.api.Assertions.fail;
  */
 public class PiscesGoldenRenderTest {
 
-    static final String GOLDEN_RESOURCE = "pisces-golden-US-061-pending.bin";
+    static final String GOLDEN_RESOURCE = "pisces-golden-ee923ace41.bin";
     static final String CAPTURE_PROPERTY = "pisces.golden.capture";
 
     private static final ParityGate.Ledger LEDGER = ParityGate.ledger(PiscesGoldenRenderTest.class);

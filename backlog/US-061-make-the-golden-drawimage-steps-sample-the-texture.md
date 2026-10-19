@@ -1,7 +1,7 @@
 # US-061 — Make the golden `drawImage` steps sample the texture
 
-**Status:** ✅ Done (2026-10-18, PR pending) · **Found:** 2026-10-16, while attributing the golden steps that
-US-059 moved
+**Status:** ✅ Done (2026-10-18, ee923ace41, PR #33) · **Found:** 2026-10-16, while attributing the golden steps
+that US-059 moved
 
 ## Story
 As the maintainer of the software pipeline and of its planned Java port (US-046),
@@ -66,7 +66,8 @@ instead of three steps that paint nothing.
   offset 34, stride 16. Step 18 maps the texture onto a centred tile half as wide and high as its box, so its box
   samples u from -9.1 to 24.1 and v from -7.2 to 23.5, and REPEAT wraps on every side. Step order, names, textures,
   modes, edges, flags, colours and boxes are unchanged, and the compositor is not touched.
-- **Golden.** `pisces-golden-US-061-pending.bin`, captured from the Java compositor of 410b8036c1 (SHA-256
+- **Golden.** `pisces-golden-ee923ace41.bin` (renamed by US-062 after the landing commit), captured from the Java
+  compositor of 410b8036c1 (SHA-256
   `dadef48365b2f438153325485164aa05d295bbcd57a7f9d51f4fa281b84d7e0a`), replaces `pisces-golden-42a5072596.bin`.
   Frames 0 to 15 are byte-identical. Steps 16 to 19 change 488, 525, 457 and 500 pixels against the step before
   (0, 0, 454 and 0 before) and differ from the old golden in 488, 806, 1011 and 1019; steps 20 to 25 carry them

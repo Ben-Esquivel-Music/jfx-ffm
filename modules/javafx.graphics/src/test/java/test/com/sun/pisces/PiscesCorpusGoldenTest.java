@@ -70,10 +70,12 @@ import static org.junit.jupiter.api.Assertions.fail;
  * public {@link PiscesRenderer}, {@link JavaSurface} and {@link Transform6} API can reach, plus seeded random
  * operation sequences, with the outcome of every step recorded.
  * <p>
- * The golden {@value #CORPUS_RESOURCE} was captured on Windows x64 from the C of commit {@code 42a5072596} (the
- * commit that landed US-059; the C did not change after it until US-046 replaced it with the Java compositor and
- * deleted it). It is the GZIP of a {@link DataOutputStream} stream: a header (magic, {@value #FORMAT_VERSION}, the
- * capture commit, the capture platform, the producer - {@value #C_PRODUCER} for the C), then per step its name, its
+ * The golden {@value #CORPUS_RESOURCE} holds the outcomes captured on Windows x64 from the C of commit
+ * {@code 42a5072596} (the commit that landed US-059; the C did not change after it until US-046 replaced it with the
+ * Java compositor and deleted it), except in the 53 steps that US-062 moved, which hold those of the Java compositor
+ * of US-062 (below). It is the GZIP of a {@link DataOutputStream} stream: a header (magic, {@value #FORMAT_VERSION},
+ * the capture commit, the capture platform, the producer - {@value #C_PRODUCER} for the C,
+ * {@value #C_AND_JAVA_PRODUCER} for this golden), then per step its name, its
  * float class, how its frame is stored, its outcome ({@code ""} for a normal return, otherwise
  * {@code "<exception class>: <message>"}), the surface size, the frame - every int of the surface array, or the
  * SHA-256 of their big-endian bytes - and an optional auxiliary int array: what {@code getRGB} wrote, the delta
@@ -82,8 +84,30 @@ import static org.junit.jupiter.api.Assertions.fail;
  * 33000 x 2 and 2 x 33000, store the SHA-256 of each frame and read the pixels around coordinate 32768 back into
  * the aux array of every step.
  * <p>
- * The test reaches the compositor through the public API only. The C produced the golden, and the Java
- * compositor that replaced it has to reproduce every step exactly on every platform, float steps included: it
+ * US-062 fixed two fixed-point edge cases of the compositor and moved 53 steps, whose new outcomes the C cannot
+ * give. The golden is therefore a capture from the Java compositor of US-062, with {@value #C_AND_JAVA_PRODUCER} as
+ * its producer; decoded and compared step by step with {@code pisces-corpus-42a5072596.bin}, the capture from the C
+ * (SHA-256 {@code 59c86968aae87c6925860842680514b46b3c312ccf2dbe14d52b3ab4cab6724a}) that it replaced, its other
+ * 3,764 steps are byte for byte the C's. Its name is a placeholder: the file is renamed to the hash of the commit
+ * that lands US-062.
+ * <ul>
+ * <li>25 steps by the box sliver ({@code PiscesBlit}): a box edge 1/65536 px from a pixel boundary was painted as an
+ * interior column in a row the box covers in part, and there the colour {@code SRC} blit, which
+ * {@code COMPOSITE_CLEAR} uses too, began its interior run in it. The {@code SRC} and {@code CLEAR} fills of the
+ * {@code fillRect} boxes {@code lfrac1-tfrac256} and {@code rfrac1-bfrac1} (steps 295, 296, 329, 330, 363 and 397, 1
+ * to 5 pixels each), {@code us062-sliver} 13 and 18 (steps 428 and 433, 5 pixels each), {@code drawImage-edges} 36
+ * (step 1532, 2 pixels) and 16 {@code us062-twins} steps of sub-rectangle 1 (steps 1592, 1594 to 1598, 1600, 1602,
+ * 1628, 1630 to 1634, 1636 and 1638, 1 or 2 pixels each). Every moved pixel lies in the sliver column of a row the
+ * box covers in part, or in the last two columns of such a row of a colour {@code SRC} or {@code CLEAR} fill.</li>
+ * <li>28 steps by REPEAT ({@code PiscesPaint.checkBoundsRepeat}), whose modulus overflowed an {@code int} from 32768
+ * texels on: {@code wide-repeat} 20 to 27 (steps 1671 to 1678, 32768 texels, wrapped below texel 0; past the last
+ * texel the overflowed modulus happened to give the right texel) and 40 to 51 and {@code tall-repeat} 0 to 7 (steps
+ * 1691 to 1710, 40000 texels). Every pixel of their nearest-neighbour steps holds the texel that the wrap modulo
+ * the sub-rectangle gives.</li>
+ * </ul>
+ * <p>
+ * The test reaches the compositor through the public API only. The C produced the golden but for those steps, and
+ * the Java compositor that replaced it has to reproduce every step exactly on every platform, float steps included: it
  * runs the C's float arithmetic in the C's order and widths and has no platform-dependent arithmetic. A step is a
  * float step when its own operation runs float code - gradient set-up and generation, the
  * {@code pisces_transform_invert} of a texture transform, the {@code pow} tables of the LCD gamma - or when an
@@ -99,7 +123,8 @@ import static org.junit.jupiter.api.Assertions.fail;
  * below), an LCD mask with any paint but a colour or any rule but {@code SRC_OVER}, an alpha mask under
  * {@code COMPOSITE_CLEAR}, an {@code emitAndClearAlphaRow} whose delta range ends exactly at the end of the array,
  * a coverage sum outside the alpha map, and {@code WRAP_REPEAT} on a texture sub-rectangle 65536 texels wide or
- * high.
+ * high (the C divided by zero there; since US-062 the Java compositor wraps it, which
+ * {@link PiscesFixedPointEdgeTest} pins).
  * <p>
  * Two inputs are not steps, because they need more heap than some test JVMs have: a texture of 2 GiB, refused by
  * the size guard of {@code psw_renderer_set_texture}, and a mask row of 536870911 pixels under the multiply paint a
@@ -115,14 +140,17 @@ import static org.junit.jupiter.api.Assertions.fail;
  * default. On a tree without the C a capture records the Java compositor, so it proves only that the build agrees
  * with itself. A capture from the C means running this class on a tree that still has the C, such as commit
  * {@code 7d5ffd66f0} with this class copied in, with
- * {@code -D}{@value #PRODUCER_PROPERTY}{@code =}{@value #C_PRODUCER}.
+ * {@code -D}{@value #PRODUCER_PROPERTY}{@code =}{@value #C_PRODUCER}; it differs from the golden in the steps that
+ * US-062 moved. A golden for a changed script is therefore a capture from the Java compositor with
+ * {@code -D}{@value #PRODUCER_PROPERTY}{@code =}{@value #C_AND_JAVA_PRODUCER} that such a capture from the C
+ * matches in every step the two fixes of US-062 do not move.
  * {@code -D}{@value #GOLDEN_OVERRIDE_PROPERTY}{@code =<absolute path>} compares against that file instead of the
  * resource; it exists to prove that a changed record fails. Regenerating the golden is a behaviour change, never a
  * test fix.
  */
 public class PiscesCorpusGoldenTest {
 
-    static final String CORPUS_RESOURCE = "pisces-corpus-42a5072596.bin";
+    static final String CORPUS_RESOURCE = "pisces-corpus-US-062-pending.bin";
     static final String CAPTURE_COMMIT = "42a5072596";
     static final String CAPTURE_PROPERTY = "pisces.corpus.capture";
     static final String GOLDEN_OVERRIDE_PROPERTY = "pisces.corpus.golden";
@@ -130,8 +158,14 @@ public class PiscesCorpusGoldenTest {
     /** Names the producer that a capture writes into its header; {@value #C_PRODUCER} for a capture from the C. */
     static final String PRODUCER_PROPERTY = "pisces.corpus.producer";
 
-    /** The producer the header of {@value #CORPUS_RESOURCE} names: the C of {@value #CAPTURE_COMMIT}. */
+    /** The producer of a capture from the C of {@value #CAPTURE_COMMIT}, such as the golden that US-062 replaced. */
     static final String C_PRODUCER = "native";
+
+    /**
+     * The producer the header of {@value #CORPUS_RESOURCE} names: the C of {@value #CAPTURE_COMMIT}, but for the
+     * steps that US-062 moved, which come from the Java compositor of US-062.
+     */
+    static final String C_AND_JAVA_PRODUCER = "native+java-US-062";
 
     /** The producer a capture writes by default: the Java compositor. */
     static final String JAVA_PRODUCER = "java";
@@ -183,8 +217,7 @@ public class PiscesCorpusGoldenTest {
         String disagreement = scriptDisagreement(actual, expected.steps());
         if (disagreement != null) {
             fail("the script and the corpus " + describeSource() + " disagree: " + disagreement
-                    + "; a changed script needs a new capture from the C of " + CAPTURE_COMMIT
-                    + " (see the class comment)");
+                    + "; a changed script needs a new capture (see the class comment)");
         }
         List<Mismatch> mismatches = compare(actual, expected.steps());
         LEDGER.compared(actual.size());
@@ -244,6 +277,10 @@ public class PiscesCorpusGoldenTest {
         Corpus captured = new Corpus(CAPTURE_COMMIT, "test", JAVA_PRODUCER, corpus.steps());
         assertTrue(report(mismatches, perturbed.size(), captured).startsWith("4 of 4 steps differ from the corpus"
                 + " captured from the Java compositor of " + CAPTURE_COMMIT), "a captured corpus names its producer");
+        Corpus golden = new Corpus(CAPTURE_COMMIT, "test", C_AND_JAVA_PRODUCER, corpus.steps());
+        assertTrue(report(mismatches, perturbed.size(), golden).startsWith("4 of 4 steps differ from the corpus"
+                + " captured from the C of " + CAPTURE_COMMIT + " (but for the steps US-062 moved, which were captured"
+                + " from the Java compositor of US-062) on test"), "the golden's corpus names both producers");
     }
 
     private static StepRecord stepRecord(String name, boolean floatStep, boolean hashed, String outcome, int width,
@@ -396,10 +433,13 @@ public class PiscesCorpusGoldenTest {
 
     /** The verdict line, then every mismatch in step order; every mismatch fails, on every platform. */
     static String report(List<Mismatch> mismatches, int stepCount, Corpus expected) {
-        String producer = C_PRODUCER.equals(expected.producer()) ? "the C" : "the Java compositor";
+        boolean mixed = C_AND_JAVA_PRODUCER.equals(expected.producer());
+        String producer = (mixed || C_PRODUCER.equals(expected.producer())) ? "the C" : "the Java compositor";
         StringBuilder text = new StringBuilder();
         text.append(mismatches.size()).append(" of ").append(stepCount).append(" steps differ from the corpus")
                 .append(" captured from ").append(producer).append(" of ").append(expected.commit())
+                .append(mixed ? " (but for the steps US-062 moved, which were captured from the Java compositor"
+                        + " of US-062)" : "")
                 .append(" on ").append(expected.platform()).append(" (this run: ").append(platform()).append(")");
         for (Mismatch mismatch : mismatches) {
             text.append(System.lineSeparator()).append("  ").append(mismatch.describe());
@@ -1948,10 +1988,10 @@ public class PiscesCorpusGoldenTest {
         }
 
         /**
-         * REPEAT on sub-rectangles of 32767, 32768 and 40000 texels, where {@code (max + 1) << 16} overflows a jint
-         * in {@code checkBoundsRepeat}. An S15.16 translation cannot reach past texel 32767, so the samples beyond
-         * the last texel come from a 1/1024 scale (SCALE_TRANSLATE), those before texel 0 from a translation
-         * (TRANSLATE).
+         * REPEAT on sub-rectangles of 32767, 32768 and 40000 texels, where the C's {@code (max + 1) << 16} overflows a
+         * jint in {@code checkBoundsRepeat} (US-062 shifts a long; see the class comment). An S15.16 translation
+         * cannot reach past texel 32767, so the samples beyond the last texel come from a 1/1024 scale
+         * (SCALE_TRANSLATE), those before texel 0 from a translation (TRANSLATE).
          */
         private void wideRepeat() {
             int[] widths = {32767, 32768, 40000};

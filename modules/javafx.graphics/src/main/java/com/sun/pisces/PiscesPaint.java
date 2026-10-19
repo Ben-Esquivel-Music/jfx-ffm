@@ -30,6 +30,10 @@ package com.sun.pisces;
  * {@code 42a5072596}. Each generator fills {@code height} rows of {@code rdr.alphaWidth} premultiplied ARGB
  * values into the paint buffer, as its C counterpart does, in the C's integer and float arithmetic.
  * <p>
+ * US-062 departs from that C at one point: {@link #checkBoundsRepeat} wraps modulo {@code ((long) max + 1) << 16}.
+ * The C shifted a {@code jint}, which overflowed for a sub-rectangle wider or taller than 32767 texels and was 0,
+ * a division by zero, for a multiple of 65536 texels.
+ * <p>
  * The texture coordinate bound helpers of the C ({@code checkBoundsRepeat}, {@code checkBoundsNoRepeat}) write
  * through pointers; here they return the new value. {@code checkBoundsRepeat} changes the 16.16 coordinate, and
  * the integer texel is then {@code (int) (coordinate >> 16)} again, which is what the C stores alongside.
@@ -393,13 +397,14 @@ final class PiscesPaint {
     /**
      * {@code checkBoundsRepeat}: a texel coordinate {@code a} outside [min, max] is wrapped modulo max + 1 into
      * [0, max] (to 0 when max < 0); min only decides which coordinates are left as they are, so a bilinear
-     * footprint may start at txMin - 1 unwrapped. Returns the new 16.16 coordinate; the modulus is the C's
-     * {@code (max+1) << 16}, an int shift widened afterwards.
+     * footprint may start at txMin - 1 unwrapped. Returns the new 16.16 coordinate. The modulus
+     * {@code ((long) max + 1) << 16} is shifted in {@code long} (US-062): the C's {@code (max+1) << 16} shifts a
+     * {@code jint}, which overflows from max = 32767 on.
      */
     private static long checkBoundsRepeat(int a, long la, int min, int max) {
         if (a < min || a > max) {
             if (max >= 0) {
-                return lmod(la, (max + 1) << 16);
+                return lmod(la, ((long) max + 1) << 16);
             } else {
                 return 0;
             }
