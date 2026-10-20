@@ -78,6 +78,9 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * {@code pushTargetActionToSystem} and {@code supportedSourceActionsFromSystem} are the no-op and the 0 they
  * always were.</li>
  * </ul>
+ * The children take the {@code CLIPBOARD} selection of {@code DISPLAY} and cannot hand the user's earlier content
+ * back - that needs a process that outlives them - which is why this class runs only on a private display
+ * ({@link GtkGlassChildJvm#requireDisplay}, {@code -DPRIVATE_DISPLAY=true}).
  */
 @EnabledOnOs(OS.LINUX)
 @Timeout(600)

@@ -1,6 +1,6 @@
 # US-015 — Keep the GTK display tests from changing the developer's desktop
 
-**Status:** 📋 Ready (side effects read from the test code, from GTK 3.24's source and from runs on WSLg and on a private Xvfb with and without openbox; the maintainer's opt-in decision comes first) · **Found:** 2026-09-27, US-008 (F3 review of the GTK display tests: `GtkScreenNativeTest` and `GtkClipboardNativeTest` change the display's state, and whether the display tests should be opt-in was left open)
+**Status:** ✅ Done (uncommitted, 2026-10-19; opt-in behind `-DPRIVATE_DISPLAY=true`, verified on a private Xvfb with and without openbox, see "Done" below) · **Found:** 2026-09-27, US-008 (F3 review of the GTK display tests: `GtkScreenNativeTest` and `GtkClipboardNativeTest` change the display's state, and whether the display tests should be opt-in was left open)
 
 ## Story
 As a developer who runs the `javafx.graphics` module tests on a Linux desktop or in WSL,
@@ -250,3 +250,116 @@ Either way, `GtkScreenNativeTest` must put back what it changes: a developer can
   `DISPLAY` was unset, `GtkClipboardNativeTest` and `GtkScreenNativeTest` included. After that, US-008 ran at most
   one class per Maven run on `:0`. No robot test has run there: without `-DUSE_ROBOT` the robot classes skip.
 - Related: US-016 runs these classes in CI and passes this story's flag.
+
+## Done (2026-10-19, uncommitted)
+
+### The decision, as taken
+**Opt-in**, the recommended option. The flag is the system property `PRIVATE_DISPLAY`, passed as
+`-DPRIVATE_DISPLAY=true` in the style of `USE_ROBOT`:
+- `GtkGlassChildJvm.requireDisplay()` now also does `assumeTrue(Boolean.getBoolean("PRIVATE_DISPLAY"), ...)`, with
+  a reason that says the GTK display tests show windows and change the display, so they run only on a private X
+  server, which the flag says `DISPLAY` names. `requireRobot()` is unchanged: `requireDisplay()` plus `USE_ROBOT`,
+  so the robot classes need both flags. `USE_ROBOT` was not reused as the display flag.
+- The root `pom.xml` declares `<PRIVATE_DISPLAY>false</PRIVATE_DISPLAY>` under "Test control flags", with a comment.
+  Like `USE_ROBOT`, the flag reaches the test JVM as a Maven user property that surefire forwards as a system
+  property; there is no `systemPropertyVariables` entry for either in `modules/javafx.graphics/pom.xml`, and none
+  was added.
+- `GtkGlassChildJvm`'s class javadoc says how to run the display classes: a private X server (Xvfb) named by
+  `DISPLAY` with `WAYLAND_DISPLAY` unset (a `wsl.exe` shell exports WSLg's `DISPLAY=:0`, the developer's desktop),
+  `-DPRIVATE_DISPLAY=true`, `-DUSE_ROBOT=true` for the input-injecting classes, and openbox for the window-manager
+  coverage.
+
+### What changed
+- `GtkGlassShim` (shim): `RootProperty` (type atom, format, items), `readRootProperty` (`XGetWindowProperty` of the
+  root window with `AnyPropertyType`: a size probe, then the whole property, looping until `bytes_after` is 0;
+  `null` when absent; no X event) and `restoreRootProperty` (`XChangeProperty` in replace mode with the saved
+  type, format and items, or `XDeleteProperty` when it was absent; then `XSync`), bound like `setRootCardinals`.
+- `GtkScreenNativeTest.screensScenario` saves `_NET_WORKAREA` and `_NET_CURRENT_DESKTOP` before its first write,
+  records them as `saved.<name>` (`absent`, or `type=<atom> format=<format> items=<a,b,...>`), and its `finally`
+  restores exactly that. The two oracles that assumed the whole screen now derive their expectation from the saved
+  properties by `get_screen_workarea`'s rules (`savedWorkarea()`: the first item of a 32-bit `CARDINAL`
+  `_NET_CURRENT_DESKTOP`, else desktop 0; that desktop's four cardinals of a 32-bit `_NET_WORKAREA`, else the whole
+  screen). Renamed: `withoutWorkareaTheVisibleBoundsAreTheWholeScreen` is now
+  `beforeTheWritesTheVisibleBoundsAreTheSavedWorkarea`, and `removingTheWorkareaRestoresTheWholeScreen` is
+  `restoringTheSavedPropertiesRestoresTheSavedWorkarea`; `theSavedPropertiesAreRecorded` pins the record (so the
+  class has 10 tests, from 9).
+- `GtkEventTraceTest` and `GtkUpcallExceptionTest` save `_NET_WORKAREA` the same way and restore it in a `finally`
+  around the write. The step texts are unchanged, and without a window manager the restore is the deletion of
+  before, so the no-window-manager goldens are untouched (none regenerated).
+- `GtkGlassChildJvm.run` and `start` gained overloads taking a `Map<String, String>` of extra environment entries;
+  the existing signatures delegate with an empty map. `GtkCommonDialogsNativeTest` is the only class that opens a
+  file chooser; its child runs with `XDG_DATA_HOME` and `XDG_CONFIG_HOME` under
+  `target/gtk-glass-child/GtkCommonDialogsNativeTest.account/{xdg-data,xdg-config}` (recreated per run, next to
+  the child directory that `start` empties) and `GSETTINGS_BACKEND=memory`; its javadoc says why.
+- `GtkClipboardNativeTest`'s javadoc says it takes `CLIPBOARD` and cannot hand the user's content back, which is
+  why it runs only on a private display. `GtkRobotNativeTest`'s `capture.offScreen` comment gives the RGB24 /
+  `CAIRO_EXTEND_NONE` / zeroed-surface / `gdk_pixbuf_add_alpha` reason from "Checked, not a defect" above. No
+  behaviour change in either.
+
+### Screen capture helper
+`GtkRobotParityTest`'s `remoteDesktopScenario` and `GtkScreencastDebugTest`'s `screencastScenario` touch the helper
+only through `ScreencastHelper.isAvailable()` (and `XdgDesktopPortal.getMethod()`), which runs the class
+initializer: `ScreencastHelper.<clinit>` -> `loadPipewire` -> `ScreencastNative.loadPipewire` (`sc_load_pipewire`:
+`dlopen` of `libpipewire-0.3.so.0` and its symbols) -> `ScreencastNative.installTokenCallbacks` ->
+`ScreencastNative.initXdgDesktopPortal` (`sc_init_xdg_desktop_portal` -> `initXdgDesktopPortal` in
+`screencast_portal.c`: `g_bus_get_sync` on the session bus, `g_dbus_proxy_new_sync` for
+`org.freedesktop.portal.ScreenCast` and, for the remote-desktop method, `org.freedesktop.portal.RemoteDesktop`,
+then `checkVersion`, which reads the proxies' `version` property) -> `portalScreenCastCleanup`. The session-opening
+calls - `CreateSession`, `SelectSources`, `SelectDevices`, `Start` - live only in `initAndStartSession`, reached from
+`sc_get_rgb_pixels` and the `sc_remote_desktop_*` functions, which neither scenario calls (no robot action, no
+pixel read). So on a desktop with PipeWire and an xdg-desktop-portal they create two D-Bus proxies, which may
+D-Bus-activate the portal service and read its `version`, and **open no session and show no permission prompt**.
+With opt-in they are gated by `-DPRIVATE_DISPLAY=true` like every other display class anyway.
+
+### Measured (2026-10-19, WSL Ubuntu 26.04, JDK 27 Temurin 27+35, Maven 3.10.0, GTK 3.24.52)
+All on a private rootless Xvfb 21.1.22 `:99` at 1920x1080x24 with `WAYLAND_DISPLAY` unset - never on `:0` -
+from a fresh clone of `ee923ace41` in WSL, unchanged ("HEAD") or with this change applied by patch ("patched").
+Command: `mvn -B -ntp -pl modules/javafx.graphics test -DskipNative=true -Dsurefire.failIfNoSpecifiedTests=false
+-Dtest='test/com/sun/glass/ui/gtk/*Test'` plus the flags in the row; counts are the surefire `Tests run` lines of
+the Maven log per class. No run produced an `hs_err` file. Scripts and logs: the session scratchpad `us015/`.
+
+| run | tree | flags | window manager | classes / tests | result |
+| --- | --- | --- | --- | --- | --- |
+| A-nowm (baseline) | HEAD | none (`DISPLAY=:99`) | none | 32 / 166, 5 skipped | 0 failures; 6 classes `Tests run: 0` (the robot classes); the account's `recently-used.xbel` count 121 -> 122 |
+| A-openbox (baseline) | HEAD | none | openbox | 32 / 160, 7 skipped | 0 failures; 7 classes 0 (robot + `GtkWindowStateTraceTest`) |
+| A-openbox-screen | HEAD | none | openbox | `GtkScreenNativeTest` 9/9 | `xprop -root` before: `_NET_WORKAREA(CARDINAL) = 0, 0, 1920, 1080, ...`, `_NET_CURRENT_DESKTOP(CARDINAL) = 0`; after: both `not found` - HEAD deletes openbox's properties and openbox never writes them again |
+| B | patched | none (`DISPLAY=:99`) | none | 32 / 31 | only the 5 headless classes ran; 27 classes `Tests run: 0`; `target/gtk-glass-child` (removed first) holds exactly `GtkGlassNativeHeadlessTest.headlessScenario`, `GtkLibraryQueryHeadlessTest.tableScenario`, `GtkLibraryQueryHeadlessTest.useCurrentScenario` |
+| C | patched | none, `DISPLAY` unset | none | 32 / 31 | 27 classes `Tests run: 0`, 5 headless classes 31 tests, as in CI |
+| D-nowm | patched | `-DPRIVATE_DISPLAY=true` | none | 32 / 167, 5 skipped | every class as in A-nowm, `GtkScreenNativeTest` 10 (was 9); 0 failures |
+| D-openbox | patched | `-DPRIVATE_DISPLAY=true` | openbox | 32 / 161, 7 skipped | every class as in A-openbox, `GtkScreenNativeTest` 10; `xprop -root _NET_WORKAREA _NET_CURRENT_DESKTOP` before == after, byte for byte |
+| D-openbox-robot | patched | `-DPRIVATE_DISPLAY=true -DUSE_ROBOT=true` | openbox | 32 / 167, 3 skipped | `GtkEventTraceTest` 4 (1 skipped: the golden needs no window manager), 0 failures; `xprop` before == after |
+| D-nowm-robot | patched | `-DPRIVATE_DISPLAY=true -DUSE_ROBOT=true` | none | 32 / 194, 0 skipped | every class ran, 0 failures: `GtkEventTraceTest` 4/4, `GtkUpcallExceptionTest` 3/3, `GtkWindowStateTraceTest` 6/6 - the no-window-manager goldens still match |
+| E-strut | patched | `-DPRIVATE_DISPLAY=true` | openbox + a dock (`xmessage`, `_NET_WM_WINDOW_TYPE_DOCK`, `_NET_WM_STRUT_PARTIAL` top 40) | `GtkScreenNativeTest` 10/10 | `_NET_WORKAREA = 0, 40, 1920, 1040, ...` before and after, identical; the child recorded `saved._NET_WORKAREA=type=6 format=32 items=0,40,1920,1040,...`, `saved._NET_CURRENT_DESKTOP=type=6 format=32 items=0`, `screens.0.visible` = `restored.0.visible` = `0,40,1920,1040` |
+| E-strut, event trace | patched | both flags | openbox + the dock | `GtkEventTraceTest` 4 (1 skipped) | `xprop` before == after |
+| Mutant | patched + scratch edit | `-DPRIVATE_DISPLAY=true` | openbox + the dock | `GtkScreenNativeTest` 10, **2 failures** | both oracles made to use the whole screen again: `beforeTheWritesTheVisibleBoundsAreTheSavedWorkarea` and `restoringTheSavedPropertiesRestoresTheSavedWorkarea` fail with `expected: <0,0,1920,1080> but was: <0,40,1920,1040>`; reverted: 10/10 |
+| F | patched | `-DPRIVATE_DISPLAY=true` | none | `GtkCommonDialogsNativeTest` 9/9 | `gsettings list-recursively org.gtk.Settings.FileChooser` and `recently-used.xbel` (sha256) identical before and after; the child's own `xdg-data/recently-used.xbel` appeared under `target` |
+| G | patched | - | - | - | `git status` after everything: the 9 code and pom files plus this story; nothing under `src/test/resources` differs from HEAD |
+| H (Windows) | patched | `-DskipNative=true`, `-am` | - | 32 / 194, 184 skipped | `test-compile` and the GTK test run build successfully; every `@EnabledOnOs(LINUX)` class reports all its methods skipped, the two pure-Java classes run 5 each |
+
+File chooser, on HEAD (what it wrote): `GtkCommonDialogsNativeTest` alone, under `dbus-run-session` so that dconf
+persists, changed `~/.local/share/recently-used.xbel` every time (`file:///tmp/jfx-chosen-file.txt`, application
+count 122 -> 123, `modified` updated). The `org.gtk.Settings.FileChooser` keys were identical before and after,
+even with `sidebar-width` preset to 200 and `window-size` to (800, 600): the chooser restores the stored size and
+sidebar width when it opens and saves the same values when it closes, so the GSettings write is idempotent on this
+display and cannot be told apart by value. That it wrote them at some point shows in the account's stored values
+against the schema defaults: `sidebar-width` 156 (default 148), `window-position` (0, 0) (default (-1, -1)),
+`window-size` (1096, 822) (default (-1, -1)). The account state was put back after each HEAD run.
+
+Skipped tests: surefire records a JUnit assumption as `<skipped type="org.opentest4j.TestAbortedException">` with
+the reason as the element's text (not a `message` attribute). Every skip in the D runs has one: "needs
+-DUSE_ROBOT=true" (`GtkRobotNativeTest` x4, `GtkCallbackTableTest.realEventsTakeTheTablePath`) and the `ParityGate`
+reason "this expectation holds only on a display like the one it was captured on; here env.windowManager=Openbox"
+(`GtkRobotNativeTest.keyLockStatesOfAFreshServer`, `screenCaptureReadsARGBFromTheRootWindow`).
+
+Classes that report `Tests run: 0` with the flag, and why (surefire records no reason for a class-level skip):
+
+| class | without `-DUSE_ROBOT` | with `-DUSE_ROBOT`, openbox |
+| --- | --- | --- |
+| `GtkDnDTargetTest`, `GtkDnDTraceTest`, `GtkEventTraceTest`, `GtkMotionFloodBenchmarkTest`, `GtkNullSlotsTest`, `GtkUpcallExceptionTest` | robot classes: `requireRobot()` needs `-DUSE_ROBOT=true` | `GtkEventTraceTest` (4) and `GtkMotionFloodBenchmarkTest` (2) run; `GtkDnDTargetTest`, `GtkDnDTraceTest`, `GtkNullSlotsTest` and `GtkUpcallExceptionTest` skip through `GtkTraceGolden.requireNoWindowManager` (they script window positions) |
+| `GtkWindowStateTraceTest` | runs without a window manager (6); `Tests run: 0` under openbox (`requireNoWindowManager`) | same |
+
+Headless (no `DISPLAY`) and Windows are unchanged in substance: 27 classes `Tests run: 0` and 31 headless tests
+in WSL; on Windows the Linux-only classes skip all their methods as before.
+
+Out of scope, filed: US-064 (`GtkGlassNative.currentDesktop` reads the first cardinal of a zero-item
+`_NET_CURRENT_DESKTOP` without an item-count guard; found by this story's review).

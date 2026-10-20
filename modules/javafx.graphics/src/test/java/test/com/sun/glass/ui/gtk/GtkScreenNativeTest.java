@@ -55,8 +55,12 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * physical size, or the screen's when the monitor reports none and there is exactly one monitor, and 96 when
  * neither is positive.</li>
  * </ul>
- * It runs in {@link GtkGlassChild} on the X11 display of {@code DISPLAY}, and sets and removes the two root
- * window properties itself, which no window manager is there to own.
+ * It runs in {@link GtkGlassChild} on the X11 display of {@code DISPLAY}. The two root window properties belong to
+ * a window manager where one runs (EWMH: it must set {@code _NET_CURRENT_DESKTOP} and a {@code _NET_WORKAREA} per
+ * desktop), so the scenario saves them first - type, format and items, or their absence - sets its own, and puts
+ * exactly the saved ones back in its {@code finally}; on a display without a window manager that is the deletion
+ * it always did. The expectations before the first write and after the restore are derived from what was saved
+ * ({@link #savedWorkarea}), the way the others are from what was written.
  */
 @EnabledOnOs(OS.LINUX)
 @Timeout(300)
@@ -115,12 +119,13 @@ public class GtkScreenNativeTest {
     }
 
     /**
-     * With no {@code _NET_WORKAREA} on the root window - the state of a display with no window manager - the
-     * visible bounds are the whole screen intersected with the monitor geometry.
+     * Before the first write, the visible bounds are the {@code _NET_WORKAREA} rectangle of the
+     * {@code _NET_CURRENT_DESKTOP} the display had - a window manager's work area - intersected with the monitor
+     * geometry, or the whole screen where there was none, the state of a display with no window manager.
      */
     @Test
-    public void withoutWorkareaTheVisibleBoundsAreTheWholeScreen() {
-        assertVisible("screens", fullScreen());
+    public void beforeTheWritesTheVisibleBoundsAreTheSavedWorkarea() {
+        assertVisible("screens", savedWorkarea());
     }
 
     /** The {@code _NET_WORKAREA} rectangle of desktop 0, intersected with the monitor geometry. */
@@ -141,13 +146,22 @@ public class GtkScreenNativeTest {
         assertVisible("workareaOutOfRange", fullScreen());
     }
 
-    /** Removing the properties again puts the visible bounds back where they were. */
+    /** Putting the saved properties back puts the visible bounds back to the saved work area, where they were. */
     @Test
-    public void removingTheWorkareaRestoresTheWholeScreen() {
-        assertVisible("restored", fullScreen());
+    public void restoringTheSavedPropertiesRestoresTheSavedWorkarea() {
+        assertVisible("restored", savedWorkarea());
         for (int i = 0; i < number("gdk.monitors"); i++) {
             assertEquals(value("screens." + i + ".visible"), value("restored." + i + ".visible"));
         }
+    }
+
+    /** The scenario recorded what it saved and put back, so the record is checkable against {@code xprop}. */
+    @Test
+    public void theSavedPropertiesAreRecorded() {
+        assertTrue(value("saved._NET_WORKAREA").equals(ABSENT)
+                || value("saved._NET_WORKAREA").startsWith("type="), value("saved._NET_WORKAREA"));
+        assertTrue(value("saved._NET_CURRENT_DESKTOP").equals(ABSENT)
+                || value("saved._NET_CURRENT_DESKTOP").startsWith("type="), value("saved._NET_CURRENT_DESKTOP"));
     }
 
     /** The resolution is the monitor's pixel width over its physical width, in whole dots per inch. */
@@ -193,6 +207,51 @@ public class GtkScreenNativeTest {
     private static int[] fullScreen() {
         int[] size = numbers(value("gdk.screenSize.0"));
         return new int[] {0, 0, size[0], size[1]};
+    }
+
+    /**
+     * The work area the saved properties gave {@code get_screen_workarea} before the scenario wrote its own, by
+     * its rules: the desktop is the first item of a saved 32-bit {@code CARDINAL} {@code _NET_CURRENT_DESKTOP},
+     * else 0; the rectangle is that desktop's four cardinals of a saved 32-bit {@code _NET_WORKAREA}, or the whole
+     * screen when the property was absent or too short for the desktop.
+     */
+    static int[] savedWorkarea() {
+        long[] desktops = savedItems("_NET_CURRENT_DESKTOP", 32, XA_CARDINAL);
+        long desktop = desktops != null && desktops.length > 0 ? Integer.toUnsignedLong((int) desktops[0]) : 0;
+        long[] workarea = savedItems("_NET_WORKAREA", 32, 0);
+        if (workarea == null || desktop >= workarea.length / 4) {
+            return fullScreen();
+        }
+        int base = (int) desktop * 4;
+        return new int[] {(int) workarea[base], (int) workarea[base + 1], (int) workarea[base + 2],
+                (int) workarea[base + 3]};
+    }
+
+    /**
+     * The items of the saved property {@code name} ({@code saved.<name>}, as {@link #describe} wrote it), or
+     * {@code null} when it was absent, in another format or - for a {@code type} other than 0 - of another type.
+     */
+    private static long[] savedItems(String name, int format, long type) {
+        String saved = value("saved." + name);
+        if (ABSENT.equals(saved)) {
+            return null;
+        }
+        String[] fields = saved.split(" ");
+        long savedType = Long.parseLong(fields[0].substring("type=".length()));
+        int savedFormat = Integer.parseInt(fields[1].substring("format=".length()));
+        String items = fields[2].substring("items=".length());
+        if (savedFormat != format || (type != 0 && savedType != type)) {
+            return null;
+        }
+        if (items.isEmpty()) {
+            return new long[0];
+        }
+        String[] parts = items.split(",");
+        long[] result = new long[parts.length];
+        for (int i = 0; i < parts.length; i++) {
+            result[i] = Long.parseLong(parts[i]);
+        }
+        return result;
     }
 
     private static int[] rectangle(long[] cardinals) {
@@ -252,6 +311,8 @@ public class GtkScreenNativeTest {
             record(out, "screens", GtkGlassShim.screens());
             return null;
         });
+        GtkGlassShim.RootProperty savedWorkarea = GtkGlassChild.onFx(() -> saved(out, "_NET_WORKAREA"));
+        GtkGlassShim.RootProperty savedDesktop = GtkGlassChild.onFx(() -> saved(out, "_NET_CURRENT_DESKTOP"));
         try {
             GtkGlassChild.onFx(() -> {
                 GtkGlassShim.setRootCardinals("_NET_CURRENT_DESKTOP", new long[] {0});
@@ -278,12 +339,29 @@ public class GtkScreenNativeTest {
             });
         } finally {
             GtkGlassChild.onFx(() -> {
-                GtkGlassShim.setRootCardinals("_NET_WORKAREA", null);
-                GtkGlassShim.setRootCardinals("_NET_CURRENT_DESKTOP", null);
+                GtkGlassShim.restoreRootProperty("_NET_WORKAREA", savedWorkarea);
+                GtkGlassShim.restoreRootProperty("_NET_CURRENT_DESKTOP", savedDesktop);
                 record(out, "restored", GtkGlassShim.screens());
                 return null;
             });
         }
+    }
+
+    /** What the scenario records for a property the root window does not have. */
+    static final String ABSENT = "absent";
+
+    /** {@code XA_CARDINAL} of {@code Xatom.h}, the type {@code get_current_desktop} requires. */
+    static final long XA_CARDINAL = 6;
+
+    /** Reads the root window property {@code name} and records it under {@code saved.<name>}; FX thread. */
+    static GtkGlassShim.RootProperty saved(Map<String, String> out, String name) {
+        GtkGlassShim.RootProperty property = GtkGlassShim.readRootProperty(name);
+        out.put("saved." + name, describe(property));
+        return property;
+    }
+
+    static String describe(GtkGlassShim.RootProperty property) {
+        return property == null ? ABSENT : property.describe();
     }
 
     private static long[] concat(long[] first, long[] second) {

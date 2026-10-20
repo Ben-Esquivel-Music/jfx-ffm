@@ -123,8 +123,11 @@ public class GtkRobotNativeTest {
         assertEquals(untouched, value("capture.arrayTooSmall"));
         assertEquals(untouched, value("capture.overflowGuard"));
         GtkGlassChildJvm.requireEnvironment(GtkRobotNativeTest.class, run, "env.gtk", "env.depth");
-        // Not an early return: gdk_pixbuf_get_from_window answers opaque black for an area off the root window,
-        // which is what the JNI build of commit 033187ad90 copied into the array.
+        // Not an early return, and not undefined pixels: gdk_pixbuf_get_from_window paints the root window into a
+        // new, zeroed cairo image surface - RGB24 at depth 24, hence the env.depth gate - and an area wholly off
+        // the root lies outside the source pattern (CAIRO_EXTEND_NONE), so its RGB stays 0; gdk_pixbuf_add_alpha
+        // then sets the alpha of a pixbuf that had none to 255. Opaque black is what the JNI build of commit
+        // 033187ad90 copied into the array.
         assertEquals(repeat(0xFF000000, 4), value("capture.offScreen"));
     }
 

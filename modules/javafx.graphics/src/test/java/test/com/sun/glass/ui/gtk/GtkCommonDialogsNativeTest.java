@@ -30,13 +30,16 @@ import com.sun.glass.ui.CommonDialogs.ExtensionFilter;
 import com.sun.glass.ui.CommonDialogs.FileChooserResult;
 import com.sun.glass.ui.gtk.GtkGlassShim;
 import java.io.File;
+import java.io.IOException;
 import java.nio.charset.Charset;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.Comparator;
 import java.util.HexFormat;
 import java.util.List;
 import java.util.Map;
+import java.util.stream.Stream;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.Timeout;
@@ -66,7 +69,11 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * dialog answers every chosen file - including one named outside ASCII - decoded with the default charset;</li>
  * <li>a null {@code ExtensionFilter[]} throws before the dialog is ever run.</li>
  * </ul>
- * It runs in {@link GtkGlassChild} on the X11 display of {@code DISPLAY}.
+ * It runs in {@link GtkGlassChild} on the X11 display of {@code DISPLAY}. A GTK file chooser saves its
+ * {@code org.gtk.Settings.FileChooser} keys through GSettings when it closes and adds an accepted file to the
+ * recently-used list, which live in the account, not on the display: the child therefore runs with its own
+ * {@code XDG_DATA_HOME} and {@code XDG_CONFIG_HOME} under {@link #ACCOUNT} and with {@code GSETTINGS_BACKEND=memory},
+ * so the account that runs the tests keeps its settings and its {@code recently-used.xbel}.
  */
 @EnabledOnOs(OS.LINUX)
 @Timeout(300)
@@ -118,13 +125,38 @@ public class GtkCommonDialogsNativeTest {
                 new ExtensionFilter(SECOND_FILTER, List.of("*.*")));
     }
 
+    /**
+     * The account state of the child: {@code xdg-data} is its {@code XDG_DATA_HOME} (GTK's recently-used list),
+     * {@code xdg-config} its {@code XDG_CONFIG_HOME} (GTK's settings and bookmarks). Outside the child's own
+     * directory, which {@link GtkGlassChildJvm#start} empties, and recreated for every run.
+     */
+    static final Path ACCOUNT = Path.of("target", "gtk-glass-child", "GtkCommonDialogsNativeTest.account")
+            .toAbsolutePath();
+
     private static GtkGlassChildJvm.Run run;
 
     @BeforeAll
     @Timeout(GtkGlassChildJvm.BEFORE_ALL_SECONDS)
-    static void runScenario() {
+    static void runScenario() throws IOException {
         GtkGlassChildJvm.requireDisplay();
-        run = GtkGlassChildJvm.run(GtkCommonDialogsNativeTest.class, "dialogScenario", List.of());
+        run = GtkGlassChildJvm.run(GtkCommonDialogsNativeTest.class, "dialogScenario", List.of(), privateAccount());
+    }
+
+    /** A fresh {@link #ACCOUNT}, and the environment that points the child's GTK at it. */
+    static Map<String, String> privateAccount() throws IOException {
+        Path data = ACCOUNT.resolve("xdg-data");
+        Path config = ACCOUNT.resolve("xdg-config");
+        if (Files.exists(ACCOUNT)) {
+            try (Stream<Path> paths = Files.walk(ACCOUNT)) {
+                for (Path path : paths.sorted(Comparator.reverseOrder()).toList()) {
+                    Files.delete(path);
+                }
+            }
+        }
+        Files.createDirectories(data);
+        Files.createDirectories(config);
+        return Map.of("XDG_DATA_HOME", data.toString(), "XDG_CONFIG_HOME", config.toString(),
+                "GSETTINGS_BACKEND", "memory");
     }
 
     private static String value(String key) {
