@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2012, 2024, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2012, 2026, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -43,6 +43,8 @@ import javafx.scene.chart.XYChartShim;
 import javafx.scene.layout.StackPane;
 import javafx.scene.shape.MoveTo;
 import javafx.scene.shape.Path;
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Disabled;
 import org.junit.jupiter.api.Test;
 
@@ -55,6 +57,17 @@ public class BarChartTest extends XYChartTestBase {
     final CategoryAxis xAxis = new CategoryAxis();
     final NumberAxis yAxis = new NumberAxis();
     BarChart<String,Number> bc;
+    private Thread.UncaughtExceptionHandler previousExceptionHandler;
+
+    @BeforeEach
+    public void saveUncaughtExceptionHandler() {
+        previousExceptionHandler = Thread.currentThread().getUncaughtExceptionHandler();
+    }
+
+    @AfterEach
+    public void restoreUncaughtExceptionHandler() {
+        Thread.currentThread().setUncaughtExceptionHandler(previousExceptionHandler);
+    }
 
     @Override
     protected void createChart() {

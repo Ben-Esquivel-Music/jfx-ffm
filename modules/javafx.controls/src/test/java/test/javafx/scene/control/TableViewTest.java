@@ -3926,39 +3926,41 @@ public class TableViewTest {
         final Thread.UncaughtExceptionHandler exceptionHandler = Thread.currentThread().getUncaughtExceptionHandler();
         Thread.currentThread().setUncaughtExceptionHandler((t, e) -> fail("We don't expect any exceptions in this test!"));
 
-        // table columns - 1 column; name
-        TableColumn<String, String> nameColumn = new TableColumn<>("name");
-        nameColumn.setCellValueFactory(param -> new ReadOnlyObjectWrapper(param.getValue()));
-        nameColumn.setPrefWidth(200);
+        try {
+            // table columns - 1 column; name
+            TableColumn<String, String> nameColumn = new TableColumn<>("name");
+            nameColumn.setCellValueFactory(param -> new ReadOnlyObjectWrapper(param.getValue()));
+            nameColumn.setPrefWidth(200);
 
-        // table
-        TableView<String> table = new TableView<>();
-        table.setItems(FXCollections.observableArrayList("one", "two", "three", "four", "five"));
-        table.getColumns().addAll(nameColumn);
+            // table
+            TableView<String> table = new TableView<>();
+            table.setItems(FXCollections.observableArrayList("one", "two", "three", "four", "five"));
+            table.getColumns().addAll(nameColumn);
 
-        table.getSelectionModel().getSelectedItems().addListener((ListChangeListener<String>) c -> {
-            while (c.next()) {
-                if(c.wasRemoved()) {
-                    // The removed list of items must be iterated or the AIOOBE will
-                    // not be thrown when getAddedSubList is called.
-                    c.getRemoved().forEach(item -> {});
+            table.getSelectionModel().getSelectedItems().addListener((ListChangeListener<String>) c -> {
+                while (c.next()) {
+                    if(c.wasRemoved()) {
+                        // The removed list of items must be iterated or the AIOOBE will
+                        // not be thrown when getAddedSubList is called.
+                        c.getRemoved().forEach(item -> {});
+                    }
+
+                    if (c.wasAdded()) {
+                        c.getAddedSubList();
+                    }
                 }
+            });
 
-                if (c.wasAdded()) {
-                    c.getAddedSubList();
-                }
-            }
-        });
+            StageLoader sl = new StageLoader(table);
 
-        StageLoader sl = new StageLoader(table);
+            table.getSelectionModel().select(0);
+            table.getSortOrder().add(nameColumn);
 
-        table.getSelectionModel().select(0);
-        table.getSortOrder().add(nameColumn);
-
-        sl.dispose();
-
-        // reset the exception handler
-        Thread.currentThread().setUncaughtExceptionHandler(exceptionHandler);
+            sl.dispose();
+        } finally {
+            // reset the exception handler
+            Thread.currentThread().setUncaughtExceptionHandler(exceptionHandler);
+        }
     }
 
     private int rt_37429_items_change_count = 0;
@@ -6024,43 +6026,45 @@ public class TableViewTest {
         final Thread.UncaughtExceptionHandler exceptionHandler = Thread.currentThread().getUncaughtExceptionHandler();
         Thread.currentThread().setUncaughtExceptionHandler((t, e) -> fail("We don't expect any exceptions in this test!"));
 
-        TableColumn<Person, String> firstNameCol = new TableColumn<>("First Name");
-        firstNameCol.setCellValueFactory(new PropertyValueFactory<>("firstName"));
+        try {
+            TableColumn<Person, String> firstNameCol = new TableColumn<>("First Name");
+            firstNameCol.setCellValueFactory(new PropertyValueFactory<>("firstName"));
 
-        TableColumn<Person, String> lastNameCol = new TableColumn<>("Last Name");
-        lastNameCol.setCellValueFactory(new PropertyValueFactory<>("lastName"));
+            TableColumn<Person, String> lastNameCol = new TableColumn<>("Last Name");
+            lastNameCol.setCellValueFactory(new PropertyValueFactory<>("lastName"));
 
-        TableView<Person> table = new TableView<>();
-        table.setItems(personTestData);
-        table.getColumns().addAll(firstNameCol, lastNameCol);
+            TableView<Person> table = new TableView<>();
+            table.setItems(personTestData);
+            table.getColumns().addAll(firstNameCol, lastNameCol);
 
-        sm = table.getSelectionModel();
-        sm.setCellSelectionEnabled(true);
-        sm.setSelectionMode(SelectionMode.MULTIPLE);
+            sm = table.getSelectionModel();
+            sm.setCellSelectionEnabled(true);
+            sm.setSelectionMode(SelectionMode.MULTIPLE);
 
-        // Call change::toString
-        table.getSelectionModel().getSelectedItems().addListener((ListChangeListener<Person>) Object::toString);
+            // Call change::toString
+            table.getSelectionModel().getSelectedItems().addListener((ListChangeListener<Person>) Object::toString);
 
-        StageLoader sl = new StageLoader(table);
+            StageLoader sl = new StageLoader(table);
 
-        KeyEventFirer keyboard = new KeyEventFirer(table);
+            KeyEventFirer keyboard = new KeyEventFirer(table);
 
-        assertEquals(0, sm.getSelectedItems().size());
+            assertEquals(0, sm.getSelectedItems().size());
 
-        sm.select(0, firstNameCol);
-        assertEquals(1, sm.getSelectedCells().size());
-        assertEquals(1, sm.getSelectedItems().size());
+            sm.select(0, firstNameCol);
+            assertEquals(1, sm.getSelectedCells().size());
+            assertEquals(1, sm.getSelectedItems().size());
 
-        keyboard.doKeyPress(KeyCode.RIGHT, KeyModifier.SHIFT);
-        assertEquals(2, sm.getSelectedCells().size());
-        assertEquals(1, sm.getSelectedItems().size());
+            keyboard.doKeyPress(KeyCode.RIGHT, KeyModifier.SHIFT);
+            assertEquals(2, sm.getSelectedCells().size());
+            assertEquals(1, sm.getSelectedItems().size());
 
-        sm.clearSelection();
+            sm.clearSelection();
 
-        sl.dispose();
-
-        // reset the exception handler
-        Thread.currentThread().setUncaughtExceptionHandler(exceptionHandler);
+            sl.dispose();
+        } finally {
+            // reset the exception handler
+            Thread.currentThread().setUncaughtExceptionHandler(exceptionHandler);
+        }
     }
 
     @Test
@@ -6068,41 +6072,43 @@ public class TableViewTest {
         final Thread.UncaughtExceptionHandler exceptionHandler = Thread.currentThread().getUncaughtExceptionHandler();
         Thread.currentThread().setUncaughtExceptionHandler((t, e) -> fail("We don't expect any exceptions in this test!"));
 
-        TableColumn<Person, String> firstNameCol = new TableColumn<>("First Name");
-        firstNameCol.setCellValueFactory(new PropertyValueFactory<>("firstName"));
+        try {
+            TableColumn<Person, String> firstNameCol = new TableColumn<>("First Name");
+            firstNameCol.setCellValueFactory(new PropertyValueFactory<>("firstName"));
 
-        TableColumn<Person, String> lastNameCol = new TableColumn<>("Last Name");
-        lastNameCol.setCellValueFactory(new PropertyValueFactory<>("lastName"));
+            TableColumn<Person, String> lastNameCol = new TableColumn<>("Last Name");
+            lastNameCol.setCellValueFactory(new PropertyValueFactory<>("lastName"));
 
-        TableView<Person> table = new TableView<>();
-        table.setItems(personTestData);
-        table.getColumns().addAll(firstNameCol, lastNameCol);
+            TableView<Person> table = new TableView<>();
+            table.setItems(personTestData);
+            table.getColumns().addAll(firstNameCol, lastNameCol);
 
-        sm = table.getSelectionModel();
-        sm.setCellSelectionEnabled(true);
-        sm.setSelectionMode(SelectionMode.MULTIPLE);
+            sm = table.getSelectionModel();
+            sm.setCellSelectionEnabled(true);
+            sm.setSelectionMode(SelectionMode.MULTIPLE);
 
-        stageLoader = new StageLoader(table);
+            stageLoader = new StageLoader(table);
 
-        // Call change::toString
-        table.getSelectionModel().getSelectedItems().addListener((ListChangeListener<Person>) Object::toString);
+            // Call change::toString
+            table.getSelectionModel().getSelectedItems().addListener((ListChangeListener<Person>) Object::toString);
 
-        assertEquals(0, sm.getSelectedItems().size());
+            assertEquals(0, sm.getSelectedItems().size());
 
-        sm.select(0, firstNameCol);
-        assertTrue(sm.isSelected(0, firstNameCol));
-        assertEquals(1, sm.getSelectedCells().size());
-        assertEquals(1, sm.getSelectedItems().size());
+            sm.select(0, firstNameCol);
+            assertTrue(sm.isSelected(0, firstNameCol));
+            assertEquals(1, sm.getSelectedCells().size());
+            assertEquals(1, sm.getSelectedItems().size());
 
-        TableCell<Person, String> cell = (TableCell<Person, String>) VirtualFlowTestUtils.getCell(table, 0, 1);
-        new MouseEventFirer(cell).fireMousePressAndRelease(KeyModifier.getShortcutKey());
-        assertTrue(sm.isSelected(0, firstNameCol));
-        assertTrue(sm.isSelected(0, lastNameCol));
-        assertEquals(2, sm.getSelectedCells().size());
-        assertEquals(1, sm.getSelectedItems().size());
-
-        // reset the exception handler
-        Thread.currentThread().setUncaughtExceptionHandler(exceptionHandler);
+            TableCell<Person, String> cell = (TableCell<Person, String>) VirtualFlowTestUtils.getCell(table, 0, 1);
+            new MouseEventFirer(cell).fireMousePressAndRelease(KeyModifier.getShortcutKey());
+            assertTrue(sm.isSelected(0, firstNameCol));
+            assertTrue(sm.isSelected(0, lastNameCol));
+            assertEquals(2, sm.getSelectedCells().size());
+            assertEquals(1, sm.getSelectedItems().size());
+        } finally {
+            // reset the exception handler
+            Thread.currentThread().setUncaughtExceptionHandler(exceptionHandler);
+        }
     }
 
     // see JDK-8284665
