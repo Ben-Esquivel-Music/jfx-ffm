@@ -65,7 +65,13 @@ import static org.junit.jupiter.api.Assumptions.assumeTrue;
  * <li>pass {@code -DPRIVATE_DISPLAY=true} to Maven, plus {@code -DUSE_ROBOT=true} for the input-injecting
  * classes;</li>
  * <li>run openbox on that display for the window-manager coverage, and nothing for the no-window-manager
- * goldens ({@link GtkTraceGolden#requireNoWindowManager}).</li>
+ * goldens ({@link GtkTraceGolden#requireNoWindowManager});</li>
+ * <li>let nothing else stay connected to that display: the no-window-manager goldens need the X server to reset
+ * between the children, which puts the pointer back in the middle of the screen. Where no session bus is
+ * reachable, GTK autolaunches one through X11 and at-spi-bus-launcher stays on the display, so run Maven on a
+ * private bus whose daemon has no {@code DISPLAY}, for example
+ * {@code env -u DISPLAY dbus-run-session -- env DISPLAY=:99 mvn ...}, as
+ * {@code .github/scripts/run-gtk-display-tests.sh} does.</li>
  * </ul>
  * Both flags reach the test JVM as Maven user properties, which surefire forwards as system properties.
  * <p>

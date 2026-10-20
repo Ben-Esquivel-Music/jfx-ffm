@@ -1,6 +1,6 @@
 # US-015 — Keep the GTK display tests from changing the developer's desktop
 
-**Status:** ✅ Done (uncommitted, 2026-10-19; opt-in behind `-DPRIVATE_DISPLAY=true`, verified on a private Xvfb with and without openbox, see "Done" below) · **Found:** 2026-09-27, US-008 (F3 review of the GTK display tests: `GtkScreenNativeTest` and `GtkClipboardNativeTest` change the display's state, and whether the display tests should be opt-in was left open)
+**Status:** ✅ Done (2026-10-19; landed as 8c43d5ff36, PR #34; opt-in behind `-DPRIVATE_DISPLAY=true`, verified on a private Xvfb with and without openbox, see "Done" below) · **Found:** 2026-09-27, US-008 (F3 review of the GTK display tests: `GtkScreenNativeTest` and `GtkClipboardNativeTest` change the display's state, and whether the display tests should be opt-in was left open)
 
 ## Story
 As a developer who runs the `javafx.graphics` module tests on a Linux desktop or in WSL,
@@ -251,7 +251,7 @@ Either way, `GtkScreenNativeTest` must put back what it changes: a developer can
   one class per Maven run on `:0`. No robot test has run there: without `-DUSE_ROBOT` the robot classes skip.
 - Related: US-016 runs these classes in CI and passes this story's flag.
 
-## Done (2026-10-19, uncommitted)
+## Done (2026-10-19; landed as 8c43d5ff36, PR #34)
 
 ### The decision, as taken
 **Opt-in**, the recommended option. The flag is the system property `PRIVATE_DISPLAY`, passed as

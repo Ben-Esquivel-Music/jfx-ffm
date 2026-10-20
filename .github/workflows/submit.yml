@@ -39,6 +39,10 @@
 # ffmpeg development packages) and jfxmedia_avf on macOS (the AVFoundation
 # backend, which no development machine in this project can compile).
 #
+# The Linux jobs then run the GTK glass display tests, which the build skips for
+# want of a display, on a private Xvfb: once without and once with a window
+# manager (.github/scripts/run-gtk-display-tests.sh).
+#
 # NOTE: much of the build logic is duplicated for each platform. Keep this in
 # mind when making changes.
 #
@@ -133,6 +137,47 @@ jobs:
           # passed to its separate test run: after a failure Maven still builds and
           # tests every module that does not depend on the failed one.
           mvn -B -ntp -fae install "-Djfx.web.skipFfmTests=false"
+
+      - name: Install a virtual display and a window manager
+        run: |
+          set -x
+          # For the GTK display tests below: xvfb for a private X server, openbox for the run
+          # with a window manager, x11-utils for the xdpyinfo and xprop that the script uses to
+          # wait for both, and dbus-daemon for the dbus-run-session that gives the tests a session
+          # bus of their own. The runner image already has xvfb and dbus-daemon.
+          sudo apt-get -y install --no-install-recommends xvfb openbox x11-utils dbus-daemon
+
+      - name: Run the GTK display tests on a private Xvfb
+        id: gtk_display_tests
+        timeout-minutes: 30
+        working-directory: jfx
+        run: |
+          set -x
+          export PATH="$JAVA_HOME/bin:$PATH"
+          # The install step runs the GTK glass tests without a display, so only the five
+          # headless classes of test/com/sun/glass/ui/gtk run there. This runs all of them on a
+          # private Xvfb at 1920x1080x24, against the natives that step built: first with no
+          # window manager, then under openbox, with -DPRIVATE_DISPLAY=true and
+          # -DUSE_ROBOT=true. The script fails the step when either run fails, and a run also
+          # fails when its children did not record the screen and window manager it claims, or
+          # when a class reports no tests without being listed with its reason.
+          bash .github/scripts/run-gtk-display-tests.sh
+
+      - name: Upload the GTK display test reports
+        if: ${{ failure() && steps.gtk_display_tests.outcome == 'failure' }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: gtk-display-tests-linux-x64
+          # Each run's report, Maven log, surefire reports, child JVM directories (stdout,
+          # stderr, recorded values, fatal error logs) and Xvfb and openbox logs; the last three
+          # paths exist only if the step was stopped in the middle of a run.
+          path: |
+            jfx/modules/javafx.graphics/target/gtk-display-tests/
+            jfx/modules/javafx.graphics/target/surefire-reports/
+            jfx/modules/javafx.graphics/target/gtk-glass-child/
+            jfx/modules/javafx.graphics/hs_err_pid*.log
+          if-no-files-found: warn
+          retention-days: 7
 
       - name: Verify the optional avplugin was built
         if: ${{ !cancelled() }}
@@ -235,6 +280,47 @@ jobs:
           # passed to its separate test run: after a failure Maven still builds and
           # tests every module that does not depend on the failed one.
           mvn -B -ntp -fae install "-Djfx.web.skipFfmTests=false"
+
+      - name: Install a virtual display and a window manager
+        run: |
+          set -x
+          # For the GTK display tests below: xvfb for a private X server, openbox for the run
+          # with a window manager, x11-utils for the xdpyinfo and xprop that the script uses to
+          # wait for both, and dbus-daemon for the dbus-run-session that gives the tests a session
+          # bus of their own. The runner image already has xvfb and dbus-daemon.
+          sudo apt-get -y install --no-install-recommends xvfb openbox x11-utils dbus-daemon
+
+      - name: Run the GTK display tests on a private Xvfb
+        id: gtk_display_tests
+        timeout-minutes: 30
+        working-directory: jfx
+        run: |
+          set -x
+          export PATH="$JAVA_HOME/bin:$PATH"
+          # The install step runs the GTK glass tests without a display, so only the five
+          # headless classes of test/com/sun/glass/ui/gtk run there. This runs all of them on a
+          # private Xvfb at 1920x1080x24, against the natives that step built: first with no
+          # window manager, then under openbox, with -DPRIVATE_DISPLAY=true and
+          # -DUSE_ROBOT=true. The script fails the step when either run fails, and a run also
+          # fails when its children did not record the screen and window manager it claims, or
+          # when a class reports no tests without being listed with its reason.
+          bash .github/scripts/run-gtk-display-tests.sh
+
+      - name: Upload the GTK display test reports
+        if: ${{ failure() && steps.gtk_display_tests.outcome == 'failure' }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: gtk-display-tests-linux-aarch64
+          # Each run's report, Maven log, surefire reports, child JVM directories (stdout,
+          # stderr, recorded values, fatal error logs) and Xvfb and openbox logs; the last three
+          # paths exist only if the step was stopped in the middle of a run.
+          path: |
+            jfx/modules/javafx.graphics/target/gtk-display-tests/
+            jfx/modules/javafx.graphics/target/surefire-reports/
+            jfx/modules/javafx.graphics/target/gtk-glass-child/
+            jfx/modules/javafx.graphics/hs_err_pid*.log
+          if-no-files-found: warn
+          retention-days: 7
 
       - name: Verify the optional avplugin was built
         if: ${{ !cancelled() }}
