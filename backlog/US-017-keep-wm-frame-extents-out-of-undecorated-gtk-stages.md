@@ -505,6 +505,8 @@ In `modules/javafx.graphics`; Linux only (`@EnabledOnOs(LINUX)`), and skipped wi
     `View` at (left, top) where GDK takes the frame from the extents; otherwise the client's position and 0,0.
 - `GtkUndecoratedStageBoundsTest`, 2 tests, the public-API check: an `UNDECORATED` `Stage` at 0,0 with a scene as
   large as the screen (1920x1080) reports 0,0 1920x1080 with its scene at 0,0, and its rectangle equals its client's.
+  The child is pinned to `-Dglass.gtk.uiScale=1.0`, since a `Stage` is in logical units and the client in X11 pixels
+  (PR #36 review).
 - **What the stand-in covers:** everything glass does with the extents itself (the size it reports, the size it asks
   for, the hints), on any display. The position half is GDK's: without a WM, GDK ignores the property for the frame
   origin, so the position is tested only under openbox and on Weston. `GtkUndecoratedStageBoundsTest` covers the

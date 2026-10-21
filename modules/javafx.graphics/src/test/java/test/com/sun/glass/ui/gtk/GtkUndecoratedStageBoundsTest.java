@@ -62,6 +62,10 @@ import static test.com.sun.glass.ui.gtk.GtkFrameExtentsStandIn.rect;
  * is written after the stage has been placed, and glass does not set an undecorated window's bounds again when its
  * extents change, so no configure event reads the position with the stand-in in force. Under openbox the position
  * half is covered by {@link GtkFrameExtentsNativeTest}, which moves each window after the stand-in is in force.
+ * <p>
+ * The child runs at a UI scale of 1 ({@code -Dglass.gtk.uiScale=1.0}): a {@code Stage} reports glass's X11 pixels
+ * divided by the UI scale, the client is read in X11 pixels, so at {@code GDK_SCALE=2} or on a high-dpi screen a
+ * correct stage would differ from its client by that factor.
  */
 @EnabledOnOs(OS.LINUX)
 @Timeout(300)
@@ -73,7 +77,8 @@ public class GtkUndecoratedStageBoundsTest {
     @Timeout(GtkGlassChildJvm.BEFORE_ALL_SECONDS)
     static void runScenario() {
         GtkGlassChildJvm.requireDisplay();
-        run = GtkGlassChildJvm.run(GtkUndecoratedStageBoundsTest.class, "stageScenario", List.of());
+        run = GtkGlassChildJvm.run(GtkUndecoratedStageBoundsTest.class, "stageScenario",
+                List.of("-Dglass.gtk.uiScale=1.0"));
     }
 
     /** The stage reports the rectangle it was shown at, the whole screen, and its scene at the stage's origin. */
