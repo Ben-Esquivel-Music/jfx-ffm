@@ -58,6 +58,8 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.Consumer;
 import java.util.function.Supplier;
 import static java.lang.foreign.ValueLayout.ADDRESS;
@@ -1026,10 +1028,20 @@ public final class WinGlassNativeShim {
     /**
      * Installs the {@code GwinPrefsCallbacks} table, which is idempotent and which
      * {@code WinApplication}'s static initializer has already done by the time any test that touches
-     * the peer runs.
+     * the peer runs. Reading {@code WinApplication.APPLICATION_ARENA} runs that initializer if nothing
+     * has yet, so the stub lands where production puts it.
      */
     public static void installPreferencesCallback() {
-        WinGlassNative.installPreferencesCallback();
+        WinGlassNative.installPreferencesCallback(WinApplication.APPLICATION_ARENA);
+    }
+
+    /**
+     * Whether {@code WinApplication}'s application arena, which holds the preferences upcall stub, is
+     * still open. {@code WinApplication.runLoop} closes it on the toolkit thread once the pump has
+     * returned and the table is cleared.
+     */
+    public static boolean applicationArenaAlive() {
+        return WinApplication.APPLICATION_ARENA.scope().isAlive();
     }
 
     /** Whether the table has been installed in this JVM. */
@@ -4460,5 +4472,670 @@ public final class WinGlassNativeShim {
             return new String(pointer.reinterpret(length * 2L).toArray(JAVA_CHAR));
         }
 
+    }
+
+    /*
+     * The toolkit window, its posts and sends, the preference sinks and the IME composition path: the seventeen
+     * shim-only hooks of the last section of glass_win_api.h, the two scheduling exports again for their raw
+     * statuses (the facade discards gwin_invoke_and_wait's and turns gwin_invoke_later's into a boolean), and the
+     * queue query those hooks leave to the test.
+     */
+
+    /** The seventeen hooks of the last section of {@code glass_win_api.h}, in its declaration order. */
+    public static final List<String> TOOLKIT_HOOK_NAMES = List.of("gwin_test_observe", "gwin_test_counter",
+            "gwin_test_publication", "gwin_test_event_log", "gwin_test_park_arm", "gwin_test_park_wait",
+            "gwin_test_park_release", "gwin_test_send_action_notify", "gwin_test_peek_private_messages",
+            "gwin_test_decoy_start", "gwin_test_decoy_hunt", "gwin_test_decoy_messages", "gwin_test_decoy_stop",
+            "gwin_test_prefs_capture", "gwin_test_prefs_invoke", "gwin_test_prefs_delegate_calls",
+            "gwin_test_ime_composition");
+
+    /** {@code gwin_test_counter} indices, {@code enum GwinTestCounter}. */
+    public static final int COUNTER_POST = 0;
+    public static final int COUNTER_NOTIFY = 1;
+    public static final int COUNTER_SEND = 2;
+    public static final int COUNTER_STALE = 3;
+    public static final int COUNTER_ACTION_ALLOC = 4;
+    public static final int COUNTER_ACTION_FREE = 5;
+    public static final int COUNTER_PREFS_POST = 6;
+    public static final int COUNTER_PREFS_REFUSED = 7;
+    public static final int COUNTER_BSTR_ALLOC = 8;
+    public static final int COUNTER_BSTR_FREE = 9;
+
+    /** {@code gwin_test_event_log} codes, {@code enum GwinTestEvent}. */
+    public static final int EVENT_REMOVE_AUTO_HIDE = 1;
+    public static final int EVENT_REMOVE_NETWORK = 2;
+    public static final int EVENT_RELEASE_UI_SETTINGS = 3;
+    public static final int EVENT_RELEASE_NETWORK_STATICS = 4;
+    public static final int EVENT_RELEASE_NETWORK_FACTORY = 5;
+    public static final int EVENT_RO_UNINITIALIZE = 6;
+
+    /** {@code enum GwinTestDelegate}: which of {@code PlatformSupport}'s two delegates. */
+    public static final int DELEGATE_AUTO_HIDE = 0;
+    public static final int DELEGATE_NETWORK = 1;
+
+    /** {@code WM_USER}, the first message number private to the toolkit window's class. */
+    public static final int WM_USER = 0x0400;
+
+    /** {@code WM_DO_ACTION}: what {@code GlassApplication::ExecAction} sends. */
+    public static final int WM_DO_ACTION = WM_USER + 1;
+
+    /** {@code WM_DO_ACTION_LATER}: what {@code gwin_invoke_later} posts; its {@code WPARAM} is the heap action. */
+    public static final int WM_DO_ACTION_LATER = WM_USER + 2;
+
+    /** {@code QS_SENDMESSAGE} of {@code winuser.h}. */
+    public static final int QS_SENDMESSAGE = 0x0040;
+
+    /** One private message a peek or a decoy window saw. */
+    public record PrivateMessage(long hwnd, int message, long wparam) {
+    }
+
+    /** How many private messages were seen in all, and the first of them, as many as the buffer held. */
+    public record MessageLog(int total, List<PrivateMessage> messages) {
+    }
+
+    /** What {@code gwin_test_decoy_hunt} answered (1 on a match, 0 at the cap) and its two counts. */
+    public record DecoyHunt(int result, long created, long inTargetSlot) {
+    }
+
+    /** One delegate invocation that {@code gwin_test_prefs_delegate_calls} recorded. */
+    public record DelegateCall(int which, int threadId, boolean onToolkitThread, int aptType, int aptQualifier) {
+    }
+
+    /** How many delegate invocations were recorded in all, and the first of them. */
+    public record DelegateLog(int total, List<DelegateCall> calls) {
+    }
+
+    /**
+     * One {@code notify_input_method} upcall during {@link #imeComposition}. The arrays are written as
+     * {@link Arrays#toString}, and as {@code "null"} when the C passed a {@code NULL} pointer.
+     */
+    public record ImeEvent(long viewId, String text, int textLength, String clauseBoundary, int clauseCount,
+                           String attrBoundary, String attrValue, int attrCount, int committedTextLength,
+                           int caretPos, int visiblePos) {
+    }
+
+    /** What {@code gwin_test_ime_composition} returned, its four counts ({@code out4}) and the upcalls it caused. */
+    public record ImeComposition(int returned, List<Integer> counts, List<ImeEvent> events) {
+    }
+
+    /** One {@code preferences_changed} upcall into {@link #installRecordingPreferencesTable}'s table. */
+    public record PreferencesCall(long sequence, Thread thread, int nativeThreadId, int types) {
+    }
+
+    /**
+     * The hooks of {@link #TOOLKIT_HOOK_NAMES} this {@code glass.dll} does not export, in that order: none for a
+     * build that has them, all seventeen for one built before they existed. Loads the library. A test that calls
+     * none of them runs on either build; calling a missing one throws {@link UnsatisfiedLinkError}.
+     */
+    public static List<String> missingToolkitHooks() {
+        return ToolkitHooks.MISSING;
+    }
+
+    /** {@code gwin_test_observe(on)}: {@code true} zeroes every counter and log and starts recording. */
+    public static void observe(boolean on) {
+        try {
+            int status = (int) ToolkitHooks.require(ToolkitHooks.OBSERVE, "gwin_test_observe").invokeExact(on ? 1 : 0);
+            requireHookOk(status, "gwin_test_observe");
+        } catch (Throwable t) {
+            throw hookFailure("gwin_test_observe", t);
+        }
+    }
+
+    /** {@code gwin_test_counter(which)}; -1 for an index the library does not know. */
+    public static long counter(int which) {
+        try {
+            return (long) ToolkitHooks.require(ToolkitHooks.COUNTER, "gwin_test_counter").invokeExact(which);
+        } catch (Throwable t) {
+            throw hookFailure("gwin_test_counter", t);
+        }
+    }
+
+    /** {@code gwin_test_publication}: the published toolkit HWND and thread id, 0 for none. */
+    public static long[] publication() {
+        try (Arena arena = Arena.ofConfined()) {
+            MemorySegment out = arena.allocate(JAVA_LONG, 2);
+            int status = (int) ToolkitHooks.require(ToolkitHooks.PUBLICATION, "gwin_test_publication")
+                    .invokeExact(out);
+            requireHookOk(status, "gwin_test_publication");
+            return out.toArray(JAVA_LONG);
+        } catch (Throwable t) {
+            throw hookFailure("gwin_test_publication", t);
+        }
+    }
+
+    /** {@code gwin_test_event_log}: the codes recorded since {@code observe(true)}, in order (64 are kept). */
+    public static List<Integer> eventLog() {
+        try (Arena arena = Arena.ofConfined()) {
+            int capacity = 64;
+            MemorySegment out = arena.allocate(JAVA_INT, capacity);
+            int total = (int) ToolkitHooks.require(ToolkitHooks.EVENT_LOG, "gwin_test_event_log")
+                    .invokeExact(out, capacity);
+            requireCount(total, "gwin_test_event_log");
+            List<Integer> codes = new ArrayList<>();
+            for (int i = 0; i < Math.min(total, capacity); i++) {
+                codes.add(out.getAtIndex(JAVA_INT, i));
+            }
+            return List.copyOf(codes);
+        } catch (Throwable t) {
+            throw hookFailure("gwin_test_event_log", t);
+        }
+    }
+
+    /**
+     * {@code gwin_test_park_arm(on)}: arms (or disarms, releasing a parked thread) the one-shot gate for the
+     * calling thread. Never arm on the toolkit thread.
+     */
+    public static int parkArm(boolean on) {
+        try {
+            return (int) ToolkitHooks.require(ToolkitHooks.PARK_ARM, "gwin_test_park_arm").invokeExact(on ? 1 : 0);
+        } catch (Throwable t) {
+            throw hookFailure("gwin_test_park_arm", t);
+        }
+    }
+
+    /** {@code gwin_test_park_wait}: whether a thread is parked now or parks within {@code timeoutMillis}. */
+    public static boolean parkWait(int timeoutMillis) {
+        try {
+            return (int) ToolkitHooks.require(ToolkitHooks.PARK_WAIT, "gwin_test_park_wait")
+                    .invokeExact(timeoutMillis) == 1;
+        } catch (Throwable t) {
+            throw hookFailure("gwin_test_park_wait", t);
+        }
+    }
+
+    /** {@code gwin_test_park_release}: {@code GWIN_OK}, or {@code GWIN_ERR_INVALID_ARG} when none is parked. */
+    public static int parkRelease() {
+        try {
+            return (int) ToolkitHooks.require(ToolkitHooks.PARK_RELEASE, "gwin_test_park_release").invokeExact();
+        } catch (Throwable t) {
+            throw hookFailure("gwin_test_park_release", t);
+        }
+    }
+
+    /**
+     * {@code gwin_test_send_action_notify(wparam)}: sends {@code WM_USER + 3} to the published toolkit window and
+     * returns once its procedure has returned. Only while the toolkit window lives.
+     */
+    public static int sendActionNotify(long wparam) {
+        try {
+            return (int) ToolkitHooks.require(ToolkitHooks.SEND_ACTION_NOTIFY, "gwin_test_send_action_notify")
+                    .invokeExact(wparam);
+        } catch (Throwable t) {
+            throw hookFailure("gwin_test_send_action_notify", t);
+        }
+    }
+
+    /**
+     * {@code gwin_test_peek_private_messages}: removes and reports every private message posted to the calling
+     * thread's queue, with no window filter. The actions of {@code WM_DO_ACTION_LATER} messages are not run.
+     */
+    public static MessageLog peekPrivateMessages() {
+        try (Arena arena = Arena.ofConfined()) {
+            int capacity = 256;
+            MemorySegment out = arena.allocate(JAVA_LONG, capacity * 3L);
+            int total = (int) ToolkitHooks.require(ToolkitHooks.PEEK, "gwin_test_peek_private_messages")
+                    .invokeExact(out, capacity);
+            requireCount(total, "gwin_test_peek_private_messages");
+            return messageLog(out, total, capacity);
+        } catch (Throwable t) {
+            throw hookFailure("gwin_test_peek_private_messages", t);
+        }
+    }
+
+    /** {@code gwin_test_decoy_start}: {@code GWIN_OK}, or a positive Win32 error. */
+    public static int decoyStart() {
+        try {
+            return (int) ToolkitHooks.require(ToolkitHooks.DECOY_START, "gwin_test_decoy_start").invokeExact();
+        } catch (Throwable t) {
+            throw hookFailure("gwin_test_decoy_start", t);
+        }
+    }
+
+    /** {@code gwin_test_decoy_hunt(target, maxCreations, out2)}; blocks while the decoy thread hunts. */
+    public static DecoyHunt decoyHunt(long target, long maxCreations) {
+        try (Arena arena = Arena.ofConfined()) {
+            MemorySegment out = arena.allocate(JAVA_LONG, 2);
+            int result = (int) ToolkitHooks.require(ToolkitHooks.DECOY_HUNT, "gwin_test_decoy_hunt")
+                    .invokeExact(MemorySegment.ofAddress(target), maxCreations, out);
+            return new DecoyHunt(result, out.getAtIndex(JAVA_LONG, 0), out.getAtIndex(JAVA_LONG, 1));
+        } catch (Throwable t) {
+            throw hookFailure("gwin_test_decoy_hunt", t);
+        }
+    }
+
+    /** {@code gwin_test_decoy_messages}: every private message the decoy windows received since the start. */
+    public static MessageLog decoyMessages() {
+        try (Arena arena = Arena.ofConfined()) {
+            int capacity = 256;
+            MemorySegment out = arena.allocate(JAVA_LONG, capacity * 3L);
+            int total = (int) ToolkitHooks.require(ToolkitHooks.DECOY_MESSAGES, "gwin_test_decoy_messages")
+                    .invokeExact(out, capacity);
+            requireCount(total, "gwin_test_decoy_messages");
+            return messageLog(out, total, capacity);
+        } catch (Throwable t) {
+            throw hookFailure("gwin_test_decoy_messages", t);
+        }
+    }
+
+    /** {@code gwin_test_decoy_stop}: destroys the decoys and joins their thread. */
+    public static int decoyStop() {
+        try {
+            return (int) ToolkitHooks.require(ToolkitHooks.DECOY_STOP, "gwin_test_decoy_stop").invokeExact();
+        } catch (Throwable t) {
+            throw hookFailure("gwin_test_decoy_stop", t);
+        }
+    }
+
+    /**
+     * {@code gwin_test_prefs_capture(on)}: {@code true} keeps one extra reference to each delegate
+     * {@code PlatformSupport} registers from now on, as an event source does. Before {@link #toolkitCreate}.
+     */
+    public static void prefsCapture(boolean on) {
+        try {
+            int status = (int) ToolkitHooks.require(ToolkitHooks.PREFS_CAPTURE, "gwin_test_prefs_capture")
+                    .invokeExact(on ? 1 : 0);
+            requireHookOk(status, "gwin_test_prefs_capture");
+        } catch (Throwable t) {
+            throw hookFailure("gwin_test_prefs_capture", t);
+        }
+    }
+
+    /**
+     * {@code gwin_test_prefs_invoke(which)}: invokes the kept delegate on the calling thread and returns its
+     * {@code HRESULT}; {@code GWIN_ERR_INVALID_ARG} when none was kept.
+     */
+    public static int prefsInvoke(int which) {
+        try {
+            return (int) ToolkitHooks.require(ToolkitHooks.PREFS_INVOKE, "gwin_test_prefs_invoke").invokeExact(which);
+        } catch (Throwable t) {
+            throw hookFailure("gwin_test_prefs_invoke", t);
+        }
+    }
+
+    /** {@code gwin_test_prefs_delegate_calls}: every delegate invocation recorded since {@code observe(true)}. */
+    public static DelegateLog prefsDelegateCalls() {
+        try (Arena arena = Arena.ofConfined()) {
+            int capacity = 256;
+            MemorySegment out = arena.allocate(JAVA_INT, capacity * 5L);
+            int total = (int) ToolkitHooks.require(ToolkitHooks.PREFS_DELEGATE_CALLS,
+                    "gwin_test_prefs_delegate_calls").invokeExact(out, capacity);
+            requireCount(total, "gwin_test_prefs_delegate_calls");
+            List<DelegateCall> calls = new ArrayList<>();
+            for (int i = 0; i < Math.min(total, capacity); i++) {
+                long base = i * 5L;
+                calls.add(new DelegateCall(out.getAtIndex(JAVA_INT, base), out.getAtIndex(JAVA_INT, base + 1),
+                        out.getAtIndex(JAVA_INT, base + 2) != 0, out.getAtIndex(JAVA_INT, base + 3),
+                        out.getAtIndex(JAVA_INT, base + 4)));
+            }
+            return new DelegateLog(total, List.copyOf(calls));
+        } catch (Throwable t) {
+            throw hookFailure("gwin_test_prefs_delegate_calls", t);
+        }
+    }
+
+    /**
+     * {@code gwin_test_ime_composition(hwnd, viewId, lparam, faultAt, out4)} with a view table whose
+     * {@code notify_input_method} slot records into {@link ImeComposition#events()} (the other slots are the
+     * recording table's), restored to the production table in a {@code finally}. {@code hwnd} 0 is the hook's own
+     * window on the calling thread.
+     */
+    public static synchronized ImeComposition imeComposition(long hwnd, long viewId, long lparam, int faultAt) {
+        ToolkitHooks.IME_EVENTS.clear();
+        try (Arena arena = Arena.ofConfined()) {
+            MemorySegment viewTable = arena.allocate(WinGlassNative.GWIN_VIEW_CALLBACKS_LAYOUT);
+            MemorySegment[] stubs = Recording.VIEW_STUBS.clone();
+            stubs[WinGlassNative.VIEW_SLOT_NAMES.indexOf("notify_input_method")] = ToolkitHooks.IME_STUB;
+            WinGlassNative.fillCallbackTable(viewTable, WinGlassNative.GWIN_VIEW_CALLBACKS_LAYOUT,
+                    WinGlassNative.VIEW_SLOT_NAMES, stubs);
+            requireHookOk((int) Recording.SET_VIEW_CALLBACKS.invokeExact(viewTable), "gwin_view_set_callbacks");
+            MemorySegment out = arena.allocate(JAVA_INT, 4);
+            out.fill((byte) 0xFF);
+            int returned = (int) ToolkitHooks.require(ToolkitHooks.IME_COMPOSITION, "gwin_test_ime_composition")
+                    .invokeExact(MemorySegment.ofAddress(hwnd), viewId, lparam, faultAt, out);
+            List<Integer> counts = new ArrayList<>();
+            for (int value : out.toArray(JAVA_INT)) {
+                counts.add(value);
+            }
+            return new ImeComposition(returned, List.copyOf(counts), List.copyOf(ToolkitHooks.IME_EVENTS));
+        } catch (Throwable t) {
+            throw hookFailure("gwin_test_ime_composition", t);
+        } finally {
+            WinGlassNative.reinstallViewCallbacks();
+        }
+    }
+
+    /**
+     * Creates the Glass toolkit window on the calling thread, which becomes the toolkit thread: installs the
+     * application callback table (idempotent) and calls {@code gwin_app_create}. Once, and only in a JVM that
+     * exists for this one toolkit: {@code WinApplication} never creates a second one either.
+     *
+     * @return the toolkit HWND, or 0 when no window resulted
+     */
+    public static long toolkitCreate() {
+        WinGlassNative.installApplicationCallback();
+        return WinGlassNative.appCreate();
+    }
+
+    /**
+     * {@code gwin_run_loop} on the toolkit thread: runs {@code launchable} (none for {@code null}) and pumps until
+     * the toolkit window is gone.
+     */
+    public static void toolkitRunLoop(Runnable launchable) {
+        WinGlassNative.runLoop(launchable);
+    }
+
+    /** {@code gwin_terminate_loop}: {@code DestroyWindow} on the toolkit window. Toolkit thread only. */
+    public static void toolkitTerminateLoop() {
+        WinGlassNative.terminateLoop();
+    }
+
+    /**
+     * {@code gwin_invoke_later} for {@code runnable}, registered as the facade registers it, returning the status
+     * the facade turns into a boolean. A refused runnable's id stays in the facade's registry, as it does for a
+     * post still queued at shutdown.
+     */
+    public static int toolkitInvokeLater(Runnable runnable) {
+        long id = WinGlassNative.registerRunnable(runnable);
+        try {
+            return (int) ToolkitDriver.INVOKE_LATER.invokeExact(id);
+        } catch (Throwable t) {
+            throw hookFailure("gwin_invoke_later", t);
+        }
+    }
+
+    /**
+     * {@code gwin_invoke_and_wait} for {@code runnable}, returning the status the facade discards. Called on the
+     * toolkit thread it is the inline path {@code Application.invokeAndWait} short-circuits in Java.
+     */
+    public static int toolkitInvokeAndWait(Runnable runnable) {
+        long id = WinGlassNative.registerRunnable(runnable);
+        try {
+            return (int) ToolkitDriver.INVOKE_AND_WAIT.invokeExact(id);
+        } catch (Throwable t) {
+            throw hookFailure("gwin_invoke_and_wait", t);
+        }
+    }
+
+    /**
+     * Whether a message sent by another thread waits in the calling thread's queue: the current-status (high)
+     * word of {@code user32!GetQueueStatus(QS_SENDMESSAGE)}. Dispatches nothing.
+     */
+    public static boolean sentMessagePending() {
+        try {
+            int status = (int) ToolkitDriver.GET_QUEUE_STATUS.invokeExact(QS_SENDMESSAGE);
+            return ((status >>> 16) & QS_SENDMESSAGE) != 0;
+        } catch (Throwable t) {
+            throw hookFailure("GetQueueStatus", t);
+        }
+    }
+
+    /**
+     * {@code user32!PostThreadMessageW(threadId, WM_NULL, 0, 0)}: wakes a thread blocked in {@code GetMessage}, which
+     * goes on waiting for a posted message after it has handled a sent one. Whether it was posted.
+     */
+    public static boolean wakeThread(int threadId) {
+        try {
+            return (int) ToolkitDriver.POST_THREAD_MESSAGE.invokeExact(threadId, 0, 0L, 0L) != 0;
+        } catch (Throwable t) {
+            throw hookFailure("PostThreadMessageW", t);
+        }
+    }
+
+    /** {@code kernel32!GetCurrentThreadId}, for comparison with {@link #publication()}'s thread id. */
+    public static int nativeThreadId() {
+        try {
+            return (int) ToolkitDriver.GET_CURRENT_THREAD_ID.invokeExact();
+        } catch (Throwable t) {
+            throw hookFailure("GetCurrentThreadId", t);
+        }
+    }
+
+    /**
+     * Installs a {@code GwinPrefsCallbacks} table whose {@code preferences_changed} records every call - its
+     * thread, the native thread id, the types and a {@link #nextSequence()} number - into
+     * {@link #recordedPreferencesCalls()} and answers 0. Before {@link #toolkitCreate}, in place of the production
+     * table; nothing puts that one back.
+     */
+    public static synchronized void installRecordingPreferencesTable() {
+        try (Arena arena = Arena.ofConfined()) {
+            MemorySegment table = arena.allocate(WinGlassNative.GWIN_PREFS_CALLBACKS_LAYOUT);
+            table.set(ADDRESS, WinGlassNative.GWIN_PREFS_CALLBACKS_LAYOUT.byteOffset(
+                    PathElement.groupElement("preferences_changed")), ToolkitDriver.PREFS_STUB);
+            int status = (int) ToolkitDriver.PREFS_SET_CALLBACKS.invokeExact(table, MemorySegment.NULL);
+            requireHookOk(status, "gwin_prefs_set_callbacks");
+        } catch (Throwable t) {
+            throw hookFailure("gwin_prefs_set_callbacks", t);
+        }
+    }
+
+    /** The calls the table of {@link #installRecordingPreferencesTable} recorded, in order. */
+    public static List<PreferencesCall> recordedPreferencesCalls() {
+        return List.copyOf(ToolkitDriver.PREFERENCES_CALLS);
+    }
+
+    /** The next number of the sequence {@link PreferencesCall#sequence()} draws from. */
+    public static long nextSequence() {
+        return ToolkitDriver.SEQUENCE.getAndIncrement();
+    }
+
+    private static MessageLog messageLog(MemorySegment out, int total, int capacity) {
+        List<PrivateMessage> messages = new ArrayList<>();
+        for (int i = 0; i < Math.min(total, capacity); i++) {
+            long base = i * 3L;
+            messages.add(new PrivateMessage(out.getAtIndex(JAVA_LONG, base), (int) out.getAtIndex(JAVA_LONG, base + 1),
+                    out.getAtIndex(JAVA_LONG, base + 2)));
+        }
+        return new MessageLog(total, List.copyOf(messages));
+    }
+
+    private static void requireHookOk(int status, String function) {
+        if (status != WinGlassNative.GWIN_OK) {
+            throw new AssertionError(function + " answered " + status);
+        }
+    }
+
+    private static void requireCount(int total, String function) {
+        if (total < 0) {
+            throw new AssertionError(function + " answered " + total);
+        }
+    }
+
+    /** An {@link Error} as it is, anything else as the {@link AssertionError} of a call that could not be made. */
+    private static Error hookFailure(String function, Throwable t) {
+        if (t instanceof Error e) {
+            return e;
+        }
+        return new AssertionError(function + " could not be called", t);
+    }
+
+    /**
+     * The seventeen hooks, each bound on its own: a symbol the library does not export leaves its handle
+     * {@code null} and its name in {@link #MISSING}, so this holder initializes on a build without them.
+     */
+    private static final class ToolkitHooks {
+
+        static {
+            WinGlassNative.ensureLoaded();
+        }
+
+        private static final Linker LINKER = Linker.nativeLinker();
+
+        /** Declared before the handles, which add to it as they are bound. */
+        private static final List<String> MISSING_NAMES = new ArrayList<>();
+
+        static final MethodHandle OBSERVE = bind("gwin_test_observe", FunctionDescriptor.of(JAVA_INT, JAVA_INT));
+        static final MethodHandle COUNTER = bind("gwin_test_counter", FunctionDescriptor.of(JAVA_LONG, JAVA_INT));
+        static final MethodHandle PUBLICATION = bind("gwin_test_publication",
+                FunctionDescriptor.of(JAVA_INT, ADDRESS));
+        static final MethodHandle EVENT_LOG = bind("gwin_test_event_log",
+                FunctionDescriptor.of(JAVA_INT, ADDRESS, JAVA_INT));
+        static final MethodHandle PARK_ARM = bind("gwin_test_park_arm", FunctionDescriptor.of(JAVA_INT, JAVA_INT));
+        static final MethodHandle PARK_WAIT = bind("gwin_test_park_wait", FunctionDescriptor.of(JAVA_INT, JAVA_INT));
+        static final MethodHandle PARK_RELEASE = bind("gwin_test_park_release", FunctionDescriptor.of(JAVA_INT));
+        static final MethodHandle SEND_ACTION_NOTIFY = bind("gwin_test_send_action_notify",
+                FunctionDescriptor.of(JAVA_INT, JAVA_LONG));
+        static final MethodHandle PEEK = bind("gwin_test_peek_private_messages",
+                FunctionDescriptor.of(JAVA_INT, ADDRESS, JAVA_INT));
+        static final MethodHandle DECOY_START = bind("gwin_test_decoy_start", FunctionDescriptor.of(JAVA_INT));
+        static final MethodHandle DECOY_HUNT = bind("gwin_test_decoy_hunt",
+                FunctionDescriptor.of(JAVA_INT, ADDRESS, JAVA_LONG, ADDRESS));
+        static final MethodHandle DECOY_MESSAGES = bind("gwin_test_decoy_messages",
+                FunctionDescriptor.of(JAVA_INT, ADDRESS, JAVA_INT));
+        static final MethodHandle DECOY_STOP = bind("gwin_test_decoy_stop", FunctionDescriptor.of(JAVA_INT));
+        static final MethodHandle PREFS_CAPTURE = bind("gwin_test_prefs_capture",
+                FunctionDescriptor.of(JAVA_INT, JAVA_INT));
+        static final MethodHandle PREFS_INVOKE = bind("gwin_test_prefs_invoke",
+                FunctionDescriptor.of(JAVA_INT, JAVA_INT));
+        static final MethodHandle PREFS_DELEGATE_CALLS = bind("gwin_test_prefs_delegate_calls",
+                FunctionDescriptor.of(JAVA_INT, ADDRESS, JAVA_INT));
+        static final MethodHandle IME_COMPOSITION = bind("gwin_test_ime_composition",
+                FunctionDescriptor.of(JAVA_INT, ADDRESS, JAVA_LONG, JAVA_LONG, JAVA_INT, ADDRESS));
+
+        static final List<String> MISSING = List.copyOf(MISSING_NAMES);
+
+        static final List<ImeEvent> IME_EVENTS = new CopyOnWriteArrayList<>();
+
+        static final MemorySegment IME_STUB = imeStub();
+
+        private ToolkitHooks() {
+        }
+
+        static MethodHandle require(MethodHandle handle, String name) {
+            if (handle == null) {
+                throw new UnsatisfiedLinkError("missing native symbol: " + name + " in glass, a build without the"
+                        + " shim-only test hooks");
+            }
+            return handle;
+        }
+
+        @SuppressWarnings("restricted")
+        private static MethodHandle bind(String name, FunctionDescriptor fd) {
+            MemorySegment symbol = SymbolLookup.loaderLookup().find(name).orElse(null);
+            if (symbol == null) {
+                MISSING_NAMES.add(name);
+                return null;
+            }
+            return LINKER.downcallHandle(symbol, fd);
+        }
+
+        @SuppressWarnings("restricted")
+        private static MemorySegment imeStub() {
+            try {
+                MethodHandle target = MethodHandles.lookup().findStatic(ToolkitHooks.class, "recordInputMethod",
+                        WinGlassNative.NOTIFY_INPUT_METHOD_FD.toMethodType());
+                return LINKER.upcallStub(target, WinGlassNative.NOTIFY_INPUT_METHOD_FD, Arena.global());
+            } catch (ReflectiveOperationException e) {
+                throw new AssertionError("no recording target recordInputMethod", e);
+            }
+        }
+
+        static void recordInputMethod(long viewId, MemorySegment text, int textLen, MemorySegment clauseBoundary,
+                                      int clauseCount, MemorySegment attrBoundary, MemorySegment attrValue,
+                                      int attrCount, int committedTextLength, int caretPos, int visiblePos) {
+            try {
+                IME_EVENTS.add(new ImeEvent(viewId, chars(text, textLen), textLen,
+                        ints(clauseBoundary, clauseCount + 1), clauseCount, ints(attrBoundary, attrCount + 1),
+                        bytes(attrValue, attrCount), attrCount, committedTextLength, caretPos, visiblePos));
+            } catch (Throwable t) {
+                IME_EVENTS.add(new ImeEvent(viewId, "recording failed: " + t, -1, "", -1, "", "", -1, -1, -1, -1));
+            }
+        }
+
+        @SuppressWarnings("restricted")
+        private static String chars(MemorySegment pointer, int length) {
+            if (pointer.equals(MemorySegment.NULL)) {
+                return "null";
+            }
+            return length <= 0 ? "" : new String(pointer.reinterpret(length * 2L).toArray(JAVA_CHAR));
+        }
+
+        @SuppressWarnings("restricted")
+        private static String ints(MemorySegment pointer, int length) {
+            if (pointer.equals(MemorySegment.NULL)) {
+                return "null";
+            }
+            return Arrays.toString(pointer.reinterpret(length * 4L).toArray(JAVA_INT));
+        }
+
+        @SuppressWarnings("restricted")
+        private static String bytes(MemorySegment pointer, int length) {
+            if (pointer.equals(MemorySegment.NULL)) {
+                return "null";
+            }
+            return length <= 0 ? "[]" : Arrays.toString(pointer.reinterpret(length).toArray(JAVA_BYTE));
+        }
+    }
+
+    /**
+     * The production exports a toolkit scenario needs with their statuses, the preferences installer for the
+     * recording table, and the three OS calls. Binds no hook, so a test that uses only this holder runs on a
+     * {@code glass.dll} without them.
+     */
+    private static final class ToolkitDriver {
+
+        static {
+            WinGlassNative.ensureLoaded();
+        }
+
+        private static final Linker LINKER = Linker.nativeLinker();
+
+        static final MethodHandle INVOKE_LATER = bindGlass("gwin_invoke_later",
+                FunctionDescriptor.of(JAVA_INT, JAVA_LONG));
+        static final MethodHandle INVOKE_AND_WAIT = bindGlass("gwin_invoke_and_wait",
+                FunctionDescriptor.of(JAVA_INT, JAVA_LONG));
+        static final MethodHandle PREFS_SET_CALLBACKS = bindGlass("gwin_prefs_set_callbacks",
+                FunctionDescriptor.of(JAVA_INT, ADDRESS, ADDRESS));
+        static final MethodHandle GET_QUEUE_STATUS = bindSystem("user32.dll", "GetQueueStatus",
+                FunctionDescriptor.of(JAVA_INT, JAVA_INT));
+        static final MethodHandle GET_CURRENT_THREAD_ID = bindSystem("kernel32.dll", "GetCurrentThreadId",
+                FunctionDescriptor.of(JAVA_INT));
+        static final MethodHandle POST_THREAD_MESSAGE = bindSystem("user32.dll", "PostThreadMessageW",
+                FunctionDescriptor.of(JAVA_INT, JAVA_INT, JAVA_INT, JAVA_LONG, JAVA_LONG));
+
+        static final AtomicLong SEQUENCE = new AtomicLong(1L);
+        static final List<PreferencesCall> PREFERENCES_CALLS = new CopyOnWriteArrayList<>();
+
+        /** {@code int32_t (*preferences_changed)(void* user, int32_t types)}. */
+        private static final FunctionDescriptor PREFS_CHANGED_FD = FunctionDescriptor.of(JAVA_INT, ADDRESS, JAVA_INT);
+
+        static final MemorySegment PREFS_STUB = prefsStub();
+
+        private ToolkitDriver() {
+        }
+
+        static int recordPreferencesChanged(MemorySegment user, int types) {
+            try {
+                PREFERENCES_CALLS.add(new PreferencesCall(SEQUENCE.getAndIncrement(), Thread.currentThread(),
+                        (int) GET_CURRENT_THREAD_ID.invokeExact(), types));
+            } catch (Throwable t) {
+                PREFERENCES_CALLS.add(new PreferencesCall(-1, Thread.currentThread(), 0, types));
+            }
+            return 0;
+        }
+
+        @SuppressWarnings("restricted")
+        private static MethodHandle bindGlass(String name, FunctionDescriptor fd) {
+            MemorySegment symbol = SymbolLookup.loaderLookup().find(name).orElseThrow(
+                    () -> new UnsatisfiedLinkError("missing native symbol: " + name + " in glass"));
+            return LINKER.downcallHandle(symbol, fd);
+        }
+
+        @SuppressWarnings("restricted")
+        private static MethodHandle bindSystem(String library, String name, FunctionDescriptor fd) {
+            MemorySegment symbol = SymbolLookup.libraryLookup(library, Arena.global()).find(name).orElseThrow(
+                    () -> new UnsatisfiedLinkError("missing native symbol: " + name + " in " + library));
+            return LINKER.downcallHandle(symbol, fd);
+        }
+
+        @SuppressWarnings("restricted")
+        private static MemorySegment prefsStub() {
+            try {
+                MethodHandle target = MethodHandles.lookup().findStatic(ToolkitDriver.class,
+                        "recordPreferencesChanged", PREFS_CHANGED_FD.toMethodType());
+                return LINKER.upcallStub(target, PREFS_CHANGED_FD, Arena.global());
+            } catch (ReflectiveOperationException e) {
+                throw new AssertionError("no recording target recordPreferencesChanged", e);
+            }
+        }
     }
 }

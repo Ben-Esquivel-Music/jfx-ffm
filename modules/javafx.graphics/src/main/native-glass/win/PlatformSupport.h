@@ -61,7 +61,8 @@ public:
     /**
      * Hand the specified preference types to GwinPrefsCallbacks.preferences_changed (glass_win_api.h), which
      * collects them, compares them and notifies the JavaFX application in Java. Returns true when it reports
-     * a change; false when it does not, or when no callback table is installed.
+     * a change; false when it does not, or when no callback table is installed. Toolkit thread only: it is
+     * called from GlassApplication::WindowProc, also for what the two WinRT sinks post there.
      */
     bool updatePreferences(PreferenceType) const;
 
@@ -81,9 +82,23 @@ public:
     void collectNetworkInfo(GwinNetworkInfo& out) const;
 
 private:
+    /*
+     * Every WinRT object this instance holds, and the two registrations with their tokens. The destructor
+     * unregisters and releases them all in its body, before uninitializeRoActivationSupport ends the
+     * apartment - as members they would only be released after it.
+     */
     Microsoft::WRL::ComPtr<ABI::Windows::UI::ViewManagement::IUISettings> settings;
-    ABI::Windows::Networking::Connectivity::INetworkInformationStatics* networkInformation;
+    Microsoft::WRL::ComPtr<ABI::Windows::UI::ViewManagement::IUISettings5> settings5;
+    Microsoft::WRL::ComPtr<IActivationFactory> networkFactory;
+    Microsoft::WRL::ComPtr<ABI::Windows::Networking::Connectivity::INetworkInformationStatics> networkInformation;
+    EventRegistrationToken autoHideToken;
+    EventRegistrationToken networkToken;
+    bool autoHideRegistered;
+    bool networkRegistered;
 
     // RoInitialize, then UISettings and NetworkInformation with their two event sinks.
     void InitializeWinRT();
+
+    // What the two sinks do on the OS's thread: post the types to the toolkit window (PlatformSupport.cpp).
+    static void PostPreferencesChanged(PreferenceType);
 };

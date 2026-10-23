@@ -89,15 +89,16 @@ import javafx.scene.paint.Color;
  * <p>
  * <b>Threading.</b> No lock, deliberately - {@code PlatformSupport} had none and a lock held across
  * {@code notifyPreferencesChanged} (application listener code) would be a deadlock the C never had.
- * The four {@code WndProc} arms reach {@link #update} on the Glass toolkit thread. The two WinRT sinks
- * need not: they are WRL {@code Callback<>} delegates and are not agile - {@code Callback<>} builds
- * them with {@code RuntimeClassFlags<Delegate>}, {@code Delegate} is {@code ClassicCom}, and by default
- * only {@code WinRt} classes aggregate the free-threaded marshaler ({@code FtmBase}) - so each event
- * source decides whether to marshal its sink into the single-threaded apartment the toolkit thread
- * created or to call it on a WinRT thread of its own. A second thread is therefore possible, not
- * excluded: {@link #collected} is {@code volatile} and {@link #update} checks no thread. Two concurrent
- * updates can still both report a change, exactly as two concurrent {@code updatePreferences} calls
- * could.
+ * {@link #update} runs only on the Glass toolkit thread, which is the JavaFX application thread here:
+ * the four {@code WndProc} arms reach it there, and so does the arm for what the two WinRT sinks post.
+ * The sinks themselves may run on another thread - they are WRL {@code Callback<>} delegates and are
+ * not agile: {@code Callback<>} builds them with {@code RuntimeClassFlags<Delegate>}, {@code Delegate}
+ * is {@code ClassicCom}, and by default only {@code WinRt} classes aggregate the free-threaded
+ * marshaler ({@code FtmBase}) - but they only post to the toolkit window, so a sink's notification
+ * arrives here asynchronously, on the toolkit thread, and the {@code gwin_prefs_query_*} calls of
+ * {@link #collect} run there too, in the apartment the WinRT objects were activated in.
+ * {@link #collected} stays {@code volatile} because tests read it from their own thread through
+ * {@link #collected()}.
  * <p>
  * Line numbers into {@code Utils.cpp} refer to it at commit {@code 8492cb03b0}
  * ({@code git show 8492cb03b0:modules/javafx.graphics/src/main/native-glass/win/Utils.cpp}).
@@ -190,8 +191,9 @@ final class WinPreferences {
      * {@code return true}). The one arm with no Java counterpart is the C's
      * "{@code Collections.unmodifiableMap} threw", which cannot happen to a constructor call.
      * <p>
-     * Called on the Glass toolkit thread from {@code WndProc}, and from the two WinRT sinks, which may
-     * run on a WinRT thread - see the class documentation on why this tolerates that.
+     * In production this runs only on the Glass toolkit thread, from {@code GlassApplication::WindowProc}:
+     * the four existing arms and the arm for what the two WinRT sinks post (see the class documentation).
+     * Tests may call it directly through {@code WinGlassNativeShim}.
      *
      * @param types a bitmask of {@code GwinPreferenceType}
      * @return true if the preferences changed
