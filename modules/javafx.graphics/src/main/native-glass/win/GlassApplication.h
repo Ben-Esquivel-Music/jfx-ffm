@@ -26,6 +26,8 @@
 #ifndef _GLASS_APPLICATION_
 #define _GLASS_APPLICATION_
 
+#include <atomic>
+
 #include "BaseWnd.h"
 #include "PlatformSupport.h"
 
@@ -67,6 +69,11 @@ public:
 
 #define WM_DO_ACTION        (WM_USER+1)
 #define WM_DO_ACTION_LATER  (WM_USER+2)
+// A synchronous call from another thread, sent with SendNotifyMessage; WPARAM names a pending record that
+// the toolkit window procedure looks up and ignores when it does not find it (GlassApplication.cpp).
+#define WM_DO_ACTION_NOTIFY (WM_USER+3)
+// Posted by PlatformSupport's two WinRT sinks; WPARAM carries their PlatformSupport::PreferenceType bits.
+#define WM_PREFERENCES_CHANGED (WM_USER+4)
 
 class GlassApplication : protected BaseWnd {
 public:
@@ -75,9 +82,36 @@ public:
     GlassApplication();
     virtual ~GlassApplication();
 
-    static HWND GetToolkitHWND() { return  (NULL == pInstance) ? NULL : pInstance->GetHWND(); }
+    /*
+     * The PUBLISHED toolkit window and thread: stored in the WM_CREATE arm, cleared under the exclusive side
+     * of the publication lock in the WM_NCDESTROY arm. Any thread may load them; a loaded HWND can be stale
+     * by the time it is used, so only PostToToolkit and ExecAction, which use it inside the shared side,
+     * may message it from another thread.
+     */
+    static HWND GetToolkitHWND() { return sm_toolkitHwnd.load(); }
+    static DWORD GetMainThreadId() { return sm_toolkitThreadId.load(); }
+
+    /* The toolkit thread's own copy of the instance. Toolkit thread only. */
     static GlassApplication *GetInstance() { return pInstance; }
-    static void ExecAction(Action *action);
+
+    /*
+     * Runs action->Do() on the toolkit thread and returns once it has returned: true when it ran, false when
+     * no toolkit window was published, it was destroyed before the action started, or, from another thread,
+     * CreateEventW failed for the event the caller waits on, so nothing was queued. On the toolkit thread
+     * itself this is SendMessage(WM_DO_ACTION), inline and without a lock; from any other thread the action
+     * is queued with SendNotifyMessage(WM_DO_ACTION_NOTIFY) inside the shared side of the publication lock
+     * and waited for outside it, and the WM_NCDESTROY arm runs down what is still queued.
+     */
+    static bool ExecAction(Action *action);
+
+    /*
+     * The guarded post: inside the shared side of the publication lock, load the published HWND and, when
+     * it is not NULL, PostMessage to it. Returns whether the message was posted. The only way this library
+     * posts to the toolkit window; nothing relies on PostMessage failing for a dead handle. Any thread.
+     */
+    static bool PostToToolkit(UINT msg, WPARAM wParam, LPARAM lParam);
+
+    /* Posts WM_DO_ACTION_LATER through PostToToolkit; deletes the action when that refuses. */
     static void ExecActionLater(Action *action);
     /*
      * The registration behind gwin_clipboard_register_viewer (glass_win_api.h): remembers
@@ -96,11 +130,6 @@ public:
      */
     static PlatformSupport* GetPlatformSupport() {
         return pInstance ? &pInstance->m_platformSupport : NULL;
-    }
-
-    inline static DWORD GetMainThreadId()
-    {
-        return pInstance == NULL ? 0 : pInstance->m_mainThreadId;
     }
 
     /*
@@ -132,6 +161,15 @@ private:
     static bool sm_shouldLeaveNestedLoop;
 
     static ULONG s_accessibilityCount;
+
+    // The publication (see GetToolkitHWND). sm_publicationLock is held shared across one load and one
+    // PostMessage or SendNotifyMessage, never nested and never across a wait; exclusive only to clear.
+    static std::atomic<HWND> sm_toolkitHwnd;
+    static std::atomic<DWORD> sm_toolkitThreadId;
+    static SRWLOCK sm_publicationLock;
+
+    static bool ExecActionFromOtherThread(Action *action);
+    static void RunDownPendingActions();
 };
 
 

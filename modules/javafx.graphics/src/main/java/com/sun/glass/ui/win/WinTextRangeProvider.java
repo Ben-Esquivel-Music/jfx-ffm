@@ -119,10 +119,9 @@ class WinTextRangeProvider {
     }
 
     /*
-     * Release, not delete, and the registry entry stays until the library fires range_disposed. There is
-     * no guard on a zero peer, here or in the library: a range that failed to be created crashes at this
-     * call, exactly as it did through _destroyTextRangeProvider. Carried as it is; fixing it is a
-     * separate change with its own test.
+     * Release, not delete, and the registry entry stays until the library fires range_disposed. A zero
+     * peer - a range that failed to be created - is passed on unchecked, and gwin_a11y_text_range_destroy
+     * returns without doing anything for it; _destroyTextRangeProvider dereferenced it.
      */
     void dispose() {
         WinGlassNative.destroyTextRange(peer);

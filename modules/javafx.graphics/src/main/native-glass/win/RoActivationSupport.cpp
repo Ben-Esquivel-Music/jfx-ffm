@@ -24,6 +24,7 @@
  */
 
 #include "RoActivationSupport.h"
+#include "glass_win_test.h"
 #include <utility>
 #include <comdef.h>
 #include <winstring.h>
@@ -114,6 +115,7 @@ void tryInitializeRoActivationSupport()
 void uninitializeRoActivationSupport()
 {
     if (initialized) {
+        GwinTestLogEvent(GWIN_TEST_EVENT_RO_UNINITIALIZE);
         RoUninitialize();
     }
 
