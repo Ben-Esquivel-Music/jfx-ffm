@@ -33,8 +33,11 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.Collections;
+import java.util.List;
 import java.util.Map;
+import java.util.Queue;
 import java.util.TreeMap;
+import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.concurrent.TimeUnit;
 import java.util.function.BooleanSupplier;
 
@@ -49,20 +52,34 @@ import java.util.function.BooleanSupplier;
  * other threads may write into it too. The scenario starts whatever it needs itself, a toolkit through
  * {@link WinNativeToolkit} for instance, and bounds every wait, so that a hang in the code under test is recorded
  * as a value instead of a stuck child. The map is written as {@code key=value} lines even when the scenario
- * throws, and the JVM then exits with status 2. The exit is {@link Runtime#halt}: a toolkit thread still blocked
- * in native code must not keep the JVM alive. With {@code -Dwin.glass.child.naturalExit=true}
- * ({@link #NATURAL_EXIT_PROPERTY}) a scenario that succeeded returns from {@code main} instead, and the JVM exits
- * only once its last non-daemon thread has ended: that is for a scenario whose subject is the exit itself.
+ * throws, and the JVM then exits with status 2. Every exception that reaches the default uncaught-exception
+ * handler fails the scenario too: one that killed a thread - a worker of {@link WinNativeToolkit#startThread}, the
+ * toolkit thread - or one Glass reports through {@code Application.reportException} on a thread with no handler of
+ * its own. The handler prints the stack trace, as the JDK does without one, and keeps the thread's name and the
+ * throwable, and when any was kept by the time the scenario returns the first {@value #UNCAUGHT_SHOWN} are written
+ * as {@code child.uncaught} and the JVM exits with status 2. One that arrives after that, from a thread the
+ * scenario did not join, is only printed; a thread with a handler of its own, such as Quantum's render thread, is
+ * not seen. The exit is {@link Runtime#halt}: a toolkit thread still blocked in native code must not keep the JVM
+ * alive. With {@code -Dwin.glass.child.naturalExit=true} ({@link #NATURAL_EXIT_PROPERTY}) a scenario that succeeded
+ * returns from {@code main} instead, and the JVM exits only once its last non-daemon thread has ended: that is for a
+ * scenario whose subject is the exit itself.
  */
 public final class WinGlassChild {
 
     /** {@code true}: after a scenario that succeeded, return from {@code main} instead of halting. */
     static final String NATURAL_EXIT_PROPERTY = "win.glass.child.naturalExit";
 
+    /** How many of the exceptions that reached the default uncaught-exception handler {@code child.uncaught} names. */
+    private static final int UNCAUGHT_SHOWN = 3;
+
+    /** {@code <thread name>: <throwable>} of every exception that reached the default uncaught-exception handler. */
+    private static final Queue<String> UNCAUGHT = new ConcurrentLinkedQueue<>();
+
     private WinGlassChild() {
     }
 
     public static void main(String[] args) {
+        Thread.setDefaultUncaughtExceptionHandler(WinGlassChild::uncaught);
         int status = 0;
         Map<String, String> values = Collections.synchronizedMap(new TreeMap<>());
         try {
@@ -81,6 +98,12 @@ public final class WinGlassChild {
             values.put("child.failure", String.valueOf(t));
             status = 2;
         } finally {
+            if (!UNCAUGHT.isEmpty()) {
+                List<String> kept = List.copyOf(UNCAUGHT);
+                values.put("child.uncaught", kept.size() + " uncaught: "
+                        + String.join("; ", kept.subList(0, Math.min(kept.size(), UNCAUGHT_SHOWN))));
+                status = 2;
+            }
             try {
                 write(Path.of(args[1]), values);
             } catch (IOException e) {
@@ -94,6 +117,13 @@ public final class WinGlassChild {
             return;
         }
         Runtime.getRuntime().halt(status);
+    }
+
+    /** Keeps the thread's name and {@code throwable}, then prints the trace as the JDK does with no handler. */
+    private static void uncaught(Thread thread, Throwable throwable) {
+        UNCAUGHT.add(thread.getName() + ": " + throwable);
+        System.err.print("Exception in thread \"" + thread.getName() + "\" ");
+        throwable.printStackTrace();
     }
 
     /** Polls {@code condition} every millisecond for at most {@code timeoutMillis}; answers its last value. */

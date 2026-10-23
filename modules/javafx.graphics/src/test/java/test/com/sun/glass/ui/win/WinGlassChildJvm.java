@@ -56,8 +56,11 @@ import static org.junit.jupiter.api.Assertions.fail;
  * test must take down a child, not the test JVM. The child gets this JVM's input arguments - the shim build on
  * {@code --upgrade-module-path}, the add-exports argument files, {@code --enable-native-access} and
  * {@code java.library.path}, so the same {@code glass.dll} - but not surefire's system properties, so no
- * {@code StubToolkit} either. Debug agents are left out. A fatal error log goes to a directory of its own
- * ({@code -XX:ErrorFile}), under {@code target/win-glass-child/<scenario>/} with the values, stdout and stderr.
+ * {@code StubToolkit} either. A scenario that starts the JavaFX platform names {@code glass.platform} itself in
+ * the options of {@link #launch}, which follow those arguments, because {@code -DHEADLESS_TEST=true} puts
+ * {@code -Dglass.platform=Headless} on the argLine. Debug agents are left out. A fatal error log goes to a
+ * directory of its own ({@code -XX:ErrorFile}), under {@code target/win-glass-child/<scenario>/} with the values,
+ * stdout and stderr.
  * <p>
  * {@link Run#describe} names the {@code glass.dll} the child loaded, by sha256, so a report says which build it
  * ran against.

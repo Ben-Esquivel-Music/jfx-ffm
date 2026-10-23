@@ -25,6 +25,7 @@
 
 package test.com.sun.glass.ui.win;
 
+import com.sun.glass.ui.Application;
 import com.sun.glass.ui.win.WinGlassNativeShim;
 import com.sun.glass.ui.win.WinGlassNativeShim.DelegateCall;
 import com.sun.glass.ui.win.WinGlassNativeShim.PreferencesCall;
@@ -228,10 +229,15 @@ public class WinPreferenceSinksNativeTest {
     @Test
     @Timeout(180)
     public void aDelegateOnTheToolkitThreadWhoseListenerCallsPlatformExitLetsTheJvmExit() {
+        // These options follow the copied input arguments, so glass.platform=Win wins over the
+        // -Dglass.platform=Headless that -DHEADLESS_TEST=true puts on the argLine.
         WinGlassChildJvm.Run run = WinGlassChildJvm.launch(WinPreferenceSinksNativeTest.class, "listenerExits",
-                "listenerExits", List.of("-D" + WinGlassChild.NATURAL_EXIT_PROPERTY + "=true"), 60);
+                "listenerExits", List.of("-D" + WinGlassChild.NATURAL_EXIT_PROPERTY + "=true", "-Dglass.platform=Win"),
+                60);
         System.out.println("listener exit: " + run.values());
         assertTrue(run.clean(), run.describe());
+        assertEquals("com.sun.glass.ui.win.WinApplication", run.value("glass.application"),
+                "the child did not run WinApplication: " + run.describe());
         assertEquals("0", run.value("invoke.status"), "no AutoHideScrollBarsChanged delegate was kept: "
                 + run.describe());
         assertEquals("true", run.value("listener.fired"), "the preference listener never ran: " + run.describe());
@@ -246,7 +252,8 @@ public class WinPreferenceSinksNativeTest {
      * Runs in {@link WinGlassChild}, which then returns from {@code main}: the JVM exits once the FX thread has
      * ended. One {@code Windows.UISettings.*} boolean is first made stale on the FX side and
      * {@code WinPreferences}' last collection is forgotten, so that the delegate's re-collect counts as a change,
-     * restores that boolean and the listener fires.
+     * restores that boolean and the listener fires. With no such boolean, as under another Glass application, it
+     * calls {@code Platform.exit()} at once, so that the child still ends and the test names what it recorded.
      */
     static void listenerExits(Map<String, String> out) throws InterruptedException {
         WinGlassNativeShim.prefsCapture(true);
@@ -260,6 +267,7 @@ public class WinPreferenceSinksNativeTest {
         CountDownLatch fired = new CountDownLatch(1);
         Platform.runLater(() -> {
             fx.set(Thread.currentThread());
+            out.put("glass.application", Application.GetApplication().getClass().getName());
             String key = Platform.getPreferences().entrySet().stream()
                     .filter(e -> e.getKey().startsWith("Windows.UISettings.") && e.getValue() instanceof Boolean)
                     .map(Map.Entry::getKey).sorted().findFirst().orElse(null);
@@ -277,6 +285,8 @@ public class WinPreferenceSinksNativeTest {
                 WinGlassNativeShim.forgetCollectedPreferences();
                 out.put("invoke.status",
                         Integer.toString(WinGlassNativeShim.prefsInvoke(WinGlassNativeShim.DELEGATE_AUTO_HIDE)));
+            } else {
+                Platform.exit();
             }
             armed.countDown();
         });
