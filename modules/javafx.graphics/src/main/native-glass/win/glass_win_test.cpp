@@ -55,12 +55,18 @@ const UINT kPrivateLast = 0x7FFF;
 
 volatile LONG64 s_counters[GWIN_TEST_COUNTER_COUNT];
 
+/*
+ * Each fixed log has its own lock over its count and entries: a writer claims and fills a slot holding it
+ * exclusive, a reset holds it exclusive, a snapshot holds it shared. Nothing is called while one is held.
+ */
 const LONG kEventCapacity = 64;
-volatile LONG s_eventCount = 0;
+SRWLOCK s_eventLock = SRWLOCK_INIT;                 // s_eventCount and s_events
+LONG s_eventCount = 0;
 int32_t s_events[kEventCapacity];
 
 const LONG kDelegateCallCapacity = 256;
-volatile LONG s_delegateCallCount = 0;
+SRWLOCK s_delegateCallLock = SRWLOCK_INIT;          // s_delegateCallCount and s_delegateCalls
+LONG s_delegateCallCount = 0;
 int32_t s_delegateCalls[kDelegateCallCapacity][5];
 
 /* The publication GlassApplication keeps: what STALE compares with and gwin_test_publication reports. */
@@ -74,23 +80,41 @@ DWORD PublishedThreadId()
     return GlassApplication::GetMainThreadId();
 }
 
-/* Appends one entry to a fixed log: the count always advances, only the first `capacity` are kept. */
-LONG ClaimLogSlot(volatile LONG* count, LONG capacity)
+/*
+ * Appends one entry to a fixed log, with its lock held exclusive until the entry is written: the count always
+ * advances, only the first `capacity` are kept.
+ */
+LONG ClaimLogSlot(LONG* count, LONG capacity)
 {
-    const LONG slot = ::InterlockedIncrement(count) - 1;
+    const LONG slot = (*count)++;
     return slot < capacity ? slot : -1;
 }
 
-/* Copies min(total, capacity) entries of `width` int32 / int64 out of a log. */
+/*
+ * Copies min(total, capacity) entries of `width` int32 / int64 out of a log and returns its total, both read
+ * with the log's lock held shared.
+ */
 template <typename T, typename U>
-void CopyLog(const U* log, LONG total, LONG kept, int32_t width, T* out, int32_t capacity)
+LONG CopyLog(SRWLOCK* lock, const LONG* count, const U* log, LONG kept, int32_t width, T* out, int32_t capacity)
 {
+    ::AcquireSRWLockShared(lock);
+    const LONG total = *count;
     const LONG n = total < kept ? total : kept;
     for (LONG i = 0; i < n && i < capacity; ++i) {
         for (int32_t k = 0; k < width; ++k) {
             out[i * width + k] = (T) log[i * width + k];
         }
     }
+    ::ReleaseSRWLockShared(lock);
+    return total;
+}
+
+/* Empties a fixed log, with its lock held exclusive. */
+void ResetLog(SRWLOCK* lock, LONG* count)
+{
+    ::AcquireSRWLockExclusive(lock);
+    *count = 0;
+    ::ReleaseSRWLockExclusive(lock);
 }
 
 bool BadBuffer(const void* out, int32_t capacity)
@@ -117,15 +141,18 @@ void GwinTestCountCallSlow(int32_t which, HWND target)
 
 void GwinTestLogEventSlow(int32_t code)
 {
+    ::AcquireSRWLockExclusive(&s_eventLock);
     const LONG slot = ClaimLogSlot(&s_eventCount, kEventCapacity);
     if (slot >= 0) {
         s_events[slot] = code;
     }
+    ::ReleaseSRWLockExclusive(&s_eventLock);
 }
 
 void GwinTestRecordDelegateCallSlow(int32_t which)
 {
     const DWORD tid = ::GetCurrentThreadId();
+    const int32_t onToolkit = tid == PublishedThreadId() ? 1 : 0;
     APTTYPE type;
     APTTYPEQUALIFIER qualifier;
     int32_t aptType = -1;
@@ -134,14 +161,16 @@ void GwinTestRecordDelegateCallSlow(int32_t which)
         aptType = (int32_t) type;
         aptQualifier = (int32_t) qualifier;
     }
+    ::AcquireSRWLockExclusive(&s_delegateCallLock);
     const LONG slot = ClaimLogSlot(&s_delegateCallCount, kDelegateCallCapacity);
     if (slot >= 0) {
         s_delegateCalls[slot][0] = which;
         s_delegateCalls[slot][1] = (int32_t) tid;
-        s_delegateCalls[slot][2] = tid == PublishedThreadId() ? 1 : 0;
+        s_delegateCalls[slot][2] = onToolkit;
         s_delegateCalls[slot][3] = aptType;
         s_delegateCalls[slot][4] = aptQualifier;
     }
+    ::ReleaseSRWLockExclusive(&s_delegateCallLock);
 }
 
 /*
@@ -210,19 +239,23 @@ HANDLE s_decoyThread = NULL;
 DWORD s_decoyThreadId = 0;
 ATOM s_decoyClass = 0;
 
+/* The decoy-message log has its own lock: the decoy thread cannot take s_decoyLock, which stop holds as it joins. */
 const LONG kDecoyMessageCapacity = 256;
-volatile LONG s_decoyMessageCount = 0;
+SRWLOCK s_decoyMessageLock = SRWLOCK_INIT;          // s_decoyMessageCount and s_decoyMessages
+LONG s_decoyMessageCount = 0;
 int64_t s_decoyMessages[kDecoyMessageCapacity][3];
 
 LRESULT CALLBACK DecoyWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
 {
     if (msg >= kPrivateFirst && msg <= kPrivateLast) {
+        ::AcquireSRWLockExclusive(&s_decoyMessageLock);
         const LONG slot = ClaimLogSlot(&s_decoyMessageCount, kDecoyMessageCapacity);
         if (slot >= 0) {
             s_decoyMessages[slot][0] = (int64_t) (intptr_t) hwnd;
             s_decoyMessages[slot][1] = (int64_t) msg;
             s_decoyMessages[slot][2] = (int64_t) wParam;
         }
+        ::ReleaseSRWLockExclusive(&s_decoyMessageLock);
         return 0;   // wParam is never dereferenced
     }
     return ::DefWindowProcW(hwnd, msg, wParam, lParam);
@@ -450,8 +483,8 @@ int32_t gwin_test_observe(int32_t on)
         for (int i = 0; i < GWIN_TEST_COUNTER_COUNT; ++i) {
             ::InterlockedExchange64(&s_counters[i], 0);
         }
-        ::InterlockedExchange(&s_eventCount, 0);
-        ::InterlockedExchange(&s_delegateCallCount, 0);
+        ResetLog(&s_eventLock, &s_eventCount);
+        ResetLog(&s_delegateCallLock, &s_delegateCallCount);
         ::InterlockedExchange(&g_gwinTestObserving, 1);
     }
     return GWIN_OK;
@@ -480,8 +513,7 @@ int32_t gwin_test_event_log(int32_t* out, int32_t capacity)
     if (BadBuffer(out, capacity)) {
         return GWIN_ERR_INVALID_ARG;
     }
-    const LONG total = ::InterlockedCompareExchange(&s_eventCount, 0, 0);
-    CopyLog(s_events, total, kEventCapacity, 1, out, capacity);
+    const LONG total = CopyLog(&s_eventLock, &s_eventCount, s_events, kEventCapacity, 1, out, capacity);
     return (int32_t) total;
 }
 
@@ -490,8 +522,8 @@ int32_t gwin_test_prefs_delegate_calls(int32_t* out5, int32_t capacity)
     if (BadBuffer(out5, capacity)) {
         return GWIN_ERR_INVALID_ARG;
     }
-    const LONG total = ::InterlockedCompareExchange(&s_delegateCallCount, 0, 0);
-    CopyLog(&s_delegateCalls[0][0], total, kDelegateCallCapacity, 5, out5, capacity);
+    const LONG total = CopyLog(&s_delegateCallLock, &s_delegateCallCount, &s_delegateCalls[0][0],
+                               kDelegateCallCapacity, 5, out5, capacity);
     return (int32_t) total;
 }
 
@@ -582,7 +614,7 @@ int32_t gwin_test_decoy_start(void)
         if (ready == NULL) {
             status = (int32_t) ::GetLastError();
         } else {
-            ::InterlockedExchange(&s_decoyMessageCount, 0);
+            ResetLog(&s_decoyMessageLock, &s_decoyMessageCount);
             s_decoyThread = ::CreateThread(NULL, 0, DecoyThreadProc, ready, 0, &s_decoyThreadId);
             if (s_decoyThread == NULL) {
                 status = (int32_t) ::GetLastError();
@@ -627,8 +659,8 @@ int32_t gwin_test_decoy_messages(int64_t* out3, int32_t capacity)
     if (BadBuffer(out3, capacity) || !DecoyRunning()) {
         return GWIN_ERR_INVALID_ARG;
     }
-    const LONG total = ::InterlockedCompareExchange(&s_decoyMessageCount, 0, 0);
-    CopyLog(&s_decoyMessages[0][0], total, kDecoyMessageCapacity, 3, out3, capacity);
+    const LONG total = CopyLog(&s_decoyMessageLock, &s_decoyMessageCount, &s_decoyMessages[0][0],
+                               kDecoyMessageCapacity, 3, out3, capacity);
     return (int32_t) total;
 }
 

@@ -188,7 +188,10 @@ final class WinNativeToolkit {
         return "0x" + Long.toHexString(value);
     }
 
-    /** A thread named {@code name} running {@code body}, daemon, started. */
+    /**
+     * A thread named {@code name} running {@code body}, daemon, started. An exception that escapes {@code body}
+     * fails the {@link WinGlassChild} scenario through that JVM's default uncaught-exception handler.
+     */
     static Thread startThread(String name, Runnable body) {
         Thread worker = new Thread(body, name);
         worker.setDaemon(true);
