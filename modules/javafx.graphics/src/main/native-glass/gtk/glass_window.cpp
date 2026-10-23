@@ -818,7 +818,7 @@ WindowContextTop::WindowContextTop(int64_t _window_id, WindowContext* _owner, lo
     glass_configure_window_transparency(gtk_widget, frame_type == TRANSPARENT);
     gtk_window_set_title(GTK_WINDOW(gtk_widget), "");
 
-    if (frame_type != TITLED) {
+    if (!has_wm_frame()) {
         gtk_window_set_decorated(GTK_WINDOW(gtk_widget), FALSE);
     } else {
         geometry.extents = get_cached_extents();
@@ -846,6 +846,13 @@ void WindowContextTop::request_frame_extents() {
 }
 
 void WindowContextTop::update_frame_extents() {
+    // Only a window with a WM frame has extents. A WM may still publish extents for an undecorated window (Weston
+    // on WSLg reports those of a decorated frame), so the others keep zero extents and leave the cache alone, as
+    // in JDK-8354943 (openjdk/jfx#2139).
+    if (!has_wm_frame()) {
+        return;
+    }
+
     int top, left, bottom, right;
 
     if (get_frame_extents_property(&top, &left, &bottom, &right)) {
@@ -995,7 +1002,7 @@ void WindowContextTop::process_state(GdkEventWindowState* event) {
 
 void WindowContextTop::process_realize() {
     gdk_window = gtk_widget_get_window(gtk_widget);
-    if (frame_type == TITLED) {
+    if (has_wm_frame()) {
         request_frame_extents();
     }
 
@@ -1041,18 +1048,28 @@ void WindowContextTop::process_configure(GdkEventConfigure* event) {
                 ? event->height : wh;
     }
 
-    gint root_x, root_y, origin_x, origin_y;
-    gdk_window_get_root_origin(gdk_window, &root_x, &root_y);
-    gdk_window_get_origin(gdk_window, &origin_x, &origin_y);
+    if (has_wm_frame()) {
+        gint root_x, root_y, origin_x, origin_y;
+        gdk_window_get_root_origin(gdk_window, &root_x, &root_y);
+        gdk_window_get_origin(gdk_window, &origin_x, &origin_y);
 
-    // x and y represent the position of the top-left corner of the window relative to the desktop area
-    geometry.x = root_x;
-    geometry.y = root_y;
+        // x and y represent the position of the top-left corner of the window relative to the desktop area
+        geometry.x = root_x;
+        geometry.y = root_y;
 
-    // view_x and view_y represent the position of the content relative to the top-left corner of the window,
-    // taking into account window decorations (such as title bars and borders) applied by the window manager.
-    geometry.view_x = origin_x - root_x;
-    geometry.view_y = origin_y - root_y;
+        // view_x and view_y represent the position of the content relative to the top-left corner of the window,
+        // taking into account window decorations (such as title bars and borders) applied by the window manager.
+        geometry.view_x = origin_x - root_x;
+        geometry.view_y = origin_y - root_y;
+    } else {
+        // An undecorated window is its client area: the event gives the client's root position. GDK's frame
+        // origin would subtract the extents a WM may publish for it anyway (Weston on WSLg), see
+        // update_frame_extents and JDK-8354943 (openjdk/jfx#2139).
+        geometry.x = event->x;
+        geometry.y = event->y;
+        geometry.view_x = 0;
+        geometry.view_y = 0;
+    }
     notify_window_move();
 
     glong to_screen = getScreenPtrForLocation(geometry.x, geometry.y);
