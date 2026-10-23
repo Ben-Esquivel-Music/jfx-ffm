@@ -28,6 +28,7 @@
 #include "GlassAccessible.h"
 #include "GlassTextRangeProvider.h"
 #include "GlassApplication.h"
+#include "glass_win_test.h"
 
 
 /*
@@ -1168,6 +1169,29 @@ void gwin_a11y_destroy(gwin_accessible_t acc)
     reinterpret_cast<GlassAccessible*>(acc)->Release();
 }
 
+namespace {
+
+/* A VARIANT gwin_a11y_raise_property_changed built holds a BSTR: GWIN_TEST_COUNTER_BSTR_ALLOC. */
+void CountRaisedBstr(const VARIANT& v)
+{
+    if (v.vt == VT_BSTR && v.bstrVal != NULL) {
+        GwinTestCount(GWIN_TEST_COUNTER_BSTR_ALLOC);
+    }
+}
+
+/* VariantClear on a VARIANT gwin_a11y_raise_property_changed built; a BSTR it released counts as
+ * GWIN_TEST_COUNTER_BSTR_FREE. A failed conversion left its VARIANT VT_EMPTY, which clears to nothing. */
+void ClearRaisedVariant(VARIANT* v)
+{
+    const bool heldBstr = v->vt == VT_BSTR && v->bstrVal != NULL;
+    const HRESULT hr = ::VariantClear(v);
+    if (heldBstr && SUCCEEDED(hr) && v->vt == VT_EMPTY) {
+        GwinTestCount(GWIN_TEST_COUNTER_BSTR_FREE);
+    }
+}
+
+} // namespace
+
 int64_t gwin_a11y_raise_property_changed(gwin_accessible_t acc, int32_t property_id,
                                          const GwinVariant* old_value, const GwinVariant* new_value)
 {
@@ -1175,15 +1199,22 @@ int64_t gwin_a11y_raise_property_changed(gwin_accessible_t acc, int32_t property
     IRawElementProviderSimple* pProvider = static_cast<IRawElementProviderSimple*>(ga);
     VARIANT ov = {0}, nv = {0};
 
-    /* The caller owns both GwinVariants and their blocks, hence takeOwnership false. Neither VARIANT
-     * is VariantClear-ed and a failing second conversion leaks the first, exactly as the JNI body
-     * left it. */
+    /* The caller owns both GwinVariants and their blocks, hence takeOwnership false. What the two
+     * conversions made - a BSTR, a SAFEARRAY, an AddRef - is this function's, and is released on every
+     * path below; UiaRaiseAutomationPropertyChangedEvent only reads the VARIANTs. The first failing
+     * conversion short-circuits with its HRESULT and no UIA call, as before. */
     HRESULT hr = GlassAccessible::variantFromGwin(old_value, &ov, false);
-    if (FAILED(hr)) return (int64_t)hr;
-    hr = GlassAccessible::variantFromGwin(new_value, &nv, false);
-    if (FAILED(hr)) return (int64_t)hr;
-
-    return (int64_t)UiaRaiseAutomationPropertyChangedEvent(pProvider, (PROPERTYID)property_id, ov, nv);
+    CountRaisedBstr(ov);
+    if (SUCCEEDED(hr)) {
+        hr = GlassAccessible::variantFromGwin(new_value, &nv, false);
+        CountRaisedBstr(nv);
+        if (SUCCEEDED(hr)) {
+            hr = UiaRaiseAutomationPropertyChangedEvent(pProvider, (PROPERTYID)property_id, ov, nv);
+        }
+    }
+    ClearRaisedVariant(&ov);
+    ClearRaisedVariant(&nv);
+    return (int64_t)hr;
 }
 
 int32_t gwin_test_variant_offsets(int32_t* out11)

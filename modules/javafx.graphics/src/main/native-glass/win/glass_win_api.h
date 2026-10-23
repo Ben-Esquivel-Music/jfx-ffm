@@ -159,11 +159,20 @@
  * the Glass/Win32 UI thread - WinRobot calls Application.checkEventThread() before each native, and the
  * JNI bodies assumed the same. What ties the WinRobot functions to that thread:
  * gwin_key_java_to_windows consults the CALLING thread's keyboard layout (MapVirtualKey, not the
- * MapVirtualKeyEx-with-HKL form). There are no locks.
+ * MapVirtualKeyEx-with-HKL form).
  * The exceptions, all in the application section: gwin_run_loop does not run ON the Glass toolkit
  * thread, it DEFINES it - the thread that calls it is the toolkit thread for as long as it blocks;
  * and gwin_invoke_later is callable from ANY thread, its usual caller being Glass's
  * InvokeLaterDispatcher thread.
+ * There is ONE lock that matters across threads, the publication lock of GlassApplication.h: the
+ * toolkit HWND and thread id are published in the toolkit window's WM_CREATE arm and cleared under the
+ * lock's exclusive side in its WM_NCDESTROY arm. A message for the toolkit window from another thread -
+ * the post of gwin_invoke_later and of GlassApplication::ExecActionLater, and the SendNotifyMessage of a
+ * synchronous call (gwin_invoke_and_wait, or any marshalled export) made off the toolkit thread - is sent
+ * inside its shared side, which spans one load and that one call, so it reaches the toolkit window or is
+ * refused, never a destroyed or recycled handle. The synchronous caller waits outside it, and the
+ * WM_NCDESTROY arm releases the calls still queued. Nothing takes the lock on the toolkit thread's own
+ * synchronous path.
  *
  * None of the WinRobot functions upcalls or blocks on Java, so Linker.Option.critical(true) is legal for
  * all of them - that statement is scoped to WinRobot and must not be read as a property of this header;
@@ -175,8 +184,9 @@
  * and upcalls, gwin_enter_nested_event_loop blocks and upcalls, gwin_invoke_and_wait blocks and
  * upcalls, gwin_invoke_later posts to a window it does not own, gwin_terminate_loop destroys a
  * window, and the two set_callbacks functions publish a pointer another thread will dial.
- * The preferences callback table is the ABI's first upcall, and its two WinRT sinks are the first
- * thing here that does not run on the JavaFX application thread - see GwinPrefsCallbacks.
+ * The preferences callback table is the ABI's first upcall. Its two WinRT sinks may be invoked on a
+ * thread of the OS's choosing, but they only post to the toolkit window, so the upcall itself runs on
+ * the JavaFX application thread - see GwinPrefsCallbacks.
  * The view and window sections carry their own critical(true) and threading rules at their heads.
  */
 
@@ -225,8 +235,14 @@ extern "C" {
  * WinGlassNative.ABI_VERSION 5 -> 6 with it.
  * SHIM-ONLY TEST HOOKS - exported, bound by WinGlassNativeShim and NOWHERE in WinGlassNative:
  * gwin_test_fire_window_callback, gwin_test_string_block, gwin_test_fire_screen_callback,
- * gwin_test_fire_accessible_callback, gwin_test_fire_text_range_callback and
- * gwin_test_variant_offsets. The other three hooks are bound by
+ * gwin_test_fire_accessible_callback, gwin_test_fire_text_range_callback,
+ * gwin_test_variant_offsets, and the seventeen of the section at the end of this header:
+ * gwin_test_observe, gwin_test_counter, gwin_test_publication, gwin_test_event_log,
+ * gwin_test_park_arm, gwin_test_park_wait, gwin_test_park_release, gwin_test_send_action_notify,
+ * gwin_test_peek_private_messages, gwin_test_decoy_start, gwin_test_decoy_hunt,
+ * gwin_test_decoy_messages, gwin_test_decoy_stop, gwin_test_prefs_capture, gwin_test_prefs_invoke,
+ * gwin_test_prefs_delegate_calls and gwin_test_ime_composition. Adding or changing those never moves
+ * the version. The other three hooks are bound by
  * the facade, so a removal or a prototype change of theirs bumps the version. */
 
 GLASS_WIN_EXPORT int32_t gwin_abi_version(void);
@@ -240,7 +256,8 @@ enum GwinStatus {
                                  * Java may drop its registry entry. The JNI entry points this replaces
                                  * failed exactly this silently and were declared void: ExecAction returned
                                  * without sending, ExecActionLater deleted the action and returned
-                                 * (both in GlassApplication.cpp). */
+                                 * (both in GlassApplication.cpp). Also the answer to a call from another
+                                 * thread whose wait event could not be created (CreateEventW failed). */
     GWIN_ERR_UPCALL      = -3,  /* A callback slot reported a Java Throwable; the C mapped it to
                                  * E_JAVAEXCEPTION exactly as OleUtils.h's checkJavaException did.
                                  * (ABI 4) */
@@ -326,8 +343,9 @@ GLASS_WIN_EXPORT int32_t gwin_key_windows_to_java(int32_t vk);
  *   c == 0x7F  -> KeyEvent.VK_DELETE, before any OS call (ViewContainer synthesises that character
  *                 for the Delete key and this reverses it).
  *   layout = GetKeyboardLayout(GlassApplication::GetMainThreadId()) - the Glass toolkit thread's
- *                 layout, and 0 (meaning the calling thread) until the toolkit window exists
- *                 (GlassApplication.h, GetMainThreadId).
+ *                 layout, and 0 (meaning the calling thread) until the toolkit window exists and once
+ *                 it is destroyed. GetMainThreadId is one atomic load of the published thread id
+ *                 (GlassApplication.h), so any calling thread may read it.
  *   hint is a KeyEvent.VK_* code; when IsNumericKeypadCode(hint) and the hinted key maps back to c
  *                 through MapVirtualKeyEx(vk, MAPVK_VK_TO_CHAR, layout), hint is returned unchanged.
  *   otherwise vk = VkKeyScanEx(c, layout) & 0xFF; 0 or 0xFF -> KeyEvent.VK_UNDEFINED (0). The mask
@@ -505,19 +523,22 @@ typedef struct GwinPrefsCallbacks {
      * the upcall target's outer catch. The upcall target must catch Throwable and return a default:
      * an exception escaping an upcall stub terminates the JVM.
      *
-     * THREAD: the WM_SETTINGCHANGE / WM_THEMECHANGED / WM_SYSCOLORCHANGE /
-     * WM_DWMCOLORIZATIONCOLORCHANGED arms run on the Glass toolkit thread, but the two WinRT sinks
-     * (AutoHideScrollBarsChanged, NetworkStatusChanged) are dispatched by WinRT on a thread of its
-     * own choosing. This is the first callback in this ABI and the first thing here that is not
-     * toolkit-thread-only; the stub must be thread-safe.
+     * THREAD: ALWAYS the Glass toolkit thread, inside GlassApplication::WindowProc - the
+     * WM_SETTINGCHANGE / WM_THEMECHANGED / WM_SYSCOLORCHANGE / WM_DWMCOLORIZATIONCOLORCHANGED arms, and
+     * the arm for what the two WinRT sinks (AutoHideScrollBarsChanged, NetworkStatusChanged) post.
+     * WRL Callback<> delegates are not agile, so the OS may invoke a sink on the toolkit thread or on a
+     * thread of its own; either way the sink only posts its types to the toolkit window through the
+     * guarded post of gwin_invoke_later, and the notification reaches Java asynchronously, on the
+     * toolkit thread. A sink invoked once the toolkit window is cleared posts nothing.
      *
-     * LIFETIME: the two sinks are registered with add_AutoHideScrollBarsChanged /
-     * add_NetworkStatusChanged and their EventRegistrationToken is discarded - there is no
-     * remove_*Changed anywhere in this library, and PlatformSupport's destructor does not unregister
-     * them. So there is no point at which native code provably can no longer call this table:
-     * clearing it with gwin_prefs_set_callbacks(NULL, NULL) does not make the stub unreachable, it
-     * only makes the native side stop dialling it. That is why the Java stub belongs in
-     * Arena.global(): no arena with a close path would be correct.
+     * RUNDOWN: only the toolkit window's procedure calls this slot, and the toolkit thread retrieves
+     * no message once gwin_run_loop has returned, so no call starts after that return - also when the
+     * pump ended with the window still alive. PlatformSupport's destructor removes both sink
+     * registrations with the tokens it kept and releases every WinRT object before RoUninitialize.
+     * Java may therefore clear the table with gwin_prefs_set_callbacks(NULL, NULL) on the toolkit
+     * thread where gwin_run_loop returned and then free the upcall stub (WinApplication closes its
+     * application arena there). The SWT-embedded case never calls gwin_run_loop and has no such point:
+     * there the stub stays in Arena.global().
      */
     int32_t (*preferences_changed)(void* user, int32_t types);
 } GwinPrefsCallbacks;
@@ -529,17 +550,19 @@ GLASS_WIN_EXPORT int32_t gwin_sizeof_network_info(void);
 /*
  * Installs (or, with cb == NULL or a NULL slot, clears) the preferences callback table. The table is
  * COPIED by value: this library never retains `cb`, so Java may build it in a confined arena and
- * close it, but the upcall stub it holds must outlive the process (see GwinPrefsCallbacks LIFETIME).
- * `user` is passed back unchanged and is never dereferenced here.
+ * close it, but the upcall stub it holds must stay valid until the table is cleared at the rundown
+ * point (see GwinPrefsCallbacks RUNDOWN). `user` is passed back unchanged and is never dereferenced here.
  *
  * THE TABLE IS THE ONLY NOTIFICATION PATH. While no table is installed,
  * PlatformSupport::updatePreferences delivers nothing and answers false; its JNI arm, which built the
  * java.util.Map in C and called Application.notifyPreferencesChanged, is gone.
  *
- * No lock, by design: install once from WinApplication's static initializer, which runs on the
+ * No lock, by design. Install once from WinApplication's static initializer, which runs on the
  * launcher thread before runLoop starts the Glass toolkit thread, so "installed before the first
- * WndProc message" and "never written from a second thread" both hold by construction. Lazy
- * installation would drop every notification that arrives during startup.
+ * WndProc message" holds by construction; lazy installation would drop every notification that
+ * arrives during startup. Clear it (cb == NULL) only on the toolkit thread after gwin_run_loop has
+ * returned: the only reader, updatePreferences, runs on that thread inside its message retrieval, so
+ * the clear comes after its last read. updatePreferences loads the slot once per call.
  *
  * Always returns GWIN_OK.
  */
@@ -591,21 +614,25 @@ typedef struct GwinAppCallbacks {
      *
      * THREAD: run_runnable is ALWAYS called on the Glass toolkit thread - the thread that called
      * gwin_run_loop, i.e. "WindowsNativeRunloopThread" - in three situations: (a) inside
-     * gwin_run_loop, before the pump and INSIDE the OLE STA, for the launchable; (b) inside
-     * DispatchMessage -> BaseWnd::StaticWindowProc -> GlassApplication::WindowProc's WM_DO_ACTION
-     * arm, while another thread blocks in SendMessage; (c) the same for WM_DO_ACTION_LATER. In the
+     * gwin_run_loop, before the pump and INSIDE the OLE STA, for the launchable; (b) for
+     * gwin_invoke_and_wait: in GlassApplication::WindowProc's WM_DO_ACTION arm, inline in the
+     * SendMessage of a call made on the toolkit thread, or in its WM_DO_ACTION_NOTIFY arm, where the
+     * toolkit thread's message retrieval hands it the call another thread queued and waits for; (c)
+     * inside DispatchMessage -> BaseWnd::StaticWindowProc -> the WM_DO_ACTION_LATER arm. In the
      * SWT-embedded case (javafx.embed.isEventThread) there is no gwin_run_loop and (a) does not
      * occur at all.
      *
      * RE-ENTRANT: a runnable may call gwin_invoke_and_wait, gwin_invoke_later or
-     * gwin_enter_nested_event_loop, and a nested pump dispatches further WM_DO_ACTION messages on top
-     * of it. Nothing in the stub may hold a lock or a ThreadLocal.
+     * gwin_enter_nested_event_loop, and a nested pump dispatches further WM_DO_ACTION_NOTIFY and
+     * WM_DO_ACTION_LATER messages on top of it. No lock of this library is held while it runs.
+     * Nothing in the stub may hold a lock or a ThreadLocal.
      *
      * RETURNS NOTHING AND CANNOT FAIL: the JNI swallowed every exception the runnable threw
      * (CheckAndClearException -> Application.reportException) and so must the stub. None of the three
-     * sites consumed a return value, and the WM_DO_ACTION / WM_DO_ACTION_LATER arm answers `return 0`
-     * rather than DefWindowProc whatever the runnable did. This slot is deliberately NOT int32_t
-     * "for symmetry" with preferences_changed, whose return really is load-bearing.
+     * sites consumed a return value, and the WM_DO_ACTION, WM_DO_ACTION_NOTIFY and WM_DO_ACTION_LATER
+     * arms all answer `return 0` rather than DefWindowProc whatever the runnable did. This slot is
+     * deliberately NOT int32_t "for symmetry" with preferences_changed, whose return really is
+     * load-bearing.
      */
     void (*run_runnable)(void* user, int64_t runnable_id);
 } GwinAppCallbacks;
@@ -641,12 +668,12 @@ GLASS_WIN_EXPORT int32_t gwin_app_set_callbacks(const GwinAppCallbacks* cb, void
  * activation (RoInitialize(RO_INIT_SINGLETHREADED), UISettings, NetworkInformation and their two event
  * sinks). If no toolkit window exists afterwards the object is deleted, as the JNI did. Returns the
  * toolkit HWND or NULL; Java DISCARDS it, exactly as it discarded _init's jlong, and must never cache it
- * for DestroyWindow (gwin_terminate_loop reads the live instance - HWND values are recycled).
+ * for DestroyWindow (gwin_terminate_loop reads the published HWND - HWND values are recycled).
  * THREAD: the thread that will call gwin_run_loop (SWT-embedded: the embedder's UI thread), before it -
  * RoInitialize's apartment is the one gwin_run_loop's OleInitialize then joins. A second call leaks the
- * first instance, as the JNI did. No upcall on the calling thread; the two WinRT sinks may call
- * GwinPrefsCallbacks.preferences_changed from a WinRT thread as soon as they are registered (see
- * GwinPrefsCallbacks THREAD). NULL when a C++ exception was caught. critical(true) FORBIDDEN.
+ * first instance, as the JNI did. No upcall on the calling thread; the two WinRT sinks may be invoked
+ * as soon as they are registered, on any thread, and post to the toolkit window (see GwinPrefsCallbacks
+ * THREAD). NULL when a C++ exception was caught. critical(true) FORBIDDEN.
  */
 GLASS_WIN_EXPORT void* gwin_app_create(void);
 
@@ -673,14 +700,19 @@ GLASS_WIN_EXPORT void* gwin_app_create(void);
 GLASS_WIN_EXPORT void gwin_run_loop(int64_t launchable_id);
 
 /*
- * WinApplication._terminateLoop's former JNI body: hWnd = GetToolkitHWND();
+ * WinApplication._terminateLoop's former JNI body: hWnd = GetToolkitHWND(), the published HWND;
  * if (IsWindow(hWnd)) DestroyWindow(hWnd). NULL when there is no instance, and IsWindow(NULL) is
  * FALSE, so a second call does nothing. DestroyWindow only works from the thread that created the
  * window - the toolkit thread - which is where Application.terminate -> finishTerminating runs.
  * Note what happens INSIDE it: WM_DESTROY -> RegisterClipboardViewerId(0) ->
  * GwinClipboardCallbacks.dispose_peer for the registered clipboard peer (an upcall from inside the
- * FFM downcall, on an attached thread); then WM_NCDESTROY clears pInstance
- * and the pump in gwin_run_loop returns. NEVER critical.
+ * FFM downcall, on an attached thread); then the WM_NCDESTROY arm takes the publication lock
+ * exclusively - so it waits for a gwin_invoke_later or a cross-thread synchronous call that is inside
+ * its shared side, one PostMessage or SendNotifyMessage - clears the published HWND and thread id,
+ * releases every gwin_invoke_and_wait still queued from another thread (they answer
+ * GWIN_ERR_NO_TOOLKIT, their runnables not run), clears pInstance, and the pump in gwin_run_loop
+ * returns. From then on every gwin_invoke_later and gwin_invoke_and_wait is refused, also one made by
+ * the runnable that called this after it returns. NEVER critical.
  */
 GLASS_WIN_EXPORT void gwin_terminate_loop(void);
 
@@ -702,13 +734,22 @@ GLASS_WIN_EXPORT void gwin_leave_nested_event_loop(void);
 
 /*
  * WinApplication._invokeAndWait's former JNI body: wraps runnable_id in an Action and hands
- * it to GlassApplication::ExecAction = SendMessage(toolkit HWND, WM_DO_ACTION, action, 0). BLOCKS
- * until run_runnable has returned on the toolkit thread; if the caller IS the toolkit thread,
- * SendMessage runs the WindowProc inline on this stack - Application.invokeAndWait short-circuits
- * that case in Java first. GWIN_OK when dispatched, GWIN_ERR_NO_TOOLKIT when there is no toolkit
- * window, in which case the runnable is NOT run and no callback arrives, exactly as ExecAction's
- * early return did silently. Java must IGNORE GWIN_ERR_NO_TOOLKIT: the JNI threw nothing and blocked
- * nobody. NEVER critical.
+ * it to GlassApplication::ExecAction. BLOCKS until run_runnable has returned on the toolkit thread.
+ *   - On the toolkit thread: SendMessage(toolkit HWND, WM_DO_ACTION, action, 0), which runs the
+ *     WindowProc inline on this stack, with no lock held - the runnable may call gwin_terminate_loop.
+ *     Application.invokeAndWait short-circuits that case in Java first.
+ *   - From any other thread: inside the shared side of the publication lock the call is linked into a
+ *     pending list and SendNotifyMessage(toolkit HWND, WM_DO_ACTION_NOTIFY) queues it; the toolkit
+ *     thread handles it where it handled the SendMessage of the JNI, ahead of posted messages. The
+ *     caller then waits outside the lock, handling the messages other threads send to it meanwhile,
+ *     as SendMessage does. The WM_NCDESTROY arm releases a call that is still queued. While the
+ *     toolkit thread runs such a call, InSendMessageEx there answers ISMEX_NOTIFY, not the ISMEX_SEND
+ *     of the JNI's SendMessage; nothing in this library asks.
+ * GWIN_OK when the runnable ran. GWIN_ERR_NO_TOOLKIT when it did not: no toolkit window was published,
+ * the window was destroyed before the runnable started, or, from another thread, CreateEventW failed
+ * for the event the caller waits on, so nothing was queued; no callback arrives then, as with
+ * ExecAction's silent early return of the JNI. Java must IGNORE GWIN_ERR_NO_TOOLKIT: the JNI threw
+ * nothing and blocked nobody. NEVER critical.
  */
 GLASS_WIN_EXPORT int32_t gwin_invoke_and_wait(int64_t runnable_id);
 
@@ -717,16 +758,18 @@ GLASS_WIN_EXPORT int32_t gwin_invoke_and_wait(int64_t runnable_id);
  * PostMessage(toolkit HWND, WM_DO_ACTION_LATER, new Action(runnable_id), 0); the WindowProc runs it
  * and then deletes the action. Returns immediately.
  *
- * CALLABLE FROM ANY THREAD - Glass's InvokeLaterDispatcher thread is the usual one.
+ * CALLABLE FROM ANY THREAD - Glass's InvokeLaterDispatcher thread is the usual one. The post goes
+ * through GlassApplication::PostToToolkit: the published HWND is loaded and posted to inside the
+ * shared side of the publication lock, so a teardown on the toolkit thread waits for that one
+ * PostMessage, and a post that loses the race with it is refused, not attempted - it never reaches a
+ * destroyed or recycled handle, and never becomes PostMessage(NULL, ...), which posts a thread message
+ * to the CALLER.
  *
- * GWIN_OK: posted. GWIN_ERR_NO_TOOLKIT: there is no toolkit window, or PostMessage failed; in both
- * cases the action is destroyed and no callback will arrive, so Java may drop the id. Two deliberate
- * deviations from ExecActionLater, both unobservable because the runnable does not run either way:
- * it ignored PostMessage's result and leaked the action, and it read pInstance twice - the HWND is
- * read ONCE here, so a teardown racing a call from another thread cannot degrade into
- * PostMessage(NULL, ...), which posts a thread message to the CALLER and would report GWIN_OK for a
- * runnable that never runs. An action posted but never dispatched - messages left on the queue at
- * shutdown - leaks its id exactly as the JNI leaked its JGlobalRef. NEVER critical.
+ * GWIN_OK: posted. GWIN_ERR_NO_TOOLKIT: no toolkit window is published, or PostMessage failed; in both
+ * cases the action is destroyed and no callback will arrive, so Java may drop the id - ExecActionLater
+ * of the JNI ignored PostMessage's result and leaked the action, and the runnable did not run either
+ * way. An action posted but not dispatched before the toolkit window is destroyed is never dispatched,
+ * and leaks its id exactly as the JNI leaked its JGlobalRef. NEVER critical.
  */
 GLASS_WIN_EXPORT int32_t gwin_invoke_later(int64_t runnable_id);
 
@@ -763,8 +806,8 @@ typedef struct GwinMenuCallbacks {
      *
      * LIFETIME: there is no point at which this library can promise no further WM_COMMAND, so
      * gwin_menu_set_callbacks(NULL, NULL) does not make the stub unreachable - it only stops this
-     * library dialling it. The Java stub therefore belongs in Arena.global(), exactly as for
-     * GwinPrefsCallbacks.
+     * library dialling it. The Java stub therefore belongs in Arena.global() (unlike GwinPrefsCallbacks,
+     * whose only caller is the toolkit window procedure and which has a rundown point).
      *
      * WHAT IS DROPPED: the JNI passed the owning com.sun.glass.ui.Window as the first argument,
      * computed natively with the former GlassWindow::GetJObject(). WinMenuImpl.notifyCommand
@@ -838,9 +881,12 @@ GLASS_WIN_EXPORT int32_t gwin_menu_set_callbacks(const GwinMenuCallbacks* cb, vo
  *
  * THREAD. All 26 sites run on the JavaFX application thread, which is the Glass toolkit thread:
  * inside DispatchMessage -> BaseWnd::StaticWindowProc -> the virtual WindowProc, or inside a
- * gwin_view_* downcall that ExecAction has marshalled there with SendMessage(WM_DO_ACTION). No
- * foreign thread exists in this section: the inertia timer is a user32!SetTimer WM_TIMER on the same
- * thread and the IManipulationEvents COM sink is called synchronously from HandleViewTouchEvent.
+ * gwin_view_* downcall that ExecAction has marshalled there: with SendMessage(WM_DO_ACTION) when the
+ * caller is the toolkit thread, and from any other thread through the pending list
+ * (SendNotifyMessage(WM_DO_ACTION_NOTIFY) and a wait); either way the call is refused once the
+ * toolkit window is gone. No foreign thread exists in this section: the inertia timer is a
+ * user32!SetTimer WM_TIMER on the same thread and the IManipulationEvents COM sink is called
+ * synchronously from HandleViewTouchEvent.
  * RE-ENTRANT: a slot may close the window before it returns (notify_mouse(ENTER) is followed by an
  * IsWindow / BaseWnd::FromHandle re-check that stays in C); three downcalls (set_parent,
  * enter_fullscreen, exit_fullscreen) upcall from INSIDE the downcall; and with animate != 0
@@ -850,10 +896,11 @@ GLASS_WIN_EXPORT int32_t gwin_menu_set_callbacks(const GwinMenuCallbacks* cb, vo
  * EXCEPTIONS. No slot may let one escape: the Java stub catches Throwable and routes it to
  * Application.reportException, which is where CheckAndClearException sent it. In the other
  * direction every gwin_view_* body below is wrapped try { } catch (...) and answers its failure
- * value: this header's "no exception crosses this boundary" was not kept by construction before -
- * GlassInputTextInfo::GetClauseInfo / GetAttributeInfo rethrow std::bad_alloc and nothing above
- * WmImeComposition catches - so the wrapper is strictly an improvement on undefined behaviour and
- * the underlying rethrow is recorded as a follow-up, not fixed here.
+ * value. The window procedure keeps the same rule for WM_IME_COMPOSITION: when an allocation fails,
+ * GlassInputTextInfo::GetClauseInfo / GetAttributeInfo answer "no clause / attribute information"
+ * (0, NULL) instead of rethrowing std::bad_alloc, and ViewContainer::WmImeComposition's catch block -
+ * the failure branch for an allocation of GetContextData - releases what it took and returns without
+ * rethrowing, so no C++ exception unwinds into user32 (gwin_test_ime_composition injects the fault).
  *
  * NULL SLOTS. The installers copy the struct by value and replace every NULL slot with an internal
  * no-op that returns 0, so the 26 sites never test a slot. A NULL slot therefore behaves exactly as
@@ -1041,7 +1088,7 @@ GLASS_WIN_EXPORT int32_t gwin_sizeof_gesture_callbacks(void);   /* ==  5 * sizeo
  * Install (cb == NULL clears) the view resp. gesture callback table. Copied by value, NULL slots
  * replaced by no-ops (see the section comment), so the caller may free the struct; the stubs in it
  * must outlive the process, because there is no point at which this library can promise no further
- * WndProc message - Arena.global(), as for the other three tables. Last call wins, no lock: Java
+ * WndProc message - Arena.global(), as for the application and menu tables. Last call wins, no lock: Java
  * installs both once from WinApplication's static initializer, on the launcher thread, before
  * Application.run() creates the toolkit window. NO void* user - see IDENTITY above. Always GWIN_OK.
  */
@@ -2896,9 +2943,9 @@ GLASS_WIN_EXPORT gwin_text_range_t gwin_a11y_text_range_create(gwin_accessible_t
 
 /*
  * GlassTextRangeProvider::Release, with gwin_a11y_destroy's rules: not a delete, range_disposed fires
- * when the last reference goes, and the accessible it pinned is released then. `range` MUST NOT BE
- * NULL - neither the JNI entry point nor WinTextRangeProvider.dispose() checks, and a range that
- * failed to be created crashes here today. Carried as it is; fixing it is a separate change.
+ * when the last reference goes, and the accessible it pinned is released then. range == NULL - a range
+ * that failed to be created, which WinTextRangeProvider.dispose() passes on unchecked - returns without
+ * doing anything; the JNI entry point this replaces dereferenced it.
  */
 GLASS_WIN_EXPORT void gwin_a11y_text_range_destroy(gwin_text_range_t range);
 
@@ -2911,9 +2958,10 @@ GLASS_WIN_EXPORT void gwin_a11y_text_range_destroy(gwin_text_range_t range);
  * is what the JNI returned. Both GwinVariants are owned by the caller (see OWNERSHIP) and are read
  * only during the call.
  *
- * Carried verbatim from the JNI body, deliberately: neither VARIANT is VariantClear-ed, so a VT_BSTR
- * property change leaks its BSTR and a failing second conversion leaks the first. Behaviour-neutral
- * beats tidy in a migration; fix it in its own change with its own test.
+ * Both VARIANTs are VariantClear-ed before it returns, on every path, so the BSTR, SAFEARRAY or AddRef a
+ * conversion made is released - also the first one's when the second conversion fails. The JNI body
+ * cleared neither, so each VT_BSTR property change leaked its BSTR. gwin_test_counter's
+ * GWIN_TEST_COUNTER_BSTR_ALLOC / _BSTR_FREE observe the BSTR half.
  */
 GLASS_WIN_EXPORT int64_t gwin_a11y_raise_property_changed(gwin_accessible_t acc, int32_t property_id,
                                                           const GwinVariant* old_value,
@@ -2963,6 +3011,176 @@ GLASS_WIN_EXPORT int64_t gwin_test_fire_text_range_callback(int32_t slot, int64_
  * not pin it. Returns GWIN_OK, or GWIN_ERR_INVALID_ARG when out11 is NULL (nothing written).
  */
 GLASS_WIN_EXPORT int32_t gwin_test_variant_offsets(int32_t* out11);
+
+/*
+ * ---- Shim-only test hooks: counters, the toolkit window, the preference sinks and the IME path ----
+ *
+ * Unconditionally exported, never called by production code, bound by WinGlassNativeShim only. Each does
+ * nothing until a test calls or arms it: the probes they place in production code (glass_win_test.h) test
+ * one flag and fall through while it is clear. They change no prototype, layout or value WinGlassNative
+ * binds, so GLASS_WIN_ABI_VERSION does not move for them.
+ */
+
+/* gwin_test_counter indices. Each counts only while gwin_test_observe is on. */
+enum GwinTestCounter {
+    GWIN_TEST_COUNTER_POST          = 0,  /* PostMessage calls aimed at the toolkit window, counted just before
+                                           * the call */
+    GWIN_TEST_COUNTER_NOTIFY        = 1,  /* SendNotifyMessage calls aimed at the toolkit window */
+    GWIN_TEST_COUNTER_SEND          = 2,  /* SendMessage calls of GlassApplication::ExecAction */
+    GWIN_TEST_COUNTER_STALE         = 3,  /* calls counted in 0..2 whose target was not the published toolkit
+                                           * window just before the call */
+    GWIN_TEST_COUNTER_ACTION_ALLOC  = 4,  /* heap actions handed to the post path */
+    GWIN_TEST_COUNTER_ACTION_FREE   = 5,  /* of those, deleted - after Do(), or by a refused post */
+    GWIN_TEST_COUNTER_PREFS_POST    = 6,  /* preference-sink posts that reached PostMessage */
+    GWIN_TEST_COUNTER_PREFS_REFUSED = 7,  /* preference-sink posts refused: no toolkit window published */
+    GWIN_TEST_COUNTER_BSTR_ALLOC    = 8,  /* BSTRs that gwin_a11y_raise_property_changed built */
+    GWIN_TEST_COUNTER_BSTR_FREE     = 9   /* of those, released by its VariantClear */
+};
+#define GWIN_TEST_COUNTER_COUNT 10
+
+/*
+ * TEST HOOK. on != 0 zeroes every counter and log of these hooks and starts recording; on == 0 stops
+ * recording and keeps the values. Zeroing is per value, not one snapshot: call it while nothing the test
+ * measures is in flight. Any thread. Always GWIN_OK.
+ */
+GLASS_WIN_EXPORT int32_t gwin_test_observe(int32_t on);
+
+/* TEST HOOK. The value of counter `which` (enum GwinTestCounter), -1 for an unknown index. Any thread. */
+GLASS_WIN_EXPORT int64_t gwin_test_counter(int32_t which);
+
+/*
+ * TEST HOOK. out2[0] = the published toolkit HWND, out2[1] = the published toolkit thread id, 0 for none:
+ * GlassApplication::GetToolkitHWND / GetMainThreadId, stored in the toolkit window's WM_CREATE arm and
+ * cleared in its WM_NCDESTROY arm. Two atomic reads, not one snapshot. Any thread. GWIN_ERR_INVALID_ARG
+ * when out2 is NULL.
+ */
+GLASS_WIN_EXPORT int32_t gwin_test_publication(int64_t* out2);
+
+/* gwin_test_event_log codes: the teardown steps of PlatformSupport and RoActivationSupport. */
+enum GwinTestEvent {
+    GWIN_TEST_EVENT_REMOVE_AUTO_HIDE         = 1,  /* remove_AutoHideScrollBarsChanged with the kept token */
+    GWIN_TEST_EVENT_REMOVE_NETWORK           = 2,  /* remove_NetworkStatusChanged with the kept token      */
+    GWIN_TEST_EVENT_RELEASE_UI_SETTINGS      = 3,  /* PlatformSupport released its IUISettings             */
+    GWIN_TEST_EVENT_RELEASE_NETWORK_STATICS  = 4,  /* ... its INetworkInformationStatics                   */
+    GWIN_TEST_EVENT_RELEASE_NETWORK_FACTORY  = 5,  /* ... the IActivationFactory it was queried from       */
+    GWIN_TEST_EVENT_RO_UNINITIALIZE          = 6   /* immediately before RoUninitialize                    */
+};
+
+/*
+ * TEST HOOK. The number of events recorded since gwin_test_observe(1) - at most 64 are kept - with the
+ * first min(total, capacity) codes (enum GwinTestEvent) written to out in order. Any thread.
+ * GWIN_ERR_INVALID_ARG for capacity < 0, or out NULL with capacity > 0.
+ */
+GLASS_WIN_EXPORT int32_t gwin_test_event_log(int32_t* out, int32_t capacity);
+
+/*
+ * TEST HOOKS. The park gate. gwin_test_park_arm(1) arms a one-shot gate for the CALLING thread: the next
+ * post to the toolkit window it makes through GlassApplication::PostToToolkit (gwin_invoke_later,
+ * ExecActionLater) stops inside the shared side of the publication lock, between its HWND load and its
+ * PostMessage, so a teardown waits for it; it signals "parked" and waits on a kernel event until
+ * gwin_test_park_release - or by itself after 120 s. Only the toolkit window's HWND being non-NULL gets
+ * a post that far. It allocates, prints and loads nothing while parked. gwin_test_park_arm(0) disarms
+ * and releases a parked thread. Never arm on the toolkit thread. Arm answers GWIN_ERR_INVALID_ARG while
+ * a thread is parked, otherwise GWIN_OK.
+ * gwin_test_park_wait: 1 when a thread is parked now or parks within timeout_ms, else 0. Any thread.
+ * gwin_test_park_release: GWIN_OK, or GWIN_ERR_INVALID_ARG when no thread is parked. Any thread.
+ */
+GLASS_WIN_EXPORT int32_t gwin_test_park_arm(int32_t on);
+GLASS_WIN_EXPORT int32_t gwin_test_park_wait(int32_t timeout_ms);
+GLASS_WIN_EXPORT int32_t gwin_test_park_release(void);
+
+/*
+ * TEST HOOK. SendMessageW(the published toolkit HWND, WM_DO_ACTION_NOTIFY (WM_USER + 3), (WPARAM) wparam,
+ * 0), outside any lock, returning once the window procedure has returned: GWIN_OK, or
+ * GWIN_ERR_NO_TOOLKIT when nothing is published. The window procedure runs only a record it finds in the
+ * pending list and ignores any other wparam without dereferencing it. Not safe against a concurrent
+ * teardown; call it while the toolkit window lives. Any thread.
+ */
+GLASS_WIN_EXPORT int32_t gwin_test_send_action_notify(int64_t wparam);
+
+/*
+ * TEST HOOK. Removes from the CALLING thread's queue, with no window filter, every posted message in
+ * WM_USER..0x7FFF (PeekMessageW with PM_REMOVE | PM_QS_POSTMESSAGE, so no sent message is dispatched) and
+ * writes {hwnd, message, wparam} as three int64 per message while capacity allows. Returns the number
+ * found. The actions WM_DO_ACTION_LATER messages carry are neither run nor deleted. Meant for the toolkit
+ * thread after gwin_terminate_loop. GWIN_ERR_INVALID_ARG for capacity < 0, or out3 NULL with capacity > 0.
+ */
+GLASS_WIN_EXPORT int32_t gwin_test_peek_private_messages(int64_t* out3, int32_t capacity);
+
+/*
+ * TEST HOOKS. Decoy windows on a thread these hooks own, which pumps and never calls into Java.
+ * gwin_test_decoy_start starts it (GWIN_OK if already running; a positive Win32 error if it cannot).
+ * gwin_test_decoy_hunt blocks while that thread creates message-only decoy windows until one has the
+ * HWND `target` (that one stays alive: 1) or max_creations were made or a creation failed (0): it holds
+ * up to 5000 decoys that land in other handle-table slots (the low 16 bits) until one lands in target's
+ * slot, then destroys and re-creates that one, each round advancing the slot's reuse count (the high 16
+ * bits); the held decoys are destroyed at the end. out2[0] = windows created, out2[1] = how many of them
+ * were in target's slot.
+ * A decoy's procedure records {hwnd, message, wparam} of every message in WM_USER..0x7FFF it receives,
+ * answers 0 and never dereferences wparam; gwin_test_decoy_messages returns the number recorded since
+ * start (256 are kept) and writes min(total, capacity) triples. gwin_test_decoy_stop destroys the decoys
+ * and joins the thread. Any thread; the four are serialized. GWIN_ERR_INVALID_ARG when the thread is not
+ * running (stop: GWIN_OK) or for a bad buffer.
+ */
+GLASS_WIN_EXPORT int32_t gwin_test_decoy_start(void);
+GLASS_WIN_EXPORT int32_t gwin_test_decoy_hunt(void* target, int64_t max_creations, int64_t* out2);
+GLASS_WIN_EXPORT int32_t gwin_test_decoy_messages(int64_t* out3, int32_t capacity);
+GLASS_WIN_EXPORT int32_t gwin_test_decoy_stop(void);
+
+/* gwin_test_prefs_invoke / gwin_test_prefs_delegate_calls: which of PlatformSupport's two delegates. */
+enum GwinTestDelegate {
+    GWIN_TEST_DELEGATE_AUTO_HIDE = 0,   /* IUISettings5::AutoHideScrollBarsChanged             */
+    GWIN_TEST_DELEGATE_NETWORK   = 1    /* INetworkInformationStatics::NetworkStatusChanged    */
+};
+
+/*
+ * TEST HOOK. on != 0: from now on PlatformSupport keeps one extra reference to each delegate it registers -
+ * the reference an event source takes at registration - releasing any it kept before. on == 0: stops and
+ * releases both. Not concurrently with gwin_app_create or gwin_test_prefs_invoke. Always GWIN_OK.
+ */
+GLASS_WIN_EXPORT int32_t gwin_test_prefs_capture(int32_t on);
+
+/*
+ * TEST HOOK. Invokes the kept delegate `which` (enum GwinTestDelegate) on the calling thread, with NULL
+ * sender and arguments, as an event source invokes the delegate it holds, and returns its HRESULT.
+ * GWIN_ERR_INVALID_ARG when none is kept. Any thread, several at once, also after teardown: the kept
+ * reference keeps the delegate object alive, though not what it captured.
+ */
+GLASS_WIN_EXPORT int32_t gwin_test_prefs_invoke(int32_t which);
+
+/*
+ * TEST HOOK. Every invocation of either delegate while observing - by the OS or by gwin_test_prefs_invoke
+ * - records, first thing: {which, thread id, 1 if that is the published toolkit thread else 0, APTTYPE,
+ * APTTYPEQUALIFIER} (CoGetApartmentType; -1, -1 when it fails). Returns the number recorded since
+ * gwin_test_observe(1) - 256 are kept - and writes min(total, capacity) quintuples. Any thread.
+ * GWIN_ERR_INVALID_ARG for capacity < 0, or out5 NULL with capacity > 0.
+ */
+GLASS_WIN_EXPORT int32_t gwin_test_prefs_delegate_calls(int32_t* out5, int32_t capacity);
+
+/*
+ * TEST HOOK. On the calling thread, SendMessageW(window, WM_IME_COMPOSITION, 0, lparam) while a canned
+ * composition stands in for the input context (ImmGetCompositionStringW) of this thread, for this call
+ * only: GCS_RESULTSTR "XY", GCS_RESULTCLAUSE {0, 2}, GCS_COMPSTR "abc", GCS_COMPCLAUSE {0, 1, 3},
+ * GCS_COMPATTR {1, 0, 0}, GCS_CURSORPOS 1, every other index 0. When fault_at >= 1, the fault_at-th
+ * allocation attempt GlassInputTextInfo makes during the call throws std::bad_alloc instead.
+ *
+ * hwnd NULL: a window this hook creates on the calling thread and destroys again, whose procedure hands
+ * WM_IME_COMPOSITION to the production ViewContainer::HandleViewInputMethodEvent of a container holding a
+ * GlassView(view_id) with input-method events enabled, as GlassWindow::WindowProc does;
+ * GwinViewCallbacks.notify_input_method is called on this thread with view_id. Production has nothing
+ * that catches between WmImeComposition and user32; this procedure catches at its own boundary, so an
+ * exception that would have unwound into user32 is reported instead. hwnd non-NULL: that window, which
+ * must belong to the calling thread; view_id is ignored, and an exception is seen only once it has come
+ * back out of SendMessageW through the user32 frames.
+ *
+ * out4[0] = allocation attempts GlassInputTextInfo made, out4[1] = faults injected (0 or 1), out4[2] =
+ * std::bad_alloc branches taken inside GetClauseInfo / GetAttributeInfo, out4[3] = entries into
+ * WmImeComposition's catch block. Returns 0 when the composition returned normally, 1 when a C++
+ * exception left the window procedure's IME handling, and GWIN_ERR_INVALID_ARG when out4 is NULL or the
+ * hook's own window or GlassView cannot be created.
+ */
+GLASS_WIN_EXPORT int32_t gwin_test_ime_composition(void* hwnd, int64_t view_id, int64_t lparam,
+                                                   int32_t fault_at, int32_t* out4);
 
 #ifdef __cplusplus
 }

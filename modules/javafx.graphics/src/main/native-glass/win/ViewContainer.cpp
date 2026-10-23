@@ -35,6 +35,7 @@
 #include "GlassInputTextInfo.h"
 #include "ManipulationEvents.h"
 #include "BaseWnd.h"
+#include "glass_win_test.h"
 
 #include "com_sun_glass_events_ViewEvent.h"
 #include "com_sun_glass_events_KeyEvent.h"
@@ -1243,13 +1244,16 @@ void ViewContainer::WmImeComposition(HWND hwnd, WPARAM wParam, LPARAM lParam)
         }
         ImmReleaseContext(hwnd, hIMC);
     } catch (...) {
-        // since GetClauseInfo and GetAttributeInfo could throw exception, we have to release
-        // the pointer here.
+        // The failure branch. GetClauseInfo and GetAttributeInfo answer "no information" when an
+        // allocation fails, but GetContextData's allocations can still throw std::bad_alloc. Release what
+        // was taken and send nothing: this runs inside the window procedure, and no C++ exception may
+        // unwind into the user32 frames that called it.
+        GwinTestImeBackstop();
         delete [] bndClauseW;
         delete [] bndAttrW;
         delete [] valAttrW;
         ImmReleaseContext(hwnd, hIMC);
-        throw;
+        return;
     }
 
     /* Free the storage allocated. The text buffer is textInfo's and goes with it. */

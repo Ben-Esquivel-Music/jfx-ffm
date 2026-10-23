@@ -26,6 +26,7 @@
 #include "PlatformSupport.h"
 #include "RoActivationSupport.h"
 #include "GlassApplication.h"
+#include "glass_win_test.h"
 #include <tuple>
 
 using namespace Microsoft::WRL;
@@ -37,10 +38,11 @@ using namespace ABI::Windows::Networking::Connectivity;
 /*
  * ---- the flat C ABI half of this file (glass_win_api.h) ----
  *
- * The preferences callback table. Written once by gwin_prefs_set_callbacks, from Java, on the
- * launcher thread before the Glass toolkit thread exists; read by updatePreferences, which runs on
- * the toolkit thread and on whatever thread WinRT dispatches the two sinks on. No lock, by design -
- * see gwin_prefs_set_callbacks in glass_win_api.h for why that is safe and what breaks if the
+ * The preferences callback table. Written by gwin_prefs_set_callbacks, from Java: installed on the
+ * launcher thread before the Glass toolkit thread exists, and cleared on the toolkit thread after
+ * gwin_run_loop has returned. Read only by updatePreferences, which runs only on the toolkit thread, in
+ * GlassApplication::WindowProc - the two WinRT sinks post there instead of reading it. No lock, by
+ * design - see gwin_prefs_set_callbacks in glass_win_api.h for why that is safe and what breaks if the
  * installation is made lazy instead.
  */
 static GwinPrefsCallbacks g_prefsCallbacks = { NULL };
@@ -59,11 +61,48 @@ static_assert((int)PlatformSupport::PT_SYSTEM_COLORS == GWIN_PT_SYSTEM_COLORS
         "GwinPreferenceType must mirror PlatformSupport::PreferenceType");
 
 /*
+ * gwin_test_prefs_capture / gwin_test_prefs_invoke (glass_win_api.h): while capture is on, the extra
+ * reference to each delegate InitializeWinRT registers, as an event source holds it. Only those two
+ * hooks write or read these.
+ */
+namespace {
+
+typedef ITypedEventHandler<UISettings*, UISettingsAutoHideScrollBarsChangedEventArgs*> AutoHideHandler;
+
+volatile LONG s_captureDelegates = 0;
+AutoHideHandler* volatile s_keptAutoHide = NULL;
+INetworkStatusChangedEventHandler* volatile s_keptNetwork = NULL;
+
+template <typename T>
+void KeepDelegate(T* volatile* slot, T* handler)
+{
+    if (s_captureDelegates == 0 || handler == NULL) {
+        return;
+    }
+    handler->AddRef();
+    T* old = static_cast<T*>(::InterlockedExchangePointer(reinterpret_cast<PVOID volatile*>(slot), handler));
+    if (old != NULL) {
+        old->Release();
+    }
+}
+
+template <typename T>
+void DropDelegate(T* volatile* slot)
+{
+    T* old = static_cast<T*>(::InterlockedExchangePointer(reinterpret_cast<PVOID volatile*>(slot), NULL));
+    if (old != NULL) {
+        old->Release();
+    }
+}
+
+} // namespace
+
+/*
  * gwin_app_create's instance: WinRT activation only. The JNI constructor, which also looked up
  * the Java classes the preferences map was built from, is gone.
  */
 PlatformSupport::PlatformSupport()
-    : networkInformation(NULL)
+    : autoHideToken(), networkToken(), autoHideRegistered(false), networkRegistered(false)
 {
     InitializeWinRT();
 }
@@ -80,18 +119,20 @@ void PlatformSupport::InitializeWinRT()
         RO_CHECKED("RoActivateInstance",
                    RoActivateInstance(hstring("Windows.UI.ViewManagement.UISettings"), (IInspectable**)&settings));
 
-        ComPtr<IUISettings5> settings5;
         RO_CHECKED("IUISettings::QueryInterface<IUISettings5>",
                    settings->QueryInterface<IUISettings5>(&settings5));
 
-        EventRegistrationToken token;
-        settings5->add_AutoHideScrollBarsChanged(
-            Callback<ITypedEventHandler<UISettings*, UISettingsAutoHideScrollBarsChangedEventArgs*>>(
-                [this](IUISettings*, IUISettingsAutoHideScrollBarsChangedEventArgs*) {
-                    updatePreferences(PT_UI_SETTINGS);
-                    return S_OK;
-                }).Get(),
-            &token);
+        // The sinks only post (see PostPreferencesChanged); they capture nothing teardown frees.
+        ComPtr<AutoHideHandler> autoHideHandler = Callback<AutoHideHandler>(
+            [](IUISettings*, IUISettingsAutoHideScrollBarsChangedEventArgs*) {
+                GwinTestRecordDelegateCall(GWIN_TEST_DELEGATE_AUTO_HIDE);
+                PostPreferencesChanged(PT_UI_SETTINGS);
+                return S_OK;
+            });
+        if (SUCCEEDED(settings5->add_AutoHideScrollBarsChanged(autoHideHandler.Get(), &autoHideToken))) {
+            autoHideRegistered = true;
+            KeepDelegate(&s_keptAutoHide, autoHideHandler.Get());
+        }
     } catch (RoException const&) {
         // If an activation exception occurs, it probably means that we're on a Windows system
         // that doesn't support the UISettings API. This is not a problem, it simply means that
@@ -99,34 +140,77 @@ void PlatformSupport::InitializeWinRT()
     }
 
     try {
-        IActivationFactory* activationFactory = NULL;
-
         RO_CHECKED("RoGetActivationFactory",
                    RoGetActivationFactory(hstring("Windows.Networking.Connectivity.NetworkInformation"),
                                           IID_IActivationFactory,
-                                          (void**)&activationFactory));
+                                          (void**)networkFactory.GetAddressOf()));
 
         RO_CHECKED("IActivationFactory::QueryInterface<INetworkInformationStatics>",
-                   activationFactory->QueryInterface(&networkInformation));
+                   networkFactory.As(&networkInformation));
 
-        EventRegistrationToken token;
-        networkInformation->add_NetworkStatusChanged(
-            Callback<INetworkStatusChangedEventHandler>(
-                [this](IInspectable*) {
-                    updatePreferences(PT_NETWORK_INFORMATION);
-                    return S_OK;
-                }).Get(),
-            &token);
+        ComPtr<INetworkStatusChangedEventHandler> networkHandler = Callback<INetworkStatusChangedEventHandler>(
+            [](IInspectable*) {
+                GwinTestRecordDelegateCall(GWIN_TEST_DELEGATE_NETWORK);
+                PostPreferencesChanged(PT_NETWORK_INFORMATION);
+                return S_OK;
+            });
+        if (SUCCEEDED(networkInformation->add_NetworkStatusChanged(networkHandler.Get(), &networkToken))) {
+            networkRegistered = true;
+            KeepDelegate(&s_keptNetwork, networkHandler.Get());
+        }
     } catch (RoException const&) {
         // If an activation exception occurs, it probably means that we're on a Windows system
         // that doesn't support the NetworkInformation API.
     }
 }
 
+/*
+ * On the toolkit thread, from ~GlassApplication - after the toolkit window's WM_NCDESTROY arm cleared the
+ * published HWND, so a delegate the OS still invokes, now or after remove_*, finds no window and posts
+ * nothing. Unregister both, then release every WinRT object here, in the body, before
+ * uninitializeRoActivationSupport calls RoUninitialize and frees combase.
+ */
 PlatformSupport::~PlatformSupport()
 {
-    settings = nullptr;
+    if (autoHideRegistered) {
+        settings5->remove_AutoHideScrollBarsChanged(autoHideToken);
+        autoHideRegistered = false;
+        GwinTestLogEvent(GWIN_TEST_EVENT_REMOVE_AUTO_HIDE);
+    }
+    if (networkRegistered) {
+        networkInformation->remove_NetworkStatusChanged(networkToken);
+        networkRegistered = false;
+        GwinTestLogEvent(GWIN_TEST_EVENT_REMOVE_NETWORK);
+    }
+
+    settings5 = nullptr;
+    if (settings != nullptr) {
+        settings = nullptr;
+        GwinTestLogEvent(GWIN_TEST_EVENT_RELEASE_UI_SETTINGS);
+    }
+    if (networkInformation != nullptr) {
+        networkInformation = nullptr;
+        GwinTestLogEvent(GWIN_TEST_EVENT_RELEASE_NETWORK_STATICS);
+    }
+    if (networkFactory != nullptr) {
+        networkFactory = nullptr;
+        GwinTestLogEvent(GWIN_TEST_EVENT_RELEASE_NETWORK_FACTORY);
+    }
+
     uninitializeRoActivationSupport();
+}
+
+/*
+ * static
+ *
+ * What both WinRT sinks do, on whatever thread the OS invokes them: post the preference types to the
+ * toolkit window through GlassApplication::PostToToolkit, the guarded post gwin_invoke_later uses. Once
+ * the toolkit window is cleared the post is refused, and the sink still answers S_OK. No lock is held
+ * across a call into Java: preferences_changed runs later, in the toolkit window's procedure.
+ */
+void PlatformSupport::PostPreferencesChanged(PreferenceType preferenceType)
+{
+    GlassApplication::PostToToolkit(WM_PREFERENCES_CHANGED, (WPARAM)preferenceType, (LPARAM)0);
 }
 
 bool PlatformSupport::updatePreferences(PreferenceType preferenceType) const
@@ -137,10 +221,11 @@ bool PlatformSupport::updatePreferences(PreferenceType preferenceType) const
      * for the WinRT half, so no java/util/Map is ever built in C (the JNI arm that built one is
      * gone). With no table installed nothing is delivered and the answer is false. The callback
      * returns 1 when the preferences changed; see GwinPrefsCallbacks in glass_win_api.h for the exact
-     * mapping - notably a notify that throws still counts as changed.
+     * mapping - notably a notify that throws still counts as changed. The slot is loaded once: the test
+     * and the call use the same value even if Java has just cleared the table.
      */
-    return g_prefsCallbacks.preferences_changed != NULL
-        && g_prefsCallbacks.preferences_changed(g_prefsUser, (int32_t)preferenceType) != 0;
+    int32_t (*const preferencesChanged)(void*, int32_t) = g_prefsCallbacks.preferences_changed;
+    return preferencesChanged != NULL && preferencesChanged(g_prefsUser, (int32_t)preferenceType) != 0;
 }
 
 bool PlatformSupport::onSettingChanged(WPARAM wParam, LPARAM lParam) const
@@ -327,6 +412,29 @@ int32_t gwin_prefs_query_network(GwinNetworkInfo* out)
 
     support->collectNetworkInfo(*out);
     return GWIN_OK;
+}
+
+int32_t gwin_test_prefs_capture(int32_t on)
+{
+    ::InterlockedExchange(&s_captureDelegates, on != 0 ? 1 : 0);
+    if (on == 0) {
+        DropDelegate(&s_keptAutoHide);
+        DropDelegate(&s_keptNetwork);
+    }
+    return GWIN_OK;
+}
+
+int32_t gwin_test_prefs_invoke(int32_t which)
+{
+    if (which == GWIN_TEST_DELEGATE_AUTO_HIDE) {
+        AutoHideHandler* handler = s_keptAutoHide;
+        return handler != NULL ? (int32_t) handler->Invoke(NULL, NULL) : GWIN_ERR_INVALID_ARG;
+    }
+    if (which == GWIN_TEST_DELEGATE_NETWORK) {
+        INetworkStatusChangedEventHandler* handler = s_keptNetwork;
+        return handler != NULL ? (int32_t) handler->Invoke(NULL) : GWIN_ERR_INVALID_ARG;
+    }
+    return GWIN_ERR_INVALID_ARG;
 }
 
 } // extern "C"

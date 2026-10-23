@@ -92,6 +92,7 @@
 #include "GlassView.h"
 #include "GlassWindow.h"
 #include "KeyTable.h"
+#include "glass_win_test.h"
 
 // The @Native Window.Level constants gwin_window_set_level maps (they are not JNI: javac -h emits
 // this header for the annotated constants whether or not any native method remains).
@@ -399,9 +400,9 @@ static int32_t CaptureScreen(int32_t x, int32_t y, int32_t width, int32_t height
  *
  * The application callback table. Written once by gwin_app_set_callbacks, from Java, on the launcher
  * thread before the Glass toolkit thread exists; read on the toolkit thread only - the launchable
- * inside gwin_run_loop, and every WM_DO_ACTION / WM_DO_ACTION_LATER the toolkit window dispatches.
- * No lock, by design, same as g_prefsCallbacks in PlatformSupport.cpp; see gwin_app_set_callbacks in
- * glass_win_api.h.
+ * inside gwin_run_loop, and every WM_DO_ACTION, WM_DO_ACTION_NOTIFY and WM_DO_ACTION_LATER the toolkit
+ * window dispatches. No lock, by design, same as g_prefsCallbacks in PlatformSupport.cpp; see
+ * gwin_app_set_callbacks in glass_win_api.h.
  */
 static GwinAppCallbacks g_appCallbacks = { NULL };
 static void* g_appUser = NULL;
@@ -416,8 +417,9 @@ static void RunRunnable(int64_t runnableId)
 
 /*
  * What ENTER_MAIN_THREAD's _MyAction was, with the JGlobalRef<jobject> replaced by the int64 id.
- * GlassApplication::WindowProc's WM_DO_ACTION / WM_DO_ACTION_LATER arm calls Do() and, for the LATER
- * form only, deletes the action afterwards - so gwin_invoke_and_wait passes a stack instance and
+ * GlassApplication::WindowProc calls Do() from its WM_DO_ACTION arm (ExecAction on the toolkit thread),
+ * its WM_DO_ACTION_NOTIFY arm (ExecAction from another thread) and its WM_DO_ACTION_LATER arm, and only
+ * the last deletes the action afterwards - so gwin_invoke_and_wait passes a stack instance and
  * gwin_invoke_later a heap one, exactly as LEAVE_MAIN_THREAD and LEAVE_MAIN_THREAD_LATER did.
  */
 class GwinRunnableAction : public Action {
@@ -595,36 +597,26 @@ void gwin_leave_nested_event_loop(void)
 
 int32_t gwin_invoke_and_wait(int64_t runnable_id)
 {
-    if (GlassApplication::GetInstance() == NULL) {
-        return GWIN_ERR_NO_TOOLKIT;
-    }
-
-    // A stack action, which is what LEAVE_MAIN_THREAD built: ExecAction uses SendMessage and so
-    // does not return until WindowProc has called Do(). ExecAction re-checks pInstance, so a window
-    // torn down in between still cannot be messaged; that benign race is pre-existing.
+    // A stack action, which is what LEAVE_MAIN_THREAD built: ExecAction does not return until Do() has
+    // returned on the toolkit thread, or until it is certain that Do() will not run. ExecAction's guarded
+    // load decides whether there is a toolkit window, and this export answers what it reports.
     GwinRunnableAction action(runnable_id);
-    GlassApplication::ExecAction(&action);
-    return GWIN_OK;
+    return GlassApplication::ExecAction(&action) ? GWIN_OK : GWIN_ERR_NO_TOOLKIT;
 }
 
 int32_t gwin_invoke_later(int64_t runnable_id)
 {
-    // Read the toolkit window ONCE. This function is callable from any thread, so testing
-    // GetInstance() and then calling GetToolkitHWND() would leave a window in which the HWND comes
-    // back NULL - and PostMessage(NULL, ...) posts a thread message to the CALLER instead of
-    // failing, which would leak the action and report GWIN_OK for a runnable that never runs.
-    // ExecActionLater read pInstance twice too, but dereferenced it, so it crashed instead.
-    HWND hWnd = GlassApplication::GetToolkitHWND();
-    if (hWnd == NULL) {
-        return GWIN_ERR_NO_TOOLKIT;
-    }
-
     // A heap action, which is what LEAVE_MAIN_THREAD_LATER built: the WM_DO_ACTION_LATER arm of
-    // GlassApplication::WindowProc deletes it after Do(). Deleting it when PostMessage fails is the
-    // one deliberate deviation from ExecActionLater, which ignored PostMessage's result and leaked.
+    // GlassApplication::WindowProc deletes it after Do(), and it is deleted here when the guarded post
+    // refuses. Callable from any thread: GlassApplication::PostToToolkit loads the toolkit window and
+    // posts to it inside the shared side of the publication lock, so the post reaches that window or is
+    // refused - never a destroyed or recycled handle, and never PostMessage(NULL, ...), which would post
+    // a thread message to the caller.
     GwinRunnableAction* action = new GwinRunnableAction(runnable_id);
-    if (!::PostMessage(hWnd, WM_DO_ACTION_LATER, (WPARAM) action, (LPARAM) 0)) {
+    GwinTestCount(GWIN_TEST_COUNTER_ACTION_ALLOC);
+    if (!GlassApplication::PostToToolkit(WM_DO_ACTION_LATER, (WPARAM) action, (LPARAM) 0)) {
         delete action;
+        GwinTestCount(GWIN_TEST_COUNTER_ACTION_FREE);
         return GWIN_ERR_NO_TOOLKIT;
     }
     return GWIN_OK;

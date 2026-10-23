@@ -26,6 +26,7 @@
 #include "common.h"
 
 #include "GlassInputTextInfo.h"
+#include "glass_win_test.h"
 
 #define WCHAR_SZ sizeof(WCHAR)
 #define DWORD_SZ sizeof(DWORD)
@@ -79,6 +80,7 @@ GlassInputTextInfo::GetContextData(HIMC hIMC, const LPARAM flags) {
          * rather than having a list of the result string information.
          */
         if (flags & GCS_RESULTSTR) {
+            GwinTestImeAllocPoint();
             m_pResultTextInfo = new GlassInputTextInfo(m_viewContainer);
             m_pResultTextInfo->GetContextData(hIMC, GCS_RESULTSTR);
         }
@@ -93,12 +95,13 @@ GlassInputTextInfo::GetContextData(HIMC hIMC, const LPARAM flags) {
     LONG   cbData[3] = {0};
     LPVOID lpData[3] = {NULL};
     for (int i = startIndex, j = 0; i <= endIndex; i++, j++) {
-        cbData[j] = ::ImmGetCompositionString(hIMC, GCS_INDEX[i], NULL, 0);
+        cbData[j] = GwinImmGetCompositionString(hIMC, GCS_INDEX[i], NULL, 0);
         if (cbData[j] == 0) {
             lpData[j] = NULL;
         } else {
+            GwinTestImeAllocPoint();
             LPBYTE lpTemp = new BYTE[cbData[j]];
-            cbData[j] = ::ImmGetCompositionString(hIMC, GCS_INDEX[i], lpTemp, cbData[j]);
+            cbData[j] = GwinImmGetCompositionString(hIMC, GCS_INDEX[i], lpTemp, cbData[j]);
             if (IMM_ERROR_GENERAL != cbData[j]) {
                 lpData[j] = (LPVOID)lpTemp;
             } else {
@@ -122,8 +125,7 @@ GlassInputTextInfo::GetContextData(HIMC hIMC, const LPARAM flags) {
 
     // Get the cursor position
     if (flags & GCS_COMPSTR) {
-        m_cursorPosW = ::ImmGetCompositionString(hIMC, GCS_CURSORPOS,
-                                                NULL, 0);
+        m_cursorPosW = GwinImmGetCompositionString(hIMC, GCS_CURSORPOS, NULL, 0);
     }
 
     // Merge the string if necessary
@@ -194,6 +196,9 @@ GlassInputTextInfo::~GlassInputTextInfo() {
 //
 //  Convert Clause Information for DBCS string to that for Unicode string
 //  *lpBndClauseW must be deleted by caller.
+//  When an allocation fails it answers what the guard below answers - no clause information, 0 and
+//  NULL - instead of throwing: WmImeComposition runs inside the window procedure, and no C++
+//  exception may unwind into the user32 frames that called it.
 //
 int GlassInputTextInfo::GetClauseInfo(int*& lpBndClauseW) {
 
@@ -208,11 +213,12 @@ int GlassInputTextInfo::GetClauseInfo(int*& lpBndClauseW) {
 
     //Convert ANSI string clause information to UNICODE string clause information.
     try {
+        GwinTestImeAllocPoint();
         bndClauseW = new int[m_cClauseW + 1];
     } catch (std::bad_alloc&) {
+        GwinTestImeHelperFailure();
         lpBndClauseW = NULL;
-        delete [] bndClauseW;
-        throw;
+        return 0;
     }
 
     for ( int cls = 0; cls < m_cClauseW; cls++ ) {
@@ -257,12 +263,15 @@ int GlassInputTextInfo::GetClauseInfo(int*& lpBndClauseW) {
             cResultClauseW = m_pResultTextInfo->GetClauseInfo(bndResultClauseW);
             // Concatenate Clause information.
             cMergedClauseW = m_cClauseW + cResultClauseW;
+            GwinTestImeAllocPoint();
             bndMergedClauseW = new int[cMergedClauseW+1];
         } catch (std::bad_alloc&) {
             delete [] bndClauseW;
             delete [] bndResultClauseW;
             delete [] bndMergedClauseW;
-            throw;
+            GwinTestImeHelperFailure();
+            lpBndClauseW = NULL;
+            return 0;
         }
 
         int i = 0;
@@ -290,6 +299,8 @@ int GlassInputTextInfo::GetClauseInfo(int*& lpBndClauseW) {
 //
 //  Convert Attribute Information for DBCS string to that for Unicode string
 //  *lpBndAttrW and *lpValAttrW  must be deleted by caller.
+//  When an allocation fails it answers what the guard below answers - no attribute information, 0 and
+//  both pointers NULL - instead of throwing, for the reason GetClauseInfo gives.
 //
 int GlassInputTextInfo::GetAttributeInfo(int*& lpBndAttrW, BYTE*& lpValAttrW) {
 
@@ -305,12 +316,15 @@ int GlassInputTextInfo::GetAttributeInfo(int*& lpBndAttrW, BYTE*& lpValAttrW) {
 
     //Scan attribute byte array and make attribute run information.
     try {
+        GwinTestImeAllocPoint();
         bndAttrW = new int[m_cAttrW + 1];
+        GwinTestImeAllocPoint();
         valAttrW = new BYTE[m_cAttrW];
     } catch (std::bad_alloc&) {
         delete [] bndAttrW;
         delete [] valAttrW;
-        throw;
+        GwinTestImeHelperFailure();
+        return 0;
     }
 
     int cAttrWT = 0;
@@ -339,14 +353,17 @@ int GlassInputTextInfo::GetAttributeInfo(int*& lpBndAttrW, BYTE*& lpValAttrW) {
         int*    bndMergedAttrW = NULL;
         BYTE*   valMergedAttrW = NULL;
         try {
+            GwinTestImeAllocPoint();
             bndMergedAttrW = new int[cMergedAttrW+1];
+            GwinTestImeAllocPoint();
             valMergedAttrW = new BYTE[cMergedAttrW];
         } catch (std::bad_alloc&) {
             delete [] bndAttrW;
             delete [] valAttrW;
             delete [] bndMergedAttrW;
             delete [] valMergedAttrW;
-            throw;
+            GwinTestImeHelperFailure();
+            return 0;
         }
         bndMergedAttrW[0] = 0;
         valMergedAttrW[0] = ATTR_CONVERTED;

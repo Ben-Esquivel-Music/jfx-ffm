@@ -140,8 +140,11 @@ import static java.lang.foreign.ValueLayout.JAVA_SHORT;
  * {@code gwin_prefs_query_network} hand out POD instead of building a {@code java.util.Map} in C,
  * {@code gwin_sizeof_ui_settings} and {@code gwin_sizeof_network_info} pin the two layouts, and
  * {@code gwin_prefs_set_callbacks} installs the one upcall that survives, the preferences-changed
- * event. That last one is this class's second upcall stub, and like the timer's it lives in
- * {@link Arena#global()}, for the same reason: nothing ever unregisters the native side.
+ * event. That last one is this class's second upcall stub. Unlike the timer's it has a close path: it
+ * is created in {@code WinApplication}'s application arena, and once {@link #runLoop} has returned on
+ * the toolkit thread, {@code WinApplication} clears the table ({@link #clearPreferencesCallback}) and
+ * closes that arena. Only the SWT-embedded case, which never pumps through {@code gwin_run_loop}, keeps
+ * it in {@link Arena#global()}.
  * <p>
  * <b>{@code GlassApplication.cpp}</b> (ABI 3). Of the thirteen natives {@code WinApplication}
  * declared, exactly two were {@code WRAPPER}s: {@code _supportsUnifiedWindows} was
@@ -151,10 +154,12 @@ import static java.lang.foreign.ValueLayout.JAVA_SHORT;
  * other eleven are not wrappers, and six of them are the {@code OS-CALL} family that
  * {@code GLASS_WIN_ABI_VERSION} 3 exists for: the message pump ({@link #runLoop}), its nested twin
  * ({@link #enterNestedEventLoop}, {@link #leaveNestedEventLoop}), {@code DestroyWindow} on the
- * toolkit window ({@link #terminateLoop}) and the {@code SendMessage} / {@code PostMessage} pair that
- * gets a {@code Runnable} onto the toolkit thread ({@link #invokeAndWait},
- * {@link #submitForLaterInvocation}). Their bodies did not change: they moved out of the JNI entry
- * points into {@code gwin_*} exports statement for statement, and the three
+ * toolkit window ({@link #terminateLoop}) and the pair that gets a {@code Runnable} onto the toolkit
+ * thread ({@link #invokeAndWait}, {@link #submitForLaterInvocation}). They moved out of the JNI entry
+ * points into {@code gwin_*} exports statement for statement. The pair has changed since: a post, and
+ * a synchronous call from any thread but the toolkit thread, go through the publication guard of the
+ * toolkit window - a {@code PostMessage}, and a {@code SendNotifyMessage} the caller waits for - so
+ * each reaches that window or is refused (see {@link #invokeAndWait}). And the three
  * {@code CallVoidMethod(runnable, javaIDs.Runnable.run)} upcalls they contained collapse into the one
  * {@code GwinAppCallbacks.run_runnable} slot, because all three resolved the same cached method id.
  * A {@code Runnable} now crosses as a {@code long} id into {@link #RUNNABLES} where it used to cross
@@ -728,7 +733,8 @@ final class WinGlassNative {
      * {@code GwinPrefsCallbacks} ({@code glass_win_api.h}): one function pointer, which is the single
      * upcall of {@code PlatformSupport.cpp} that survives - the preferences-changed <em>event</em>.
      * The library copies the table by value, so this may be built in a confined arena and closed; it
-     * is the stub inside it that has to outlive the process.
+     * is the stub inside it that has to outlive every call, until the table is cleared after the pump
+     * (see {@link #installPreferencesCallback}).
      */
     static final StructLayout GWIN_PREFS_CALLBACKS_LAYOUT = MemoryLayout.structLayout(
             ADDRESS.withName("preferences_changed"));
@@ -1198,7 +1204,8 @@ final class WinGlassNative {
     /**
      * {@code int32_t gwin_prefs_set_callbacks(const GwinPrefsCallbacks* cb, void* user)}. Installing a
      * table replaces the JNI notification path wholesale, so it happens exactly once, from
-     * {@code WinApplication}'s static initializer - see {@link #installPreferencesCallback}.
+     * {@code WinApplication}'s static initializer - see {@link #installPreferencesCallback}. The one
+     * clear follows on the toolkit thread after the pump - see {@link #clearPreferencesCallback}.
      */
     private static final MethodHandle GWIN_PREFS_SET_CALLBACKS = bindGlass("gwin_prefs_set_callbacks",
             FunctionDescriptor.of(JAVA_INT, ADDRESS, ADDRESS));
@@ -3358,23 +3365,27 @@ final class WinGlassNative {
      * <p>
      * <b>Call this exactly once, from {@code WinApplication}'s static initializer.</b> That runs on the
      * launcher thread before {@code runLoop} starts the Glass toolkit thread, so "installed before the
-     * first {@code WndProc} message" and "never written from a second thread" both hold by
-     * construction. Installing it any later drops every notification that arrives before the install;
-     * installing it lazily, on the first preference read, would drop the ones during startup.
+     * first {@code WndProc} message" holds by construction, and the only later write is
+     * {@link #clearPreferencesCallback}, after the toolkit thread's last read. Installing it any later
+     * drops every notification that arrives before the install; installing it lazily, on the first
+     * preference read, would drop the ones during startup.
      * <p>
      * The table is copied by the library, so the confined arena that holds it is closed here. The stub
-     * inside it is in {@link Arena#global()} and stays there: the two WinRT sinks are registered with
-     * {@code add_AutoHideScrollBarsChanged} / {@code add_NetworkStatusChanged} and their
-     * {@code EventRegistrationToken} is discarded, there is no {@code remove_*Changed} anywhere in the
-     * library, so there is no point at which native code provably can no longer call it and no arena
-     * with a close path would be correct.
+     * inside it is allocated in {@code stubArena}, which must outlive every call: only the toolkit
+     * window's procedure dials the slot, on the toolkit thread, and that thread retrieves no message
+     * once {@code gwin_run_loop} has returned, so an arena may be closed there after
+     * {@link #clearPreferencesCallback} ({@code GwinPrefsCallbacks}, RUNDOWN).
+     *
+     * @param stubArena the arena of the upcall stub: {@code WinApplication}'s application arena, or
+     *                  {@link Arena#global()} in the SWT-embedded case, which never calls
+     *                  {@code gwin_run_loop} and so has no point after which the stub may be freed
      */
-    static synchronized void installPreferencesCallback() {
+    static synchronized void installPreferencesCallback(Arena stubArena) {
         if (preferencesCallbackInstalled) {
             return;
         }
         MemorySegment callback = upcallStub(upcallTarget("onPreferencesChanged", PREFS_CHANGED_FD),
-                PREFS_CHANGED_FD, Arena.global());
+                PREFS_CHANGED_FD, stubArena);
         try (Arena arena = Arena.ofConfined()) {
             MemorySegment table = arena.allocate(GWIN_PREFS_CALLBACKS_LAYOUT);
             table.set(ADDRESS, PREFS_CHANGED_OFFSET, callback);
@@ -3384,6 +3395,22 @@ final class WinGlassNative {
             throw unexpected(t);
         }
         preferencesCallbackInstalled = true;
+    }
+
+    /**
+     * {@code gwin_prefs_set_callbacks(NULL, NULL)}: clears the table, after which the library delivers
+     * no preference change. <b>Call this only on the toolkit thread, after {@link #runLoop} has
+     * returned there</b>: the one reader of the slot runs on that thread inside its message retrieval,
+     * so the clear comes after the last read and the setter needs no lock. Then the stub's arena may be
+     * closed.
+     */
+    static void clearPreferencesCallback() {
+        try {
+            int status = (int) GWIN_PREFS_SET_CALLBACKS.invokeExact(MemorySegment.NULL, MemorySegment.NULL);
+            requireOk(status, "gwin_prefs_set_callbacks");
+        } catch (Throwable t) {
+            throw unexpected(t);
+        }
     }
 
     /** Whether {@link #installPreferencesCallback} has run in this JVM. */
@@ -3397,15 +3424,19 @@ final class WinGlassNative {
      * pointer {@link #installPreferencesCallback} passed, which is {@code NULL} - the registry the C
      * needed a {@code this} for is a static field here.
      * <p>
-     * <b>Thread.</b> The {@code WM_SETTINGCHANGE} / {@code WM_THEMECHANGED} / {@code WM_SYSCOLORCHANGE}
-     * / {@code WM_DWMCOLORIZATIONCOLORCHANGED} arms reach this on the Glass toolkit thread. The two
-     * WinRT sinks may not: they are WRL {@code Callback<>} delegates, not agile by default -
-     * {@code Callback<>} builds them with {@code RuntimeClassFlags<Delegate>}, {@code Delegate} is
-     * {@code ClassicCom}, and only {@code WinRt} classes aggregate the free-threaded marshaler
+     * <b>Thread.</b> Always the Glass toolkit thread, inside {@code GlassApplication::WindowProc}: the
+     * {@code WM_SETTINGCHANGE} / {@code WM_THEMECHANGED} / {@code WM_SYSCOLORCHANGE} /
+     * {@code WM_DWMCOLORIZATIONCOLORCHANGED} arms, and the arm for what the two WinRT sinks post. The
+     * sinks themselves may run elsewhere: they are WRL {@code Callback<>} delegates, not agile by
+     * default - {@code Callback<>} builds them with {@code RuntimeClassFlags<Delegate>}, {@code Delegate}
+     * is {@code ClassicCom}, and only {@code WinRt} classes aggregate the free-threaded marshaler
      * ({@code FtmBase}) - so each event source decides whether to marshal its sink into the apartment
      * {@code RoInitialize(RO_INIT_SINGLETHREADED)} created on the toolkit thread or to call it on a
-     * WinRT thread of its own; the upcall stub attaches such a thread. {@link WinPreferences} is
-     * written for that second thread.
+     * WinRT thread of its own. Either way a sink only posts its types to the toolkit window through the
+     * guarded post of {@code gwin_invoke_later} ({@code PlatformSupport::PostPreferencesChanged}), so a
+     * sink's notification reaches this asynchronously, on the toolkit thread, and a sink invoked once
+     * the toolkit window is destroyed posts nothing. No call starts after {@code gwin_run_loop} has
+     * returned (see {@link #clearPreferencesCallback}).
      * <p>
      * <b>It must not throw.</b> An exception escaping an upcall stub terminates the JVM, so
      * {@code Throwable} is caught and answered with 0, which is the C's "nothing changed" and its
@@ -3492,10 +3523,10 @@ final class WinGlassNative {
      * {@code gwin_run_loop} does.
      * <p>
      * The table is copied by the library, so the confined arena that holds it is closed here. The stub
-     * inside it is in {@link Arena#global()} and stays there, for the reason
-     * {@code GwinPrefsCallbacks} gives: there is no point at which the library can promise no further
-     * callback - a message posted by {@code gwin_invoke_later} can be dispatched at any time up to the
-     * last {@code GetMessage} - so no arena with a close path would be correct.
+     * inside it is in {@link Arena#global()} and stays there: a message posted by
+     * {@code gwin_invoke_later} can be dispatched at any time up to the last {@code GetMessage}, and
+     * unlike the preferences stub ({@link #clearPreferencesCallback}) nothing frees this one after the
+     * pump, so it is one stub for the life of the process.
      */
     static synchronized void installApplicationCallback() {
         if (applicationCallbackInstalled) {
@@ -3527,14 +3558,17 @@ final class WinGlassNative {
      * <p>
      * <b>Thread.</b> Always the Glass toolkit thread, in three situations: inside
      * {@code gwin_run_loop} before the pump starts and inside the OLE apartment it created, for the
-     * launchable; and inside {@code DispatchMessage} for the {@code WM_DO_ACTION} and
-     * {@code WM_DO_ACTION_LATER} arms of {@code GlassApplication::WindowProc}. An inter-thread
-     * {@code SendMessage} still runs the window procedure on the window's owning thread, so no foreign
-     * thread can reach this.
+     * launchable; in the arms of {@code GlassApplication::WindowProc} for {@link #invokeAndWait} - the
+     * {@code WM_DO_ACTION} arm, inline in a {@code SendMessage} made on the toolkit thread, and the
+     * {@code WM_DO_ACTION_NOTIFY} arm, where the toolkit thread's message retrieval hands it a call that
+     * another thread queued with {@code SendNotifyMessage}; and inside {@code DispatchMessage} for the
+     * {@code WM_DO_ACTION_LATER} arm. Every one of those messages runs the window procedure on the
+     * window's owning thread, so no foreign thread can reach this.
      * <p>
      * <b>Re-entrant.</b> The runnable may call {@link #invokeAndWait}, {@link #submitForLaterInvocation}
-     * or {@link #enterNestedEventLoop}, and a nested pump dispatches further {@code WM_DO_ACTION}
-     * messages on top of this frame. Nothing here holds a lock; the C held none either.
+     * or {@link #enterNestedEventLoop}, and a nested pump dispatches further {@code WM_DO_ACTION_NOTIFY}
+     * and {@code WM_DO_ACTION_LATER} messages on top of this frame. Nothing here holds a lock; the C
+     * holds none while it runs.
      * <p>
      * <b>It must not throw, and it returns nothing.</b> An exception escaping an upcall stub terminates
      * the JVM, so {@code Throwable} is caught and reported exactly as {@code CheckAndClearException}
@@ -3634,18 +3668,26 @@ final class WinGlassNative {
 
     /**
      * {@code Java_com_sun_glass_ui_win_WinApplication__1invokeAndWait} ({@code :464-477}): wrap the
-     * runnable in an {@code Action} and hand it to {@code GlassApplication::ExecAction}, which is
-     * {@code SendMessage(toolkit HWND, WM_DO_ACTION, action, 0)}. <b>Blocks</b> until
-     * {@link #onRunRunnable} has returned on the toolkit thread.
+     * runnable in an {@code Action} and hand it to {@code GlassApplication::ExecAction}. <b>Blocks</b>
+     * until {@link #onRunRunnable} has returned on the toolkit thread, or until the call is refused.
      * <p>
-     * <b>{@link #GWIN_ERR_NO_TOOLKIT} is ignored, on purpose.</b> There was no toolkit window, so the
-     * runnable did not run and no callback will arrive - and that is exactly what the JNI did, because
-     * {@code ExecAction} returned early and silently ({@code :229-235}). Throwing here, or blocking,
-     * would be a new behaviour on a path that runs during shutdown.
+     * From any thread but the toolkit thread, {@code ExecAction} links the call into a pending list and
+     * queues it with {@code SendNotifyMessage(toolkit HWND, WM_DO_ACTION_NOTIFY)}, inside the shared side
+     * of the toolkit window's publication guard, then waits outside the guard, handling the messages
+     * other threads send to it meanwhile, as the JNI's {@code SendMessage} did. The toolkit thread
+     * handles the call where it handled that {@code SendMessage}, ahead of posted messages, so the order
+     * against pending {@link #submitForLaterInvocation} runnables is unchanged. A call still queued when
+     * the window is destroyed is released by its {@code WM_NCDESTROY} arm, unrun.
      * <p>
-     * If the caller is itself the toolkit thread, {@code SendMessage} runs the window procedure inline
-     * on this stack; {@code Application.invokeAndWait} short-circuits that case in Java first
-     * ({@code Application.java:463-465}), as it always did.
+     * <b>{@link #GWIN_ERR_NO_TOOLKIT} is ignored, on purpose.</b> There was no toolkit window, or it was
+     * destroyed before the runnable started, so the runnable did not run and no callback will arrive -
+     * and that is what the JNI did, because {@code ExecAction} returned early and silently
+     * ({@code :229-235}). Throwing here, or blocking, would be a new behaviour on a path that runs during
+     * shutdown.
+     * <p>
+     * If the caller is itself the toolkit thread, {@code SendMessage(toolkit HWND, WM_DO_ACTION)} runs the
+     * window procedure inline on this stack, with no lock held; {@code Application.invokeAndWait}
+     * short-circuits that case in Java first ({@code Application.java:463-465}), as it always did.
      */
     static void invokeAndWait(Runnable runnable) {
         long id = registerRunnable(runnable);
@@ -9044,9 +9086,9 @@ final class WinGlassNative {
 
     /**
      * {@code gwin_a11y_text_range_destroy(range)}: {@code GlassTextRangeProvider::Release}, with
-     * {@link #destroyAccessible}'s rules. {@code range} must not be 0: neither the JNI entry point nor
-     * {@code WinTextRangeProvider.dispose()} checks, and a range that failed to be created crashes here
-     * today. Carried as it is; fixing it is a separate change.
+     * {@link #destroyAccessible}'s rules. A {@code range} of 0 - a range that failed to be created,
+     * which {@code WinTextRangeProvider.dispose()} passes on unchecked - returns without doing anything;
+     * the JNI entry point this replaces dereferenced it.
      */
     static void destroyTextRange(long range) {
         try {
