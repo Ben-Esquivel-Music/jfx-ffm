@@ -359,6 +359,10 @@ public:
 protected:
     void applyShapeMask(void*, uint width, uint height);
 private:
+    // Whether the window manager frames the window: only a TITLED window gets a WM frame, the other frame types
+    // ask GTK for no decorations (gtk_window_set_decorated in the constructor).
+    bool has_wm_frame() { return frame_type == TITLED; }
+
     void request_frame_extents();
     void update_frame_extents();
     void set_cached_extents(WindowFrameExtents ex);

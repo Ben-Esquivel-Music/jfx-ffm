@@ -30,6 +30,7 @@ import com.sun.glass.ui.Screen;
 import com.sun.glass.ui.View;
 import com.sun.glass.ui.Window;
 import com.sun.glass.ui.gtk.GtkGlassShim;
+import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -40,6 +41,8 @@ import org.junit.jupiter.api.condition.EnabledOnOs;
 import org.junit.jupiter.api.condition.OS;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.EnumSource;
+import test.com.sun.glass.ui.gtk.GtkFrameExtentsStandIn.Action;
+import test.com.sun.glass.ui.gtk.GtkFrameExtentsStandIn.Effect;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
@@ -59,8 +62,11 @@ import static test.com.sun.glass.ui.gtk.GtkFrameExtentsStandIn.rect;
  * asked.</li>
  * <li>A {@code TITLED} window, the control, is the frame the extents describe: its {@code Window} size is the client
  * size plus the extents, an explicit window size is that frame size, and the hints are the sizes asked less the
- * extents, as {@link GtkWindowNativeTest} pins. Where GDK takes the frame from the extents (below), the
- * {@code Window} is at the client's position less (left, top) and the {@code View} at (left, top).</li>
+ * extents, as {@link GtkWindowNativeTest} pins. Its position is GDK's frame origin. Where GDK takes the frame from the
+ * extents (below), the {@code Window} is at the client's position less (left, top) and the {@code View} at (left,
+ * top). Elsewhere GDK takes the client's top-level ancestor as the frame - the window manager's frame under a
+ * reparenting window manager, the client itself without one ({@link GtkGlassShim#topLevelGeometry}) - and the
+ * {@code Window} is at that ancestor's position, with the {@code View} at the client's offset from it.</li>
  * </ul>
  * The extents are the window manager's where it publishes non-zero ones (Weston, and openbox for {@code TITLED}),
  * otherwise Weston's 38, 38, 59, 38 written on the window by the test ({@link GtkFrameExtentsStandIn}). The
@@ -70,14 +76,20 @@ import static test.com.sun.glass.ui.gtk.GtkFrameExtentsStandIn.rect;
  * GTK for, the hints - whatever runs on the display. The position is GDK's: {@code gdk_window_get_root_origin}, the
  * frame origin that {@code process_configure} reads for a {@code TITLED} window, comes from
  * {@code _NET_FRAME_EXTENTS} only when a window manager lists that atom in {@code _NET_SUPPORTED}
- * ({@link GtkGlassShim#supportsNetWmHint}). Without a window manager GDK ignores the property and reports the client
- * as the frame, so there the position half - the {@code Window}'s x and y and the {@code View}'s offset - is covered
- * only under a window manager that supports the atom, such as openbox, and on WSLg's Weston.
+ * ({@link GtkGlassShim#supportsNetWmHint}). Elsewhere GDK ignores the property and takes the frame from the window
+ * tree, which without a window manager is the client itself, so the position half - the {@code Window}'s x and y and
+ * the {@code View}'s offset - is covered only under a window manager that supports the atom, such as openbox, and on
+ * WSLg's Weston.
  * <p>
  * The child also records each window as shown, but every assertion is on readings taken after an explicit move
- * ({@code Window.setPosition}) of the window the window manager has placed: a reparenting window manager (openbox)
- * can leave the position glass reads at map time behind the client's, a race of its own that this class does not
- * measure.
+ * ({@code Window.setPosition}) of the window the window manager has placed, once that move has shown in X
+ * ({@link GtkFrameExtentsStandIn#settled}): a reparenting window manager (openbox) can leave the position glass reads
+ * at map time behind the client's, a race of its own that this class does not measure.
+ * <p>
+ * The class is meant for a display without a window manager, with openbox, or WSLg's Weston: window managers that let
+ * a client move and size its window. A tiling window manager is not one. i3 keeps every window it manages in its tile
+ * and marks it maximized, so glass writes no size limits for it, and the move, the size and the limits of every window
+ * but the override-redirect {@code POPUP} never take effect there; those tests fail on that.
  */
 @EnabledOnOs(OS.LINUX)
 @Timeout(300)
@@ -178,23 +190,27 @@ public class GtkFrameExtentsNativeTest {
 
     /**
      * A {@code TITLED} window is the frame the extents describe around its client: the client size plus the
-     * extents, and - where GDK takes the frame from the extents - at the client's position less (left, top), with
-     * the {@code View} at (left, top).
+     * extents, at GDK's frame origin - where GDK takes the frame from the extents the client's position less (left,
+     * top), elsewhere the position of the client's top-level ancestor - with the {@code View} at the client's offset
+     * from it.
      */
     @Test
     public void theTitledControlIsTheFrameTheExtentsDescribe() {
         Reading moved = reading(Kind.TITLED, "moved");
         int[] e = moved.extents();
         int[] client = parseRect(moved.client());
+        int[] topLevel = parseRect(moved.frame());
         boolean gdkFrame = run.values().get("gdk.frameFromExtents").equals("true");
-        int left = gdkFrame ? e[0] : 0;
-        int top = gdkFrame ? e[2] : 0;
-        String frame = rect(client[0] - left, client[1] - top, client[2] + e[0] + e[1], client[3] + e[2] + e[3]);
-        assertEquals(frame + " View " + left + "," + top, moved.glass() + " View " + moved.view(),
+        int x = gdkFrame ? client[0] - e[0] : topLevel[0];
+        int y = gdkFrame ? client[1] - e[2] : topLevel[1];
+        String frame = rect(x, y, client[2] + e[0] + e[1], client[3] + e[2] + e[3]);
+        assertEquals(frame + " View " + (client[0] - x) + "," + (client[1] - y),
+                moved.glass() + " View " + moved.view(),
                 moved.describe("the Window is the client plus the extents, " + (gdkFrame
                         ? "at the client's position less (left, top), and the View is at (left, top)"
-                        : "at the client's position, and the View at 0,0: GDK takes no frame from the extents"
-                                + " without a window manager that lists _NET_FRAME_EXTENTS in _NET_SUPPORTED")));
+                        : "at the position of the client's top-level ancestor (X frame), and the View at the client's"
+                                + " offset from it: without a window manager that lists _NET_FRAME_EXTENTS in"
+                                + " _NET_SUPPORTED, GDK takes that ancestor as the frame")));
     }
 
     /** An explicit window size of a {@code TITLED} window is its frame size: the client is that less the extents. */
@@ -241,6 +257,11 @@ public class GtkFrameExtentsNativeTest {
             return values.get("client");
         }
 
+        /** The client's top-level ancestor ({@link GtkGlassShim#topLevelGeometry}). */
+        String frame() {
+            return values.get("frame");
+        }
+
         String hints() {
             return values.get("hints");
         }
@@ -249,22 +270,28 @@ public class GtkFrameExtentsNativeTest {
             return GtkFrameExtentsStandIn.extents(values.get("extents"));
         }
 
-        /** The kind, the extents in force and where they come from, both rectangles, the hints and what is expected. */
+        /**
+         * The kind, the extents in force and where they come from, both rectangles, the hints, how the reading
+         * settled and what is expected.
+         */
         String describe(String expectation) {
             return kind + " window, step '" + step + "', _NET_FRAME_EXTENTS " + values.get("extents") + " from "
                     + values.get("extentsSource") + ": glass Window " + glass() + ", View " + view() + "; client "
-                    + client() + "; WM_NORMAL_HINTS " + hints() + ". Expected: " + expectation;
+                    + client() + ", X frame " + frame() + "; WM_NORMAL_HINTS " + hints() + "; the step's action: "
+                    + values.get("effect") + "; settled: " + values.get("settled") + ", stand-in rewrites: "
+                    + values.get("rewrites") + ". Expected: " + expectation;
         }
     }
 
     /**
-     * The settled reading of {@code step} of the {@code kind} window; fails unless it settled and had non-zero frame
-     * extents in force, without which it would prove nothing.
+     * The settled reading of {@code step} of the {@code kind} window; fails unless the step's action showed in X, the
+     * readings settled and non-zero frame extents were in force, without which it would prove nothing.
      */
     private static Reading reading(Kind kind, String step) {
         String prefix = kind + "." + step + ".";
         Map<String, String> values = new LinkedHashMap<>();
-        for (String key : List.of("glass", "view", "client", "extents", "hints", "settled", "rewrites")) {
+        for (String key : List.of("glass", "view", "client", "frame", "extents", "hints", "settled", "effect",
+                "rewrites")) {
             String value = run.values().get(prefix + key);
             if (value == null) {
                 throw new AssertionError("the child recorded no " + prefix + key + ": " + run.describe());
@@ -273,8 +300,12 @@ public class GtkFrameExtentsNativeTest {
         }
         values.put("extentsSource", run.values().get(kind + ".extentsSource"));
         Reading reading = new Reading(kind, step, values);
-        assertNotEquals("no", values.get("settled"), reading.describe("a reading that settled within "
-                + GtkFrameExtentsStandIn.SETTLE_ROUNDS + " rounds"));
+        assertNotEquals(GtkFrameExtentsStandIn.NEVER_TOOK_EFFECT, values.get("settled"), reading.describe("the step's"
+                + " action to show in X within " + GtkFrameExtentsStandIn.EFFECT_MILLIS + " ms; it never took"
+                + " effect"));
+        assertNotEquals(GtkFrameExtentsStandIn.NOT_SETTLED, values.get("settled"), reading.describe("a reading that"
+                + " settled within " + GtkFrameExtentsStandIn.SETTLE_ROUNDS + " rounds after the step's action"
+                + " showed in X"));
         assertTrue(GtkFrameExtentsStandIn.nonZero(values.get("extents")), reading.describe("non-zero frame"
                 + " extents in force, from the window manager or the stand-in"));
         return reading;
@@ -298,42 +329,44 @@ public class GtkFrameExtentsNativeTest {
     /**
      * Shows the {@code kind} window with a {@code View}, provides its frame extents, and records a settled reading
      * after it is shown, after a move, after an explicit window size and, for a resizable window, after the size
-     * limits.
+     * limits. Each request differs from the window's state before it - every {@code Kind} starts elsewhere, smaller
+     * and without size limits - so that {@link GtkFrameExtentsStandIn#settled} can tell when it took effect. Closes
+     * every window it made, whatever fails.
      */
     private static void measure(GtkEventTrace t, Map<String, String> out, Kind kind) throws Exception {
         boolean popup = kind == Kind.POPUP;
-        Window owner = popup ? show(null, Kind.UNTITLED, false) : null;
-        Window window = show(owner, kind, !popup);
+        List<Window> made = new ArrayList<>();
         try {
+            Window owner = popup ? show(made, null, Kind.UNTITLED, false) : null;
+            Window window = show(made, owner, kind, !popup);
             long xid = GtkGlassChild.onFx(window::getNativeWindow);
             t.settle();
-            boolean standIn = GtkFrameExtentsStandIn.provide(out, kind.name(), xid);
-            step(t, out, kind, "shown", window, xid, standIn, () -> {
+            Measured m = new Measured(t, out, kind, window, xid,
+                    GtkFrameExtentsStandIn.provide(out, kind.name(), xid, popup));
+            m.step("shown", Effect.NONE, () -> {
             });
-            step(t, out, kind, "moved", window, xid, standIn, () -> window.setPosition(MOVE_X, MOVE_Y));
-            step(t, out, kind, "sized", window, xid, standIn, () -> window.setSize(SIZE_WIDTH, SIZE_HEIGHT));
+            m.step("moved", Effect.CLIENT, () -> window.setPosition(MOVE_X, MOVE_Y));
+            m.step("sized", Effect.CLIENT, () -> window.setSize(SIZE_WIDTH, SIZE_HEIGHT));
             if (!popup) {
-                step(t, out, kind, "limits", window, xid, standIn, () -> {
+                m.step("limits", Effect.HINTS, () -> {
                     window.setMinimumSize(MIN_WIDTH, MIN_HEIGHT);
                     window.setMaximumSize(MAX_WIDTH, MAX_HEIGHT);
                 });
             }
         } finally {
-            GtkGlassChild.onFx(() -> {
-                window.close();
-                if (owner != null) {
-                    owner.close();
-                }
-                return null;
-            });
+            close(made);
             t.settle();
         }
     }
 
-    /** A window of {@code kind} with a {@code View}, bounds set and shown, as Quantum shows a stage; FX thread. */
-    private static Window show(Window owner, Kind kind, boolean resizable) throws Exception {
+    /**
+     * A window of {@code kind} with a {@code View}, bounds set and shown, as Quantum shows a stage, added to
+     * {@code made} as soon as it exists; FX thread.
+     */
+    private static Window show(List<Window> made, Window owner, Kind kind, boolean resizable) throws Exception {
         return GtkGlassChild.onFx(() -> {
             Window w = Application.GetApplication().createWindow(owner, Screen.getMainScreen(), kind.style);
+            made.add(w);
             View v = Application.GetApplication().createView();
             v.setEventHandler(new View.EventHandler());
             w.setView(v);
@@ -345,23 +378,40 @@ public class GtkFrameExtentsNativeTest {
         });
     }
 
-    @FunctionalInterface
-    private interface Action {
-        void run() throws Exception;
-    }
-
-    /** Runs {@code action} on the FX thread and records the settled reading under {@code <kind>.<name>}. */
-    private static void step(GtkEventTrace t, Map<String, String> out, Kind kind, String name, Window window,
-                             long xid, boolean standIn, Action action) throws Exception {
+    /** Closes {@code windows}, the last made first, each whatever closing another threw; FX thread. */
+    private static void close(List<Window> windows) throws Exception {
         GtkGlassChild.onFx(() -> {
-            action.run();
+            RuntimeException failure = null;
+            for (Window w : windows.reversed()) {
+                try {
+                    w.close();
+                } catch (RuntimeException e) {
+                    if (failure == null) {
+                        failure = e;
+                    } else {
+                        failure.addSuppressed(e);
+                    }
+                }
+            }
+            if (failure != null) {
+                throw failure;
+            }
             return null;
         });
-        GtkFrameExtentsStandIn.settled(t, out, kind + "." + name, xid, standIn, () -> {
-            Map<String, String> values = new LinkedHashMap<>();
-            values.put("glass", rect(window.getX(), window.getY(), window.getWidth(), window.getHeight()));
-            values.put("view", window.getView().getX() + "," + window.getView().getY());
-            return values;
-        });
+    }
+
+    /** The {@code kind} window being measured, and where its readings go. */
+    private record Measured(GtkEventTrace t, Map<String, String> out, Kind kind, Window window, long xid,
+                            boolean standIn) {
+
+        /** Runs {@code action} on the FX thread and records the settled reading under {@code <kind>.<name>}. */
+        void step(String name, Effect effect, Action action) throws Exception {
+            GtkFrameExtentsStandIn.settled(t, out, kind + "." + name, xid, standIn, effect, action, () -> {
+                Map<String, String> values = new LinkedHashMap<>();
+                values.put("glass", rect(window.getX(), window.getY(), window.getWidth(), window.getHeight()));
+                values.put("view", window.getView().getX() + "," + window.getView().getY());
+                return values;
+            });
+        }
     }
 }

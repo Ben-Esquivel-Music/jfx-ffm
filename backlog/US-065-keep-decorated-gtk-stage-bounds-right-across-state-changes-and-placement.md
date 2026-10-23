@@ -64,6 +64,13 @@ there.
   168,168 instead of 200,200. Glass's events: MOVE 168,168 at 166 ms, RESIZE 168,168 476x397 at 248 ms, MOVE 136,136 at
   265 ms. Quiet probe without load: 0 of 6; instrumented probe: 2 of 2; quiet under load (4 to 7 on 8 CPUs): 6 of 6,
   3 before and 3 after the fix, with identical values.
+- **Undecorated windows** can still be hit after US-017 (its note d, openbox): their position is now `event->x`,
+  `event->y`, and for a real ConfigureNotify that is GDK's own `XTranslateCoordinates`, a live read too, only taken
+  earlier, when GDK reads the event. 3 of 10 runs before US-017 and 0 of 12 after, under the load above: narrowed, not
+  removed by construction. Two candidate fixes would cover them together with `TITLED`: re-read the client's root
+  origin at `GDK_MAP`, since openbox places its frame before it maps it; or order the configure events against
+  ReparentNotify as AWT's `XDecoratedPeer` does (it keeps the reparent's serial, skips the ConfigureNotify that carries
+  it and every one before the window is visible, and takes a synthetic one's position as it is).
 
 ### 5. On Weston a decorated stage reports its position 32 px from where it was put
 US-017 decided (D3) to keep Weston's 32 px shadow margin in a decorated stage's bounds. Weston places the visible
@@ -117,8 +124,8 @@ would then move the window by 32 px; that round trip itself was not measured.
 ## Notes
 - Evidence: US-017's "Resolution" (survey tables, "The openbox rows, explained", "All-zero reports and state
   changes", gates) and the session evidence it describes.
-- Not in this story: undecorated windows. US-017 gave them zero extents and the configure event's position. The
-  openbox row of US-017's note (d) did not recur after that fix (0 of 16 runs, against 3 of 10 before under the same
-  load).
+- Undecorated windows are in this story only through item 4. US-017 gave them zero extents and the configure event's
+  position, which narrowed the openbox row of its note (d) (0 of 12 runs under load after the fix, against 3 of 10
+  before) without removing it by construction.
 - Related: US-017 (D2 left `TITLED` as it was; D3 keeps Weston's shadow margin); JDK-8354943 and openjdk/jfx#2139;
   JDK-8365201.

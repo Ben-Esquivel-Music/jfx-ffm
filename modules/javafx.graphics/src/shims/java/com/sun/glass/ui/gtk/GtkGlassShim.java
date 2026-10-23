@@ -2212,6 +2212,52 @@ public final class GtkGlassShim {
      * thread.
      */
     public static int[] windowSize(long xid) {
+        try {
+            int[] geometry = geometry(xid);
+            return new int[] {geometry[2], geometry[3]};
+        } catch (Throwable t) {
+            throw new IllegalStateException(t);
+        }
+    }
+
+    /**
+     * The geometry of the top-level ancestor of the X11 window {@code xid} - the window that holds it, or is it, and
+     * whose parent is the root - as {@code {x, y, width, height}}: {@code XQueryTree} from {@code xid} up to the root,
+     * then {@code XGetGeometry} of the last window below the root, whose x and y are root coordinates. Under a
+     * reparenting window manager that window is the window manager's frame; without one it is {@code xid}. This is
+     * the walk {@code gdk_x11_window_get_frame_extents} makes for the frame of {@code gdk_window_get_root_origin}
+     * where it does not take the frame from {@code _NET_FRAME_EXTENTS} ({@link #supportsNetWmHint}), made here on its
+     * own; unlike GDK's, it does not stop at a {@code _NET_VIRTUAL_ROOTS} window. FX thread.
+     */
+    public static int[] topLevelGeometry(long xid) {
+        try (Arena arena = Arena.ofConfined()) {
+            MemorySegment display = (MemorySegment) Readback.GDK_X11_GET_DEFAULT_XDISPLAY.invokeExact();
+            MemorySegment root = arena.allocate(JAVA_LONG);
+            MemorySegment parent = arena.allocate(JAVA_LONG);
+            MemorySegment children = arena.allocate(ADDRESS);
+            MemorySegment count = arena.allocate(JAVA_INT);
+            long window = xid;
+            while (true) {
+                int ok = (int) Readback.X_QUERY_TREE.invokeExact(display, window, root, parent, children, count);
+                if (ok == 0) {
+                    throw new IllegalStateException("XQueryTree failed for window " + window);
+                }
+                MemorySegment list = children.get(ADDRESS, 0);
+                if (list.address() != 0) {
+                    int freed = (int) Readback.X_FREE.invokeExact(list);
+                }
+                if (parent.get(JAVA_LONG, 0) == root.get(JAVA_LONG, 0)) {
+                    return geometry(window);
+                }
+                window = parent.get(JAVA_LONG, 0);
+            }
+        } catch (Throwable t) {
+            throw new IllegalStateException(t);
+        }
+    }
+
+    /** {@code XGetGeometry} of the X11 window {@code xid} on GDK's display: {@code {x, y, width, height}}. */
+    private static int[] geometry(long xid) throws Throwable {
         try (Arena arena = Arena.ofConfined()) {
             MemorySegment display = (MemorySegment) Readback.GDK_X11_GET_DEFAULT_XDISPLAY.invokeExact();
             MemorySegment root = arena.allocate(JAVA_LONG);
@@ -2226,11 +2272,8 @@ public final class GtkGlassShim {
             if (ok == 0) {
                 throw new IllegalStateException("XGetGeometry failed for window " + xid);
             }
-            return new int[] {width.get(JAVA_INT, 0), height.get(JAVA_INT, 0)};
-        } catch (RuntimeException | Error e) {
-            throw e;
-        } catch (Throwable t) {
-            throw new IllegalStateException(t);
+            return new int[] {x.get(JAVA_INT, 0), y.get(JAVA_INT, 0), width.get(JAVA_INT, 0),
+                    height.get(JAVA_INT, 0)};
         }
     }
 
@@ -2703,6 +2746,12 @@ public final class GtkGlassShim {
         static final MethodHandle X_GET_GEOMETRY = downcall("libX11.so.6", "XGetGeometry",
                 FunctionDescriptor.of(JAVA_INT, ADDRESS, JAVA_LONG, ADDRESS, ADDRESS, ADDRESS, ADDRESS, ADDRESS,
                         ADDRESS, ADDRESS));
+        /**
+         * {@code Status XQueryTree(Display *, Window, Window *root_return, Window *parent_return,
+         * Window **children_return, unsigned int *nchildren_return)}.
+         */
+        static final MethodHandle X_QUERY_TREE = downcall("libX11.so.6", "XQueryTree",
+                FunctionDescriptor.of(JAVA_INT, ADDRESS, JAVA_LONG, ADDRESS, ADDRESS, ADDRESS, ADDRESS));
         static final MethodHandle GDK_SCREEN_GET_SYSTEM_VISUAL = downcall("libgdk-3.so.0",
                 "gdk_screen_get_system_visual", FunctionDescriptor.of(ADDRESS, ADDRESS));
         static final MethodHandle GDK_VISUAL_GET_DEPTH = downcall("libgdk-3.so.0", "gdk_visual_get_depth",

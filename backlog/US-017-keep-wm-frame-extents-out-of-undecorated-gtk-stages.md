@@ -1,6 +1,6 @@
 # US-017 — Keep a window manager's frame extents out of undecorated GTK stage bounds
 
-**Status:** ✅ Done (2026-10-20, uncommitted; the PR number is added when it lands. Fix option 1, as in openjdk/jfx#2139: undecorated windows ignore `_NET_FRAME_EXTENTS` and take their position from the configure event; `TITLED` unchanged; verified on a private Xvfb with no WM, openbox and i3, and on WSLg; the `TITLED` faults went to US-065; see "Resolution" below) · **Found:** 2026-09-27, US-008 (explaining the `GtkWindowNativeTest` failures on WSLg)
+**Status:** ✅ Done (2026-10-20, PR #36. Fix option 1, as in openjdk/jfx#2139: undecorated windows ignore `_NET_FRAME_EXTENTS` and take their position from the configure event; `TITLED` unchanged; the openbox start-up race of note (d) narrowed for undecorated windows, not removed by construction; verified on a private Xvfb with no WM and with openbox, and on WSLg; under i3 only the JDK-8329821 and JDK-8348095 scenarios and the tabbed-container probe, since the new classes are not meant for a tiling WM; the `TITLED` faults and the rest of the race went to US-065; see "Resolution" below) · **Found:** 2026-09-27, US-008 (explaining the `GtkWindowNativeTest` failures on WSLg)
 
 ## Story
 As a JavaFX app developer whose app shows an undecorated, transparent or extended stage on Linux (a splash screen,
@@ -107,8 +107,9 @@ FFM glass of `e003c1f200` unless marked JNI (`8492cb03b0`).
 - (d) The same in two runs. Glass applied no extents (the view is at 0,0 and the window is the client), yet it
   reports a position that is not the client's. Not explained. **Explained 2026-10-20:** a startup race in
   `process_configure`, which read GDK's frame origin while openbox was still placing its new frame; see "The openbox
-  rows" under "Resolution". It did not occur after the fix: 0 of 16 runs, against 3 of 10 before the fix under the
-  same load (a small sample, Fisher p about 0.08).
+  rows" under "Resolution". The fix narrows it but does not remove it by construction: 0 of 12 runs under load after
+  the fix, against 3 of 10 before under the same load (a small sample, Fisher p about 0.08), and 0 of 4 without load
+  before and after. What is left is tracked in US-065.
 
 On Weston, glass's rectangle for the undecorated 1920x1080 window is exactly the frame a decorated window of that
 size would have: 1920 + 2 x (6 + 32) = 1996 wide, 1080 + 27 + 6 + 2 x 32 = 1177 tall, at the client position less
@@ -274,7 +275,7 @@ openbox both glasses give 121x20, 798x575 and 32765x32742. `_GTK_FRAME_EXTENTS` 
   (2026-09-27).
 - Related: US-065 (the `TITLED` faults this story measured and left to a story of their own, decision D4).
 
-## Resolution (2026-10-20, uncommitted; the PR number is added when it lands)
+## Resolution (2026-10-20, PR #36)
 
 All on master `c666773a96` in WSL (Ubuntu 26.04, JDK 27 Temurin 27+35, Maven 3.10.0, GTK 3.24.52). The decisions
 D1-D5 were taken by the manager as acting maintainer, from the survey and the source research below. The raw
@@ -371,10 +372,12 @@ in `process_configure` while a reparenting WM has not yet placed its frame, and 
 `update_frame_extents` feeding that position back into `gtk_window_move`. Weston showed the same race, for
 undecorated windows too: a configure handled after the extents were on the window but before their PropertyNotify
 stored the client less (38, 59), and `update_frame_extents` then moved the client there (62,41 instead of 100,100;
-1 of 11 undecorated windows in quiet runs, 6 of 6 instrumented). The fix removes the undecorated half: their position
-now comes from the event, and `update_frame_extents` no longer moves them. After the fix the openbox row did not occur
-in 16 runs (3 of 10 before the fix under the same load) and no undecorated window raced on Weston. The `TITLED` half
-is US-065.
+1 of 11 undecorated windows in quiet runs, 6 of 6 instrumented). The fix narrows the undecorated half: their position
+now comes from the event, and `update_frame_extents` no longer moves them. It does not remove it by construction: for
+a real ConfigureNotify, `event->x`, `event->y` is GDK's own `XTranslateCoordinates`, a live read too, only taken
+earlier, when GDK reads the event rather than when glass handles it. After the fix the openbox row did not occur in 12
+runs under load (3 of 10 before the fix under the same load) and no undecorated window raced on Weston: evidence, not
+proof. What is left of the undecorated half, and the `TITLED` half, are US-065.
 
 ### The position source, confirmed on Weston
 In every row of every Weston run, `gdk_window_get_root_origin` returned the client's root position less (left, top)
@@ -435,6 +438,16 @@ Weston's extents through the states (`xprop -spy`, two windows, two runs): 38,38
   - The position comes from the configure event (`event->x`, `event->y`), as in #2139, rather than from
     `gdk_window_get_origin` as option 1 was written. Both are the client's root position; the event's value is the
     one GDK translated when it read the event.
+  - Accepted (PR #36 review): for a synthetic ConfigureNotify (`send_event`), `event->x`, `event->y` are the WM's
+    numbers as it sent them, so an undecorated window now trusts ICCCM 4.1.5, which requires root coordinates in that
+    event. GTK itself relies on the same, as do AWT (`XDecoratedPeer.handleConfigureNotifyEvent` through
+    `XWindowPeer.getNewLocation`, JDK 27+35: a `send_event` ConfigureNotify's x, y as they are, less the insets) and
+    #2139. No measured WM sends wrong values: the one transient, on WSLg (about 40 ms of 32,32 after the map), is the
+    client's real root position while Weston's new frame is still at 0,0, and it settles where it was asked. The
+    reviewer reported that older Weston sent the client's offset in its frame instead. One look found Weston's
+    `ea9a01f2e39c` ("xwm: Prepare send_configurenotify for non-fullscreen use", 2022), whose description says it adds
+    the window's root position to that offset, for a function used until then only for full-screen windows; its diff
+    and whether WSLg's Weston has it were not read, so the report stays unverified.
   - Option 2 rejected: an X round trip per change, it works only under a reparenting WM, and under i3 tabbed it would
     put i3's border into an undecorated stage.
 - **D2: `TITLED` (`DECORATED`, `UNIFIED`, `UTILITY`) stays as it is.** The stage is the WM's frame as
@@ -453,7 +466,8 @@ Weston's extents through the states (`xprop -spy`, two windows, two runs): 38,38
   on Weston that reports its position 32 px from where it was put (`setPosition(150, 120)` reads back 118,88). They are
   not fixed here: each is `TITLED` behaviour (D2), they share one mechanism (`update_frame_extents` and
   `process_configure` re-running `set_bounds` with a stored or live position), and #2139 reworks exactly that. The
-  openbox undecorated row (note d) is not in it, because it did not recur after the fix.
+  openbox undecorated row (note d), which the fix narrowed but did not remove by construction, is in its item 4 too
+  (PR #36 review).
 - **D5: out of scope.** The Weston abort on `maximize(true)` of a glass popup (see "Notes").
 
 ### The fix
@@ -485,13 +499,19 @@ Weston's extents through the states (`xprop -spy`, two windows, two runs): 38,38
 In `modules/javafx.graphics`; Linux only (`@EnabledOnOs(LINUX)`), and skipped without `DISPLAY` and
 `-DPRIVATE_DISPLAY=true` like every GTK display class (`GtkGlassChildJvm.requireDisplay`).
 - `GtkGlassShim` gains `setNetFrameExtents(xid, left, right, top, bottom)` (`XChangeProperty` of 32-bit `CARDINAL`s
-  on the client, as a WM does, then `XSync`), `windowSize(xid)` (`XGetGeometry`: the client size) and
+  on the client, as a WM does, then `XSync`), `windowSize(xid)` (`XGetGeometry`: the client size),
   `supportsNetWmHint(name)` (`gdk_x11_screen_supports_net_wm_hint`: whether the WM lists the atom in
-  `_NET_SUPPORTED`, which decides whether GDK's frame origin uses the extents).
-- `GtkFrameExtentsStandIn`, a helper, not a test class. It waits up to 3 s for non-zero extents of the WM's own (not
-  at all without a WM), otherwise writes Weston's 38, 38, 59, 38 on the window. It then takes readings until two in a
-  row agree, writing the stand-in back first if the WM overwrote it (openbox writes 0,0,0,0 when it resizes an
-  undecorated window; it never did in these runs).
+  `_NET_SUPPORTED`, which decides whether GDK's frame origin uses the extents) and `topLevelGeometry(xid)`
+  (`XQueryTree` up to the root, then `XGetGeometry` of the client's ancestor below it: the frame GDK takes from the
+  window tree otherwise; PR #36 review).
+- `GtkFrameExtentsStandIn`, a helper, not a test class. It uses the WM's extents where they are non-zero and
+  otherwise writes Weston's 38, 38, 59, 38 on the window at once; it waits, up to 3 s, only while a WM runs and a
+  window it manages has no `_NET_FRAME_EXTENTS` yet (an all-zero value is the WM's answer, and the popup is
+  override-redirect; PR #36 review). Each step's action (a move, a size, the size limits) must then show in X - the
+  client's geometry, or `WM_NORMAL_HINTS` for the limits, differs from its value just before the action - within 5 s,
+  otherwise the step is recorded as "never took effect" and its tests fail on that (PR #36 review). Then it takes
+  readings until two in a row agree, writing the stand-in back first if the WM overwrote it (openbox writes 0,0,0,0
+  when it resizes an undecorated window; it never did in these runs).
 - `GtkFrameExtentsNativeTest`, 14 tests on one child JVM. It shows `TITLED` first, so that no other window can fill
   the cache before it. Every assertion is on readings taken after an explicit `setPosition(150, 120)` of the placed
   window, and each also requires non-zero extents in force and a settled reading. So it does not depend on the startup
@@ -502,7 +522,8 @@ In `modules/javafx.graphics`; Linux only (`@EnabledOnOs(LINUX)`), and skipped wi
   - `undecoratedSizeLimitsReachTheWindowManagerAsAsked` (not the popup): hints min 123,45 max 800,600;
   - the `TITLED` control (D2), three tests: the `Window` is the client plus the extents, an explicit size is the frame
     size, and the hints are the sizes asked less the extents. Its position is the client's less (left, top) and the
-    `View` at (left, top) where GDK takes the frame from the extents; otherwise the client's position and 0,0.
+    `View` at (left, top) where GDK takes the frame from the extents; otherwise the position of the client's top-level
+    ancestor and the client's offset from it (PR #36 review: the client itself without a WM, i3's frame under i3).
 - `GtkUndecoratedStageBoundsTest`, 2 tests, the public-API check: an `UNDECORATED` `Stage` at 0,0 with a scene as
   large as the screen (1920x1080) reports 0,0 1920x1080 with its scene at 0,0, and its rectangle equals its client's.
   The child is pinned to `-Dglass.gtk.uiScale=1.0`, since a `Stage` is in logical units and the client in X11 pixels
@@ -514,8 +535,8 @@ In `modules/javafx.graphics`; Linux only (`@EnabledOnOs(LINUX)`), and skipped wi
   stand-in comes after the stage is placed, and glass no longer sets an undecorated window's bounds again, so no
   configure reads the position with it in force. Under openbox `GtkFrameExtentsNativeTest` covers the position, since
   it moves each window after the stand-in is in force. Both class javadocs say so.
-- Added run time: the native class about 14 s without a WM and 26 s under openbox (the 3 s wait per window), the stage
-  class 2-5 s.
+- Added run time: the native class about 14 s without a WM and under openbox, the stage class 2-3 s. Before the PR #36
+  review, which dropped the 3 s wait where the WM had already answered, they took 27 s and 7 s under openbox.
 
 Before the fix (the unfixed natives with the new classes; each setup run twice, with the same results): the native
 class fails 11 of 14 and the stage class 2 of 2; the `TITLED` control passes.
@@ -552,9 +573,15 @@ the stage class:
 | JDK-8329821 under i3: `ContextMenu.show(anchor, Side.BOTTOM, 0, 0)` on a decorated stage | passes, 2 runs | passes, 2 runs: the menu is override-redirect and 108x80 in X, in JavaFX and in its scene, with no extents |
 | JDK-8348095 under i3: the same in a full-screen stage | passes, 2 runs | passes, 2 runs: the menu's content sits 1,-2 from the anchor's bottom-left, in X exactly where JavaFX computed it |
 | i3 tabbed with a sibling, `UNTITLED` 320x240 | 0,18 1920x1062, `View` 2,0: i3's frame | 2,18 1916x1060, `View` 0,0: the client without i3's 2 px border (D1's accepted risk). Alone in the container both report 0,0 1920x1080 |
-| the openbox race of note (d), one window per fresh openbox | 3 of 10 runs under load (8 busy loops at nice 10, openbox at nice 19), 0 of 4 without | 0 of 12 under load, 0 of 4 without |
+| the openbox race of note (d), one window per fresh openbox | 3 of 10 runs under load (8 busy loops at nice 10, openbox at nice 19), 0 of 4 without | 0 of 12 under load, 0 of 4 without: narrowed, not removed by construction (US-065 item 4) |
 | headless (`DISPLAY` unset) | 31 tests in the 5 headless classes | the same 31; the 2 new classes report `Tests run: 0` with the other display classes |
 
+- `GtkFrameExtentsNativeTest` under i3 (PR #36 review; with the fix, on a private Xvfb): as committed in 836398ba31,
+  9 of 14 fail, the `TITLED` control among them (glass 0,0 1920x1080 with the `View` at 2,18 is i3's frame, which GDK
+  takes from the window tree, where the test expected the client's position). With the control's expectation
+  corrected alone it passes (8 of 14 fail). With every change of that review 12 of 14 fail: i3 keeps each managed
+  window in its tile, so its move, size and size limits never take effect, the control's included, and only the
+  override-redirect popup's two tests pass. i3 is not a WM the class is meant for (its javadoc).
 - The gate took 667 s and 681 s before the fix and 698 s after. No run left an `hs_err` file, and the runs left the
   natives unchanged. Every run except those on `:0` was on a private Xvfb.
 - In the JDK-8348095 scenario the full-screen stage reports 0,0 1924x1100 before and after the fix: the stale

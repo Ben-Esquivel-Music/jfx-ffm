@@ -818,7 +818,7 @@ WindowContextTop::WindowContextTop(int64_t _window_id, WindowContext* _owner, lo
     glass_configure_window_transparency(gtk_widget, frame_type == TRANSPARENT);
     gtk_window_set_title(GTK_WINDOW(gtk_widget), "");
 
-    if (frame_type != TITLED) {
+    if (!has_wm_frame()) {
         gtk_window_set_decorated(GTK_WINDOW(gtk_widget), FALSE);
     } else {
         geometry.extents = get_cached_extents();
@@ -846,10 +846,10 @@ void WindowContextTop::request_frame_extents() {
 }
 
 void WindowContextTop::update_frame_extents() {
-    // Only a TITLED window has a WM frame. A WM may still publish extents for an undecorated window (Weston on
-    // WSLg reports those of a decorated frame), so the others keep zero extents and leave the cache alone, as
+    // Only a window with a WM frame has extents. A WM may still publish extents for an undecorated window (Weston
+    // on WSLg reports those of a decorated frame), so the others keep zero extents and leave the cache alone, as
     // in JDK-8354943 (openjdk/jfx#2139).
-    if (frame_type != TITLED) {
+    if (!has_wm_frame()) {
         return;
     }
 
@@ -1002,7 +1002,7 @@ void WindowContextTop::process_state(GdkEventWindowState* event) {
 
 void WindowContextTop::process_realize() {
     gdk_window = gtk_widget_get_window(gtk_widget);
-    if (frame_type == TITLED) {
+    if (has_wm_frame()) {
         request_frame_extents();
     }
 
@@ -1048,7 +1048,7 @@ void WindowContextTop::process_configure(GdkEventConfigure* event) {
                 ? event->height : wh;
     }
 
-    if (frame_type == TITLED) {
+    if (has_wm_frame()) {
         gint root_x, root_y, origin_x, origin_y;
         gdk_window_get_root_origin(gdk_window, &root_x, &root_y);
         gdk_window_get_origin(gdk_window, &origin_x, &origin_y);

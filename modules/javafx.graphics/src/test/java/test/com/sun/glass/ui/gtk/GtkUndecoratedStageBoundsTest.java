@@ -30,6 +30,7 @@ import com.sun.javafx.tk.quantum.WindowStage;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.atomic.AtomicReference;
 import javafx.geometry.Rectangle2D;
 import javafx.scene.Group;
 import javafx.scene.Scene;
@@ -41,6 +42,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.Timeout;
 import org.junit.jupiter.api.condition.EnabledOnOs;
 import org.junit.jupiter.api.condition.OS;
+import test.com.sun.glass.ui.gtk.GtkFrameExtentsStandIn.Effect;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
@@ -125,18 +127,22 @@ public class GtkUndecoratedStageBoundsTest {
                 "extentsSource")) {
             values.put(key, value("stage." + key));
         }
-        assertNotEquals("no", values.get("settled"), describe(values, "a reading that settled within "
-                + GtkFrameExtentsStandIn.SETTLE_ROUNDS + " rounds"));
+        assertNotEquals(GtkFrameExtentsStandIn.NOT_SETTLED, values.get("settled"), describe(values, "a reading that"
+                + " settled within " + GtkFrameExtentsStandIn.SETTLE_ROUNDS + " rounds"));
         assertTrue(GtkFrameExtentsStandIn.nonZero(values.get("extents")), describe(values, "non-zero frame extents"
                 + " in force, from the window manager or the stand-in"));
         return values;
     }
 
-    /** The extents in force and where they come from, the stage's rectangle and the client's, and the expectation. */
+    /**
+     * The extents in force and where they come from, the stage's rectangle and the client's, how the reading settled
+     * and the expectation.
+     */
     private static String describe(Map<String, String> values, String expectation) {
         return "UNDECORATED stage, _NET_FRAME_EXTENTS " + values.get("extents") + " from "
                 + values.get("extentsSource") + ": stage " + values.get("stage") + ", scene " + values.get("scene")
-                + "; client " + values.get("client") + "; primary screen " + values.get("screen") + ". Expected: "
+                + "; client " + values.get("client") + "; primary screen " + values.get("screen") + "; settled: "
+                + values.get("settled") + ", stand-in rewrites: " + values.get("rewrites") + ". Expected: "
                 + expectation;
     }
 
@@ -144,27 +150,30 @@ public class GtkUndecoratedStageBoundsTest {
     // The scenario (child JVM)
     // ---------------------------------------------------------------------------------------------
 
-    /** Runs in {@link GtkGlassChild}. */
+    /** Runs in {@link GtkGlassChild}. Hides the stage it made, whatever fails. */
     static void stageScenario(Map<String, String> out) throws Exception {
         GtkGlassChild.recordEnvironment(out);
         GtkEventTrace t = new GtkEventTrace();
-        Stage stage = GtkGlassChild.onFx(() -> {
-            Rectangle2D screen = Screen.getPrimary().getBounds();
-            out.put("stage.screen", rect((int) screen.getMinX(), (int) screen.getMinY(), (int) screen.getWidth(),
-                    (int) screen.getHeight()));
-            Stage s = new Stage(StageStyle.UNDECORATED);
-            s.setScene(new Scene(new Group(), screen.getWidth(), screen.getHeight()));
-            s.setX(0);
-            s.setY(0);
-            s.show();
-            return s;
-        });
+        AtomicReference<Stage> made = new AtomicReference<>();
         try {
+            Stage stage = GtkGlassChild.onFx(() -> {
+                Rectangle2D screen = Screen.getPrimary().getBounds();
+                out.put("stage.screen", rect((int) screen.getMinX(), (int) screen.getMinY(),
+                        (int) screen.getWidth(), (int) screen.getHeight()));
+                Stage s = new Stage(StageStyle.UNDECORATED);
+                made.set(s);
+                s.setScene(new Scene(new Group(), screen.getWidth(), screen.getHeight()));
+                s.setX(0);
+                s.setY(0);
+                s.show();
+                return s;
+            });
             long xid = GtkGlassChild.onFx(() ->
                     ((WindowStage) WindowHelper.getPeer(stage)).getPlatformWindow().getNativeWindow());
             t.settle();
-            boolean standIn = GtkFrameExtentsStandIn.provide(out, "stage", xid);
-            GtkFrameExtentsStandIn.settled(t, out, "stage", xid, standIn, () -> {
+            boolean standIn = GtkFrameExtentsStandIn.provide(out, "stage", xid, false);
+            GtkFrameExtentsStandIn.settled(t, out, "stage", xid, standIn, Effect.NONE, () -> {
+            }, () -> {
                 Map<String, String> values = new LinkedHashMap<>();
                 values.put("stage", number(stage.getX()) + "," + number(stage.getY()) + " " + number(stage.getWidth())
                         + "x" + number(stage.getHeight()));
@@ -173,7 +182,10 @@ public class GtkUndecoratedStageBoundsTest {
             });
         } finally {
             GtkGlassChild.onFx(() -> {
-                stage.hide();
+                Stage s = made.get();
+                if (s != null) {
+                    s.hide();
+                }
                 return null;
             });
         }
