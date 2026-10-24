@@ -50,7 +50,7 @@ import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.condition.EnabledOnOs;
 import org.junit.jupiter.api.condition.OS;
-import test.com.sun.javafx.font.LinuxFontGoldens.GoldenMap;
+import test.com.sun.javafx.font.FontGoldenHarness.GoldenMap;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;

@@ -29,7 +29,7 @@ import java.lang.reflect.Constructor;
 import java.lang.reflect.InvocationTargetException;
 
 /**
- * Uncached font objects for the Linux goldens.
+ * Uncached font objects for the font goldens.
  * <p>
  * {@link PrismFontFactory} caches physical, composite and logical fonts, and their fallback slots grow in the
  * order the process first needs them, so a golden that went through those caches would depend on which test
@@ -51,10 +51,15 @@ public final class FontResourceShim {
      */
     public static FontResource newUncachedFontFile(String file) {
         try {
-            return PrismFontFactory.getFontFactory().createFontFile(null, file, 0, false, false, false);
+            return newUncachedFontFile(file, 0);
         } catch (Exception e) {
             return null;
         }
+    }
+
+    /** The font at {@code index} of {@code file}, made as {@link #newUncachedFontFile(String)} makes it; throws. */
+    public static FontResource newUncachedFontFile(String file, int index) throws Exception {
+        return PrismFontFactory.getFontFactory().createFontFile(null, file, index, false, false, false);
     }
 
     /** The package-private {@link PrismFont} constructor. */

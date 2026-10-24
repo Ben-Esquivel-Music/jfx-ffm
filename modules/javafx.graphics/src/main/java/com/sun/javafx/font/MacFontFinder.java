@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2011, 2024, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2011, 2026, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -25,21 +25,32 @@
 
 package com.sun.javafx.font;
 
+import java.lang.foreign.MemorySegment;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.Locale;
 
-import com.sun.glass.utils.NativeLibLoader;
+import com.sun.javafx.font.coretext.CFNative;
+import com.sun.javafx.font.coretext.CTNative;
 
+/**
+ * The macOS system fonts, font files and cascade lists, from CoreText; once JNI natives in {@code MacFontFinder.c}.
+ * "The C" here is that file at commit {@code 28b02ef511}
+ * ({@code git show 28b02ef511:modules/javafx.graphics/src/main/native-font/MacFontFinder.c}).
+ */
 public class MacFontFinder {
-
-    static {
-        NativeLibLoader.loadLibrary("javafx_font");
-    }
 
     private static final int SystemFontType = 2; /*kCTFontSystemFontType*/
     private static final int MonospacedFontType = 1; /*kCTFontUserFixedPitchFontType*/
-    private native static String getFont(int type);
+    private static String getFont(int type) {
+        MemorySegment font = CTNative.CTFontCreateUIFontForLanguage(type, 0, MemorySegment.NULL);
+        MemorySegment family = CTNative.CTFontCopyFamilyName(font);
+        String name = CFNative.cfToString(family);
+        CFNative.CFRelease(family);
+        CFNative.CFRelease(font);
+        return name;
+    }
+
     public static String getSystemFont() {
         return getFont(SystemFontType);
     }
@@ -48,7 +59,13 @@ public class MacFontFinder {
         return getFont(MonospacedFontType);
     }
 
-    native static float getSystemFontSize();
+    static float getSystemFontSize() {
+        MemorySegment font = CTNative.CTFontCreateUIFontForLanguage(CTNative.kCTFontUIFontSystem, 0.0,
+                                                                    MemorySegment.NULL);
+        float size = (float) CTNative.CTFontGetSize(font);
+        CFNative.CFRelease(font);
+        return size;
+    }
 
     public static boolean populateFontFileNameMap(
             HashMap<String,String> fontToFileMap,
@@ -100,9 +117,78 @@ public class MacFontFinder {
      * @param familyName
      * @return array of post-script font names
      */
-    private native static String[] getFontData();
+    private static String[] getFontData() {
+        MemorySegment collection = CTNative.CTFontCollectionCreateFromAvailableFonts(MemorySegment.NULL);
+        MemorySegment fonts = CTNative.CTFontCollectionCreateMatchingFontDescriptors(collection);
+        CFNative.CFRelease(collection);
+        long count = CFNative.CFArrayGetCount(fonts);
+        String[] result = new String[(int) ((count + 2) * 3)];
+        int index = 0;
+        for (long i = 0; i < count; i++) {
+            index = addDescriptor(CFNative.CFArrayGetValueAtIndex(fonts, i), result, index);
+        }
+        CFNative.CFRelease(fonts);
+        for (int type : new int[] {CTNative.kCTFontUIFontSystem, CTNative.kCTFontUIFontEmphasizedSystem}) {
+            MemorySegment font = CTNative.CTFontCreateUIFontForLanguage(type, 0, MemorySegment.NULL);
+            MemorySegment descriptor = CTNative.CTFontCopyFontDescriptor(font);
+            index = addDescriptor(descriptor, result, index);
+            CFNative.CFRelease(descriptor);
+            CFNative.CFRelease(font);
+        }
+        return result;
+    }
 
-    public native static String[] getCascadeList(long fontRef);
-    public native static long[] getCascadeListRefs(long fontRef);
+    private static int addDescriptor(MemorySegment descriptor, String[] result, int index) {
+        if (descriptor.address() == 0) {
+            return index;
+        }
+        MemorySegment name = CTNative.CTFontDescriptorCopyAttribute(descriptor, CTNative.kCTFontDisplayNameAttribute);
+        MemorySegment family = CTNative.CTFontDescriptorCopyAttribute(descriptor, CTNative.kCTFontFamilyNameAttribute);
+        MemorySegment url = CTNative.CTFontDescriptorCopyAttribute(descriptor, CTNative.kCTFontURLAttribute);
+        MemorySegment file = url.address() == 0 ? MemorySegment.NULL
+                : CFNative.CFURLCopyFileSystemPath(url, CFNative.kCFURLPOSIXPathStyle);
+        int next = index;
+        if (name.address() != 0 && family.address() != 0 && file.address() != 0) {
+            result[next++] = CFNative.cfToString(name);
+            result[next++] = CFNative.cfToString(family);
+            result[next++] = CFNative.cfToString(file);
+        }
+        for (MemorySegment object : new MemorySegment[] {name, family, url, file}) {
+            if (object.address() != 0) {
+                CFNative.CFRelease(object);
+            }
+        }
+        return next;
+    }
+
+    /** Display name and file per cascade entry; the name and URL copies are leaked, as the C leaked them. */
+    public static String[] getCascadeList(long fontRef) {
+        MemorySegment codes = CFNative.CFLocaleCopyISOLanguageCodes();
+        MemorySegment descriptors = CTNative.CTFontCopyDefaultCascadeListForLanguages(ptr(fontRef), codes);
+        CFNative.CFRelease(codes);
+        long count = CFNative.CFArrayGetCount(descriptors);
+        String[] names = new String[(int) (count * 2)];
+        for (int i = 0; i < count; i++) {
+            MemorySegment descriptor = CFNative.CFArrayGetValueAtIndex(descriptors, i);
+            CTNative.CTFontDescriptorCopyAttribute(descriptor, CTNative.kCTFontNameAttribute);
+            MemorySegment displayName = CTNative.CTFontDescriptorCopyAttribute(descriptor,
+                                                                               CTNative.kCTFontDisplayNameAttribute);
+            MemorySegment url = CTNative.CTFontDescriptorCopyAttribute(descriptor, CTNative.kCTFontURLAttribute);
+            MemorySegment file = url.address() == 0 ? MemorySegment.NULL
+                    : CFNative.CFURLCopyFileSystemPath(url, CFNative.kCFURLPOSIXPathStyle);
+            names[2 * i] = CFNative.cfToString(displayName);
+            CFNative.CFRelease(displayName);
+            names[2 * i + 1] = CFNative.cfToString(file);
+            if (file.address() != 0) {
+                CFNative.CFRelease(file);
+            }
+        }
+        CFNative.CFRelease(descriptors);
+        return names;
+    }
+
+    private static MemorySegment ptr(long address) {
+        return MemorySegment.ofAddress(address);
+    }
 }
 

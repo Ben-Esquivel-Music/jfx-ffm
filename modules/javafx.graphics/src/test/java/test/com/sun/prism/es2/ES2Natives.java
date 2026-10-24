@@ -80,13 +80,9 @@ public final class ES2Natives {
      * Other libraries the javafx.graphics CMake build writes into the same directory. Any of them
      * present with no library under test means the natives were built but this one was left out - still a
      * skip, because the ES2 libraries are optional, but a more specific one. The list is a union of witnesses,
-     * so an entry a platform does not build only shrinks it: {@code javafx_font} is built on macOS only (its
-     * CoreText sources). Windows lost its {@code font} target with {@code directwrite.cpp}; Linux, which
-     * still builds {@code prism_es2}, lost it when {@code fontpath_linux.c}, {@code freetype.c} and
-     * {@code pango.c} of commit {@code 7b43255b30} were replaced by Java bindings of the system libraries,
-     * and lost {@code glass} with {@code launcher.c}, the library that held its
-     * {@code Java_com_sun_glass_ui_gtk_GtkApplication__1queryLibrary} at commit {@code 033187ad90}. For the
-     * Monocle library the desktop {@code prism_es2} is one more witness: built, but without libgles-dev.
+     * so an entry a platform does not build only shrinks it: {@code javafx_iio} is built on every platform,
+     * {@code glass} on Windows and macOS only. For the Monocle library the desktop {@code prism_es2} is one more
+     * witness: built, but without libgles-dev.
      */
     private static final List<String> SIBLING_FILES = siblingFiles();
 
@@ -100,8 +96,7 @@ public final class ES2Natives {
 
     private static List<String> siblingFiles() {
         List<String> files = new ArrayList<>(List.of(
-                System.mapLibraryName("glass"), System.mapLibraryName("javafx_font"),
-                System.mapLibraryName("javafx_iio")));
+                System.mapLibraryName("glass"), System.mapLibraryName("javafx_iio")));
         if (!DESKTOP_LIBRARY_NAME.equals(LIBRARY_NAME)) {
             files.add(System.mapLibraryName(DESKTOP_LIBRARY_NAME));
         }

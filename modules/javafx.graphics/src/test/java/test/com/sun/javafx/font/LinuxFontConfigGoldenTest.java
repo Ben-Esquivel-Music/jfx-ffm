@@ -43,7 +43,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.condition.EnabledOnOs;
 import org.junit.jupiter.api.condition.OS;
 import test.com.sun.javafx.font.LinuxFontGoldens.FontMaps;
-import test.com.sun.javafx.font.LinuxFontGoldens.GoldenMap;
+import test.com.sun.javafx.font.FontGoldenHarness.GoldenMap;
 import test.com.sun.javafx.test.ParityGate;
 
 import static org.junit.jupiter.api.Assertions.assertFalse;

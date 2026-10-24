@@ -41,7 +41,7 @@ import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.condition.EnabledOnOs;
 import org.junit.jupiter.api.condition.OS;
-import test.com.sun.javafx.font.LinuxFontGoldens.GoldenMap;
+import test.com.sun.javafx.font.FontGoldenHarness.GoldenMap;
 import test.com.sun.javafx.test.ParityGate;
 
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
@@ -180,14 +180,14 @@ public class LinuxPangoGoldenTest {
 
     private static void captureCodecs(GoldenMap out) {
         for (int i = 0; i < UTF16_ROWS.size(); i++) {
-            out.put("pg.utf16to8.a" + LinuxFontGoldens.pad(i, 2), utf16to8(UTF16_ROWS.get(i), false));
+            out.put("pg.utf16to8.a" + FontGoldenFormat.pad(i, 2), utf16to8(UTF16_ROWS.get(i), false));
         }
         for (int i = 0; i < UTF16_EXTRA_ROWS.size(); i++) {
-            out.put("pg.utf16to8.x" + LinuxFontGoldens.pad(i, 2), utf16to8(UTF16_EXTRA_ROWS.get(i), false));
+            out.put("pg.utf16to8.x" + FontGoldenFormat.pad(i, 2), utf16to8(UTF16_EXTRA_ROWS.get(i), false));
         }
-        out.put("pg.utf16to8.x" + LinuxFontGoldens.pad(UTF16_EXTRA_ROWS.size(), 2), utf16to8(longText(), true));
+        out.put("pg.utf16to8.x" + FontGoldenFormat.pad(UTF16_EXTRA_ROWS.size(), 2), utf16to8(longText(), true));
         for (int i = 0; i < LinuxFontGoldens.TEXTS.size(); i++) {
-            out.put("pg.utf16to8.s" + LinuxFontGoldens.pad(i, 2), utf16to8(LinuxFontGoldens.TEXTS.get(i), false));
+            out.put("pg.utf16to8.s" + FontGoldenFormat.pad(i, 2), utf16to8(LinuxFontGoldens.TEXTS.get(i), false));
         }
 
         for (int i = 0; i < SET_FAMILY_ROWS.size(); i++) {
@@ -196,8 +196,8 @@ public class LinuxPangoGoldenTest {
             OSPangoShim.pango_font_description_set_family(desc, input);
             byte[] stored = LinuxFontOracleShim.pangoGetFamilyRaw(desc);
             OSPangoShim.pango_font_description_free(desc);
-            String in = input != null && input.length() > 64 ? summary(input) : LinuxFontGoldens.unitsHex(input);
-            out.put("pg.setFamily.f" + LinuxFontGoldens.pad(i, 2), in + "|" + LinuxFontGoldens.bytesHex(stored));
+            String in = input != null && input.length() > 64 ? summary(input) : FontGoldenFormat.unitsHex(input);
+            out.put("pg.setFamily.f" + FontGoldenFormat.pad(i, 2), in + "|" + FontGoldenFormat.bytesHex(stored));
         }
 
         for (int i = 0; i < GET_FAMILY_ROWS.size(); i++) {
@@ -206,18 +206,18 @@ public class LinuxPangoGoldenTest {
             LinuxFontOracleShim.pangoSetFamilyRaw(desc, planted);
             String family = OSPangoShim.pango_font_description_get_family(desc);
             OSPangoShim.pango_font_description_free(desc);
-            out.put("pg.getFamily.b" + LinuxFontGoldens.pad(i, 2),
-                    LinuxFontGoldens.bytesHex(planted) + "|" + LinuxFontGoldens.unitsHex(family));
+            out.put("pg.getFamily.b" + FontGoldenFormat.pad(i, 2),
+                    FontGoldenFormat.bytesHex(planted) + "|" + FontGoldenFormat.unitsHex(family));
         }
         long unset = OSPangoShim.pango_font_description_new();
         String family = OSPangoShim.pango_font_description_get_family(unset);
         OSPangoShim.pango_font_description_free(unset);
-        out.put("pg.getFamily.unset", FontGoldens.NULL + "|" + LinuxFontGoldens.unitsHex(family));
+        out.put("pg.getFamily.unset", FontGoldens.NULL + "|" + FontGoldenFormat.unitsHex(family));
     }
 
     /** {@code input|bytes|strlen|g_utf8_strlen(str,-1)|g_utf8_offset_to_pointer(str,len)-str}. */
     private static String utf16to8(String input, boolean summarize) {
-        String in = summarize ? summary(input) : LinuxFontGoldens.unitsHex(input);
+        String in = summarize ? summary(input) : FontGoldenFormat.unitsHex(input);
         long str = OSPangoShim.g_utf16_to_utf8(input == null ? null : input.toCharArray());
         if (str == 0) {
             return in + "|#null|#null|#null|#null";
@@ -226,7 +226,7 @@ public class LinuxPangoGoldenTest {
         long length = OSPangoShim.g_utf8_strlen(str, -1);
         long end = OSPangoShim.g_utf8_offset_to_pointer(str, length);
         OSPangoShim.g_free(str);
-        String out = summarize ? bytes.length + ":" + FontGoldens.sha256Hex(bytes) : LinuxFontGoldens.bytesHex(bytes);
+        String out = summarize ? bytes.length + ":" + FontGoldens.sha256Hex(bytes) : FontGoldenFormat.bytesHex(bytes);
         return in + "|" + out + "|" + bytes.length + "|" + length + "|" + (end - str);
     }
 
@@ -277,7 +277,7 @@ public class LinuxPangoGoldenTest {
     private static void rawRun(GoldenMap out, long fontmap, String familyKey, String family, boolean fallback,
                                boolean rtl, float size, int textIndex) {
         String key = "pg.raw." + familyKey + "." + (fallback ? "on" : "off") + "." + (rtl ? "rtl" : "ltr") + "."
-                + size + ".s" + LinuxFontGoldens.pad(textIndex, 2);
+                + size + ".s" + FontGoldenFormat.pad(textIndex, 2);
         long context = OSPangoShim.pango_font_map_create_context(fontmap);
         if (rtl) {
             OSPangoShim.pango_context_set_base_dir(context, OSPangoShim.constant("PANGO_DIRECTION_RTL"));
@@ -319,7 +319,7 @@ public class LinuxPangoGoldenTest {
                 }
                 OSPangoShim.g_list_free(runs);
                 for (int i = 0; i < count; i++) {
-                    out.put(key + ".i" + LinuxFontGoldens.pad(i, 2),
+                    out.put(key + ".i" + FontGoldenFormat.pad(i, 2),
                             itemValue(publicFields[i], shaped[i], itemFonts[i]));
                 }
             }
@@ -346,8 +346,8 @@ public class LinuxPangoGoldenTest {
         }
         value.append(shaped.numGlyphs()).append(';').append(shaped.numChars())
              .append('|').append(String.join(";", glyphs))
-             .append('|').append(LinuxFontGoldens.joinInts(shaped.widths()))
-             .append('|').append(LinuxFontGoldens.joinInts(shaped.logClusters()))
+             .append('|').append(FontGoldenFormat.joinInts(shaped.widths()))
+             .append('|').append(FontGoldenFormat.joinInts(shaped.logClusters()))
              .append('|');
         if (shaped.font() == 0) {
             value.append(FontGoldens.NULL);
@@ -398,9 +398,9 @@ public class LinuxPangoGoldenTest {
         PGFont font = FontResourceShim.newPrismFont(resource, resource.getFullName(), size);
         for (int s : texts) {
             String text = LinuxFontGoldens.TEXTS.get(s);
-            LinuxFontGoldens.putLayout(out, prefix + ".ltr.s" + LinuxFontGoldens.pad(s, 2), font, text, false);
+            FontGoldenFormat.putLayout(out, prefix + ".ltr.s" + FontGoldenFormat.pad(s, 2), font, text, false);
             if (bothDirections) {
-                LinuxFontGoldens.putLayout(out, prefix + ".rtl.s" + LinuxFontGoldens.pad(s, 2), font, text, true);
+                FontGoldenFormat.putLayout(out, prefix + ".rtl.s" + FontGoldenFormat.pad(s, 2), font, text, true);
             }
         }
         if (resource instanceof CompositeFontResource composite) {
@@ -408,7 +408,7 @@ public class LinuxPangoGoldenTest {
             out.put(prefix + ".numSlots", Integer.toString(slots));
             for (int slot = 0; slot < slots; slot++) {
                 FontResource slotResource = composite.getSlotResource(slot);
-                out.put(prefix + ".slot" + LinuxFontGoldens.pad(slot, 2), slotResource == null ? FontGoldens.NULL
+                out.put(prefix + ".slot" + FontGoldenFormat.pad(slot, 2), slotResource == null ? FontGoldens.NULL
                         : LinuxFontGoldens.safeText(slotResource.getFullName()) + ";"
                         + LinuxFontGoldens.safeText(slotResource.getFileName()));
             }
@@ -444,15 +444,15 @@ public class LinuxPangoGoldenTest {
                 int nul = input.indexOf('\0');
                 if (nul >= 0 && !parts[1].equals(FontGoldens.NULL)) {
                     byte[] prefix = input.substring(0, nul).getBytes(StandardCharsets.UTF_8);
-                    truncatedAtNul |= parts[1].equals(LinuxFontGoldens.bytesHex(prefix));
+                    truncatedAtNul |= parts[1].equals(FontGoldenFormat.bytesHex(prefix));
                 }
             } else if (key.startsWith("pg.setFamily.") && !parts[0].contains(":")
                        && !parts[0].equals(FontGoldens.NULL) && !parts[1].equals(FontGoldens.NULL)) {
                 String input = LinuxFontGoldens.fromUnitsHex(parts[0]);
-                modifiedUtf8 |= !parts[1].equals(LinuxFontGoldens.bytesHex(input.getBytes(StandardCharsets.UTF_8)));
+                modifiedUtf8 |= !parts[1].equals(FontGoldenFormat.bytesHex(input.getBytes(StandardCharsets.UTF_8)));
             } else if (key.startsWith("pg.getFamily.b") && !parts[1].equals(FontGoldens.NULL)) {
                 String standard = new String(LinuxFontGoldens.parseBytesHex(parts[0]), StandardCharsets.UTF_8);
-                jniDecoding |= !parts[1].equals(LinuxFontGoldens.unitsHex(standard));
+                jniDecoding |= !parts[1].equals(FontGoldenFormat.unitsHex(standard));
             } else if (key.startsWith("pg.raw.") && key.contains(".i") && parts.length >= 6) {
                 String[] item = parts[0].split(";");
                 String[] counts = parts[1].split(";");

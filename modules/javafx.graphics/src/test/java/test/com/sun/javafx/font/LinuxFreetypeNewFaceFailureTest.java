@@ -124,8 +124,8 @@ public class LinuxFreetypeNewFaceFailureTest {
     }
 
     private static Path prepare(String scenario) throws IOException {
-        Path work = LinuxFontGoldens.moduleDirectory().resolve(WORK_DIRECTORY).resolve(scenario);
-        LinuxFontGoldens.deleteTree(work);
+        Path work = FontGoldenRuntime.moduleDirectory().resolve(WORK_DIRECTORY).resolve(scenario);
+        FontGoldenRuntime.deleteTree(work);
         return Files.createDirectories(work);
     }
 
@@ -160,14 +160,14 @@ public class LinuxFreetypeNewFaceFailureTest {
         command.add(work.toString());
 
         Process process = new ProcessBuilder(command)
-                .directory(LinuxFontGoldens.moduleDirectory().toFile())
+                .directory(FontGoldenRuntime.moduleDirectory().toFile())
                 .redirectOutput(stdout.toFile())
                 .redirectError(stderr.toFile())
                 .start();
         if (!process.waitFor(CHILD_TIMEOUT_SECONDS, TimeUnit.SECONDS)) {
             process.destroyForcibly().waitFor(10, TimeUnit.SECONDS);
             fail("child JVM '" + scenario + "' did not finish within " + CHILD_TIMEOUT_SECONDS + " s; stderr:\n"
-                    + LinuxFontGoldens.tail(stderr, 40));
+                    + FontGoldenRuntime.tail(stderr, 40));
         }
         List<Path> errorFiles;
         try (Stream<Path> files = Files.list(errors)) {
@@ -180,7 +180,7 @@ public class LinuxFreetypeNewFaceFailureTest {
             for (Path errorFile : errorFiles) {
                 message.append('\n').append(fatalErrorHeader(errorFile));
             }
-            message.append("\nlast stderr lines:\n").append(LinuxFontGoldens.tail(stderr, 40))
+            message.append("\nlast stderr lines:\n").append(FontGoldenRuntime.tail(stderr, 40))
                    .append("\ncommand: ").append(command);
             fail(message.toString());
         }

@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2011, 2024, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2011, 2026, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -31,7 +31,12 @@
 package test.com.sun.javafx.font;
 
 import com.sun.javafx.font.PrismFontFactory;
+import com.sun.javafx.font.coretext.CFNativeShim;
+import com.sun.javafx.font.coretext.CGNativeShim;
+import com.sun.javafx.font.coretext.CTNativeShim;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.condition.EnabledOnOs;
+import org.junit.jupiter.api.condition.OS;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 
@@ -53,6 +58,19 @@ public class PrismFontFactoryTest {
         assertNotNull(result, "Should never turn null");
         expResult = PrismFontFactory.getFontFactory();
         assertEquals(expResult, result, "Creates different instance of FontFactory");
+    }
+
+    /**
+     * Reading a registry initialises its facade, so this cannot show that the factory linked them:
+     * {@code MacFontBindingStructureTest} pins the {@code CTNative.link()} call from the class file.
+     */
+    @Test
+    @EnabledOnOs(OS.MAC)
+    public void theCoreTextRegistriesAreCompleteBesideAFontFactory() {
+        assertNotNull(PrismFontFactory.getFontFactory());
+        assertEquals(20, CFNativeShim.boundFunctions().size(), "CoreFoundation");
+        assertEquals(22, CGNativeShim.boundFunctions().size(), "CoreGraphics");
+        assertEquals(33, CTNativeShim.boundFunctions().size(), "CoreText");
     }
 
 }
