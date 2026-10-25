@@ -78,7 +78,7 @@ public class WinPreferenceSinksNativeTest {
 
     private static final long WAIT_MILLIS = 10_000;
     private static final int DEFAULT_RUNS = 3;
-    private static final int SECONDS_PER_RUN = 30;
+    private static final int SECONDS_PER_RUN = 60;
     private static final int INVOCATIONS_AFTER_TEARDOWN = 10;
 
     @BeforeAll
@@ -149,6 +149,10 @@ public class WinPreferenceSinksNativeTest {
                 }
             }
         });
+        // start() does not wait for gwin_run_loop, and the send below is handled ahead of the posted preference
+        // messages, which gwin_terminate_loop's DestroyWindow discards: wait until one has been handled.
+        out.put("prefs.awaited", Boolean.toString(
+                WinGlassChild.waitFor(WAIT_MILLIS, () -> !WinGlassNativeShim.recordedPreferencesCalls().isEmpty())));
         sleep(ThreadLocalRandom.current().nextLong(20, 200));
         // A sent runnable: the sink's posts can fill the toolkit thread's queue to its quota, and a posted one
         // would then be refused.
