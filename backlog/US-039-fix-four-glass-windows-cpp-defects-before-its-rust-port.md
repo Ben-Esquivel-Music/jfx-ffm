@@ -378,8 +378,10 @@ thread, apartment `MAINSTA`.
 - Part 1: a post or send that lost the race with teardown is refused, not attempted, and `ExecActionLater` frees
   its action then; `gwin_invoke_and_wait` answers `GWIN_ERR_NO_TOOLKIT` when the window goes before its runnable
   starts (Java ignores the status); teardown waits for a guarded call in flight; the cross-thread caller's wait is
-  the library's; `InSendMessageEx` on the toolkit thread answers `ISMEX_NOTIFY` during a cross-thread call; and a
-  toolkit thread that ends with a record pending leaves its caller waiting until US-052 part 1 lands.
+  the library's; `InSendMessageEx` on the toolkit thread answers `ISMEX_NOTIFY` during a cross-thread call; a
+  `gwin_invoke_later` whose action cannot be allocated answers `GWIN_ERR_NO_TOOLKIT` (its runnable does not run)
+  instead of letting `std::bad_alloc` leave the export; and a toolkit thread that ends with a record pending leaves
+  its caller waiting until US-052 part 1 lands.
 - Part 2: a sink's notification reaches Java asynchronously, on the toolkit thread.
 - Part 3: destroying a NULL text range no longer crashes, and the cleared VARIANTs also release a `VT_UNKNOWN`
   reference and a `VT_R8|VT_ARRAY` array, which leaked the same way.

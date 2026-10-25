@@ -346,7 +346,9 @@ final class WinGlassNative {
      * No toolkit window - never created, or already destroyed. Nothing was scheduled and no callback
      * will arrive for the id that was passed, so the caller may drop its registry entry. The two JNI
      * entry points this replaces returned {@code void} and failed exactly this silently
-     * ({@code GlassApplication.cpp:229-235}, {@code :238-245}).
+     * ({@code GlassApplication.cpp:229-235}, {@code :238-245}). It is also the answer when
+     * {@code gwin_invoke_and_wait}, called from another thread, cannot create its wait event, and when
+     * {@code gwin_invoke_later} cannot allocate its action.
      */
     static final int GWIN_ERR_NO_TOOLKIT = -2;
 
@@ -3483,7 +3485,9 @@ final class WinGlassNative {
      * runnable has run or has been refused, {@link #runLoop} in a {@code finally} because the JNI's
      * launchable was a parameter whose local ref died with the call, and
      * {@link #submitForLaterInvocation} when the downcall answers {@link #GWIN_ERR_NO_TOOLKIT}, which
-     * is the case where the C destroyed the action. What is left over is a runnable posted to the
+     * is the case where nothing was posted. The last three remove through
+     * {@link #unregisterRunnable}, which is also how {@code WinGlassNativeShim}'s toolkit drivers drop
+     * their ids, by the same rules. What is left over is a runnable posted to the
      * toolkit window whose message was still on the queue at shutdown, and that leaked its
      * {@code JGlobalRef} in precisely the same way. Reproducing a pre-existing leak is the job;
      * inventing cleanup for it is not.
@@ -3614,7 +3618,7 @@ final class WinGlassNative {
         } catch (Throwable t) {
             throw unexpected(t);
         } finally {
-            RUNNABLES.remove(id);
+            unregisterRunnable(id);
         }
     }
 
@@ -3694,7 +3698,7 @@ final class WinGlassNative {
         try {
             execAction(id);
         } finally {
-            RUNNABLES.remove(id);
+            unregisterRunnable(id);
         }
     }
 
@@ -3707,14 +3711,17 @@ final class WinGlassNative {
      * ({@code InvokeLaterDispatcher.java:122}, and {@code :143} through its own
      * {@code invokeAndWait}).
      * <p>
-     * On {@link #GWIN_ERR_NO_TOOLKIT} the C destroyed the action, so no callback will ever arrive for
-     * this id and the registry entry is dropped here. The runnable is not run and nothing is thrown,
-     * which is what {@code ExecActionLater} did ({@code :238-245}).
+     * On {@link #GWIN_ERR_NO_TOOLKIT} nothing was posted (an action the library allocated has been
+     * destroyed), so no callback will ever arrive for this id and the registry entry is dropped here.
+     * The runnable is not run and nothing is thrown; with no toolkit window that is what
+     * {@code ExecActionLater} did ({@code :238-245}). Where the JNI's {@code new} threw
+     * {@code std::bad_alloc} through the call, the library now answers {@link #GWIN_ERR_NO_TOOLKIT}
+     * and the runnable does not run.
      */
     static void submitForLaterInvocation(Runnable runnable) {
         long id = registerRunnable(runnable);
         if (!postAction(id)) {
-            RUNNABLES.remove(id);
+            unregisterRunnable(id);
         }
     }
 
@@ -3731,6 +3738,16 @@ final class WinGlassNative {
         return id;
     }
 
+    /**
+     * Drops the entry for {@code id}, for a caller that can prove no callback will arrive for it - the
+     * rules {@link #RUNNABLES} lists. Removing an id that is not there (0, or one {@link #onRunRunnable}
+     * has already removed) is a no-op. Package-private, with {@link #registerRunnable}, so that
+     * {@code WinGlassNativeShim}'s toolkit drivers release their ids exactly as the facade does.
+     */
+    static void unregisterRunnable(long id) {
+        RUNNABLES.remove(id);
+    }
+
     /** {@code gwin_invoke_and_wait}; the status is discarded - see {@link #invokeAndWait}. */
     private static void execAction(long id) {
         try {
@@ -3743,8 +3760,8 @@ final class WinGlassNative {
     /**
      * {@code gwin_invoke_later}.
      *
-     * @return whether the action was posted; false is {@link #GWIN_ERR_NO_TOOLKIT}, after which the
-     *         library has destroyed the action and no callback will arrive
+     * @return whether the action was posted; false is {@link #GWIN_ERR_NO_TOOLKIT}, after which
+     *         nothing is posted and no callback will arrive
      */
     private static boolean postAction(long id) {
         try {

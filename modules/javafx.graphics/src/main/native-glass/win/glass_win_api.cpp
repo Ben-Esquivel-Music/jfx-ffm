@@ -612,7 +612,15 @@ int32_t gwin_invoke_later(int64_t runnable_id)
     // posts to it inside the shared side of the publication lock, so the post reaches that window or is
     // refused - never a destroyed or recycled handle, and never PostMessage(NULL, ...), which would post
     // a thread message to the caller.
-    GwinRunnableAction* action = new GwinRunnableAction(runnable_id);
+    // The allocation comes first, before PostToToolkit decides whether a toolkit window exists, so it
+    // is new (std::nothrow): a std::bad_alloc must not leave this extern "C" export, which Java calls
+    // through a downcall. An action that cannot be allocated is answered like a refused post -
+    // nothing is posted and no callback arrives - and GWIN_TEST_COUNTER_ACTION_ALLOC is not counted,
+    // because nothing was allocated.
+    GwinRunnableAction* action = new (std::nothrow) GwinRunnableAction(runnable_id);
+    if (action == NULL) {
+        return GWIN_ERR_NO_TOOLKIT;
+    }
     GwinTestCount(GWIN_TEST_COUNTER_ACTION_ALLOC);
     if (!GlassApplication::PostToToolkit(WM_DO_ACTION_LATER, (WPARAM) action, (LPARAM) 0)) {
         delete action;

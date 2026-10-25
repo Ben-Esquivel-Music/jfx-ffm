@@ -4831,21 +4831,30 @@ public final class WinGlassNativeShim {
 
     /**
      * {@code gwin_invoke_later} for {@code runnable}, registered as the facade registers it, returning the status
-     * the facade turns into a boolean. A refused runnable's id stays in the facade's registry, as it does for a
-     * post still queued at shutdown.
+     * the facade turns into a boolean. On {@link WinGlassNative#GWIN_ERR_NO_TOOLKIT} nothing was posted (an action
+     * the library allocated has been destroyed) and no callback will arrive, so the id is dropped from the facade's
+     * registry, as {@code submitForLaterInvocation} drops it; the status is returned unchanged. Only a post still
+     * queued at shutdown stays registered, as in the facade.
      */
     public static int toolkitInvokeLater(Runnable runnable) {
         long id = WinGlassNative.registerRunnable(runnable);
+        int status;
         try {
-            return (int) ToolkitDriver.INVOKE_LATER.invokeExact(id);
+            status = (int) ToolkitDriver.INVOKE_LATER.invokeExact(id);
         } catch (Throwable t) {
             throw hookFailure("gwin_invoke_later", t);
         }
+        if (status == WinGlassNative.GWIN_ERR_NO_TOOLKIT) {
+            WinGlassNative.unregisterRunnable(id);
+        }
+        return status;
     }
 
     /**
      * {@code gwin_invoke_and_wait} for {@code runnable}, returning the status the facade discards. Called on the
-     * toolkit thread it is the inline path {@code Application.invokeAndWait} short-circuits in Java.
+     * toolkit thread it is the inline path {@code Application.invokeAndWait} short-circuits in Java. The downcall
+     * does not return until the runnable has run or has been refused, so the id is removed from the facade's
+     * registry in a {@code finally} once it has, whatever it answered, as {@code invokeAndWait} removes it.
      */
     public static int toolkitInvokeAndWait(Runnable runnable) {
         long id = WinGlassNative.registerRunnable(runnable);
@@ -4853,6 +4862,8 @@ public final class WinGlassNativeShim {
             return (int) ToolkitDriver.INVOKE_AND_WAIT.invokeExact(id);
         } catch (Throwable t) {
             throw hookFailure("gwin_invoke_and_wait", t);
+        } finally {
+            WinGlassNative.unregisterRunnable(id);
         }
     }
 

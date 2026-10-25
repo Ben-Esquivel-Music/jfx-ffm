@@ -48,10 +48,11 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * {@code gwin_invoke_later}, {@code gwin_invoke_and_wait} and {@code gwin_key_code_for_char} in a loop while the
  * toolkit window is destroyed under them, and go on calling after it is gone. Each run is a {@link WinGlassChild}
  * JVM of its own and must end with no access violation (status 0, no fatal error log), no call aimed at a window
- * that was no longer the published toolkit window ({@code STALE} 0) and no caller left blocked. A run whose
- * toolkit did not end, or that made no call after the end, counts as failed: it hammered nothing across shutdown.
- * At most {@value #OUTSTANDING_POSTS} posts wait at once, and the toolkit is ended by a sent runnable: a posted one
- * would wait behind the posts and starve behind the stream of sends, which the toolkit thread always handles first.
+ * that was no longer the published toolkit window ({@code STALE} 0), no caller left blocked and no runnable id left
+ * registered by a call the toolkit refused. A run whose toolkit did not end, or that made no call after the end,
+ * counts as failed: it hammered nothing across shutdown. At most {@value #OUTSTANDING_POSTS} posts wait at once,
+ * and the toolkit is ended by a sent runnable: a posted one would wait behind the posts and starve behind the stream
+ * of sends, which the toolkit thread always handles first.
  * <p>
  * {@code -Dwin.glass.hammer.runs=N} sets the number of runs (default {@value #DEFAULT_RUNS}). A run gets at most
  * {@value #SECONDS_PER_RUN} s, the whole test an hour.
@@ -100,13 +101,17 @@ public class WinToolkitShutdownHammerTest {
 
     /**
      * A clean exit, {@code STALE} 0 and no caller left blocked; and, so that the run did hammer across shutdown, a
-     * loop that returned and calls made after it.
+     * loop that returned and calls made after it. The runnable registry must then hold exactly the posts the
+     * teardown dropped from the queue: every refused {@code gwin_invoke_later}, and every {@code gwin_invoke_and_wait}
+     * whatever it answered, has taken its id out again, as the facade does.
      */
     private static boolean passed(WinGlassChildJvm.Run run) {
         Map<String, String> values = run.values();
         return run.clean() && "0".equals(values.get("counter.stale")) && "0".equals(values.get("hammer.stuck"))
                 && "true".equals(values.get("loop.returned"))
-                && !"0".equals(values.getOrDefault("hammer.callsAfterTeardown", "0"));
+                && !"0".equals(values.getOrDefault("hammer.callsAfterTeardown", "0"))
+                && values.containsKey("registry.afterHammers")
+                && values.get("registry.afterHammers").equals(values.get("posts.queuedAtShutdown"));
     }
 
     /** Runs in {@link WinGlassChild}. */
@@ -156,6 +161,12 @@ public class WinToolkitShutdownHammerTest {
             }
         }
         out.put("hammer.stuck", Integer.toString(stuck));
+        // Every caller has returned, so no gwin_invoke_and_wait holds an id. A post that ran gave its permit back and
+        // the upcall took its id; a refused post gave its permit back and the refusal took its id; a post the
+        // teardown dropped from the queue kept both. The pool started with OUTSTANDING_POSTS permits and the
+        // teardown added as many.
+        out.put("posts.queuedAtShutdown", Integer.toString(2 * OUTSTANDING_POSTS - outstanding.availablePermits()));
+        out.put("registry.afterHammers", Integer.toString(WinGlassNativeShim.runnableRegistrySize()));
         out.put("hammer.calls", Long.toString(calls.get()));
         out.put("hammer.callsAfterTeardown", Long.toString(calls.get() - callsAtTeardown));
         synchronized (statuses) {

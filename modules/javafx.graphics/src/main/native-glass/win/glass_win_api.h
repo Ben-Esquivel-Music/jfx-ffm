@@ -257,7 +257,8 @@ enum GwinStatus {
                                  * failed exactly this silently and were declared void: ExecAction returned
                                  * without sending, ExecActionLater deleted the action and returned
                                  * (both in GlassApplication.cpp). Also the answer to a call from another
-                                 * thread whose wait event could not be created (CreateEventW failed). */
+                                 * thread whose wait event could not be created (CreateEventW failed), and
+                                 * to a gwin_invoke_later whose action could not be allocated. */
     GWIN_ERR_UPCALL      = -3,  /* A callback slot reported a Java Throwable; the C mapped it to
                                  * E_JAVAEXCEPTION exactly as OleUtils.h's checkJavaException did.
                                  * (ABI 4) */
@@ -765,11 +766,13 @@ GLASS_WIN_EXPORT int32_t gwin_invoke_and_wait(int64_t runnable_id);
  * destroyed or recycled handle, and never becomes PostMessage(NULL, ...), which posts a thread message
  * to the CALLER.
  *
- * GWIN_OK: posted. GWIN_ERR_NO_TOOLKIT: no toolkit window is published, or PostMessage failed; in both
- * cases the action is destroyed and no callback will arrive, so Java may drop the id - ExecActionLater
- * of the JNI ignored PostMessage's result and leaked the action, and the runnable did not run either
- * way. An action posted but not dispatched before the toolkit window is destroyed is never dispatched,
- * and leaks its id exactly as the JNI leaked its JGlobalRef. NEVER critical.
+ * GWIN_OK: posted. GWIN_ERR_NO_TOOLKIT: no toolkit window is published, or PostMessage failed, or the
+ * action could not be allocated; in every case nothing is posted, an allocated action is destroyed and
+ * no callback will arrive, so Java may drop the id - ExecActionLater of the JNI ignored PostMessage's
+ * result and leaked the action, and the runnable did not run either way. The action is allocated with
+ * new (std::nothrow), so no std::bad_alloc leaves this export, where the JNI's new threw it through the
+ * JNI call. An action posted but not dispatched before the toolkit window is destroyed is never
+ * dispatched, and leaks its id exactly as the JNI leaked its JGlobalRef. NEVER critical.
  */
 GLASS_WIN_EXPORT int32_t gwin_invoke_later(int64_t runnable_id);
 
