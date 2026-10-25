@@ -2,13 +2,13 @@
 
 | Field | Value |
 | --- | --- |
-| **Status** | 🔶 **Open, macOS half only** — Windows half done; Linux half done 2026-09-15 (landed in PR #12); remaining `coretext.OS` 58 + `MacFontFinder` 5 + `DFontDecoder` 5 = 68 natives, no macOS host |
+| **Status** | 🟢 **Complete** (all three platforms; macOS 2026-10-24). Windows half done; Linux half done 2026-09-15 (landed in PR #12); macOS half done 2026-10-24|
 | **Parent epic** | Fully remove JNI from `javafx.graphics` (replaced by a functioning FFM API) |
 | **Branch of record** | `ffm/graphics` |
 | **Repository** | `Ben-Esquivel-Music/jfx-ffm` |
 | **Priority** | High — largest single JNI surface remaining in the module (200 of ~335 exports) |
 | **Estimate** | XL — 8 native files, 6 499 LOC, 200 `JNIEXPORT`, 4 Java binding classes |
-| **Blocked by** | Nothing on Windows. The macOS and Linux half is blocked by the same lack of build capability as US-001. |
+| **Blocked by** | Nothing. Both halves that US-001's lack of build capability blocked are done: Linux in PR #12, macOS on a macOS host on 2026-10-24. |
 | **Audit of record** | `jni-auditor`, saved at `session-state/.../files/audit-javafx-font.md` (34 KB) |
 
 ---
@@ -239,17 +239,83 @@ Precedent to follow: `com.sun.prism.es2.ES2Native` on `ffm/graphics` — same
 
 - All 10 acceptance criteria met.
 - `ffm-reviewer` sign-off recorded.
-- US-003b raised for the macOS/Linux remainder, referencing US-001's constraint.
+- ~~US-003b raised for the macOS/Linux remainder~~ No longer needed: both halves were done under
+  this story (Linux in PR #12, macOS in "macOS half (2026-10-24)").
 - Changes left in the working tree / a review branch — **no commits, merges or PRs without
   explicit approval from the repository owner.**
 
 ---
 
+## macOS half (2026-10-24)
+
+28b02ef511 is the last commit with the JNI; its `libjavafx_font.dylib` is the build the five
+`mac-*-golden.txt` files were captured from. US-003 lands as one commit, so no commit can
+re-capture the macOS goldens; a re-capture needs the C of 28b02ef511 with the natives
+`MacFontBindings`' capture guard expects (`coretext.OS` 56, `MacFontFinder` 4,
+`DFontDecoder` 5: the 68 less three dead ones).
+
+**What was migrated**
+- `coretext.OS` (58 natives), `MacFontFinder` (5) and `DFontDecoder` (5) keep every entry point;
+  the bodies are Java over three FFM facades in `com.sun.javafx.font.coretext`, one per
+  framework: `CFNative` (CoreFoundation, plus the shared linkage toolkit), `CGNative`
+  (CoreGraphics, plus the one `CGPathApply` upcall stub) and `CTNative` (CoreText, plus
+  `link()`). Together they bind 75 functions and 11 data symbols; each file is under 900 lines.
+- The pure-computation C is reimplemented in Java, each behind an A/B test against the JNI
+  with 0 mismatches before the switch: `GlyfTableBounds` (glyph bounds from `loca`/`glyf`),
+  `CGPathSink` (glyph outlines) and `CGBitmapReader` (glyph masks). Where the C read past a
+  bitmap (bpp 24 or 32 on an 8-bit context, which `CTGlyph` never requests), `CGBitmapReader`
+  throws `IndexOutOfBoundsException`.
+- `native-font/` (`coretext.c`, `MacFontFinder.c`, `dfontdecoder.c`: 1,685 lines) and the
+  `font` target of `modules/javafx.graphics/native/mac.cmake` are deleted. `PrismFontFactory`
+  no longer loads `javafx_font`; it calls `CTNative.link()`. No platform builds `javafx_font`.
+- The C's crashes on NULL and its leaks are kept on purpose, so the migration stays
+  behaviour-neutral.
+
+**Acceptance results**
+- Natives: 68 to 0 (every golden run prints `native methods left: OS 0, MacFontFinder 0,
+  DFontDecoder 0`).
+- `mvn -pl modules/javafx.graphics -am clean package`: BUILD SUCCESS, no `libjavafx_font*`
+  under `target`; javafx.graphics 26,163 tests, 0 failures, 0 errors, 761 skipped.
+- macOS font gate (`Mac*Test`, `PrismFontFactoryTest`, `CFNativeTest`, `CGNativeTest`,
+  `CTNativeTest`, `CGPathSinkTest`, `GlyfTableBoundsTest`, `CGBitmapReaderTest`) with
+  `-Djfx.parity.require=true`: 123 tests, 0 failures, 0 errors, 0 skipped; no `hs_err_pid*`.
+- Render, JNI (28b02ef511) against FFM, on a scene with system fonts, bold/italic synthesis,
+  two `.dfont` files and a TTC, grey and LCD text, at 1x and 2x: 0 differing pixels in all 12
+  comparisons.
+- Startup: the first frame comes 62 ms later (median 524 against 462 ms); 39 ms of that is
+  the eager `CTNative.link()` in `PrismFontFactory`'s static initialiser.
+
+**AC map** (the acceptance criteria above are worded for Windows)
+- AC 1-5: natives 68 to 0; `native-font/` and the `mac.cmake` `font` target are deleted; none
+  of the four remaining dylibs (`libglass`, `libjavafx_iio`, `libprism_es2`, `libprism_mtl`)
+  exports a `Java_com_sun_javafx_font_*` symbol.
+- AC 6-7: clean package, 26,163 tests, 0 failures.
+- AC 8: owner check (0 differing pixels in the 12 JNI against FFM comparisons).
+- AC 9: `ffm-reviewer` sign-off, approved with nits on 2026-10-24.
+- AC 10: no Windows or Linux production or build file changed; the one behavioural
+  `PrismFontFactory` change (`NativeLibLoader.loadLibrary("javafx_font")` becomes
+  `CTNative.link()`) is inside its `isMacOSX` branch; the rest is an import swap and a comment.
+  Test code is the exception: the Linux golden tests moved onto the shared golden harness, and
+  `JpegNatives` and `ES2Natives` no longer list `javafx_font`. The owner's CI run covers both.
+
+
+**Follow-up:** US-067 fixes the kept crashes and leaks.
+
+---
+
 ## References
 
-- `modules/javafx.graphics/native/win.cmake:258-266` — the `font` target (globs the directory)
-- `modules/javafx.graphics/src/main/native-font/directwrite.cpp:79-153` — representative struct marshalling
-- `modules/javafx.graphics/src/main/native-font/directwrite.cpp:936-1768` — the three COM callback objects
-- `modules/javafx.graphics/src/main/java/com/sun/javafx/font/directwrite/OS.java` — 70 natives
-- `modules/javafx.graphics/src/main/java/com/sun/javafx/font/freetype/OSFreetype.java:102` — the orphan
+26ce75d02f (PR #12) removed what the first five cite; the pointers show it at the parent commit,
+a544256444.
+
+- `git show a544256444:modules/javafx.graphics/native/win.cmake`, lines 258-266 — the `font`
+  target (globs the directory)
+- `git show a544256444:modules/javafx.graphics/src/main/native-font/directwrite.cpp`,
+  lines 79-153 — representative struct marshalling
+- `git show a544256444:modules/javafx.graphics/src/main/native-font/directwrite.cpp`,
+  lines 936-1768 — the three COM callback objects
+- `git show a544256444:modules/javafx.graphics/src/main/java/com/sun/javafx/font/directwrite/OS.java`
+  — 70 natives
+- `git show a544256444:modules/javafx.graphics/src/main/java/com/sun/javafx/font/freetype/OSFreetype.java`,
+  line 102 — the orphan
 - `session-state/.../files/audit-javafx-font.md` — full audit

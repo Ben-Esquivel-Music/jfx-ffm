@@ -53,7 +53,7 @@ import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.condition.EnabledOnOs;
 import org.junit.jupiter.api.condition.OS;
-import test.com.sun.javafx.font.LinuxFontGoldens.GoldenMap;
+import test.com.sun.javafx.font.FontGoldenHarness.GoldenMap;
 import test.com.sun.javafx.test.ParityGate;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -201,7 +201,7 @@ public class LinuxFreetypeGoldenTest {
         int glyphG = mapper.charToGlyph('g');
         int glyphSpace = mapper.charToGlyph(' ');
         int[] rawGlyphs = {glyphH, glyphG, glyphSpace, 0, 65535, -1, numGlyphs};
-        out.put("ft.raw.dejavusans.glyphs", LinuxFontGoldens.joinInts(rawGlyphs));
+        out.put("ft.raw.dejavusans.glyphs", FontGoldenFormat.joinInts(rawGlyphs));
 
         captureLoads(out, library, dejavu, euro, rawGlyphs, glyphH, glyphG, glyphSpace);
 
@@ -215,7 +215,7 @@ public class LinuxFreetypeGoldenTest {
     /** {@code ft.raw.newFace.<case>} = {@code rc;outChanged}, plus {@code ;doneFaceRc} for faces not kept. */
     private static Map<String, Long> captureNewFace(GoldenMap out, long library) throws IOException {
         Path work = LinuxFontGoldens.workDirectory().resolve("freetype");
-        LinuxFontGoldens.deleteTree(work);
+        FontGoldenRuntime.deleteTree(work);
         Files.createDirectories(work);
         Path notAFont = work.resolve("notafont.ttf");
         Files.write(notAFont, new byte[256]);
@@ -257,8 +257,8 @@ public class LinuxFreetypeGoldenTest {
         }
         out.put("ft.raw.doneFace.null.rc", Integer.toString(OSFreetypeShim.ftDoneFace(0)));
         out.put("ft.raw.slot.null", LinuxFontGoldens.joinLongs(OSFreetypeShim.glyphSlot(0)));
-        out.put("ft.raw.bitmap.null", LinuxFontGoldens.bitmapSummary(OSFreetypeShim.bitmapData(0)));
-        out.put("ft.raw.outline.null", LinuxFontGoldens.outlineSummary(OSFreetypeShim.outlineDecompose(0)));
+        out.put("ft.raw.bitmap.null", FontGoldenFormat.bytesSummary(OSFreetypeShim.bitmapData(0)));
+        out.put("ft.raw.outline.null", FontGoldenFormat.outlineSummary(OSFreetypeShim.outlineDecompose(0)));
         return kept;
     }
 
@@ -290,13 +290,13 @@ public class LinuxFreetypeGoldenTest {
     private static String load(long face, int glyph, int loadFlags) {
         int rc = OSFreetypeShim.ftLoadGlyph(face, glyph, loadFlags);
         return rc + "|" + LinuxFontGoldens.joinLongs(OSFreetypeShim.glyphSlot(face)) + "|"
-                + LinuxFontGoldens.bitmapSummary(OSFreetypeShim.bitmapData(face));
+                + FontGoldenFormat.bytesSummary(OSFreetypeShim.bitmapData(face));
     }
 
     /** {@code rc|outline summary} after an outline load. */
     private static String outline(long face, int glyph, int loadFlags) {
         int rc = OSFreetypeShim.ftLoadGlyph(face, glyph, loadFlags);
-        return rc + "|" + LinuxFontGoldens.outlineSummary(OSFreetypeShim.outlineDecompose(face));
+        return rc + "|" + FontGoldenFormat.outlineSummary(OSFreetypeShim.outlineDecompose(face));
     }
 
     private static void captureLoads(GoldenMap out, long library, long dejavu, long euro, int[] rawGlyphs,
@@ -337,7 +337,7 @@ public class LinuxFreetypeGoldenTest {
             for (int glyph : new int[] {glyphH, glyphG}) {
                 int rc = OSFreetypeShim.ftLoadGlyph(dejavu, glyph, flags("transformed"));
                 String slot = LinuxFontGoldens.joinLongs(OSFreetypeShim.glyphSlot(dejavu));
-                String path = LinuxFontGoldens.outlineSummary(OSFreetypeShim.outlineDecompose(dejavu));
+                String path = FontGoldenFormat.outlineSummary(OSFreetypeShim.outlineDecompose(dejavu));
                 out.put("ft.raw.xform." + names[m] + "." + LinuxFontGoldens.gid(glyph), rc + "|" + slot + "|" + path);
             }
         }
@@ -363,7 +363,7 @@ public class LinuxFreetypeGoldenTest {
         for (int glyph : new int[] {glyphH, glyphG, glyphSpace, 65535}) {
             OSFreetypeShim.ftLoadGlyph(dejavu, glyph, outlineFlags);
             out.put("ft.raw.outline.dejavusans.12.0." + LinuxFontGoldens.gid(glyph) + ".dump",
-                    LinuxFontGoldens.outlineDump(OSFreetypeShim.outlineDecompose(dejavu)));
+                    FontGoldenFormat.outlineDump(OSFreetypeShim.outlineDecompose(dejavu)));
         }
 
         for (int glyph = 0; glyph <= 17; glyph++) {
@@ -372,7 +372,7 @@ public class LinuxFreetypeGoldenTest {
         }
         OSFreetypeShim.ftLoadGlyph(euro, 1, noScaleOutline);
         out.put("ft.raw.outline.freeeuro.noScale.g00001.dump",
-                LinuxFontGoldens.outlineDump(OSFreetypeShim.outlineDecompose(euro)));
+                FontGoldenFormat.outlineDump(OSFreetypeShim.outlineDecompose(euro)));
         out.put("ft.raw.outline.freeeuro.charSize.rc",
                 Integer.toString(OSFreetypeShim.ftSetCharSize(euro, 0, 768, 72, 72)));
         for (int glyph = 0; glyph <= 17; glyph++) {
@@ -454,7 +454,7 @@ public class LinuxFreetypeGoldenTest {
                     + FONT_WITH_CURVES + " rewrites at " + CURVES_CHARSTRING_OFFSET);
         }
         System.arraycopy(charstring, 0, font, CURVES_CHARSTRING_OFFSET, CURVES_CHARSTRING_LENGTH);
-        Path target = LinuxFontGoldens.moduleDirectory().resolve(FONT_WITH_CURVES_FILE);
+        Path target = FontGoldenRuntime.moduleDirectory().resolve(FONT_WITH_CURVES_FILE);
         Files.createDirectories(target.getParent());
         Files.write(target, font);
         return FONT_WITH_CURVES_FILE;
@@ -541,7 +541,7 @@ public class LinuxFreetypeGoldenTest {
 
         String fontWithCurves = writeFontWithCurves();
         out.put("ft.java.fontwithcurves.sha256",
-                FontGoldens.sha256Hex(LinuxFontGoldens.moduleDirectory().resolve(fontWithCurves)));
+                FontGoldens.sha256Hex(FontGoldenRuntime.moduleDirectory().resolve(fontWithCurves)));
         RetainedGlyphs retained = new RetainedGlyphs();
         for (String key : JAVA_FONTS) {
             String fontFile = key.equals(FONT_WITH_CURVES) ? fontWithCurves : LinuxFontGoldens.pinned(key).toString();
@@ -571,7 +571,7 @@ public class LinuxFreetypeGoldenTest {
             for (int glyph : glyphs) {
                 float[] bbox = resource.getGlyphBoundingBox(glyph, unitsPerEm, new float[4]);
                 out.put("ft.java.bbox." + key + "." + LinuxFontGoldens.gid(glyph),
-                        LinuxFontGoldens.joinFloats(bbox));
+                        FontGoldenFormat.joinFloats(bbox));
             }
             for (float size : MASK_SIZES) {
                 for (int aa : new int[] {FontResource.AA_GREYSCALE, FontResource.AA_LCD}) {
@@ -601,7 +601,7 @@ public class LinuxFreetypeGoldenTest {
                 FontStrike rotated = resource.getStrike(12f, transforms.get("rot30"), FontResource.AA_GREYSCALE);
                 for (int glyph : transformGlyphs) {
                     out.put("ft.java.outline." + key + ".12.0.rot30." + LinuxFontGoldens.gid(glyph),
-                            LinuxFontGoldens.shapeSummary(rotated.getGlyph(glyph).getShape()));
+                            FontGoldenFormat.shapeSummary(rotated.getGlyph(glyph).getShape()));
                 }
             }
             for (int glyph : glyphs) {
@@ -609,7 +609,7 @@ public class LinuxFreetypeGoldenTest {
                     FontStrike strike = resource.getStrike(size, BaseTransform.IDENTITY_TRANSFORM,
                                                            FontResource.AA_GREYSCALE);
                     out.put("ft.java.outline." + key + "." + size + "." + LinuxFontGoldens.gid(glyph),
-                            LinuxFontGoldens.shapeSummary(strike.getGlyph(glyph).getShape()));
+                            FontGoldenFormat.shapeSummary(strike.getGlyph(glyph).getShape()));
                 }
             }
             for (JavaDump dump : JAVA_DUMPS) {
@@ -620,7 +620,7 @@ public class LinuxFreetypeGoldenTest {
                 Shape shape = resource.getStrike(dump.size(), BaseTransform.IDENTITY_TRANSFORM,
                                                  FontResource.AA_GREYSCALE).getGlyph(glyph).getShape();
                 out.put("ft.java.outline." + key + "." + dump.size() + "." + LinuxFontGoldens.gid(glyph) + ".dump",
-                        shape instanceof Path2D path ? LinuxFontGoldens.outlineDump(path) : FontGoldens.NULL);
+                        shape instanceof Path2D path ? FontGoldenFormat.outlineDump(path) : FontGoldens.NULL);
             }
         }
         out.put("ft.java.lateReread.masks", Integer.toString(retained.assertUnchanged()));
@@ -673,7 +673,7 @@ public class LinuxFreetypeGoldenTest {
         /** {@code width;height;length;sha256} of the pixel data, or {@code width;height;#null}. */
         static String sizeAndPixels(Glyph glyph) {
             return glyph.getWidth() + ";" + glyph.getHeight() + ";"
-                    + LinuxFontGoldens.bitmapSummary(glyph.getPixelData());
+                    + FontGoldenFormat.bytesSummary(glyph.getPixelData());
         }
     }
 
@@ -697,7 +697,7 @@ public class LinuxFreetypeGoldenTest {
             String value = glyph.getWidth() + ";" + glyph.getHeight() + ";" + glyph.getOriginX() + ";"
                     + glyph.getOriginY() + ";" + Float.toString(glyph.getPixelXAdvance()) + ";"
                     + Float.toString(glyph.getPixelYAdvance()) + ";" + Float.toString(glyph.getAdvance()) + ";"
-                    + glyph.isLCDGlyph() + ";" + LinuxFontGoldens.bitmapSummary(pixels);
+                    + glyph.isLCDGlyph() + ";" + FontGoldenFormat.bytesSummary(pixels);
             out.put(maskKey(font, size, aa, tx, code), pixels == null ? value + ";" + FontGoldens.NULL : value);
             retained.retain(maskKey(font, size, aa, tx, code), glyph);
         }

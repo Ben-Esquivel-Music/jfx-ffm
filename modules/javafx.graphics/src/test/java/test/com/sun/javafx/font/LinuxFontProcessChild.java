@@ -61,7 +61,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.locks.ReentrantLock;
 import java.util.function.UnaryOperator;
 import test.com.sun.javafx.font.LinuxFontGoldens.FontMaps;
-import test.com.sun.javafx.font.LinuxFontGoldens.GoldenMap;
+import test.com.sun.javafx.font.FontGoldenHarness.GoldenMap;
 
 /**
  * The child JVM of {@link LinuxFontProcessGoldenTest}, {@link LinuxFontStressTest} and the ping of
@@ -238,7 +238,7 @@ final class LinuxFontProcessChild {
             }
         }
         for (int e = 1; e < fonts.length; e++) {
-            String element = "raw.gfc.after.sans.e" + LinuxFontGoldens.pad(e, 2) + ".";
+            String element = "raw.gfc.after.sans.e" + FontGoldenFormat.pad(e, 2) + ".";
             StringBuilder content = new StringBuilder();
             sans.forEach((k, v) -> {
                 if (k.startsWith(element)) {
@@ -258,9 +258,9 @@ final class LinuxFontProcessChild {
                 + text.apply(embedded[0].getFullName()) + ";" + embedded[0].getFontResource().getClass().getName());
         out.put("embedded.count", Integer.toString(factory.test_getNumEmbeddedFonts()));
         if (embedded != null) {
-            LinuxFontGoldens.putLayout(out, "embedded.layout.s03", embedded[0], LinuxFontGoldens.TEXTS.get(3), false);
-            LinuxFontGoldens.putLayout(out, "embedded.layout.s04", embedded[0], LinuxFontGoldens.TEXTS.get(4), false);
-            LinuxFontGoldens.putLayout(out, "embedded.layout.aAlefB", embedded[0], "a\u05D0b", false);
+            FontGoldenFormat.putLayout(out, "embedded.layout.s03", embedded[0], LinuxFontGoldens.TEXTS.get(3), false);
+            FontGoldenFormat.putLayout(out, "embedded.layout.s04", embedded[0], LinuxFontGoldens.TEXTS.get(4), false);
+            FontGoldenFormat.putLayout(out, "embedded.layout.aAlefB", embedded[0], "a\u05D0b", false);
         }
         PGFont[] notAFont = factory.loadEmbeddedFont(null, work.resolve("notafont.ttf").toString(), 12f, true, false);
         out.put("embedded.notAFont", notAFont == null ? FontGoldens.NULL : Integer.toString(notAFont.length));
@@ -269,7 +269,7 @@ final class LinuxFontProcessChild {
         PGFont ahemFont = factory.createFont("Ahem", 12f);
         out.put("createFont.ahem", text.apply(ahemFont.getFullName()) + ";isLastInFcFontList="
                 + (lastAhemFile != null && lastAhemFile.equals(ahemFont.getFontResource().getFileName())));
-        LinuxFontGoldens.putLayout(out, "createFont.ahem.layout", ahemFont, "AB", false);
+        FontGoldenFormat.putLayout(out, "createFont.ahem.layout", ahemFont, "AB", false);
         out.put("application.fonts", Integer.toString(LinuxFontOracleShim.fcApplicationFontCount()));
 
         PGFont[] eAcute = factory.loadEmbeddedFont(null, work.resolve("caf\u00E9.ttf").toString(), 12f, true, false);
@@ -281,7 +281,7 @@ final class LinuxFontProcessChild {
         out.put("embedded.supplementary.count", Integer.toString(factory.test_getNumEmbeddedFonts()));
         PGFont[] nonAscii = eAcute != null ? eAcute : supplementary;
         if (nonAscii != null) {
-            LinuxFontGoldens.putLayout(out, "embedded.nonAscii.layout", nonAscii[0], "AB", false);
+            FontGoldenFormat.putLayout(out, "embedded.nonAscii.layout", nonAscii[0], "AB", false);
         }
         out.put("application.fonts.afterEmbedded", Integer.toString(LinuxFontOracleShim.fcApplicationFontCount()));
     }
@@ -332,7 +332,7 @@ final class LinuxFontProcessChild {
     private static void hermetic(GoldenMap out, String scenario) {
         UnaryOperator<String> normalize = normalizer(scenario);
         UnaryOperator<String> units = s -> s == null ? FontGoldens.NULL
-                : "u:" + LinuxFontGoldens.unitsHex(normalize.apply(s));
+                : "u:" + FontGoldenFormat.unitsHex(normalize.apply(s));
         FontConfigManagerShim.ensureLoaded();
         String[] names = FontConfigManagerShim.fontConfigNames();
         for (boolean fallbacks : new boolean[] {true, false}) {
@@ -728,7 +728,7 @@ final class LinuxFontProcessChild {
         StringBuilder summaries = new StringBuilder();
         for (int glyph = 0; glyph < LinuxFontStressTest.OUTLINE_GLYPHS; glyph++) {
             Shape shape = strike.getGlyph(glyph).getShape();
-            summaries.append(shape instanceof Path2D path ? LinuxFontGoldens.outlineSummary(path) : "#null")
+            summaries.append(shape instanceof Path2D path ? FontGoldenFormat.outlineSummary(path) : "#null")
                      .append('\n');
         }
         return FontGoldens.sha256Hex(summaries.toString().getBytes(StandardCharsets.UTF_8));

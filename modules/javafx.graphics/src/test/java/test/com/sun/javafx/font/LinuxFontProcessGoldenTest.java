@@ -38,7 +38,7 @@ import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.condition.EnabledOnOs;
 import org.junit.jupiter.api.condition.OS;
-import test.com.sun.javafx.font.LinuxFontGoldens.GoldenMap;
+import test.com.sun.javafx.font.FontGoldenHarness.GoldenMap;
 import test.com.sun.javafx.test.ParityGate;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -146,7 +146,7 @@ public class LinuxFontProcessGoldenTest {
 
     /** Copies of Ahem under a Latin-1 and a supplementary-character name, and 256 zero bytes as a non-font. */
     static void prepareRegistration(Path directory) throws IOException {
-        LinuxFontGoldens.deleteTree(directory);
+        FontGoldenRuntime.deleteTree(directory);
         Files.createDirectories(directory);
         Path ahem = LinuxFontGoldens.pinned("ahem");
         Files.copy(ahem, directory.resolve("caf\u00E9.ttf"), StandardCopyOption.REPLACE_EXISTING);
@@ -160,7 +160,7 @@ public class LinuxFontProcessGoldenTest {
      * font.
      */
     static void prepareConfiguration(Path directory, boolean withFonts) throws IOException {
-        LinuxFontGoldens.deleteTree(directory);
+        FontGoldenRuntime.deleteTree(directory);
         Path fonts = Files.createDirectories(directory.resolve("fonts"));
         Path cache = Files.createDirectories(directory.resolve("cache"));
         if (withFonts) {

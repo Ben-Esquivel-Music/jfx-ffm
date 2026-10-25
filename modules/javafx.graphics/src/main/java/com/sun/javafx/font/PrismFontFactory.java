@@ -38,8 +38,8 @@ import java.util.Iterator;
 import java.util.Locale;
 
 import com.sun.glass.ui.Screen;
-import com.sun.glass.utils.NativeLibLoader;
 import com.sun.javafx.PlatformUtil;
+import com.sun.javafx.font.coretext.CTNative;
 import com.sun.javafx.text.GlyphLayout;
 
 public abstract class PrismFontFactory implements FontFactory {
@@ -83,18 +83,10 @@ public abstract class PrismFontFactory implements FontFactory {
         isEmbedded = PlatformUtil.isEmbedded();
         int[] tempCacheLayoutSize = {0x10000};
 
-        /* javafx_font exists only for the CoreText path of macOS (MacFontFinder.c,
-         * coretext.c, dfontdecoder.c behind MacFontFinder, com.sun.javafx.font.coretext.OS and
-         * DFontDecoder). Windows and Linux build no such library: font enumeration is
-         * com.sun.javafx.font.WinFontNative and DirectWrite is com.sun.javafx.font.directwrite.DWNative
-         * on Windows; fontconfig is com.sun.javafx.font.FontConfigNative, FreeType
-         * com.sun.javafx.font.freetype.FTNative and Pango com.sun.javafx.font.freetype.PangoNative on
-         * Linux, each binding the system library it needs from Java on first use (the JNI sources
-         * fontpath_linux.c, freetype.c and pango.c of commit 7b43255b30 are gone). Loading
-         * javafx_font where it is not built would be an UnsatisfiedLinkError in this static
-         * initializer, i.e. no fonts at all. */
+        /* Linked here rather than in CTFactory: getFontFactory replaces anything CTFactory throws
+         * with a bare InternalError, losing the framework or symbol a link failure names. */
         if (isMacOSX) {
-            NativeLibLoader.loadLibrary("javafx_font");
+            CTNative.link();
         }
         String dbg = System.getProperty("prism.debugfonts", "");
         debugFonts = "true".equals(dbg);

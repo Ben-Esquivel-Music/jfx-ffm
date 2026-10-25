@@ -106,7 +106,7 @@ set(JFX_CC_OPTIONS
     "$<$<NOT:$<CONFIG:Debug>>:-O3;-DNDEBUG>")
 
 # Gradle dynamicLinkFlags (CMake adds -dynamiclib itself); used by glass, iio,
-# prismES2, prismMTL and font.
+# prismES2 and prismMTL.
 set(JFX_FRAMEWORK_LINK_LIBS
     "-framework AppKit"
     "-framework ApplicationServices"
@@ -188,16 +188,6 @@ add_jfx_library(prismMTL
     SOURCE_DIRS "${GRAPHICS_SRC}/native-prism-mtl"
     INCLUDE_DIRS "${GENSRC_DIR}/mtl-headers"
     COMPILE_OPTIONS ${JFX_CC_OPTIONS} -DMACOSX -Werror=objc-method-access
-    LINK_LIBS ${JFX_FRAMEWORK_LINK_LIBS})
-
-# ---------------------------------------------------------------------------
-# libjavafx_font.dylib (platform-independent font sources; the
-# platform-specific files self-exclude via #ifdef guards)
-# ---------------------------------------------------------------------------
-add_jfx_library(font
-    OUTPUT_NAME javafx_font
-    SOURCE_DIRS "${GRAPHICS_SRC}/native-font"
-    COMPILE_OPTIONS ${JFX_CC_OPTIONS} -DJFXFONT_PLUS
     LINK_LIBS ${JFX_FRAMEWORK_LINK_LIBS})
 
 # ---------------------------------------------------------------------------
