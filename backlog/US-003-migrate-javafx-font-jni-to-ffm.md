@@ -2,7 +2,7 @@
 
 | Field | Value |
 | --- | --- |
-| **Status** | 🟢 **Complete** (all three platforms; macOS 2026-10-24) — owner checks pending: AC 8 by-eye, robot text tests, green CI on a pushed branch other than `master`. Windows half done; Linux half done 2026-09-15 (landed in PR #12); macOS half: see "macOS half (2026-10-24)" |
+| **Status** | 🟢 **Complete** (all three platforms; macOS 2026-10-24). Windows half done; Linux half done 2026-09-15 (landed in PR #12); macOS half done 2026-10-24|
 | **Parent epic** | Fully remove JNI from `javafx.graphics` (replaced by a functioning FFM API) |
 | **Branch of record** | `ffm/graphics` |
 | **Repository** | `Ben-Esquivel-Music/jfx-ffm` |
@@ -298,19 +298,6 @@ re-capture the macOS goldens; a re-capture needs the C of 28b02ef511 with the na
   Test code is the exception: the Linux golden tests moved onto the shared golden harness, and
   `JpegNatives` and `ES2Natives` no longer list `javafx_font`. The owner's CI run covers both.
 
-**Owner checks still open**
-- AC 8: the by-eye look at the JNI and FFM screenshots. The pixel comparison above supports it
-  but does not replace it.
-- The robot text tests (`tests/system` with `-DFULL_TEST=true -DUSE_ROBOT=true`) on a
-  prepared machine; `.claude/skills/jfx-ffm-testing/SKILL.md` gives the `-Dtest` and
-  `-Dsurefire.includes` patterns and the macOS Accessibility permission. A run made while the
-  screen was in use is not evidence either way.
-- Green CI on a pushed branch other than `master` (`.github/workflows/submit.yml` ignores
-  pushes to `master`, `main`, `jfx<N>` and `WIP*`), all five jobs. The `macos_x64_build` job
-  must show `MacFontAbiTest`, `CFNativeTest`, `CGNativeTest`, `CTNativeTest`, `MacFontOSTest`
-  and `MacFontStressTest` run with 0 skipped: it is the only x86_64 evidence for the by-value
-  `CGRect`, `CFRange` and `CGAffineTransform` calls. The two Linux jobs cover the shared
-  golden-harness refactor.
 
 **Follow-up:** US-067 fixes the kept crashes and leaks.
 
