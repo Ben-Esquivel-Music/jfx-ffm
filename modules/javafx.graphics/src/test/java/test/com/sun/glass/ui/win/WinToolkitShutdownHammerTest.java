@@ -81,10 +81,12 @@ public class WinToolkitShutdownHammerTest {
     public void callsAcrossShutdownNeverCrashAndNeverReachAWindowThatIsNotPublished() {
         int runs = Integer.getInteger("win.glass.hammer.runs", DEFAULT_RUNS);
         List<String> failures = new ArrayList<>();
+        List<WinGlassChildJvm.Run> children = new ArrayList<>();
         long calls = 0;
         for (int i = 0; i < runs; i++) {
             WinGlassChildJvm.Run run = WinGlassChildJvm.launch(WinToolkitShutdownHammerTest.class, "hammer",
                     "hammer-" + i, List.of(), SECONDS_PER_RUN);
+            children.add(run);
             if (!passed(run)) {
                 failures.add(run.describe());
             }
@@ -93,8 +95,8 @@ public class WinToolkitShutdownHammerTest {
                 System.out.println("hammer run " + i + ": " + run.values());
             }
         }
-        System.out.println("hammer: " + runs + " runs, " + calls + " calls, " + failures.size() + " failed (glass.dll"
-                + " sha256 " + WinGlassChildJvm.glassSha256() + ")");
+        System.out.println("hammer: " + runs + " runs, " + calls + " calls, " + failures.size() + " failed ("
+                + WinGlassChildJvm.loadedGlass(children) + ")");
         assertEquals(List.of(), failures, failures.size() + " of " + runs + " hammer runs failed");
         assertTrue(calls > 0, "no call was made");
     }

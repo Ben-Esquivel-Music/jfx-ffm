@@ -203,12 +203,16 @@ const DWORD kParkCapMs = 120000;
 
 } // namespace
 
-/* Waits on a kernel event and calls nothing that could need the loader lock. */
+/*
+ * Waits on a kernel event and calls nothing that could need the loader lock. The compare-exchange claims the
+ * gate; a disarm that lands after the claim, also before PARK_PARKED is stored, has set the manual-reset
+ * release event, which stays set until the next arm, so the wait below returns at once.
+ */
 void GwinTestParkSlow()
 {
     const LONG me = (LONG) ::GetCurrentThreadId();
     if (::InterlockedCompareExchange(&g_gwinTestParkThread, 0, me) != me) {
-        return;   // another post of this thread consumed the gate first
+        return;   // disarmed, or armed for another thread, since GwinTestParkPoint read the gate
     }
     ::InterlockedExchange(&s_parkState, PARK_PARKED);
     ::SetEvent(s_parkedEvent);
@@ -541,11 +545,10 @@ int32_t gwin_test_park_arm(int32_t on)
         ::InterlockedExchange(&s_parkState, PARK_ARMED);
         ::InterlockedExchange(&g_gwinTestParkThread, (LONG) ::GetCurrentThreadId());
     } else {
+        // Releases unconditionally: a thread that claimed the gate may not have stored PARK_PARKED yet.
         ::InterlockedExchange(&g_gwinTestParkThread, 0);
         ::InterlockedCompareExchange(&s_parkState, PARK_IDLE, PARK_ARMED);
-        if (::InterlockedCompareExchange(&s_parkState, 0, 0) == PARK_PARKED) {
-            ::SetEvent(s_releaseEvent);
-        }
+        ::SetEvent(s_releaseEvent);
     }
     return GWIN_OK;
 }

@@ -185,8 +185,9 @@
  * upcalls, gwin_invoke_later posts to a window it does not own, gwin_terminate_loop destroys a
  * window, and the two set_callbacks functions publish a pointer another thread will dial.
  * The preferences callback table is the ABI's first upcall. Its two WinRT sinks may be invoked on a
- * thread of the OS's choosing, but they only post to the toolkit window, so the upcall itself runs on
- * the JavaFX application thread - see GwinPrefsCallbacks.
+ * thread of the OS's choosing, but they only post to the toolkit window, or keep their types for the
+ * toolkit pump when that post fails, so the upcall itself runs on the JavaFX application thread - see
+ * GwinPrefsCallbacks.
  * The view and window sections carry their own critical(true) and threading rules at their heads.
  */
 
@@ -509,8 +510,11 @@ typedef struct GwinPrefsCallbacks {
      * The former PlatformSupport::updatePreferences, now on the Java side. `types` is a bitmask of
      * GwinPreferenceType; the values the native side actually sends are 2 (SPI_SETCLIENTAREAANIMATION),
      * 4 (the "ImmersiveColorSet" WM_SETTINGCHANGE and the AutoHideScrollBars sink), 5
-     * (WM_THEMECHANGED / WM_SYSCOLORCHANGE / WM_DWMCOLORIZATIONCOLORCHANGED), 6 (SPI_SETHIGHCONTRAST)
-     * and 8 (the NetworkStatusChanged sink). GWIN_PT_ALL is never sent here - that is the
+     * (WM_THEMECHANGED / WM_SYSCOLORCHANGE / WM_DWMCOLORIZATIONCOLORCHANGED), 6 (SPI_SETHIGHCONTRAST),
+     * 8 (the NetworkStatusChanged sink) and 12 (4 | 8). A sink whose post failed keeps its type (see
+     * THREAD): PlatformSupport::PostPreferencesChanged ORs it into one process-wide word with
+     * InterlockedOr, and PlatformSupport::RunDeferredPreferences delivers the whole word in one call, so a
+     * delivery of kept types is 4, 8 or 12. GWIN_PT_ALL is never sent here - that is the
      * collect-only path, WinPreferences.collect(GWIN_PT_ALL) behind WinApplication.getPlatformPreferences.
      *
      * RETURNS 1 if the preferences changed, 0 otherwise. GlassApplication::WindowProc uses it to
@@ -526,15 +530,28 @@ typedef struct GwinPrefsCallbacks {
      *
      * THREAD: ALWAYS the Glass toolkit thread, inside GlassApplication::WindowProc - the
      * WM_SETTINGCHANGE / WM_THEMECHANGED / WM_SYSCOLORCHANGE / WM_DWMCOLORIZATIONCOLORCHANGED arms, and
-     * the arm for what the two WinRT sinks (AutoHideScrollBarsChanged, NetworkStatusChanged) post.
+     * the arm for what the two WinRT sinks (AutoHideScrollBarsChanged, NetworkStatusChanged) post - or,
+     * for the types a sink kept (below), with no lock held where a posted message has just been handled:
+     * right after a DispatchMessage of the pump of gwin_run_loop or gwin_enter_nested_event_loop, or in
+     * the toolkit window's WM_DO_ACTION_LATER arm or the arm for the sink's wake.
      * WRL Callback<> delegates are not agile, so the OS may invoke a sink on the toolkit thread or on a
      * thread of its own; either way the sink only posts its types to the toolkit window through the
      * guarded post of gwin_invoke_later, and the notification reaches Java asynchronously, on the
-     * toolkit thread. A sink invoked once the toolkit window is cleared posts nothing.
+     * toolkit thread. A sink invoked once the toolkit window is cleared posts nothing and keeps nothing.
+     * When the PostMessage fails with the toolkit window published - the toolkit thread's
+     * posted-message queue is at its quota - the sink keeps its types in a process-wide word and posts
+     * one wake (wParam 0) the same way; the kept types are delivered after the next DispatchMessage of
+     * either pump, or when the toolkit window handles the wake or a gwin_invoke_later action, so a
+     * notification can arrive late but is not lost. The window arms also cover a pump that is not ours
+     * - a modal loop of the OS (move/size, menus, common dialogs, DoDragDrop), or the embedder's in the
+     * SWT-embedded case: there the kept types wait for the next wake or gwin_invoke_later action it
+     * dispatches, or for the modal loop to end. Kept types are dropped when the toolkit window is
+     * destroyed and before a new one is published, as the posts still queued for a destroyed window are
+     * never dispatched.
      *
-     * RUNDOWN: only the toolkit window's procedure calls this slot, and the toolkit thread retrieves
-     * no message once gwin_run_loop has returned, so no call starts after that return - also when the
-     * pump ended with the window still alive. PlatformSupport's destructor removes both sink
+     * RUNDOWN: only the toolkit window's procedure and the two pumps call this slot, and the toolkit
+     * thread retrieves no message once gwin_run_loop has returned, so no call starts after that return -
+     * also when the pump ended with the window still alive. PlatformSupport's destructor removes both sink
      * registrations with the tokens it kept and releases every WinRT object before RoUninitialize.
      * Java may therefore clear the table with gwin_prefs_set_callbacks(NULL, NULL) on the toolkit
      * thread where gwin_run_loop returned and then free the upcall stub (WinApplication closes its
@@ -686,9 +703,11 @@ GLASS_WIN_EXPORT void* gwin_app_create(void);
  *      run the launchable itself before the downcall: the JNI ran it after OleInitialize and before
  *      the pump, and Application.run passes Screen.initScreens() + FX startup as it.
  *   3. while (GlassApplication::GetInstance() && GetMessage(&msg, NULL, 0, 0) > 0)
- *          { TranslateMessage; DispatchMessage; }
+ *          { TranslateMessage; DispatchMessage; PlatformSupport::RunDeferredPreferences; }
  *      - the instance may be destroyed by a nested loop, and WM_QUIT is deliberately LEFT on the
- *      queue. The GetInstance() term is load-bearing; the queue is not drained.
+ *      queue. The GetInstance() term is load-bearing; the queue is not drained. The JNI body had no
+ *      RunDeferredPreferences step: it delivers the preference types a WinRT sink kept because its
+ *      post failed (see GwinPrefsCallbacks THREAD), and does nothing else.
  *   4. the Windows 7 + Narrator workaround: if GetAccessibilityCount() > 0 && !IS_WIN8, one more
  *      SetTimer(NULL, NULL, 1000, NULL) / GetMessage / KillTimer round. Unreachable on Windows 10+;
  *      carried over anyway.
@@ -719,7 +738,8 @@ GLASS_WIN_EXPORT void gwin_terminate_loop(void);
 
 /*
  * GlassApplication::EnterNestedEventLoop, now JVM-free: sm_shouldLeaveNestedLoop = false;
- * pump while (GetInstance() && !sm_shouldLeaveNestedLoop && GetMessage(...) > 0);
+ * pump while (GetInstance() && !sm_shouldLeaveNestedLoop && GetMessage(...) > 0), delivering after each
+ * DispatchMessage the preference types a WinRT sink kept, as gwin_run_loop's pump does;
  * sm_shouldLeaveNestedLoop = false again on the way out. The RETURN VALUE is not part of this ABI:
  * it never left Java in the first place and WinApplication holds it now. Toolkit thread only.
  * BLOCKS and dispatches, so it upcalls re-entrantly. NEVER critical.
@@ -3034,12 +3054,19 @@ enum GwinTestCounter {
                                            * window just before the call */
     GWIN_TEST_COUNTER_ACTION_ALLOC  = 4,  /* heap actions handed to the post path */
     GWIN_TEST_COUNTER_ACTION_FREE   = 5,  /* of those, deleted - after Do(), or by a refused post */
-    GWIN_TEST_COUNTER_PREFS_POST    = 6,  /* preference-sink posts that reached PostMessage */
-    GWIN_TEST_COUNTER_PREFS_REFUSED = 7,  /* preference-sink posts refused: no toolkit window published */
+    GWIN_TEST_COUNTER_PREFS_POST    = 6,  /* preference-sink posts that reached PostMessage, counted just before
+                                           * the call, whatever it answered; the wParam 0 wake of a deferral
+                                           * included */
+    GWIN_TEST_COUNTER_PREFS_REFUSED = 7,  /* preference-sink posts refused: no toolkit window published; the
+                                           * wake of a deferral included */
     GWIN_TEST_COUNTER_BSTR_ALLOC    = 8,  /* BSTRs that gwin_a11y_raise_property_changed built */
-    GWIN_TEST_COUNTER_BSTR_FREE     = 9   /* of those, released by its VariantClear */
+    GWIN_TEST_COUNTER_BSTR_FREE     = 9,  /* of those, released by its VariantClear */
+    GWIN_TEST_COUNTER_PREFS_DEFERRED = 10, /* preference-sink posts whose PostMessage failed with the toolkit
+                                            * window published; their types were kept for a later delivery */
+    GWIN_TEST_COUNTER_PREFS_DEFERRED_RUN = 11  /* deliveries of kept types: updatePreferences calls of
+                                                * PlatformSupport::RunDeferredPreferences */
 };
-#define GWIN_TEST_COUNTER_COUNT 10
+#define GWIN_TEST_COUNTER_COUNT 12
 
 /*
  * TEST HOOK. on != 0 zeroes every counter and log of these hooks and starts recording; on == 0 stops
@@ -3083,8 +3110,11 @@ GLASS_WIN_EXPORT int32_t gwin_test_event_log(int32_t* out, int32_t capacity);
  * PostMessage, so a teardown waits for it; it signals "parked" and waits on a kernel event until
  * gwin_test_park_release - or by itself after 120 s. Only the toolkit window's HWND being non-NULL gets
  * a post that far. It allocates, prints and loads nothing while parked. gwin_test_park_arm(0) disarms
- * and releases a parked thread. Never arm on the toolkit thread. Arm answers GWIN_ERR_INVALID_ARG while
- * a thread is parked, otherwise GWIN_OK.
+ * and releases a parked thread, or one that has claimed the gate and not yet parked: it sets the
+ * release event unconditionally, and the event stays set until the next gwin_test_park_arm(1). Re-arm
+ * only after the previous armed post has returned: a re-arm resets the release event, so it must not
+ * race a late claimant. Never arm on the toolkit thread. Arm answers GWIN_ERR_INVALID_ARG while a
+ * thread is parked, otherwise GWIN_OK.
  * gwin_test_park_wait: 1 when a thread is parked now or parks within timeout_ms, else 0. Any thread.
  * gwin_test_park_release: GWIN_OK, or GWIN_ERR_INVALID_ARG when no thread is parked. Any thread.
  */

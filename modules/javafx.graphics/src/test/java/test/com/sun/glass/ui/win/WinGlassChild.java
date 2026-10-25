@@ -25,14 +25,19 @@
 
 package test.com.sun.glass.ui.win;
 
+import com.sun.glass.ui.win.WinGlassNativeShim;
 import java.io.IOException;
+import java.io.InputStream;
 import java.io.StringWriter;
 import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
 import java.util.Collections;
+import java.util.HexFormat;
 import java.util.List;
 import java.util.Map;
 import java.util.Queue;
@@ -63,17 +68,39 @@ import java.util.function.BooleanSupplier;
  * alive. With {@code -Dwin.glass.child.naturalExit=true} ({@link #NATURAL_EXIT_PROPERTY}) a scenario that succeeded
  * returns from {@code main} instead, and the JVM exits only once its last non-daemon thread has ended: that is for a
  * scenario whose subject is the exit itself.
+ * <p>
+ * The {@code glass.dll} this JVM loaded, wherever the scenario loaded it from, is recorded as
+ * {@link #LOADED_GLASS_PATH} and {@link #LOADED_GLASS_SHA256}: a daemon thread asks {@code GetModuleHandleW} every
+ * {@value #LOADED_GLASS_POLL_MILLIS} ms, records the module's file and its sha256 once it is loaded and writes the
+ * values file then, so that a child its parent kills later still names the build it ran; {@code main} records it
+ * after the scenario if that thread had not. A JVM that never loaded it records neither key.
  */
 public final class WinGlassChild {
 
     /** {@code true}: after a scenario that succeeded, return from {@code main} instead of halting. */
     static final String NATURAL_EXIT_PROPERTY = "win.glass.child.naturalExit";
 
+    /** The full path {@code GetModuleFileNameW} answers for the {@code glass.dll} this JVM loaded. */
+    static final String LOADED_GLASS_PATH = "glass.loaded.path";
+
+    /** The sha256 of the file at {@link #LOADED_GLASS_PATH}, as lower-case hexadecimal. */
+    static final String LOADED_GLASS_SHA256 = "glass.loaded.sha256";
+
+    /** How often the watching thread asks whether {@code glass.dll} has been loaded. */
+    private static final long LOADED_GLASS_POLL_MILLIS = 10;
+
     /** How many of the exceptions that reached the default uncaught-exception handler {@code child.uncaught} names. */
     private static final int UNCAUGHT_SHOWN = 3;
 
     /** {@code <thread name>: <throwable>} of every exception that reached the default uncaught-exception handler. */
     private static final Queue<String> UNCAUGHT = new ConcurrentLinkedQueue<>();
+
+    /** Serializes the writes of the values file; once {@link #finalWritten}, the watching thread writes no more. */
+    private static final Object WRITE_LOCK = new Object();
+
+    private static boolean finalWritten;
+
+    private static volatile boolean stopWatching;
 
     private WinGlassChild() {
     }
@@ -82,6 +109,8 @@ public final class WinGlassChild {
         Thread.setDefaultUncaughtExceptionHandler(WinGlassChild::uncaught);
         int status = 0;
         Map<String, String> values = Collections.synchronizedMap(new TreeMap<>());
+        Path output = Path.of(args[1]);
+        Thread watcher = watchLoadedGlass(values, output);
         try {
             String target = args[0];
             int hash = target.indexOf('#');
@@ -98,6 +127,9 @@ public final class WinGlassChild {
             values.put("child.failure", String.valueOf(t));
             status = 2;
         } finally {
+            stopWatching = true;
+            WinNativeToolkit.join(watcher, 5_000);
+            recordLoadedGlass(values);
             if (!UNCAUGHT.isEmpty()) {
                 List<String> kept = List.copyOf(UNCAUGHT);
                 values.put("child.uncaught", kept.size() + " uncaught: "
@@ -105,7 +137,10 @@ public final class WinGlassChild {
                 status = 2;
             }
             try {
-                write(Path.of(args[1]), values);
+                synchronized (WRITE_LOCK) {
+                    finalWritten = true;
+                    write(output, values);
+                }
             } catch (IOException e) {
                 e.printStackTrace();
                 status = 3;
@@ -124,6 +159,81 @@ public final class WinGlassChild {
         UNCAUGHT.add(thread.getName() + ": " + throwable);
         System.err.print("Exception in thread \"" + thread.getName() + "\" ");
         throwable.printStackTrace();
+    }
+
+    /**
+     * Starts the daemon thread that records the loaded {@code glass.dll} into {@code values} as soon as it is loaded
+     * and then writes {@code values} to {@code output}, unless {@code main} has written them already.
+     */
+    private static Thread watchLoadedGlass(Map<String, String> values, Path output) {
+        Thread watcher = new Thread(() -> {
+            while (!stopWatching) {
+                if (recordLoadedGlass(values)) {
+                    synchronized (WRITE_LOCK) {
+                        if (!finalWritten) {
+                            try {
+                                write(output, values);
+                            } catch (IOException e) {
+                                e.printStackTrace();
+                            }
+                        }
+                    }
+                    return;
+                }
+                try {
+                    Thread.sleep(LOADED_GLASS_POLL_MILLIS);
+                } catch (InterruptedException e) {
+                    return;
+                }
+            }
+        }, "loaded-glass-watcher");
+        watcher.setDaemon(true);
+        watcher.start();
+        return watcher;
+    }
+
+    /**
+     * Records {@link #LOADED_GLASS_PATH} and {@link #LOADED_GLASS_SHA256} once this JVM has loaded {@code glass.dll},
+     * unless they are recorded already; a failure to find or hash the file is recorded in their place. Whether they
+     * are recorded now.
+     */
+    private static boolean recordLoadedGlass(Map<String, String> values) {
+        if (values.containsKey(LOADED_GLASS_PATH)) {
+            return true;
+        }
+        String path;
+        String sha256;
+        try {
+            path = WinGlassNativeShim.loadedModulePath(System.mapLibraryName("glass"));
+            if (path == null) {
+                return false;
+            }
+            sha256 = sha256(Path.of(path));
+        } catch (Throwable t) {
+            path = "(not found: " + t + ")";
+            sha256 = "(not computed)";
+        }
+        synchronized (values) {
+            if (!values.containsKey(LOADED_GLASS_PATH)) {
+                values.put(LOADED_GLASS_PATH, path);
+                values.put(LOADED_GLASS_SHA256, sha256);
+            }
+        }
+        return true;
+    }
+
+    /** The sha256 of {@code file} as lower-case hexadecimal, or a note saying why it could not be read. */
+    static String sha256(Path file) {
+        try (InputStream in = Files.newInputStream(file)) {
+            MessageDigest digest = MessageDigest.getInstance("SHA-256");
+            byte[] buffer = new byte[1 << 16];
+            for (int n = in.read(buffer); n > 0; n = in.read(buffer)) {
+                digest.update(buffer, 0, n);
+            }
+            return HexFormat.of().formatHex(digest.digest());
+        } catch (IOException | NoSuchAlgorithmException | RuntimeException e) {
+            return "(unreadable: " + e + ")";
+        }
     }
 
     /** Polls {@code condition} every millisecond for at most {@code timeoutMillis}; answers its last value. */

@@ -176,7 +176,7 @@ final class WinNativeToolkit {
 
     /** Every {@code gwin_test_counter}, indexed as {@code enum GwinTestCounter} numbers them. */
     static long[] counters() {
-        long[] values = new long[WinGlassNativeShim.COUNTER_BSTR_FREE + 1];
+        long[] values = new long[WinGlassNativeShim.COUNTER_COUNT];
         for (int i = 0; i < values.length; i++) {
             values[i] = WinGlassNativeShim.counter(i);
         }

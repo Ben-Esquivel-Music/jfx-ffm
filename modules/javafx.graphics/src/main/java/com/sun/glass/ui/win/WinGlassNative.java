@@ -498,7 +498,9 @@ final class WinGlassNative {
      * enum GwinPreferenceType (glass_win_api.h), which is PlatformSupport::PreferenceType
      * (PlatformSupport.h). A bitmask of the four sources of the preference map, not an index.
      * GWIN_PT_ALL is what WinApplication.getPlatformPreferences collects; the values the native side
-     * sends to the callback are 2, 4, 5, 6 and 8.
+     * sends to the callback are 2, 4, 5, 6, 8 and 12 (4 | 8: the types the two WinRT sinks kept after a
+     * failed post, ORed by PlatformSupport::PostPreferencesChanged and delivered in one call by
+     * PlatformSupport::RunDeferredPreferences).
      */
     static final int GWIN_PT_SYSTEM_COLORS = 1;
     static final int GWIN_PT_SYSTEM_PARAMS = 2;
@@ -3426,19 +3428,22 @@ final class WinGlassNative {
      * pointer {@link #installPreferencesCallback} passed, which is {@code NULL} - the registry the C
      * needed a {@code this} for is a static field here.
      * <p>
-     * <b>Thread.</b> Always the Glass toolkit thread, inside {@code GlassApplication::WindowProc}: the
+     * <b>Thread.</b> Always the Glass toolkit thread: inside {@code GlassApplication::WindowProc}, in the
      * {@code WM_SETTINGCHANGE} / {@code WM_THEMECHANGED} / {@code WM_SYSCOLORCHANGE} /
-     * {@code WM_DWMCOLORIZATIONCOLORCHANGED} arms, and the arm for what the two WinRT sinks post. The
-     * sinks themselves may run elsewhere: they are WRL {@code Callback<>} delegates, not agile by
-     * default - {@code Callback<>} builds them with {@code RuntimeClassFlags<Delegate>}, {@code Delegate}
+     * {@code WM_DWMCOLORIZATIONCOLORCHANGED} arms and the arm for what the two WinRT sinks post, or in
+     * {@code PlatformSupport::RunDeferredPreferences}, for the types a sink kept, right after a posted
+     * message was handled: after a {@code DispatchMessage} of a toolkit pump, or in two arms of that
+     * procedure. The sinks themselves may run elsewhere: they are WRL {@code Callback<>} delegates, not
+     * agile by default - {@code Callback<>} builds them with {@code RuntimeClassFlags<Delegate>}, {@code Delegate}
      * is {@code ClassicCom}, and only {@code WinRt} classes aggregate the free-threaded marshaler
      * ({@code FtmBase}) - so each event source decides whether to marshal its sink into the apartment
      * {@code RoInitialize(RO_INIT_SINGLETHREADED)} created on the toolkit thread or to call it on a
      * WinRT thread of its own. Either way a sink only posts its types to the toolkit window through the
-     * guarded post of {@code gwin_invoke_later} ({@code PlatformSupport::PostPreferencesChanged}), so a
-     * sink's notification reaches this asynchronously, on the toolkit thread, and a sink invoked once
-     * the toolkit window is destroyed posts nothing. No call starts after {@code gwin_run_loop} has
-     * returned (see {@link #clearPreferencesCallback}).
+     * guarded post of {@code gwin_invoke_later} ({@code PlatformSupport::PostPreferencesChanged}), or
+     * keeps them for the toolkit thread when that {@code PostMessage} fails with the window published (its
+     * posted-message queue is at its quota), so a sink's notification reaches this asynchronously, on the
+     * toolkit thread, and a sink invoked once the toolkit window is destroyed posts and keeps nothing. No
+     * call starts after {@code gwin_run_loop} has returned (see {@link #clearPreferencesCallback}).
      * <p>
      * <b>It must not throw.</b> An exception escaping an upcall stub terminates the JVM, so
      * {@code Throwable} is caught and answered with 0, which is the C's "nothing changed" and its
@@ -3450,7 +3455,8 @@ final class WinGlassNative {
      * target and {@code WinPreferencesNativeTest} can assert the swallow; nothing but the stub calls it.
      *
      * @return 1 if the preferences changed, 0 otherwise; {@code GlassApplication::WindowProc} chooses
-     *         between {@code return 0} and {@code DefWindowProc} on this
+     *         between {@code return 0} and {@code DefWindowProc} on this, and
+     *         {@code RunDeferredPreferences} does not use it
      */
     static int onPreferencesChanged(MemorySegment user, int types) {
         try {

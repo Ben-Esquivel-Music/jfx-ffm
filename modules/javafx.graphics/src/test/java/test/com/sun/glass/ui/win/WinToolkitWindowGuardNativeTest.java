@@ -59,6 +59,8 @@ import static test.com.sun.glass.ui.win.WinNativeToolkit.hex;
  * <li>A parked {@code gwin_invoke_later} holds teardown: {@code gwin_terminate_loop} does not return while the
  * poster is parked and returns once it is released, and no call was aimed at a window that was no longer
  * published.</li>
+ * <li>Disarming the gate ({@code gwin_test_park_arm(0)}) from another thread releases the parked poster: its
+ * {@code gwin_invoke_later} returns, no thread is left parked, and the toolkit then ends normally.</li>
  * <li>Once the toolkit window is cleared, every {@code gwin_invoke_later} is refused, calls {@code PostMessage}
  * zero times and frees its action - also from the runnable that called {@code gwin_terminate_loop}, after that
  * call, while the toolkit object still exists.</li>
@@ -89,11 +91,13 @@ public class WinToolkitWindowGuardNativeTest {
     private static final int POSTS_PER_POSTER = 25;
 
     private static String noToolkit;
+    private static String invalidArg;
 
     @BeforeAll
     static void requireNatives() {
         WinGlassNatives.require();
         noToolkit = Integer.toString(WinGlassNativeShim.constant("GWIN_ERR_NO_TOOLKIT"));
+        invalidArg = Integer.toString(WinGlassNativeShim.constant("GWIN_ERR_INVALID_ARG"));
     }
 
     /*
@@ -162,6 +166,54 @@ public class WinToolkitWindowGuardNativeTest {
         out.put("peek.toDestroyedWindow",
                 Long.toString(peek.messages().stream().filter(m -> m.hwnd() == hwnd).count()));
         out.put("peek.messages", describe(peek.messages()));
+    }
+
+    @Test
+    @Timeout(120)
+    public void disarmingTheGateReleasesAParkedInvokeLater() {
+        WinGlassChildJvm.Run run = WinGlassChildJvm.run(WinToolkitWindowGuardNativeTest.class, "disarmedPost");
+        System.out.println("disarmed post: " + run.values());
+        assertEquals("0", run.value("poster.arm"), run.describe());
+        assertEquals("true", run.value("parked"), "the poster never reached the gate: " + run.describe());
+        assertEquals("0", run.value("disarm"), run.describe());
+        assertEquals("true", run.value("poster.endedAfterDisarm"),
+                "gwin_test_park_arm(0) did not release the parked poster within " + WAIT_MILLIS + " ms: "
+                        + run.describe());
+        assertEquals(invalidArg, run.value("release"),
+                "a thread was still parked after the disarm, so gwin_test_park_release found one: " + run.describe());
+        assertEquals("0", run.value("poster.status"), run.describe());
+        assertEquals("true", run.value("parked.ran"), run.describe());
+        assertEquals("0", run.value("terminate.post"), run.describe());
+        assertEquals("true", run.value("loop.returned"), run.describe());
+        assertEquals("true", run.value("toolkit.ended"), run.describe());
+    }
+
+    /**
+     * Runs in {@link WinGlassChild}. The gate is released with {@code gwin_test_park_release} after the bounded
+     * wait for the poster, so a disarm that left the poster parked holds neither the poster nor the teardown for
+     * the gate's 120 s cap.
+     */
+    static void disarmedPost(Map<String, String> out) {
+        WinNativeToolkit toolkit = WinNativeToolkit.start();
+        WinGlassNativeShim.observe(true);
+        CountDownLatch parkedRan = new CountDownLatch(1);
+        Thread poster = WinNativeToolkit.startThread("poster", () -> {
+            out.put("poster.arm", Integer.toString(WinGlassNativeShim.parkArm(true)));
+            out.put("poster.status", Integer.toString(WinGlassNativeShim.toolkitInvokeLater(parkedRan::countDown)));
+        });
+        out.put("parked", Boolean.toString(WinGlassNativeShim.parkWait((int) WAIT_MILLIS)));
+        long disarmed = System.nanoTime();
+        out.put("disarm", Integer.toString(WinGlassNativeShim.parkArm(false)));
+        boolean ended = WinNativeToolkit.join(poster, WAIT_MILLIS);
+        out.put("poster.endedAfterDisarm", Boolean.toString(ended));
+        out.put("poster.millisAfterDisarm", Long.toString((System.nanoTime() - disarmed) / 1_000_000));
+        out.put("release", Integer.toString(WinGlassNativeShim.parkRelease()));
+        out.put("poster.ended", Boolean.toString(WinNativeToolkit.join(poster, WAIT_MILLIS)));
+        out.put("parked.ran", Boolean.toString(WinNativeToolkit.await(parkedRan, WAIT_MILLIS)));
+        out.put("terminate.post", Integer.toString(toolkit.terminate()));
+        out.put("loop.returned", Boolean.toString(toolkit.awaitLoopReturn(WAIT_MILLIS)));
+        recordCounters(out, counters());
+        out.put("toolkit.ended", Boolean.toString(toolkit.releaseAndAwaitEnd(WAIT_MILLIS)));
     }
 
     /*

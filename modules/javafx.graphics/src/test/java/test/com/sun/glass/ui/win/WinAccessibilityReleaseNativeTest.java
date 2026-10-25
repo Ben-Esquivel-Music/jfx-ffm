@@ -131,7 +131,7 @@ public class WinAccessibilityReleaseNativeTest {
             WinGlassNativeShim.raiseAutomationPropertyChangedEvent(accessible, UIA_NAME_PROPERTY_ID, was, was);
             assertEquals(0L, WinGlassNativeShim.counter(WinGlassNativeShim.COUNTER_BSTR_ALLOC));
             assertEquals(-1L, WinGlassNativeShim.counter(-1));
-            assertEquals(-1L, WinGlassNativeShim.counter(10));
+            assertEquals(-1L, WinGlassNativeShim.counter(WinGlassNativeShim.COUNTER_COUNT));
             assertTrue(WinGlassNativeShim.missingToolkitHooks().isEmpty(), "this build lacks "
                     + WinGlassNativeShim.missingToolkitHooks());
         } finally {

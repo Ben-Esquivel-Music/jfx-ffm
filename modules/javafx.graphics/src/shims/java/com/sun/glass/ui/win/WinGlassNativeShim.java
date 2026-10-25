@@ -1525,6 +1525,29 @@ public final class WinGlassNativeShim {
         private static final MethodHandle DESTROY_WINDOW = bind(USER32, "DestroyWindow",
                 FunctionDescriptor.of(JAVA_INT, ADDRESS));
 
+        /** {@code DWORD GetWindowThreadProcessId(HWND hWnd, LPDWORD lpdwProcessId)}. */
+        private static final MethodHandle GET_WINDOW_THREAD_PROCESS_ID = bind(USER32, "GetWindowThreadProcessId",
+                FunctionDescriptor.of(JAVA_INT, ADDRESS, ADDRESS));
+
+        private static final StructLayout CALL_STATE = Linker.Option.captureStateLayout();
+        private static final long LAST_ERROR_OFFSET = CALL_STATE.byteOffset(PathElement.groupElement("GetLastError"));
+
+        /**
+         * {@code LRESULT SendMessageTimeoutW(HWND hWnd, UINT Msg, WPARAM wParam, LPARAM lParam, UINT fuFlags,
+         * UINT uTimeout, PDWORD_PTR lpdwResult)}, capturing {@code GetLastError}.
+         */
+        private static final MethodHandle SEND_MESSAGE_TIMEOUT_W = bind(USER32, "SendMessageTimeoutW",
+                FunctionDescriptor.of(JAVA_LONG, ADDRESS, JAVA_INT, JAVA_LONG, JAVA_LONG, JAVA_INT, JAVA_INT, ADDRESS),
+                Linker.Option.captureCallState("GetLastError"));
+
+        /**
+         * {@code BOOL PostMessageW(HWND hWnd, UINT Msg, WPARAM wParam, LPARAM lParam)}, capturing
+         * {@code GetLastError}.
+         */
+        private static final MethodHandle POST_MESSAGE_W = bind(USER32, "PostMessageW",
+                FunctionDescriptor.of(JAVA_INT, ADDRESS, JAVA_INT, JAVA_LONG, JAVA_LONG),
+                Linker.Option.captureCallState("GetLastError"));
+
         /** {@code HWND SetCapture(HWND hWnd)}: the previous capture window. */
         private static final MethodHandle SET_CAPTURE = bind(USER32, "SetCapture",
                 FunctionDescriptor.of(ADDRESS, ADDRESS));
@@ -1554,10 +1577,11 @@ public final class WinGlassNativeShim {
         }
 
         @SuppressWarnings("restricted")
-        private static MethodHandle bind(SymbolLookup lookup, String name, FunctionDescriptor fd) {
+        private static MethodHandle bind(SymbolLookup lookup, String name, FunctionDescriptor fd,
+                                         Linker.Option... options) {
             MemorySegment symbol = lookup.find(name).orElseThrow(
                     () -> new UnsatisfiedLinkError("missing native symbol: " + name));
-            return LINKER.downcallHandle(symbol, fd);
+            return LINKER.downcallHandle(symbol, fd, options);
         }
     }
 
@@ -2855,6 +2879,89 @@ public final class WinGlassNativeShim {
     public static boolean destroyWindow(long hwnd) {
         try {
             return (int) Readback.DESTROY_WINDOW.invokeExact(MemorySegment.ofAddress(hwnd)) != 0;
+        } catch (Throwable t) {
+            throw new AssertionError(t);
+        }
+    }
+
+    /** winuser.h {@code HWND_MESSAGE}, {@code ((HWND)-3)}: the parent of a message-only window. */
+    private static final long HWND_MESSAGE = -3L;
+
+    /** winuser.h {@code SMTO_NORMAL}. */
+    private static final int SMTO_NORMAL = 0x0000;
+
+    /**
+     * {@code CreateWindowExW(0, L"STATIC", text, 0, 0, 0, 0, 0, HWND_MESSAGE, NULL, NULL, NULL)}: a message-only
+     * window of the system {@code STATIC} class, owned by the calling thread, whose procedure answers
+     * {@code WM_GETTEXTLENGTH} with the length of {@code text}; or 0. Destroy it on the same thread with
+     * {@link #destroyWindow}.
+     */
+    public static long createMessageOnlyStatic(String text) {
+        try (Arena arena = Arena.ofConfined()) {
+            MemorySegment hwnd = (MemorySegment) Readback.CREATE_WINDOW_EX_W.invokeExact(0,
+                    cString(arena, "STATIC"), cString(arena, text), 0, 0, 0, 0, 0,
+                    MemorySegment.ofAddress(HWND_MESSAGE), MemorySegment.NULL, MemorySegment.NULL, MemorySegment.NULL);
+            return hwnd.address();
+        } catch (Throwable t) {
+            throw new AssertionError(t);
+        }
+    }
+
+    /** {@code GetWindowThreadProcessId(hwnd, NULL)}: the id of the thread that created the window, or 0. */
+    public static int windowThreadId(long hwnd) {
+        try {
+            return (int) Readback.GET_WINDOW_THREAD_PROCESS_ID.invokeExact(MemorySegment.ofAddress(hwnd),
+                    MemorySegment.NULL);
+        } catch (Throwable t) {
+            throw new AssertionError(t);
+        }
+    }
+
+    /** What {@link #sendMessageTimeout} answered: its return value, the message result and the last error. */
+    public record SentMessage(long returned, long result, int lastError) {
+    }
+
+    /** The preset of {@link SentMessage#result()}: what it holds where {@code SendMessageTimeoutW} writes nothing. */
+    public static final long NO_MESSAGE_RESULT = -1L;
+
+    /**
+     * {@code SendMessageTimeoutW(hwnd, message, 0, 0, SMTO_NORMAL, timeoutMillis, &result)} and the
+     * {@code GetLastError} it left, which is set to 0 before the call. A window of another thread gets the message
+     * only while that thread retrieves, or waits for, messages in a way that handles sent ones; otherwise the call
+     * answers 0 after {@code timeoutMillis}, with {@code ERROR_TIMEOUT} (1460), and the result is not the message's
+     * answer (on Windows 10 it is then 0).
+     */
+    public static SentMessage sendMessageTimeout(long hwnd, int message, int timeoutMillis) {
+        try (Arena arena = Arena.ofConfined()) {
+            MemorySegment callState = arena.allocate(Readback.CALL_STATE);
+            callState.set(JAVA_INT, Readback.LAST_ERROR_OFFSET, 0);
+            MemorySegment result = arena.allocate(JAVA_LONG);
+            result.set(JAVA_LONG, 0, NO_MESSAGE_RESULT);
+            long returned = (long) Readback.SEND_MESSAGE_TIMEOUT_W.invokeExact(callState,
+                    MemorySegment.ofAddress(hwnd), message, 0L, 0L, SMTO_NORMAL, timeoutMillis, result);
+            return new SentMessage(returned, result.get(JAVA_LONG, 0),
+                    callState.get(JAVA_INT, Readback.LAST_ERROR_OFFSET));
+        } catch (Throwable t) {
+            throw new AssertionError(t);
+        }
+    }
+
+    /** What {@link #postMessage} answered: whether it was posted, and the last error it left. */
+    public record PostedMessage(boolean posted, int lastError) {
+    }
+
+    /**
+     * {@code PostMessageW(hwnd, message, 0, 0)} and the {@code GetLastError} it left, which is set to 0 before the
+     * call. Once the posted-message queue of the window's thread holds its quota (10,000 by default) the call
+     * fails with {@code ERROR_NOT_ENOUGH_QUOTA} (1816).
+     */
+    public static PostedMessage postMessage(long hwnd, int message) {
+        try (Arena arena = Arena.ofConfined()) {
+            MemorySegment callState = arena.allocate(Readback.CALL_STATE);
+            callState.set(JAVA_INT, Readback.LAST_ERROR_OFFSET, 0);
+            int posted = (int) Readback.POST_MESSAGE_W.invokeExact(callState, MemorySegment.ofAddress(hwnd), message,
+                    0L, 0L);
+            return new PostedMessage(posted != 0, callState.get(JAVA_INT, Readback.LAST_ERROR_OFFSET));
         } catch (Throwable t) {
             throw new AssertionError(t);
         }
@@ -4500,6 +4607,11 @@ public final class WinGlassNativeShim {
     public static final int COUNTER_PREFS_REFUSED = 7;
     public static final int COUNTER_BSTR_ALLOC = 8;
     public static final int COUNTER_BSTR_FREE = 9;
+    public static final int COUNTER_PREFS_DEFERRED = 10;
+    public static final int COUNTER_PREFS_DEFERRED_RUN = 11;
+
+    /** {@code GWIN_TEST_COUNTER_COUNT}: how many counters there are, the first index the library does not know. */
+    public static final int COUNTER_COUNT = 12;
 
     /** {@code gwin_test_event_log} codes, {@code enum GwinTestEvent}. */
     public static final int EVENT_REMOVE_AUTO_HIDE = 1;
@@ -4622,8 +4734,8 @@ public final class WinGlassNativeShim {
     }
 
     /**
-     * {@code gwin_test_park_arm(on)}: arms (or disarms, releasing a parked thread) the one-shot gate for the
-     * calling thread. Never arm on the toolkit thread.
+     * {@code gwin_test_park_arm(on)}: arms (or disarms, releasing a thread that is parked or has claimed the gate)
+     * the one-shot gate for the calling thread. Never arm on the toolkit thread.
      */
     public static int parkArm(boolean on) {
         try {
@@ -4902,6 +5014,31 @@ public final class WinGlassNativeShim {
     }
 
     /**
+     * The full path of the module this process has loaded under the file name {@code fileName}
+     * ({@code kernel32!GetModuleHandleW}, then {@code GetModuleFileNameW}), or {@code null} while it has loaded none.
+     * Loads nothing - neither that module nor {@code glass} - so it may be asked from any thread, before the library
+     * under test is loaded.
+     */
+    public static String loadedModulePath(String fileName) {
+        try (Arena arena = Arena.ofConfined()) {
+            MemorySegment module = (MemorySegment) LoadedModules.GET_MODULE_HANDLE.invokeExact(
+                    cString(arena, fileName));
+            if (module.address() == 0) {
+                return null;
+            }
+            MemorySegment path = arena.allocate(JAVA_CHAR, LoadedModules.PATH_CAPACITY);
+            int length = (int) LoadedModules.GET_MODULE_FILE_NAME.invokeExact(module, path,
+                    LoadedModules.PATH_CAPACITY);
+            if (length <= 0 || length >= LoadedModules.PATH_CAPACITY) {
+                throw new AssertionError("GetModuleFileNameW answered " + length + " for " + fileName);
+            }
+            return new String(path.asSlice(0, length * JAVA_CHAR.byteSize()).toArray(JAVA_CHAR));
+        } catch (Throwable t) {
+            throw hookFailure("GetModuleFileNameW", t);
+        }
+    }
+
+    /**
      * Installs a {@code GwinPrefsCallbacks} table whose {@code preferences_changed} records every call - its
      * thread, the native thread id, the types and a {@link #nextSequence()} number - into
      * {@link #recordedPreferencesCalls()} and answers 0. Before {@link #toolkitCreate}, in place of the production
@@ -5147,6 +5284,28 @@ public final class WinGlassNativeShim {
             } catch (ReflectiveOperationException e) {
                 throw new AssertionError("no recording target recordPreferencesChanged", e);
             }
+        }
+    }
+
+    /** The two {@code kernel32} calls of {@link #loadedModulePath}. Does not load {@code glass}. */
+    private static final class LoadedModules {
+
+        /** UTF-16 code units of the longest path {@code GetModuleFileNameW} can answer, its terminator included. */
+        static final int PATH_CAPACITY = 32_768;
+
+        static final MethodHandle GET_MODULE_HANDLE = bindKernel32("GetModuleHandleW",
+                FunctionDescriptor.of(ADDRESS, ADDRESS));
+        static final MethodHandle GET_MODULE_FILE_NAME = bindKernel32("GetModuleFileNameW",
+                FunctionDescriptor.of(JAVA_INT, ADDRESS, ADDRESS, JAVA_INT));
+
+        private LoadedModules() {
+        }
+
+        @SuppressWarnings("restricted")
+        private static MethodHandle bindKernel32(String name, FunctionDescriptor fd) {
+            MemorySegment symbol = SymbolLookup.libraryLookup("kernel32.dll", Arena.global()).find(name).orElseThrow(
+                    () -> new UnsatisfiedLinkError("missing native symbol: " + name + " in kernel32.dll"));
+            return Linker.nativeLinker().downcallHandle(symbol, fd);
         }
     }
 }

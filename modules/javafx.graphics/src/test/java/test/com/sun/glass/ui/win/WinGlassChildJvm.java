@@ -25,24 +25,20 @@
 
 package test.com.sun.glass.ui.win;
 
-import java.io.File;
 import java.io.IOException;
-import java.io.InputStream;
 import java.io.UncheckedIOException;
 import java.lang.management.ManagementFactory;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
-import java.nio.file.InvalidPathException;
 import java.nio.file.Path;
-import java.security.MessageDigest;
-import java.security.NoSuchAlgorithmException;
 import java.util.ArrayList;
+import java.util.Collection;
 import java.util.Comparator;
-import java.util.HexFormat;
 import java.util.List;
 import java.util.Map;
 import java.util.TreeMap;
 import java.util.concurrent.TimeUnit;
+import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
 import static org.junit.jupiter.api.Assertions.fail;
@@ -62,13 +58,17 @@ import static org.junit.jupiter.api.Assertions.fail;
  * directory of its own ({@code -XX:ErrorFile}), under {@code target/win-glass-child/<scenario>/} with the values,
  * stdout and stderr.
  * <p>
- * {@link Run#describe} names the {@code glass.dll} the child loaded, by sha256, so a report says which build it
- * ran against.
+ * {@link Run#describe}, {@link Run#loadedGlass} and the message of a child that took too long name the
+ * {@code glass.dll} the child itself recorded loading, by path and sha256 ({@link WinGlassChild#LOADED_GLASS_PATH}),
+ * so a report says which build it ran against; with no such record they say so.
  */
 final class WinGlassChildJvm {
 
     /** How long {@link #run} waits for a child that bounds its own waits. */
     static final long CHILD_SECONDS = 90;
+
+    /** What {@link #loadedGlass} answers for a child that recorded no loaded {@code glass.dll}. */
+    static final String NO_LOADED_GLASS = "child did not report the loaded glass.dll";
 
     /** What a child JVM left behind. */
     record Run(String scenario, int exitCode, Map<String, String> values, Path stdout, Path stderr,
@@ -88,10 +88,15 @@ final class WinGlassChildJvm {
             return value;
         }
 
+        /** The {@code glass.dll} this child recorded loading, as {@link WinGlassChildJvm#loadedGlass} words it. */
+        String loadedGlass() {
+            return WinGlassChildJvm.loadedGlass(values);
+        }
+
         String describe() {
-            return "child JVM '" + scenario + "' exited with " + exitCode + " (glass.dll sha256 " + glassSha256()
-                    + "); hs_err files: " + errorFiles + "\nvalues: " + values + "\nlast stderr lines:\n"
-                    + tail(stderr, 40) + "\nlast stdout lines:\n" + tail(stdout, 20);
+            return "child JVM '" + scenario + "' exited with " + exitCode + " (" + loadedGlass() + "); hs_err files: "
+                    + errorFiles + "\nvalues: " + values + "\nlast stderr lines:\n" + tail(stderr, 40)
+                    + "\nlast stdout lines:\n" + tail(stdout, 20);
         }
     }
 
@@ -149,21 +154,14 @@ final class WinGlassChildJvm {
                     .start();
             if (!process.waitFor(timeoutSeconds, TimeUnit.SECONDS)) {
                 kill(process);
-                fail("child JVM '" + scenario + "' did not finish within " + timeoutSeconds + " s (glass.dll sha256 "
-                        + glassSha256() + "); stderr:\n" + tail(stderr, 40));
+                fail("child JVM '" + scenario + "' did not finish within " + timeoutSeconds + " s ("
+                        + loadedGlassOfKilled(output) + "); stderr:\n" + tail(stderr, 40));
             }
             List<Path> errorFiles;
             try (Stream<Path> files = Files.list(errors)) {
                 errorFiles = files.sorted().toList();
             }
-            Map<String, String> values = new TreeMap<>();
-            if (Files.isRegularFile(output)) {
-                for (String line : Files.readAllLines(output, StandardCharsets.UTF_8)) {
-                    int eq = line.indexOf('=');
-                    values.put(line.substring(0, eq), WinGlassChild.unescape(line.substring(eq + 1)));
-                }
-            }
-            return new Run(scenario, process.exitValue(), values, stdout, stderr, errorFiles, command);
+            return new Run(scenario, process.exitValue(), readValues(output), stdout, stderr, errorFiles, command);
         } catch (IOException e) {
             throw new UncheckedIOException(e);
         } catch (InterruptedException e) {
@@ -177,37 +175,46 @@ final class WinGlassChildJvm {
     }
 
     /**
-     * The sha256 of the first {@code glass.dll} on {@code java.library.path}, which is the one this JVM and its
-     * children load, or a note saying why there is none.
+     * The {@code glass.dll} a child recorded loading in {@code values} - {@code loaded glass.dll sha256 <hex> from
+     * <path>} - or {@link #NO_LOADED_GLASS} when it recorded none.
      */
-    static String glassSha256() {
-        String library = System.mapLibraryName("glass");
-        for (String entry : System.getProperty("java.library.path", "").split(File.pathSeparator)) {
-            if (entry.isEmpty()) {
-                continue;
-            }
-            try {
-                Path candidate = Path.of(entry).resolve(library);
-                if (Files.isRegularFile(candidate)) {
-                    return sha256(candidate);
-                }
-            } catch (InvalidPathException e) {
-                // An entry this platform cannot parse holds no library.
-            }
+    static String loadedGlass(Map<String, String> values) {
+        String path = values.get(WinGlassChild.LOADED_GLASS_PATH);
+        if (path == null) {
+            return NO_LOADED_GLASS;
         }
-        return "(no " + library + " on java.library.path)";
+        return "loaded glass.dll sha256 " + values.get(WinGlassChild.LOADED_GLASS_SHA256) + " from " + path;
     }
 
-    private static String sha256(Path file) {
-        try (InputStream in = Files.newInputStream(file)) {
-            MessageDigest digest = MessageDigest.getInstance("SHA-256");
-            byte[] buffer = new byte[1 << 16];
-            for (int n = in.read(buffer); n > 0; n = in.read(buffer)) {
-                digest.update(buffer, 0, n);
+    /**
+     * {@link #loadedGlass} of several children, each distinct answer once, in order: one answer when they all
+     * loaded the same file.
+     */
+    static String loadedGlass(Collection<Run> runs) {
+        return runs.stream().map(Run::loadedGlass).distinct().collect(Collectors.joining("; "));
+    }
+
+    /** The values a child wrote to {@code output}, none when it wrote no file. */
+    private static Map<String, String> readValues(Path output) throws IOException {
+        Map<String, String> values = new TreeMap<>();
+        if (Files.isRegularFile(output)) {
+            for (String line : Files.readAllLines(output, StandardCharsets.UTF_8)) {
+                int eq = line.indexOf('=');
+                values.put(line.substring(0, eq), WinGlassChild.unescape(line.substring(eq + 1)));
             }
-            return HexFormat.of().formatHex(digest.digest());
-        } catch (IOException | NoSuchAlgorithmException e) {
-            return "(unreadable: " + e + ")";
+        }
+        return values;
+    }
+
+    /**
+     * {@link #loadedGlass} of a child that was killed: what its values file held, which is what the child wrote
+     * once it had loaded {@code glass.dll}, if it got that far.
+     */
+    private static String loadedGlassOfKilled(Path output) {
+        try {
+            return loadedGlass(readValues(output));
+        } catch (IOException | RuntimeException e) {
+            return NO_LOADED_GLASS + " (its values file is unreadable: " + e + ")";
         }
     }
 

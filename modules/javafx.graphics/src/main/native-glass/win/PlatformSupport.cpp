@@ -41,9 +41,10 @@ using namespace ABI::Windows::Networking::Connectivity;
  * The preferences callback table. Written by gwin_prefs_set_callbacks, from Java: installed on the
  * launcher thread before the Glass toolkit thread exists, and cleared on the toolkit thread after
  * gwin_run_loop has returned. Read only by updatePreferences, which runs only on the toolkit thread, in
- * GlassApplication::WindowProc - the two WinRT sinks post there instead of reading it. No lock, by
- * design - see gwin_prefs_set_callbacks in glass_win_api.h for why that is safe and what breaks if the
- * installation is made lazy instead.
+ * GlassApplication::WindowProc or in RunDeferredPreferences inside a toolkit pump - the two WinRT sinks
+ * post there, or keep their types for the pump, instead of reading it. No lock, by design - see
+ * gwin_prefs_set_callbacks in glass_win_api.h for why that is safe and what breaks if the installation is
+ * made lazy instead.
  */
 static GwinPrefsCallbacks g_prefsCallbacks = { NULL };
 static void* g_prefsUser = NULL;
@@ -122,7 +123,8 @@ void PlatformSupport::InitializeWinRT()
         RO_CHECKED("IUISettings::QueryInterface<IUISettings5>",
                    settings->QueryInterface<IUISettings5>(&settings5));
 
-        // The sinks only post (see PostPreferencesChanged); they capture nothing teardown frees.
+        // The sinks only post or keep their types (see PostPreferencesChanged); they capture nothing teardown
+        // frees.
         ComPtr<AutoHideHandler> autoHideHandler = Callback<AutoHideHandler>(
             [](IUISettings*, IUISettingsAutoHideScrollBarsChangedEventArgs*) {
                 GwinTestRecordDelegateCall(GWIN_TEST_DELEGATE_AUTO_HIDE);
@@ -201,16 +203,67 @@ PlatformSupport::~PlatformSupport()
 }
 
 /*
+ * The PreferenceType bits the sinks kept because their post failed with the toolkit window published,
+ * ORed together until a toolkit pump takes them. Any thread ORs; the toolkit thread exchanges. Interlocked
+ * access only.
+ */
+static volatile LONG s_deferredTypes = 0;
+
+/*
  * static
  *
  * What both WinRT sinks do, on whatever thread the OS invokes them: post the preference types to the
  * toolkit window through GlassApplication::PostToToolkit, the guarded post gwin_invoke_later uses. Once
- * the toolkit window is cleared the post is refused, and the sink still answers S_OK. No lock is held
- * across a call into Java: preferences_changed runs later, in the toolkit window's procedure.
+ * the toolkit window is cleared the post is refused and nothing is kept - the teardown discards it. When
+ * PostMessage fails with the window published (the toolkit thread's posted-message queue is at its
+ * quota), the types are ORed into s_deferredTypes and one wake, wParam 0, is posted the same way, its
+ * answer ignored: posted, it is dispatched after the OR; refused because the queue is still full, the
+ * messages filling it are; either way a dispatch follows the OR, and RunDeferredPreferences delivers the
+ * kept types after it (see there for a pump that is not ours). The sink answers S_OK in every case. No lock
+ * is held across a call into Java: preferences_changed runs later, on the toolkit thread.
  */
 void PlatformSupport::PostPreferencesChanged(PreferenceType preferenceType)
 {
-    GlassApplication::PostToToolkit(WM_PREFERENCES_CHANGED, (WPARAM)preferenceType, (LPARAM)0);
+    bool published = false;
+    if (GlassApplication::PostToToolkit(WM_PREFERENCES_CHANGED, (WPARAM)preferenceType, (LPARAM)0, &published)
+            || !published) {
+        return;
+    }
+    ::InterlockedOr(&s_deferredTypes, (LONG)preferenceType);
+    GwinTestCount(GWIN_TEST_COUNTER_PREFS_DEFERRED);
+    GlassApplication::PostToToolkit(WM_PREFERENCES_CHANGED, (WPARAM)0, (LPARAM)0);
+}
+
+/*
+ * static
+ *
+ * On the toolkit thread, with no lock held, where a posted message has just been handled - the context of
+ * the WM_PREFERENCES_CHANGED arm, which makes the same updatePreferences call: after each DispatchMessage of
+ * gwin_run_loop's and GlassApplication::EnterNestedEventLoop's pumps, and in the toolkit window's
+ * WM_DO_ACTION_LATER arm and its WM_PREFERENCES_CHANGED arm for the wake, which a pump that is not ours
+ * dispatches too: a modal loop of the OS (move/size, menus, common dialogs, DoDragDrop) and, in the
+ * SWT-embedded case, where gwin_run_loop never runs, the embedder's. Such a pump keeps the types until it
+ * dispatches one of those two, or until the modal loop ends. The answer is not used: no message handling
+ * depends on it here. One acquire load while nothing is kept. Without a PlatformSupport (the toolkit window
+ * is gone) the taken types are dropped, as the teardown drops them.
+ */
+void PlatformSupport::RunDeferredPreferences()
+{
+    if (::ReadAcquire(&s_deferredTypes) == 0) {
+        return;
+    }
+    const int types = (int)::InterlockedExchange(&s_deferredTypes, 0) & PT_ALL;
+    PlatformSupport* support = GlassApplication::GetPlatformSupport();
+    if (types != 0 && support != NULL) {
+        GwinTestCount(GWIN_TEST_COUNTER_PREFS_DEFERRED_RUN);
+        support->updatePreferences(PreferenceType(types));
+    }
+}
+
+/* static */
+void PlatformSupport::DiscardDeferredPreferences()
+{
+    ::InterlockedExchange(&s_deferredTypes, 0);
 }
 
 bool PlatformSupport::updatePreferences(PreferenceType preferenceType) const

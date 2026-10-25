@@ -72,7 +72,8 @@ public:
 // A synchronous call from another thread, sent with SendNotifyMessage; WPARAM names a pending record that
 // the toolkit window procedure looks up and ignores when it does not find it (GlassApplication.cpp).
 #define WM_DO_ACTION_NOTIFY (WM_USER+3)
-// Posted by PlatformSupport's two WinRT sinks; WPARAM carries their PlatformSupport::PreferenceType bits.
+// Posted by PlatformSupport's two WinRT sinks; WPARAM carries their PlatformSupport::PreferenceType bits, or 0
+// for the wake a sink posts after keeping the types of a failed post (PlatformSupport::PostPreferencesChanged).
 #define WM_PREFERENCES_CHANGED (WM_USER+4)
 
 class GlassApplication : protected BaseWnd {
@@ -106,10 +107,13 @@ public:
 
     /*
      * The guarded post: inside the shared side of the publication lock, load the published HWND and, when
-     * it is not NULL, PostMessage to it. Returns whether the message was posted. The only way this library
-     * posts to the toolkit window; nothing relies on PostMessage failing for a dead handle. Any thread.
+     * it is not NULL, PostMessage to it. Returns whether the message was posted. When `published` is not
+     * NULL it receives whether a toolkit window was published, so a false return tells "no toolkit" (the
+     * window was never created or is torn down) from a PostMessage that failed with the window published -
+     * the toolkit thread's posted-message queue is at its quota. The only way this library posts to the
+     * toolkit window; nothing relies on PostMessage failing for a dead handle. Any thread.
      */
-    static bool PostToToolkit(UINT msg, WPARAM wParam, LPARAM lParam);
+    static bool PostToToolkit(UINT msg, WPARAM wParam, LPARAM lParam, bool *published = NULL);
 
     /* Posts WM_DO_ACTION_LATER through PostToToolkit; deletes the action when that refuses. */
     static void ExecActionLater(Action *action);

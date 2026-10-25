@@ -28,6 +28,7 @@ package test.com.sun.glass.ui.win;
 import com.sun.glass.ui.Application;
 import com.sun.glass.ui.win.WinGlassNativeShim;
 import com.sun.glass.ui.win.WinGlassNativeShim.DelegateCall;
+import com.sun.glass.ui.win.WinGlassNativeShim.PostedMessage;
 import com.sun.glass.ui.win.WinGlassNativeShim.PreferencesCall;
 import com.sun.javafx.application.PlatformImpl;
 import java.util.ArrayList;
@@ -39,6 +40,7 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.function.BiConsumer;
 import java.util.stream.Collectors;
 import javafx.application.Platform;
 import javafx.beans.InvalidationListener;
@@ -52,6 +54,7 @@ import org.junit.jupiter.api.condition.OS;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assumptions.assumeFalse;
 
 /**
  * The two WinRT preference sinks of {@code PlatformSupport} - the {@code AutoHideScrollBarsChanged} and
@@ -64,6 +67,10 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * runs on the toolkit thread, and none after {@code gwin_run_loop} has returned.</li>
  * <li>A delegate invoked after the toolkit window is gone posts nothing: the sink-post counters say it was
  * refused, and {@code PostMessage} was not called.</li>
+ * <li>A delegate whose post fails because the toolkit thread's posted-message queue is at its quota keeps its
+ * type: once the toolkit thread runs again, {@code preferences_changed} receives it, on the toolkit thread, once -
+ * whether the toolkit thread was blocked in a runnable of {@code gwin_invoke_later} or of a
+ * {@code gwin_invoke_and_wait} from another thread. After teardown the same delegate is refused and keeps nothing.</li>
  * <li>A delegate invoked on the toolkit thread, whose preference listener calls {@code Platform.exit()}, lets the
  * JVM exit. On the way out the toolkit thread clears the production table and closes
  * {@code WinApplication}'s application arena, which held its stub.</li>
@@ -81,6 +88,29 @@ public class WinPreferenceSinksNativeTest {
     private static final int SECONDS_PER_RUN = 60;
     private static final int INVOCATIONS_AFTER_TEARDOWN = 10;
 
+    /** How long the toolkit thread stays blocked at most while its queue is filled. */
+    private static final long BLOCK_MILLIS = 30_000;
+
+    /**
+     * How many posts filling the toolkit thread's queue are made at most: twenty times the default quota. A fill that
+     * reaches it without a refusal aborts the test, because the quota of the machine, {@value #POST_MESSAGE_LIMIT},
+     * is above it.
+     */
+    private static final int FILL_CAP = 200_000;
+
+    /** The registry value that sets the quota of a thread's posted-message queue (10,000 when it is absent). */
+    private static final String POST_MESSAGE_LIMIT =
+            "HKLM\\SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion\\Windows\\USERPostMessageLimit";
+
+    /** {@code WM_NULL} of {@code winuser.h}: a message the toolkit window's procedure passes to DefWindowProc. */
+    private static final int WM_NULL = 0x0000;
+
+    /** {@code ERROR_NOT_ENOUGH_QUOTA} of {@code winerror.h}: what PostMessage fails with on a full queue. */
+    private static final int ERROR_NOT_ENOUGH_QUOTA = 1816;
+
+    /** {@code GWIN_PT_NETWORK_INFORMATION} of {@code glass_win_api.h}: the type the network sink posts. */
+    private static final int NETWORK_INFORMATION = 8;
+
     @BeforeAll
     static void requireNatives() {
         WinGlassNatives.require();
@@ -96,16 +126,18 @@ public class WinPreferenceSinksNativeTest {
     public void invokingTheSinksAcrossTeardownNeverCrashes() {
         int runs = Integer.getInteger("win.glass.sinks.runs", DEFAULT_RUNS);
         List<String> failures = new ArrayList<>();
+        List<WinGlassChildJvm.Run> children = new ArrayList<>();
         for (int i = 0; i < runs; i++) {
             WinGlassChildJvm.Run run = WinGlassChildJvm.launch(WinPreferenceSinksNativeTest.class,
                     "invokeAcrossTeardown", "invokeAcrossTeardown-" + i, List.of(), SECONDS_PER_RUN);
+            children.add(run);
             if (!run.clean() || !"true".equals(run.values().get("loop.returned"))
                     || "0".equals(run.values().getOrDefault("sink.invocationsAfterTeardown", "0"))) {
                 failures.add(run.describe());
             }
         }
-        System.out.println("sinks across teardown: " + runs + " runs, " + failures.size() + " failed (glass.dll"
-                + " sha256 " + WinGlassChildJvm.glassSha256() + ")");
+        System.out.println("sinks across teardown: " + runs + " runs, " + failures.size() + " failed ("
+                + WinGlassChildJvm.loadedGlass(children) + ")");
         assertEquals(List.of(), failures, failures.size() + " of " + runs + " runs failed");
     }
 
@@ -224,6 +256,193 @@ public class WinPreferenceSinksNativeTest {
         out.put("after.prefsCalls",
                 Integer.toString(WinGlassNativeShim.recordedPreferencesCalls().size() - callsBefore));
         toolkit.releaseAndAwaitEnd(WAIT_MILLIS);
+    }
+
+    /*
+     * A post the full queue refuses.
+     */
+
+    @Test
+    @Timeout(120)
+    public void aNetworkChangeWhosePostAFullQueueRefusedIsDeliveredOnceTheToolkitThreadRunsAgain() {
+        WinGlassChildJvm.Run run = WinGlassChildJvm.run(WinPreferenceSinksNativeTest.class, "invokeIntoFullQueue");
+        System.out.println("sink into a full queue: " + run.values() + " (" + run.loadedGlass() + ")");
+        assertKeptTypeDelivered(run);
+    }
+
+    @Test
+    @Timeout(120)
+    public void aNetworkChangeWhosePostAFullQueueRefusedDuringAnInvokeAndWaitIsDeliveredByTheRunLoop() {
+        WinGlassChildJvm.Run run = WinGlassChildJvm.run(WinPreferenceSinksNativeTest.class,
+                "invokeIntoFullQueueDuringInvokeAndWait");
+        System.out.println("sink into a full queue during an invoke-and-wait: " + run.values() + " ("
+                + run.loadedGlass() + ")");
+        assertKeptTypeDelivered(run);
+        assertEquals("true", run.value("waiter.ended"),
+                "the gwin_invoke_and_wait that blocked the toolkit thread did not return: " + run.describe());
+        assertEquals("0", run.value("waiter.status"), run.describe());
+    }
+
+    /**
+     * What a run of {@link #intoFullQueue} must show: the fill reached the quota; the network sink's post and its
+     * wake were refused and its type was kept; {@code preferences_changed} received that type once, on the toolkit
+     * thread, after the toolkit thread ran again; after teardown the same sink is refused and keeps nothing. A fill
+     * that reached {@value #FILL_CAP} posts without a refusal aborts the test.
+     */
+    private static void assertKeptTypeDelivered(WinGlassChildJvm.Run run) {
+        assertEquals("true", run.value("busy.started"), run.describe());
+        assumeFalse("none".equals(run.value("fill.lastError")), "the fill posted " + run.value("fill.posted")
+                + " messages to the toolkit thread's posted-message queue, its cap, and none was refused: the quota"
+                + " of this machine (" + POST_MESSAGE_LIMIT + ") is above the cap, so the queue cannot be filled");
+        assertEquals(Integer.toString(ERROR_NOT_ENOUGH_QUOTA), run.value("fill.lastError"),
+                "the toolkit thread's posted-message queue was not filled to its quota: " + run.describe());
+        assertEquals("0", run.value("sink.status"), "no NetworkStatusChanged delegate was kept: " + run.describe());
+        assertEquals("false", run.value("probe.posted"), "the queue was no longer full after the sink: "
+                + run.describe());
+        assertEquals("0", run.value("blocked.networkCalls"),
+                "preferences_changed ran while the toolkit thread was blocked: " + run.describe());
+        assertEquals("true", run.value("delivered"), "the network change whose post the full queue refused never"
+                + " reached preferences_changed after the toolkit thread ran again: " + run.describe());
+        assertEquals("1", run.value("delivered.networkCalls"), run.describe());
+        assertEquals(Integer.toString(NETWORK_INFORMATION), run.value("delivered.types"), run.describe());
+        assertEquals("0", run.value("delivered.offToolkitThread"),
+                "preferences_changed ran on a thread other than the toolkit thread: " + run.describe());
+        assertEquals("2", run.value("blocked.prefsPost"), "the refused post and its wake: " + run.describe());
+        assertEquals("0", run.value("blocked.prefsRefused"), run.describe());
+        assertEquals("1", run.value("blocked.prefsDeferred"), run.describe());
+        assertEquals("0", run.value("blocked.prefsDeferredRun"), run.describe());
+        assertEquals("1", run.value("delivered.prefsDeferredRun"), run.describe());
+        assertEquals("0", run.value("terminate.send"), run.describe());
+        assertEquals("true", run.value("loop.returned"), run.describe());
+        assertEquals("0", run.value("after.status"), run.describe());
+        assertEquals("1", run.value("after.prefsRefusedDelta"),
+                "the sink that ran after the window was gone was not refused: " + run.describe());
+        assertEquals("0", run.value("after.prefsPostDelta"), run.describe());
+        assertEquals("0", run.value("after.prefsDeferredDelta"),
+                "the sink that ran after the window was gone kept its type: " + run.describe());
+        assertEquals("0", run.value("after.prefsCalls"), "preferences_changed ran after teardown: " + run.describe());
+    }
+
+    /**
+     * Runs in {@link WinGlassChild}. A runnable posted with {@code gwin_invoke_later} blocks the toolkit thread
+     * while this thread fills the toolkit thread's posted-message queue with {@code WM_NULL} until
+     * {@code PostMessageW} fails, then invokes the network delegate, whose post and wake the full queue refuses
+     * too, and unblocks the toolkit thread. The type the sink kept is delivered by the {@code WM_DO_ACTION_LATER}
+     * arm of {@code GlassApplication::WindowProc}, right after the blocking runnable has returned.
+     */
+    static void invokeIntoFullQueue(Map<String, String> out) {
+        intoFullQueue(out, (toolkit, blocker) -> out.put("busy.post", Integer.toString(toolkit.invokeLater(blocker))));
+    }
+
+    /**
+     * Runs in {@link WinGlassChild}. {@link #invokeIntoFullQueue}, but a thread of its own, {@code waiter}, passes
+     * the blocking runnable to {@code gwin_invoke_and_wait}: the toolkit thread runs it in the
+     * {@code WM_DO_ACTION_NOTIFY} arm, inside the {@code GetMessage} of {@code gwin_run_loop}, and that arm delivers
+     * no kept type. The type the sink kept is delivered by {@code gwin_run_loop} itself, after its
+     * {@code DispatchMessage} of the first {@code WM_NULL} of the fill. Nothing else is posted to the toolkit
+     * thread before the delivery has been recorded: a runnable or a wake dispatched first would deliver the type in
+     * its own arm instead.
+     */
+    static void invokeIntoFullQueueDuringInvokeAndWait(Map<String, String> out) {
+        AtomicReference<Thread> waiter = new AtomicReference<>();
+        intoFullQueue(out, (toolkit, blocker) -> waiter.set(WinNativeToolkit.startThread("waiter",
+                () -> out.put("waiter.status", Integer.toString(toolkit.invokeAndWait(blocker))))));
+        out.put("waiter.ended", Boolean.toString(WinNativeToolkit.join(waiter.get(), WAIT_MILLIS)));
+    }
+
+    /**
+     * The body of {@link #invokeIntoFullQueue} and {@link #invokeIntoFullQueueDuringInvokeAndWait}: {@code block}
+     * hands the toolkit thread the runnable that blocks it. The block ends in a {@code finally}, and by itself after
+     * {@value #BLOCK_MILLIS} ms. The delivery is recorded before anything else is posted to the toolkit thread, which
+     * then ends by a send, because a post could still find the queue full.
+     */
+    private static void intoFullQueue(Map<String, String> out, BiConsumer<WinNativeToolkit, Runnable> block) {
+        WinGlassNativeShim.installRecordingPreferencesTable();
+        WinGlassNativeShim.prefsCapture(true);
+        WinNativeToolkit toolkit = WinNativeToolkit.start();
+        long hwnd = toolkit.hwnd();
+        CountDownLatch busy = new CountDownLatch(1);
+        CountDownLatch unblock = new CountDownLatch(1);
+        block.accept(toolkit, () -> {
+            busy.countDown();
+            out.put("busy.unblocked", Boolean.toString(WinNativeToolkit.await(unblock, BLOCK_MILLIS)));
+        });
+        long invoked = WinGlassNativeShim.nextSequence();
+        try {
+            out.put("busy.started", Boolean.toString(WinNativeToolkit.await(busy, WAIT_MILLIS)));
+            WinGlassNativeShim.observe(true);
+            fill(out, hwnd);
+            out.put("sink.status",
+                    Integer.toString(WinGlassNativeShim.prefsInvoke(WinGlassNativeShim.DELEGATE_NETWORK)));
+            PostedMessage probe = WinGlassNativeShim.postMessage(hwnd, WM_NULL);
+            out.put("probe.posted", Boolean.toString(probe.posted()));
+            out.put("probe.lastError", Integer.toString(probe.lastError()));
+            out.put("blocked.networkCalls", Integer.toString(networkCallsSince(invoked).size()));
+            recordSinkCounters(out, "blocked");
+        } finally {
+            unblock.countDown();
+        }
+        out.put("delivered", Boolean.toString(
+                WinGlassChild.waitFor(WAIT_MILLIS, () -> !networkCallsSince(invoked).isEmpty())));
+        List<PreferencesCall> delivered = networkCallsSince(invoked);
+        out.put("delivered.networkCalls", Integer.toString(delivered.size()));
+        out.put("delivered.types", delivered.stream().map(c -> Integer.toString(c.types()))
+                .collect(Collectors.joining(",")));
+        out.put("delivered.offToolkitThread",
+                Long.toString(delivered.stream().filter(c -> c.thread() != toolkit.thread()).count()));
+        recordSinkCounters(out, "delivered");
+
+        // A sent runnable: a post could still find the queue full.
+        out.put("terminate.send", Integer.toString(toolkit.terminateBySend()));
+        out.put("loop.returned", Boolean.toString(toolkit.awaitLoopReturn(WAIT_MILLIS)));
+        long refused = WinGlassNativeShim.counter(WinGlassNativeShim.COUNTER_PREFS_REFUSED);
+        long posted = WinGlassNativeShim.counter(WinGlassNativeShim.COUNTER_PREFS_POST);
+        long deferred = WinGlassNativeShim.counter(WinGlassNativeShim.COUNTER_PREFS_DEFERRED);
+        long afterTeardown = WinGlassNativeShim.nextSequence();
+        out.put("after.status",
+                Integer.toString(WinGlassNativeShim.prefsInvoke(WinGlassNativeShim.DELEGATE_NETWORK)));
+        out.put("after.prefsRefusedDelta", Long.toString(
+                WinGlassNativeShim.counter(WinGlassNativeShim.COUNTER_PREFS_REFUSED) - refused));
+        out.put("after.prefsPostDelta", Long.toString(
+                WinGlassNativeShim.counter(WinGlassNativeShim.COUNTER_PREFS_POST) - posted));
+        out.put("after.prefsDeferredDelta", Long.toString(
+                WinGlassNativeShim.counter(WinGlassNativeShim.COUNTER_PREFS_DEFERRED) - deferred));
+        out.put("after.prefsCalls", Long.toString(WinGlassNativeShim.recordedPreferencesCalls().stream()
+                .filter(c -> c.sequence() > afterTeardown).count()));
+        toolkit.releaseAndAwaitEnd(WAIT_MILLIS);
+    }
+
+    /** Posts {@code WM_NULL} to {@code hwnd} until a post fails, {@value #FILL_CAP} times at most. */
+    private static void fill(Map<String, String> out, long hwnd) {
+        int posted = 0;
+        PostedMessage last = null;
+        while (posted < FILL_CAP) {
+            last = WinGlassNativeShim.postMessage(hwnd, WM_NULL);
+            if (!last.posted()) {
+                break;
+            }
+            posted++;
+        }
+        out.put("fill.posted", Integer.toString(posted));
+        out.put("fill.lastError", last == null || last.posted() ? "none" : Integer.toString(last.lastError()));
+    }
+
+    /** The recorded {@code preferences_changed} calls with the network bit, drawn after {@code sequence}. */
+    private static List<PreferencesCall> networkCallsSince(long sequence) {
+        return WinGlassNativeShim.recordedPreferencesCalls().stream()
+                .filter(c -> c.sequence() > sequence && (c.types() & NETWORK_INFORMATION) != 0)
+                .toList();
+    }
+
+    private static void recordSinkCounters(Map<String, String> out, String prefix) {
+        out.put(prefix + ".prefsPost",
+                Long.toString(WinGlassNativeShim.counter(WinGlassNativeShim.COUNTER_PREFS_POST)));
+        out.put(prefix + ".prefsRefused",
+                Long.toString(WinGlassNativeShim.counter(WinGlassNativeShim.COUNTER_PREFS_REFUSED)));
+        out.put(prefix + ".prefsDeferred",
+                Long.toString(WinGlassNativeShim.counter(WinGlassNativeShim.COUNTER_PREFS_DEFERRED)));
+        out.put(prefix + ".prefsDeferredRun",
+                Long.toString(WinGlassNativeShim.counter(WinGlassNativeShim.COUNTER_PREFS_DEFERRED_RUN)));
     }
 
     /*

@@ -350,19 +350,30 @@ fix describes. Verified on Windows 10 Pro 10.0.19045 x64.
   `GLASS_WIN_ABI_VERSION` stays 6. The 17 new `gwin_test_*` hooks (`glass_win_test.{h,cpp}`) are bound by
   `WinGlassNativeShim` only. The header and Java comments the Proposed fix lists are corrected.
 
-**Tests**, 33 in six new classes (2 of them opt-in), with the mutants each class must kill. Every mutant was built
+**Tests**, 37 in six new classes (2 of them opt-in), with the mutants each class must kill. Every mutant was built
 from the fix and failed as stated; every test passes on the fix.
-- `WinToolkitInvokeOrderNativeTest` (1): W runs before L, on master and on the fix. Post and wait: no pending send
-  seen, and L ran first.
-- `WinToolkitWindowGuardNativeTest` (6, plus the opt-in decoy record): posting without the shared section: teardown
+- `WinToolkitInvokeOrderNativeTest` (2): W runs before L, on master and on the fix. Post and wait: no pending send
+  seen, and L ran first. The caller waiting in a cross-thread `gwin_invoke_and_wait` answers the
+  `SendMessageTimeoutW(WM_GETTEXTLENGTH)` its runnable sends from the toolkit thread to the caller's message-only
+  `STATIC` window. A wait that handles no sent message (`WaitForSingleObject`): the send times out after 5,005 ms
+  with `ERROR_TIMEOUT`.
+- `WinToolkitWindowGuardNativeTest` (7, plus the opt-in decoy record): posting without the shared section: teardown
   not held, stale count 1. Clearing in `~GlassApplication`: still published after `gwin_terminate_loop`, 101 posts
   to the dead handle. The guard on the toolkit-thread path, and always the cross-thread path: the call never
   returns. No rundown: the queued caller never returns. The shared side held across the wait: timeout.
-  Dereferencing the `WPARAM`: the child JVM ends with `0xC000041D`.
+  Dereferencing the `WPARAM`: the child JVM ends with `0xC000041D`. Disarming the park gate from another thread
+  releases the parked poster. A disarm that never sets the release event: the poster is still parked after 10 s.
 - `WinToolkitShutdownHammerTest` (1, statistical): 50 child JVMs, 17,122,286 calls, no access violation, stale 0.
-- `WinPreferenceSinksNativeTest` (5, plus the opt-in manual run): sinks that call `updatePreferences`: 16,130 of
+- `WinPreferenceSinksNativeTest` (7, plus the opt-in manual run): sinks that call `updatePreferences`: 16,130 of
   16,130 calls off the toolkit thread, 5,300 after the loop returned, and 10 of 10 late delegates still called
-  Java. Across teardown, 50 child JVMs and 97,848,164 invocations: no access violation.
+  Java. Across teardown, 50 child JVMs and 97,848,164 invocations: no access violation. With the toolkit thread
+  blocked in a `gwin_invoke_later` runnable, or in a cross-thread `gwin_invoke_and_wait` one, and its
+  posted-message queue at its quota (10,000 `WM_NULL` posts, then `ERROR_NOT_ENOUGH_QUOTA`), the network
+  delegate's type is delivered once, on the toolkit thread, when it runs again: by the `WM_DO_ACTION_LATER` arm, or
+  by `gwin_run_loop` after its next `DispatchMessage`. A sink that ignores its failed post: no delivery in 10 s, in
+  both. No delivery after the pumps' `DispatchMessage`: the `gwin_invoke_and_wait` one fails, the other passes. The
+  nested loop's delivery (the same code) and the wake arm's (no hook frees a queue slot between the two posts) are
+  checked by inspection only.
 - `WinAccessibilityReleaseNativeTest` (3): no `VariantClear`: 0 of 2001 BSTRs freed.
 - `WinImeCompositionFaultNativeTest` (15): the rethrow restored: 13 fail, one per throwing allocation.
 
@@ -382,7 +393,13 @@ thread, apartment `MAINSTA`.
   `gwin_invoke_later` whose action cannot be allocated answers `GWIN_ERR_NO_TOOLKIT` (its runnable does not run)
   instead of letting `std::bad_alloc` leave the export; and a toolkit thread that ends with a record pending leaves
   its caller waiting until US-052 part 1 lands.
-- Part 2: a sink's notification reaches Java asynchronously, on the toolkit thread.
+- Part 2: a sink's notification reaches Java asynchronously, on the toolkit thread. A sink whose post fails while
+  the toolkit window is published (the toolkit thread's posted-message queue is at its quota, 10,000 by default)
+  keeps its types, and the toolkit thread delivers them, ORed into one `updatePreferences` call, right after it next
+  handles a posted message: after each `DispatchMessage` of `gwin_run_loop` and of the nested event loop, and in the
+  toolkit window's `WM_DO_ACTION_LATER` arm and in its arm for the wake (`wParam` 0) the sink then posts, which a
+  pump that is not ours (an OS modal loop, the SWT embedder's) dispatches too. Types kept when the toolkit window
+  goes are dropped.
 - Part 3: destroying a NULL text range no longer crashes, and the cleared VARIANTs also release a `VT_UNKNOWN`
   reference and a `VT_R8|VT_ARRAY` array, which leaked the same way.
 - Part 4: under out-of-memory a composition is reported without its clauses or attributes, or dropped through the

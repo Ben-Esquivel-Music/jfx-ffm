@@ -559,9 +559,11 @@ void gwin_run_loop(int64_t launchable_id)
     MSG msg;
     // The GlassApplication instance may be destroyed in a nested loop.
     // Note that we leave the WM_QUIT message on the queue but who cares?
+    // After each dispatch: the preference types a WinRT sink kept because its post failed.
     while (GlassApplication::GetInstance() && ::GetMessage(&msg, NULL, 0, 0) > 0) {
         ::TranslateMessage(&msg);
         ::DispatchMessage(&msg);
+        PlatformSupport::RunDeferredPreferences();
     }
 
     if (GlassApplication::GetAccessibilityCount() > 0 && !IS_WIN8) {

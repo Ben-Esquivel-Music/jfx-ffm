@@ -166,6 +166,9 @@ LRESULT GlassApplication::WindowProc(UINT msg, WPARAM wParam, LPARAM lParam)
                 if (msg == WM_DO_ACTION_LATER) {
                     delete action;
                     GwinTestCount(GWIN_TEST_COUNTER_ACTION_FREE);
+                    // A posted message, so whichever pump dispatched it - also one that is not ours - is
+                    // where the WM_PREFERENCES_CHANGED arm would run: deliver what a sink kept.
+                    PlatformSupport::RunDeferredPreferences();
                 }
             }
             return 0;
@@ -183,6 +186,9 @@ LRESULT GlassApplication::WindowProc(UINT msg, WPARAM wParam, LPARAM lParam)
             // clearing in WM_NCDESTROY needs the exclusive side. The value replaced here is NULL or, when
             // gwin_app_create is called again, the toolkit window of the earlier instance, whose WM_NCDESTROY
             // has not run, so a guarded post or send that loaded it still reaches a window that exists.
+            // Preference types a sink kept under an earlier toolkit window are dropped before this one is
+            // published (PlatformSupport::PostPreferencesChanged).
+            PlatformSupport::DiscardDeferredPreferences();
             pInstance = this;
             sm_toolkitThreadId.store(m_mainThreadId);
             sm_toolkitHwnd.store(GetHWND());
@@ -196,12 +202,14 @@ LRESULT GlassApplication::WindowProc(UINT msg, WPARAM wParam, LPARAM lParam)
         case WM_NCDESTROY:
             // The handle still names this window while its procedure handles this message, so it cannot
             // go to another window before the exclusive section below has ended. Every guarded post or
-            // send that loaded it has finished by then, and every later one loads NULL. Then run down the
-            // cross-thread calls still queued: their actions will not run.
+            // send that loaded it has finished by then, and every later one loads NULL. Then drop the
+            // preference types a sink kept for this window, which is never dispatched to again, and run down
+            // the cross-thread calls still queued: their actions will not run.
             ::AcquireSRWLockExclusive(&sm_publicationLock);
             sm_toolkitHwnd.store(NULL);
             sm_toolkitThreadId.store(0);
             ::ReleaseSRWLockExclusive(&sm_publicationLock);
+            PlatformSupport::DiscardDeferredPreferences();
             // pInstance is deleted in BaseWnd::StaticWindowProc
             pInstance = NULL;
             RunDownPendingActions();
@@ -240,10 +248,16 @@ LRESULT GlassApplication::WindowProc(UINT msg, WPARAM wParam, LPARAM lParam)
             break;
         case WM_PREFERENCES_CHANGED:
             // A WinRT sink posted from its own thread (PlatformSupport::PostPreferencesChanged); handled
-            // here like the arms below, so preferences_changed only ever runs on this thread.
+            // here like the arms below, so preferences_changed only ever runs on this thread. wParam 0 is
+            // the wake that follows a failed post: it delivers the types the sink kept instead, and answers
+            // what DefWindowProc answers for it without touching this instance afterwards.
             {
                 const int types = (int)wParam & PlatformSupport::PT_ALL;
-                if (types != 0 && m_platformSupport.updatePreferences(PlatformSupport::PreferenceType(types))) {
+                if (types == 0) {
+                    PlatformSupport::RunDeferredPreferences();
+                    return 0;
+                }
+                if (m_platformSupport.updatePreferences(PlatformSupport::PreferenceType(types))) {
                     return 0;
                 }
             }
@@ -383,13 +397,16 @@ void GlassApplication::RunDownPendingActions()
 }
 
 /* static */
-bool GlassApplication::PostToToolkit(UINT msg, WPARAM wParam, LPARAM lParam)
+bool GlassApplication::PostToToolkit(UINT msg, WPARAM wParam, LPARAM lParam, bool *published)
 {
     // The shared section holds the load and one PostMessage, which runs no window procedure and no user
     // code on this thread, so its holder can never reach WM_NCDESTROY inside it.
     bool posted = false;
     ::AcquireSRWLockShared(&sm_publicationLock);
     HWND hWnd = sm_toolkitHwnd.load();
+    if (published != NULL) {
+        *published = hWnd != NULL;
+    }
     if (hWnd != NULL) {
         GwinTestParkPoint();
         GwinTestCountCall(GWIN_TEST_COUNTER_POST, hWnd);
@@ -419,7 +436,8 @@ void GlassApplication::ExecActionLater(Action *action)
  *
  * The pump itself, with no JVM in it: glass_win_api.h's gwin_enter_nested_event_loop forwards here.
  * The loop's return value is not this library's business: it never left Java, and WinApplication
- * holds it itself and stores it before calling gwin_leave_nested_event_loop.
+ * holds it itself and stores it before calling gwin_leave_nested_event_loop. After each dispatch it
+ * delivers the preference types a sink kept, as gwin_run_loop's pump does.
  */
 void GlassApplication::EnterNestedEventLoop()
 {
@@ -432,6 +450,7 @@ void GlassApplication::EnterNestedEventLoop()
     {
         ::TranslateMessage(&msg);
         ::DispatchMessage(&msg);
+        PlatformSupport::RunDeferredPreferences();
     }
 
     sm_shouldLeaveNestedLoop = false;
