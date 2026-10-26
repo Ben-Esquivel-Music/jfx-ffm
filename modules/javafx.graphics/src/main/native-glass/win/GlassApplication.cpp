@@ -110,6 +110,16 @@ void CompletePending(PendingAction *record, LONG state)
 }
 
 /*
+ * Completes an unlinked record when it goes out of scope, with `state`: PENDING_NOT_RUN unless it was set to
+ * PENDING_DONE after Do() returned, so a Do() that leaves by an exception still releases its caller.
+ */
+struct PendingCompletion {
+    PendingAction *record;
+    LONG state;
+    ~PendingCompletion() { CompletePending(record, state); }
+};
+
+/*
  * The caller's wait: until `done` is set, still handling the messages other threads send to this one, as
  * SendMessage does while it waits.
  */
@@ -125,9 +135,19 @@ void WaitHandlingSentMessages(HANDLE done)
             ::PeekMessageW(&msg, NULL, 0, 0, PM_NOREMOVE | PM_QS_SENDMESSAGE);   // dispatches sent messages
             continue;
         }
-        // The record stays linked or running until `done` is set, so this caller must not leave early.
-        ::WaitForSingleObject(done, INFINITE);
-        return;
+        // The wait failed. The action may send to a window of this thread, so keep handling sent messages while
+        // polling `done` (sleeping when the poll fails too), and never leave early: the record stays linked or
+        // running until `done` is set.
+        const DWORD pollMillis = 10;
+        const DWORD polled = ::WaitForSingleObject(done, pollMillis);
+        if (polled == WAIT_OBJECT_0) {
+            return;
+        }
+        if (polled == WAIT_FAILED) {
+            ::Sleep(pollMillis);
+        }
+        MSG msg;
+        ::PeekMessageW(&msg, NULL, 0, 0, PM_NOREMOVE | PM_QS_SENDMESSAGE);
     }
 }
 
@@ -188,11 +208,15 @@ LRESULT GlassApplication::WindowProc(UINT msg, WPARAM wParam, LPARAM lParam)
             return 0;
         case WM_DO_ACTION_NOTIFY:
             // ExecAction from another thread. Only a record found in the pending list is run; any other
-            // WPARAM is ignored and never dereferenced. Do() runs with no lock held.
+            // WPARAM is ignored and never dereferenced. Do() runs with no lock held. The record is unlinked
+            // first, so the rundown can no longer release its caller and only this arm can: `completion` does
+            // when Do() returns and also when it leaves by an exception, which keeps propagating (the caller
+            // then answers that the action did not run).
             if (UnlinkPending((const void *)wParam)) {
                 PendingAction *record = (PendingAction *)wParam;
+                PendingCompletion completion = { record, PENDING_NOT_RUN };
                 record->action->Do();
-                CompletePending(record, PENDING_DONE);
+                completion.state = PENDING_DONE;
             }
             return 0;
         case WM_CREATE:
@@ -414,7 +438,7 @@ bool GlassApplication::ExecActionFromOtherThread(Action *action)
  *
  * The WM_NCDESTROY arm's rundown, after the publication is cleared: no new record can be linked any more,
  * and every linked one has its message queued but not yet handled. A running record is not in the list;
- * its caller waits for Do() to return.
+ * the WM_DO_ACTION_NOTIFY arm releases its caller when Do() returns or leaves by an exception.
  */
 void GlassApplication::RunDownPendingActions()
 {

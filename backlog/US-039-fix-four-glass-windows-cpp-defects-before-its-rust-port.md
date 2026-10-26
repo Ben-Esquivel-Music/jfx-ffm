@@ -334,6 +334,9 @@ fix describes. Verified on Windows 10 Pro 10.0.19045 x64.
   with `GWIN_ERR_NO_TOOLKIT` once the HWND is cleared. From another thread `ExecAction` links a stack record into a
   pending list, sends `WM_DO_ACTION_NOTIFY` (`WM_USER+3`) with `SendNotifyMessage` inside the shared side and waits
   outside it; the `WM_NCDESTROY` arm runs the list down. On the toolkit thread it keeps `SendMessage` and no lock.
+  The `WM_DO_ACTION_NOTIFY` arm releases its caller on every exit from `Do()`: done when `Do()` returns, not run
+  when it leaves by an exception, which propagates as before. If `MsgWaitForMultipleObjectsEx` fails, the caller's
+  fallback wait still handles sent messages and returns only once its record is done.
 - **Part 2.** The sinks capture nothing and post `WM_PREFERENCES_CHANGED` (`WM_USER+4`) through `PostToToolkit`,
   and the toolkit `WndProc` runs `updatePreferences`, which loads the slot once. `~PlatformSupport` removes both
   registrations and releases the WinRT objects and the factory before `RoUninitialize`. The Java stub lives in
@@ -343,12 +346,13 @@ fix describes. Verified on Windows 10 Pro 10.0.19045 x64.
   VARIANTs on every path, also when the second conversion fails.
 - **Part 4.** `GetClauseInfo` and `GetAttributeInfo` catch `std::bad_alloc` and return their "no information"
   result. `WmImeComposition`'s catch block no longer rethrows; it is also the failure branch for the two throwing
-  allocations of `GetContextData`, which the Problem did not list. On that path `GetContextData` leaks the
-  composition buffers it allocated before the failing one; this was accepted for the C, and the Rust port's owned
-  buffers remove it.
+  allocations of `GetContextData`, which the Problem did not list. On that path, and on its error return when the
+  composition changed between the size query and the copy, `GetContextData` frees the buffers it had allocated;
+  both paths leaked them until the review of 2026-10-26.
 - **ABI.** No export `WinGlassNative` binds is added or removed, and no prototype, layout or enum value changes, so
-  `GLASS_WIN_ABI_VERSION` stays 6. The 17 new `gwin_test_*` hooks (`glass_win_test.{h,cpp}`) are bound by
-  `WinGlassNativeShim` only. The header and Java comments the Proposed fix lists are corrected.
+  `GLASS_WIN_ABI_VERSION` stays 6. The 17 new `gwin_test_*` hooks (declared in `glass_win_api.h`; 15 defined in
+  `glass_win_test.cpp`, 2 in `PlatformSupport.cpp`) are bound by `WinGlassNativeShim` only. The header and Java comments
+  the Proposed fix lists are corrected.
 
 **Tests**, 39 in six new classes (2 of them opt-in), with the mutants each class must kill. Every mutant was built
 from the fix and failed as stated; every test passes on the fix.
@@ -414,10 +418,33 @@ thread, apartment `MAINSTA`.
 - Part 4: under out-of-memory a composition is reported without its clauses or attributes, or dropped through the
   catch block, instead of unwinding through `user32`.
 
-**Gate.** One build with the natives from source, `mvn -o -B -pl modules/javafx.graphics -am test`: javafx.graphics
-26070 run, 0 failed, 367 skipped; javafx.base 5510 run, 0 failed, 22 skipped. `WinApplicationNativeTest`,
-`WinPreferencesNativeTest`, `WinAccessibilityNativeTest` and `WinViewNativeTest` are unchanged and pass.
+**Gate.** The latest gate, on 2026-10-26, is one build with the natives from source,
+`mvn -o -B -pl modules/javafx.graphics -am test -Djfx.parity.require=true`: javafx.graphics 26198 run, 0 failed, 442
+skipped; javafx.base 5510 run, 0 failed, 22 skipped. When the story was done, the same build without
+`-Djfx.parity.require=true` ran 26070 and skipped 367 in javafx.graphics; the rebase onto master 4745af9f89 added 122
+run and 75 skipped (17 macOS font classes and one `@EnabledOnOs(MAC)` test), and the review rounds added 6 tests (33 to
+39). `WinApplicationNativeTest`, `WinPreferencesNativeTest`, `WinAccessibilityNativeTest` and `WinViewNativeTest` are
+unchanged and pass.
 
 **Upstream.** openjdk/jfx master, read on 2026-10-23, shares part 1 in part (the race and the recycled-HWND post and
 send; the preference-query path is fork-only), part 2 in part (all but the double load of the callback slot and the
 `Arena.global()` stub), and parts 3 and 4 fully. The issue drafts are kept outside the repository until filed.
+
+**Review (2026-10-26).** A local review of the branch, read from the diff: three findings fixed (in parts 1 and 4
+above), five filed (four in existing stories, one as a new story), two accepted and one refuted (a sink
+notification refused before `WM_CREATE` publishes the toolkit window loses nothing, because the startup preference
+map is collected after publication).
+- Filed in US-052 part 1: a toolkit thread that ends with the window alive leaves cross-thread callers waiting, and
+  the `WM_NCDESTROY` arm tears down without comparing the publication with its own window.
+- Filed in US-053 part 2: `WM_DO_ACTION` and `WM_DO_ACTION_LATER` dereference any `WPARAM`, and posted
+  `WM_DO_ACTION_LATER` actions leak at teardown.
+- Filed as US-068: the `gwin_test_*` hooks and their probes ship in the release glass.dll.
+- Accepted: three delivery tiers for preference changes. The post (types in `WPARAM`) gives one `updatePreferences`
+  per notification, as the JNI's synchronous call did; the kept word with its wake, and the timer, are mutant-proven
+  fallbacks for a refused post. One coalescing path would change the call count in a burst and still need the timer.
+  Idle cost: one acquire load (`ReadAcquire`) at each of the five `RunDeferredPreferences` sites; the
+  `InterlockedExchange` runs only once a type was kept.
+- Accepted: a kernel event per cross-thread synchronous call, two kernel calls beside a send, a wait and a context
+  switch. A waiting caller handles sent messages, and a handler may make another such call on that thread, so a
+  cached per-thread event would serve two waits; `WaitOnAddress` and condition variables cannot wait for sent
+  messages. A failed `CreateEventW` refuses the call before anything is queued, as for a toolkit that is gone.

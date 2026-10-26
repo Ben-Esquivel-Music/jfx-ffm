@@ -101,7 +101,8 @@ public:
     /*
      * Runs action->Do() on the toolkit thread and returns once it has returned: true when it ran, false when
      * no toolkit window was published, it was destroyed before the action started, or, from another thread,
-     * CreateEventW failed for the event the caller waits on, so nothing was queued. On the toolkit thread
+     * CreateEventW failed for the event the caller waits on, so nothing was queued, or Do() left by an
+     * exception, which keeps propagating on the toolkit thread. On the toolkit thread
      * itself this is SendMessage(WM_DO_ACTION), inline and without a lock; from any other thread the action
      * is queued with SendNotifyMessage(WM_DO_ACTION_NOTIFY) inside the shared side of the publication lock
      * and waited for outside it, and the WM_NCDESTROY arm runs down what is still queued.

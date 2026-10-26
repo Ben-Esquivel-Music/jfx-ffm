@@ -91,21 +91,17 @@ GlassInputTextInfo::GetContextData(HIMC hIMC, const LPARAM flags) {
         return -1;
     }
 
-    /* Get the data from the input context */
+    /* Get the data from the input context. The buffers stay owned here until the members take them
+     * below, so the error return and a std::bad_alloc from a later allocation free them. */
     LONG   cbData[3] = {0};
-    LPVOID lpData[3] = {NULL};
+    std::unique_ptr<BYTE[]> lpData[3];
     for (int i = startIndex, j = 0; i <= endIndex; i++, j++) {
         cbData[j] = GwinImmGetCompositionString(hIMC, GCS_INDEX[i], NULL, 0);
-        if (cbData[j] == 0) {
-            lpData[j] = NULL;
-        } else {
+        if (cbData[j] != 0) {
             GwinTestImeAllocPoint();
-            LPBYTE lpTemp = new BYTE[cbData[j]];
-            cbData[j] = GwinImmGetCompositionString(hIMC, GCS_INDEX[i], lpTemp, cbData[j]);
-            if (IMM_ERROR_GENERAL != cbData[j]) {
-                lpData[j] = (LPVOID)lpTemp;
-            } else {
-                lpData[j] = NULL;
+            lpData[j].reset(new BYTE[cbData[j]]);
+            cbData[j] = GwinImmGetCompositionString(hIMC, GCS_INDEX[i], lpData[j].get(), cbData[j]);
+            if (IMM_ERROR_GENERAL == cbData[j]) {
                 return -1;
             }
         }
@@ -113,14 +109,14 @@ GlassInputTextInfo::GetContextData(HIMC hIMC, const LPARAM flags) {
 
     // Assign the context data
     m_cStrW = cbData[0]/WCHAR_SZ;
-    m_lpStrW = (LPWSTR)lpData[0];
+    m_lpStrW = (LPWSTR)lpData[0].release();
 
     m_cClauseW = cbData[1]/DWORD_SZ - 1;
-    m_lpClauseW = (LPDWORD)lpData[1];
+    m_lpClauseW = (LPDWORD)lpData[1].release();
 
     if (cbData[2] > 0) {
         m_cAttrW = cbData[2];
-        m_lpAttrW = (LPBYTE)lpData[2];
+        m_lpAttrW = lpData[2].release();
     }
 
     // Get the cursor position

@@ -87,7 +87,10 @@ Paths are relative to `modules/javafx.graphics/src/main/native-glass/win`.
      function, which compares the thread id again under the guard, against what is published at that moment. So
      a thread that ends after its toolkit was torn down or replaced leaves the other toolkit published, and so
      does the `WM_NCDESTROY` of a window that is no longer the published one, also when one thread created
-     both. Nothing is stored per thread or per fiber at `WM_CREATE` beyond the publication.
+     both. Nothing is stored per thread or per fiber at `WM_CREATE` beyond the publication. The `WM_NCDESTROY`
+     arm's `PlatformSupport::DiscardDeferredPreferences()` and its `pInstance = NULL` are gated by the same compare,
+     so the teardown of a window that is no longer published cannot drop the preference types a sink kept for the
+     toolkit published since, nor clear that toolkit's instance.
    - **Publication under the guard.** `WM_CREATE` stores the HWND and then the thread id inside the exclusive
      guard, where US-039 part 1 stores them with no lock. A second `gwin_app_create` is allowed ("A second call
      leaks the first instance", `glass_win_api.h:646-647`), so a thread whose toolkit was never torn down can

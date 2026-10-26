@@ -214,7 +214,11 @@ static volatile LONG s_deferredTypes = 0;
  *
  * What both WinRT sinks do, on whatever thread the OS invokes them: post the preference types to the
  * toolkit window through GlassApplication::PostToToolkit, the guarded post gwin_invoke_later uses. Once
- * the toolkit window is cleared the post is refused and nothing is kept - the teardown discards it. When
+ * the toolkit window is cleared the post is refused and nothing is kept - the teardown discards it. A sink
+ * invoked before any toolkit window is published (InitializeWinRT registers the sinks before
+ * GlassApplication's constructor calls Create) is refused the same way and loses nothing: the startup map,
+ * WinApplication.getPlatformPreferences, is collected later on the toolkit thread, after gwin_app_create has
+ * returned, and reads the current values. When
  * PostMessage fails with the window published (the toolkit thread's posted-message queue is at its
  * quota), the types are ORed into s_deferredTypes and one wake, wParam 0, is posted the same way: posted,
  * it is dispatched after the OR, by whichever pump runs, and its arm delivers the kept types. When the wake

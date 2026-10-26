@@ -1245,9 +1245,10 @@ void ViewContainer::WmImeComposition(HWND hwnd, WPARAM wParam, LPARAM lParam)
         ImmReleaseContext(hwnd, hIMC);
     } catch (...) {
         // The failure branch. GetClauseInfo and GetAttributeInfo answer "no information" when an
-        // allocation fails, but GetContextData's allocations can still throw std::bad_alloc. Release what
-        // was taken and send nothing: this runs inside the window procedure, and no C++ exception may
-        // unwind into the user32 frames that called it.
+        // allocation fails, but GetContextData's allocations can still throw std::bad_alloc; it frees the
+        // buffers it has not handed to textInfo yet, and textInfo frees the rest. Release what was taken
+        // here and send nothing: this runs inside the window procedure, and no C++ exception may unwind
+        // into the user32 frames that called it.
         GwinTestImeBackstop();
         delete [] bndClauseW;
         delete [] bndAttrW;
