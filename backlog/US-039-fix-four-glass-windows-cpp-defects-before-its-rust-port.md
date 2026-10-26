@@ -350,7 +350,7 @@ fix describes. Verified on Windows 10 Pro 10.0.19045 x64.
   `GLASS_WIN_ABI_VERSION` stays 6. The 17 new `gwin_test_*` hooks (`glass_win_test.{h,cpp}`) are bound by
   `WinGlassNativeShim` only. The header and Java comments the Proposed fix lists are corrected.
 
-**Tests**, 37 in six new classes (2 of them opt-in), with the mutants each class must kill. Every mutant was built
+**Tests**, 39 in six new classes (2 of them opt-in), with the mutants each class must kill. Every mutant was built
 from the fix and failed as stated; every test passes on the fix.
 - `WinToolkitInvokeOrderNativeTest` (2): W runs before L, on master and on the fix. Post and wait: no pending send
   seen, and L ran first. The caller waiting in a cross-thread `gwin_invoke_and_wait` answers the
@@ -364,7 +364,7 @@ from the fix and failed as stated; every test passes on the fix.
   Dereferencing the `WPARAM`: the child JVM ends with `0xC000041D`. Disarming the park gate from another thread
   releases the parked poster. A disarm that never sets the release event: the poster is still parked after 10 s.
 - `WinToolkitShutdownHammerTest` (1, statistical): 50 child JVMs, 17,122,286 calls, no access violation, stale 0.
-- `WinPreferenceSinksNativeTest` (7, plus the opt-in manual run): sinks that call `updatePreferences`: 16,130 of
+- `WinPreferenceSinksNativeTest` (9, plus the opt-in manual run): sinks that call `updatePreferences`: 16,130 of
   16,130 calls off the toolkit thread, 5,300 after the loop returned, and 10 of 10 late delegates still called
   Java. Across teardown, 50 child JVMs and 97,848,164 invocations: no access violation. With the toolkit thread
   blocked in a `gwin_invoke_later` runnable, or in a cross-thread `gwin_invoke_and_wait` one, and its
@@ -373,7 +373,14 @@ from the fix and failed as stated; every test passes on the fix.
   by `gwin_run_loop` after its next `DispatchMessage`. A sink that ignores its failed post: no delivery in 10 s, in
   both. No delivery after the pumps' `DispatchMessage`: the `gwin_invoke_and_wait` one fails, the other passes. The
   nested loop's delivery (the same code) and the wake arm's (no hook frees a queue slot between the two posts) are
-  checked by inspection only.
+  checked by inspection only. Under a pump that is not Glass's (the toolkit thread runs its own `GetMessageW` /
+  `TranslateMessage` / `DispatchMessageW` loop, the SWT embedder's shape, and the queue is full of posts to a window
+  of the embedder's), the post and the wake are refused, the sink arms the one-shot timer and its `WM_TIMER`
+  delivers the type once, on the toolkit thread, with the sink on another thread or on the toolkit thread. A refused
+  wake that arms no timer, and a `WM_TIMER` arm that does not deliver: both fail. No request from another thread: the
+  cross-thread one fails; no timer on the toolkit thread, or a delivery inside the sink: the toolkit-thread one fails.
+  With the timer as a second delivery path, the invoke-and-wait variant's pump delivery is proven with the cross-thread
+  request removed too.
 - `WinAccessibilityReleaseNativeTest` (3): no `VariantClear`: 0 of 2001 BSTRs freed.
 - `WinImeCompositionFaultNativeTest` (15): the rethrow restored: 13 fail, one per throwing allocation.
 
@@ -398,8 +405,10 @@ thread, apartment `MAINSTA`.
   keeps its types, and the toolkit thread delivers them, ORed into one `updatePreferences` call, right after it next
   handles a posted message: after each `DispatchMessage` of `gwin_run_loop` and of the nested event loop, and in the
   toolkit window's `WM_DO_ACTION_LATER` arm and in its arm for the wake (`wParam` 0) the sink then posts, which a
-  pump that is not ours (an OS modal loop, the SWT embedder's) dispatches too. Types kept when the toolkit window
-  goes are dropped.
+  pump that is not ours (an OS modal loop, the SWT embedder's) dispatches too. When the wake is refused as well, the
+  sink arms a one-shot timer on the toolkit window (`SetTimer` on the toolkit thread, else a `WM_PREFERENCES_ARM_TIMER`
+  request sent with `SendNotifyMessage`, which only arms it), and its `WM_TIMER`, retrieved once the backlog has
+  drained, delivers the types under whichever pump retrieves it. Types kept when the toolkit window goes are dropped.
 - Part 3: destroying a NULL text range no longer crashes, and the cleared VARIANTs also release a `VT_UNKNOWN`
   reference and a `VT_R8|VT_ARRAY` array, which leaked the same way.
 - Part 4: under out-of-memory a composition is reported without its clauses or attributes, or dropped through the

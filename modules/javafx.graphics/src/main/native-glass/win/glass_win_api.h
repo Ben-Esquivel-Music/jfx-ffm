@@ -186,7 +186,7 @@
  * window, and the two set_callbacks functions publish a pointer another thread will dial.
  * The preferences callback table is the ABI's first upcall. Its two WinRT sinks may be invoked on a
  * thread of the OS's choosing, but they only post to the toolkit window, or keep their types for the
- * toolkit pump when that post fails, so the upcall itself runs on the JavaFX application thread - see
+ * toolkit thread when that post fails, so the upcall itself runs on the JavaFX application thread - see
  * GwinPrefsCallbacks.
  * The view and window sections carry their own critical(true) and threading rules at their heads.
  */
@@ -531,23 +531,27 @@ typedef struct GwinPrefsCallbacks {
      * THREAD: ALWAYS the Glass toolkit thread, inside GlassApplication::WindowProc - the
      * WM_SETTINGCHANGE / WM_THEMECHANGED / WM_SYSCOLORCHANGE / WM_DWMCOLORIZATIONCOLORCHANGED arms, and
      * the arm for what the two WinRT sinks (AutoHideScrollBarsChanged, NetworkStatusChanged) post - or,
-     * for the types a sink kept (below), with no lock held where a posted message has just been handled:
+     * for the types a sink kept (below), with no lock held where a retrieved message has just been dispatched:
      * right after a DispatchMessage of the pump of gwin_run_loop or gwin_enter_nested_event_loop, or in
-     * the toolkit window's WM_DO_ACTION_LATER arm or the arm for the sink's wake.
+     * the toolkit window's WM_DO_ACTION_LATER arm, the arm for the sink's wake or its WM_TIMER arm.
      * WRL Callback<> delegates are not agile, so the OS may invoke a sink on the toolkit thread or on a
      * thread of its own; either way the sink only posts its types to the toolkit window through the
      * guarded post of gwin_invoke_later, and the notification reaches Java asynchronously, on the
      * toolkit thread. A sink invoked once the toolkit window is cleared posts nothing and keeps nothing.
      * When the PostMessage fails with the toolkit window published - the toolkit thread's
      * posted-message queue is at its quota - the sink keeps its types in a process-wide word and posts
-     * one wake (wParam 0) the same way; the kept types are delivered after the next DispatchMessage of
-     * either pump, or when the toolkit window handles the wake or a gwin_invoke_later action, so a
-     * notification can arrive late but is not lost. The window arms also cover a pump that is not ours
-     * - a modal loop of the OS (move/size, menus, common dialogs, DoDragDrop), or the embedder's in the
-     * SWT-embedded case: there the kept types wait for the next wake or gwin_invoke_later action it
-     * dispatches, or for the modal loop to end. Kept types are dropped when the toolkit window is
-     * destroyed and before a new one is published, as the posts still queued for a destroyed window are
-     * never dispatched.
+     * one wake (wParam 0) the same way. When the wake is refused too, the sink arms a one-shot timer on
+     * the toolkit window: SetTimer when the sink runs on the toolkit thread, else a request sent there
+     * with SendNotifyMessage, which the toolkit thread handles at its next message retrieval by arming
+     * the timer and nothing else. The WM_TIMER comes once the queue holds no posted message. The kept
+     * types are delivered after the next DispatchMessage of either pump, or when the toolkit window
+     * handles the wake, a gwin_invoke_later action or the timer, so a notification can arrive late but
+     * is not lost. The window arms also cover a pump that is not ours - a modal loop of the OS
+     * (move/size, menus, common dialogs, DoDragDrop), or the embedder's in the SWT-embedded case: it
+     * dispatches the wake or the timer like any other message. Only a failed SetTimer or
+     * SendNotifyMessage leaves the types for the next of those points. Kept types are dropped when the
+     * toolkit window is destroyed and before a new one is published, as the posts still queued for a
+     * destroyed window are never dispatched; its timer and a request still queued go with it.
      *
      * RUNDOWN: only the toolkit window's procedure and the two pumps call this slot, and the toolkit
      * thread retrieves no message once gwin_run_loop has returned, so no call starts after that return -
@@ -3063,10 +3067,13 @@ enum GwinTestCounter {
     GWIN_TEST_COUNTER_BSTR_FREE     = 9,  /* of those, released by its VariantClear */
     GWIN_TEST_COUNTER_PREFS_DEFERRED = 10, /* preference-sink posts whose PostMessage failed with the toolkit
                                             * window published; their types were kept for a later delivery */
-    GWIN_TEST_COUNTER_PREFS_DEFERRED_RUN = 11  /* deliveries of kept types: updatePreferences calls of
+    GWIN_TEST_COUNTER_PREFS_DEFERRED_RUN = 11, /* deliveries of kept types: updatePreferences calls of
                                                 * PlatformSupport::RunDeferredPreferences */
+    GWIN_TEST_COUNTER_PREFS_WAKE_TIMER = 12    /* wake timers armed on the toolkit window because a sink's wake
+                                                * post was refused with the window published: SetTimer
+                                                * succeeded, on the toolkit thread, from either path */
 };
-#define GWIN_TEST_COUNTER_COUNT 12
+#define GWIN_TEST_COUNTER_COUNT 13
 
 /*
  * TEST HOOK. on != 0 zeroes every counter and log of these hooks and starts recording; on == 0 stops

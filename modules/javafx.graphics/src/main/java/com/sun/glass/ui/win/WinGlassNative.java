@@ -3431,19 +3431,27 @@ final class WinGlassNative {
      * <b>Thread.</b> Always the Glass toolkit thread: inside {@code GlassApplication::WindowProc}, in the
      * {@code WM_SETTINGCHANGE} / {@code WM_THEMECHANGED} / {@code WM_SYSCOLORCHANGE} /
      * {@code WM_DWMCOLORIZATIONCOLORCHANGED} arms and the arm for what the two WinRT sinks post, or in
-     * {@code PlatformSupport::RunDeferredPreferences}, for the types a sink kept, right after a posted
-     * message was handled: after a {@code DispatchMessage} of a toolkit pump, or in two arms of that
-     * procedure. The sinks themselves may run elsewhere: they are WRL {@code Callback<>} delegates, not
-     * agile by default - {@code Callback<>} builds them with {@code RuntimeClassFlags<Delegate>}, {@code Delegate}
-     * is {@code ClassicCom}, and only {@code WinRt} classes aggregate the free-threaded marshaler
-     * ({@code FtmBase}) - so each event source decides whether to marshal its sink into the apartment
-     * {@code RoInitialize(RO_INIT_SINGLETHREADED)} created on the toolkit thread or to call it on a
-     * WinRT thread of its own. Either way a sink only posts its types to the toolkit window through the
-     * guarded post of {@code gwin_invoke_later} ({@code PlatformSupport::PostPreferencesChanged}), or
-     * keeps them for the toolkit thread when that {@code PostMessage} fails with the window published (its
-     * posted-message queue is at its quota), so a sink's notification reaches this asynchronously, on the
-     * toolkit thread, and a sink invoked once the toolkit window is destroyed posts and keeps nothing. No
-     * call starts after {@code gwin_run_loop} has returned (see {@link #clearPreferencesCallback}).
+     * {@code PlatformSupport::RunDeferredPreferences}, for the types a sink kept, right after a retrieved
+     * message was dispatched: after a {@code DispatchMessage} of a toolkit pump, or in three arms of that
+     * procedure - {@code WM_DO_ACTION_LATER}, the wake a sink posts after keeping its types, and the
+     * {@code WM_TIMER} of the one-shot timer it arms when that wake is refused too - which a pump that is
+     * not Glass's (an OS modal loop, the SWT embedder's) dispatches like any other message; never inside
+     * a sink or at a sent-message point. The sinks themselves may run elsewhere: they are WRL
+     * {@code Callback<>} delegates, not agile by default - {@code Callback<>} builds them with
+     * {@code RuntimeClassFlags<Delegate>}, {@code Delegate} is {@code ClassicCom}, and only {@code WinRt}
+     * classes aggregate the free-threaded marshaler ({@code FtmBase}) - so each event source decides whether
+     * to marshal its sink into the apartment {@code RoInitialize(RO_INIT_SINGLETHREADED)} created on the
+     * toolkit thread or to call it on a WinRT thread of its own. Either way a sink only posts its types to
+     * the toolkit window through the guarded post of {@code gwin_invoke_later}
+     * ({@code PlatformSupport::PostPreferencesChanged}), or keeps them for the toolkit thread when that
+     * {@code PostMessage} fails with the window published (its posted-message queue is at its quota) and
+     * posts the wake; when the wake is refused too it arms the timer
+     * ({@code GlassApplication::ArmPreferencesTimer}): {@code SetTimer} on the toolkit thread, else a
+     * request sent there with {@code SendNotifyMessage}, which the toolkit thread handles at its next
+     * message retrieval by arming the timer and nothing else. The {@code WM_TIMER} comes once the queue
+     * holds no posted message. So a sink's notification reaches this asynchronously, on the toolkit
+     * thread, and a sink invoked once the toolkit window is destroyed posts and keeps nothing. No call
+     * starts after {@code gwin_run_loop} has returned (see {@link #clearPreferencesCallback}).
      * <p>
      * <b>It must not throw.</b> An exception escaping an upcall stub terminates the JVM, so
      * {@code Throwable} is caught and answered with 0, which is the C's "nothing changed" and its

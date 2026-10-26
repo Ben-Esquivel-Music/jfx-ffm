@@ -75,6 +75,9 @@ public:
 // Posted by PlatformSupport's two WinRT sinks; WPARAM carries their PlatformSupport::PreferenceType bits, or 0
 // for the wake a sink posts after keeping the types of a failed post (PlatformSupport::PostPreferencesChanged).
 #define WM_PREFERENCES_CHANGED (WM_USER+4)
+// Sent, never posted, by ArmPreferencesTimer from a sink on another thread when that wake was refused too; WPARAM
+// and LPARAM are 0. The toolkit window procedure only arms its preferences timer: it never calls Java.
+#define WM_PREFERENCES_ARM_TIMER (WM_USER+5)
 
 class GlassApplication : protected BaseWnd {
 public:
@@ -86,8 +89,8 @@ public:
     /*
      * The PUBLISHED toolkit window and thread: stored in the WM_CREATE arm, cleared under the exclusive side
      * of the publication lock in the WM_NCDESTROY arm. Any thread may load them; a loaded HWND can be stale
-     * by the time it is used, so only PostToToolkit and ExecAction, which use it inside the shared side,
-     * may message it from another thread.
+     * by the time it is used, so only PostToToolkit, ExecAction and ArmPreferencesTimer, which use it inside
+     * the shared side, may message it from another thread.
      */
     static HWND GetToolkitHWND() { return sm_toolkitHwnd.load(); }
     static DWORD GetMainThreadId() { return sm_toolkitThreadId.load(); }
@@ -117,6 +120,17 @@ public:
 
     /* Posts WM_DO_ACTION_LATER through PostToToolkit; deletes the action when that refuses. */
     static void ExecActionLater(Action *action);
+
+    /*
+     * What PlatformSupport::PostPreferencesChanged does when the wake it posts is refused too, with the toolkit
+     * window published: arms the one-shot preferences timer on the toolkit window, whose WM_TIMER arm delivers
+     * the kept types (PlatformSupport::RunDeferredPreferences). SetTimer works only on the window's own thread.
+     * On the toolkit thread it is called here, with no guard, as ExecAction's inline path; from any other
+     * thread WM_PREFERENCES_ARM_TIMER is sent with SendNotifyMessage inside the shared side of the publication
+     * lock, and the toolkit thread arms the timer at its next message retrieval, in any pump, ahead of the
+     * posted backlog. Never calls Java, never waits. Any thread.
+     */
+    static void ArmPreferencesTimer();
     /*
      * The registration behind gwin_clipboard_register_viewer (glass_win_api.h): remembers
      * clipboardId as the target of GwinClipboardCallbacks.content_changed. Disposes whatever was

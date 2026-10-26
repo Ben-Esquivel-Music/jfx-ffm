@@ -4585,7 +4585,7 @@ public final class WinGlassNativeShim {
      * The toolkit window, its posts and sends, the preference sinks and the IME composition path: the seventeen
      * shim-only hooks of the last section of glass_win_api.h, the two scheduling exports again for their raw
      * statuses (the facade discards gwin_invoke_and_wait's and turns gwin_invoke_later's into a boolean), and the
-     * queue query those hooks leave to the test.
+     * queue query and the message pump those hooks leave to the test.
      */
 
     /** The seventeen hooks of the last section of {@code glass_win_api.h}, in its declaration order. */
@@ -4609,9 +4609,10 @@ public final class WinGlassNativeShim {
     public static final int COUNTER_BSTR_FREE = 9;
     public static final int COUNTER_PREFS_DEFERRED = 10;
     public static final int COUNTER_PREFS_DEFERRED_RUN = 11;
+    public static final int COUNTER_PREFS_WAKE_TIMER = 12;
 
     /** {@code GWIN_TEST_COUNTER_COUNT}: how many counters there are, the first index the library does not know. */
-    public static final int COUNTER_COUNT = 12;
+    public static final int COUNTER_COUNT = 13;
 
     /** {@code gwin_test_event_log} codes, {@code enum GwinTestEvent}. */
     public static final int EVENT_REMOVE_AUTO_HIDE = 1;
@@ -4636,6 +4637,9 @@ public final class WinGlassNativeShim {
 
     /** {@code QS_SENDMESSAGE} of {@code winuser.h}. */
     public static final int QS_SENDMESSAGE = 0x0040;
+
+    /** {@code WM_TIMER} of {@code winuser.h}. */
+    public static final int WM_TIMER = 0x0113;
 
     /** One private message a peek or a decoy window saw. */
     public record PrivateMessage(long hwnd, int message, long wparam) {
@@ -4672,6 +4676,13 @@ public final class WinGlassNativeShim {
 
     /** One {@code preferences_changed} upcall into {@link #installRecordingPreferencesTable}'s table. */
     public record PreferencesCall(long sequence, Thread thread, int nativeThreadId, int types) {
+    }
+
+    /**
+     * What one turn of {@link #pumpOneMessage} retrieved: the answer of {@code GetMessageW} (above 0 for a message,
+     * 0 for {@code WM_QUIT}, -1 for a failure) and the window, number and {@code WPARAM} of the message.
+     */
+    public record PumpedMessage(int returned, long hwnd, int message, long wparam) {
     }
 
     /**
@@ -5004,6 +5015,28 @@ public final class WinGlassNativeShim {
         }
     }
 
+    /**
+     * One turn of a message pump that is not Glass's, as the event loop of an embedder runs it on the toolkit
+     * thread: {@code user32!GetMessageW(&msg, NULL, 0, 0)} and, when that retrieved a message,
+     * {@code TranslateMessage} and {@code DispatchMessageW}. Unlike the pump of {@code gwin_run_loop} it calls
+     * nothing after the dispatch. Blocks until a posted message, a timer or a thread message is retrieved; a
+     * message another thread sent to the calling thread is handled inside that retrieval.
+     */
+    public static PumpedMessage pumpOneMessage() {
+        try (Arena arena = Arena.ofConfined()) {
+            MemorySegment msg = arena.allocate(ToolkitDriver.MSG_LAYOUT);
+            int returned = (int) ToolkitDriver.GET_MESSAGE_W.invokeExact(msg, MemorySegment.NULL, 0, 0);
+            if (returned > 0) {
+                int ignoredTranslated = (int) ToolkitDriver.TRANSLATE_MESSAGE.invokeExact(msg);
+                long ignoredResult = (long) ToolkitDriver.DISPATCH_MESSAGE_W.invokeExact(msg);
+            }
+            return new PumpedMessage(returned, msg.get(ADDRESS, ToolkitDriver.MSG_HWND).address(),
+                    msg.get(JAVA_INT, ToolkitDriver.MSG_MESSAGE), msg.get(JAVA_LONG, ToolkitDriver.MSG_WPARAM));
+        } catch (Throwable t) {
+            throw hookFailure("GetMessageW", t);
+        }
+    }
+
     /** {@code kernel32!GetCurrentThreadId}, for comparison with {@link #publication()}'s thread id. */
     public static int nativeThreadId() {
         try {
@@ -5216,8 +5249,9 @@ public final class WinGlassNativeShim {
 
     /**
      * The production exports a toolkit scenario needs with their statuses, the preferences installer for the
-     * recording table, and the three OS calls. Binds no hook, so a test that uses only this holder runs on a
-     * {@code glass.dll} without them.
+     * recording table, and the OS calls: {@code GetQueueStatus}, {@code GetCurrentThreadId},
+     * {@code PostThreadMessageW} and the three of {@link #pumpOneMessage}. Binds no hook, so a test that uses only
+     * this holder runs on a {@code glass.dll} without them.
      */
     private static final class ToolkitDriver {
 
@@ -5239,6 +5273,31 @@ public final class WinGlassNativeShim {
                 FunctionDescriptor.of(JAVA_INT));
         static final MethodHandle POST_THREAD_MESSAGE = bindSystem("user32.dll", "PostThreadMessageW",
                 FunctionDescriptor.of(JAVA_INT, JAVA_INT, JAVA_INT, JAVA_LONG, JAVA_LONG));
+
+        /** {@code BOOL GetMessageW(LPMSG lpMsg, HWND hWnd, UINT wMsgFilterMin, UINT wMsgFilterMax)}. */
+        static final MethodHandle GET_MESSAGE_W = bindSystem("user32.dll", "GetMessageW",
+                FunctionDescriptor.of(JAVA_INT, ADDRESS, ADDRESS, JAVA_INT, JAVA_INT));
+        /** {@code BOOL TranslateMessage(const MSG *lpMsg)}. */
+        static final MethodHandle TRANSLATE_MESSAGE = bindSystem("user32.dll", "TranslateMessage",
+                FunctionDescriptor.of(JAVA_INT, ADDRESS));
+        /** {@code LRESULT DispatchMessageW(const MSG *lpMsg)}. */
+        static final MethodHandle DISPATCH_MESSAGE_W = bindSystem("user32.dll", "DispatchMessageW",
+                FunctionDescriptor.of(JAVA_LONG, ADDRESS));
+
+        /** {@code MSG} of {@code winuser.h} on x64: 48 bytes, {@code wParam} 8-aligned after {@code message}. */
+        static final StructLayout MSG_LAYOUT = MemoryLayout.structLayout(
+                ADDRESS.withName("hwnd"),
+                JAVA_INT.withName("message"),
+                MemoryLayout.paddingLayout(4),
+                JAVA_LONG.withName("wParam"),
+                JAVA_LONG.withName("lParam"),
+                JAVA_INT.withName("time"),
+                JAVA_INT.withName("ptX"),
+                JAVA_INT.withName("ptY"),
+                JAVA_INT.withName("lPrivate"));
+        static final long MSG_HWND = MSG_LAYOUT.byteOffset(PathElement.groupElement("hwnd"));
+        static final long MSG_MESSAGE = MSG_LAYOUT.byteOffset(PathElement.groupElement("message"));
+        static final long MSG_WPARAM = MSG_LAYOUT.byteOffset(PathElement.groupElement("wParam"));
 
         static final AtomicLong SEQUENCE = new AtomicLong(1L);
         static final List<PreferencesCall> PREFERENCES_CALLS = new CopyOnWriteArrayList<>();

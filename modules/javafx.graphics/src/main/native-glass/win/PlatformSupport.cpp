@@ -216,11 +216,13 @@ static volatile LONG s_deferredTypes = 0;
  * toolkit window through GlassApplication::PostToToolkit, the guarded post gwin_invoke_later uses. Once
  * the toolkit window is cleared the post is refused and nothing is kept - the teardown discards it. When
  * PostMessage fails with the window published (the toolkit thread's posted-message queue is at its
- * quota), the types are ORed into s_deferredTypes and one wake, wParam 0, is posted the same way, its
- * answer ignored: posted, it is dispatched after the OR; refused because the queue is still full, the
- * messages filling it are; either way a dispatch follows the OR, and RunDeferredPreferences delivers the
- * kept types after it (see there for a pump that is not ours). The sink answers S_OK in every case. No lock
- * is held across a call into Java: preferences_changed runs later, on the toolkit thread.
+ * quota), the types are ORed into s_deferredTypes and one wake, wParam 0, is posted the same way: posted,
+ * it is dispatched after the OR, by whichever pump runs, and its arm delivers the kept types. When the wake
+ * is refused too with the window still published, GlassApplication::ArmPreferencesTimer arms a one-shot
+ * timer on the toolkit window: the WM_TIMER is retrieved once the backlog filling the queue has drained,
+ * again by whichever pump runs, and its arm delivers them. Our pumps also deliver after each DispatchMessage
+ * (RunDeferredPreferences). The sink answers S_OK in every case. No lock is held across a call into Java:
+ * preferences_changed runs later, on the toolkit thread, never inside the sink.
  */
 void PlatformSupport::PostPreferencesChanged(PreferenceType preferenceType)
 {
@@ -231,21 +233,23 @@ void PlatformSupport::PostPreferencesChanged(PreferenceType preferenceType)
     }
     ::InterlockedOr(&s_deferredTypes, (LONG)preferenceType);
     GwinTestCount(GWIN_TEST_COUNTER_PREFS_DEFERRED);
-    GlassApplication::PostToToolkit(WM_PREFERENCES_CHANGED, (WPARAM)0, (LPARAM)0);
+    if (!GlassApplication::PostToToolkit(WM_PREFERENCES_CHANGED, (WPARAM)0, (LPARAM)0, &published) && published) {
+        GlassApplication::ArmPreferencesTimer();
+    }
 }
 
 /*
  * static
  *
- * On the toolkit thread, with no lock held, where a posted message has just been handled - the context of
- * the WM_PREFERENCES_CHANGED arm, which makes the same updatePreferences call: after each DispatchMessage of
- * gwin_run_loop's and GlassApplication::EnterNestedEventLoop's pumps, and in the toolkit window's
- * WM_DO_ACTION_LATER arm and its WM_PREFERENCES_CHANGED arm for the wake, which a pump that is not ours
- * dispatches too: a modal loop of the OS (move/size, menus, common dialogs, DoDragDrop) and, in the
- * SWT-embedded case, where gwin_run_loop never runs, the embedder's. Such a pump keeps the types until it
- * dispatches one of those two, or until the modal loop ends. The answer is not used: no message handling
- * depends on it here. One acquire load while nothing is kept. Without a PlatformSupport (the toolkit window
- * is gone) the taken types are dropped, as the teardown drops them.
+ * On the toolkit thread, with no lock held, where a retrieved message has just been dispatched - the context
+ * of the WM_PREFERENCES_CHANGED arm, which makes the same updatePreferences call: after each DispatchMessage
+ * of gwin_run_loop's and GlassApplication::EnterNestedEventLoop's pumps, and in the toolkit window's
+ * WM_DO_ACTION_LATER arm, its WM_PREFERENCES_CHANGED arm for the wake and its WM_TIMER arm for the timer a
+ * refused wake arms (GlassApplication::ArmPreferencesTimer), which a pump that is not ours dispatches too: a
+ * modal loop of the OS (move/size, menus, common dialogs, DoDragDrop) and, in the SWT-embedded case, where
+ * gwin_run_loop never runs, the embedder's. Never inside a sink or at a sent-message point. The answer is not
+ * used: no message handling depends on it here. One acquire load while nothing is kept. Without a
+ * PlatformSupport (the toolkit window is gone) the taken types are dropped, as the teardown drops them.
  */
 void PlatformSupport::RunDeferredPreferences()
 {

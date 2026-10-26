@@ -131,6 +131,20 @@ void WaitHandlingSentMessages(HANDLE done)
     }
 }
 
+/* The preferences timer of GlassApplication::ArmPreferencesTimer: the only timer set on the toolkit window. */
+const UINT_PTR IDT_PREFERENCES_WAKE = 1;
+
+/*
+ * Arms the one-shot preferences timer on hWnd, the toolkit window; arming it again before it fires replaces it.
+ * Toolkit thread only.
+ */
+void SetPreferencesTimer(HWND hWnd)
+{
+    if (::SetTimer(hWnd, IDT_PREFERENCES_WAKE, USER_TIMER_MINIMUM, NULL) != 0) {
+        GwinTestCount(GWIN_TEST_COUNTER_PREFS_WAKE_TIMER);
+    }
+}
+
 } // namespace
 
 /*
@@ -260,6 +274,22 @@ LRESULT GlassApplication::WindowProc(UINT msg, WPARAM wParam, LPARAM lParam)
                 if (m_platformSupport.updatePreferences(PlatformSupport::PreferenceType(types))) {
                     return 0;
                 }
+            }
+            break;
+        case WM_PREFERENCES_ARM_TIMER:
+            // Sent by ArmPreferencesTimer from another thread, so handled inside whatever message retrieval this
+            // thread is in - also a SendMessage it waits in - where no kept type is delivered: a listener may end
+            // the toolkit. It only arms the timer; the WM_TIMER a pump retrieves and dispatches delivers.
+            SetPreferencesTimer(GetHWND());
+            return 0;
+        case WM_TIMER:
+            // The one-shot preferences timer. WM_TIMER is retrieved only when no posted message is pending, so
+            // it comes after the backlog that refused the wake, dispatched by whichever pump retrieved it:
+            // deliver what a sink kept, as the wake arm does, without touching this instance afterwards.
+            if (wParam == IDT_PREFERENCES_WAKE) {
+                ::KillTimer(GetHWND(), IDT_PREFERENCES_WAKE);
+                PlatformSupport::RunDeferredPreferences();
+                return 0;
             }
             break;
         case WM_THEMECHANGED:
@@ -429,6 +459,36 @@ void GlassApplication::ExecActionLater(Action *action)
         delete action;
         GwinTestCount(GWIN_TEST_COUNTER_ACTION_FREE);
     }
+}
+
+/*
+ * static
+ *
+ * Kept preference types are delivered only where a retrieved message is dispatched, never inside a sink or at
+ * a sent-message point, and SetTimer works only on the window's own thread: hence a timer, armed on the toolkit
+ * thread. When SendNotifyMessage or SetTimer fails, the kept types wait for the next point that delivers them.
+ */
+void GlassApplication::ArmPreferencesTimer()
+{
+    if (sm_toolkitThreadId.load() == ::GetCurrentThreadId()) {
+        // A sink the OS invoked on the toolkit thread, the only writer of the publication: no guard. Never
+        // SendNotifyMessage on this thread: it would run the window procedure inline, inside the shared
+        // section that WM_NCDESTROY takes exclusively.
+        if (pInstance != NULL) {
+            SetPreferencesTimer(pInstance->GetHWND());
+        }
+        return;
+    }
+
+    // From another thread SendNotifyMessage returns at once and runs nothing on this thread, and a sent
+    // message does not count against the posted-message quota that refused the wake.
+    ::AcquireSRWLockShared(&sm_publicationLock);
+    HWND hWnd = sm_toolkitHwnd.load();
+    if (hWnd != NULL) {
+        GwinTestCountCall(GWIN_TEST_COUNTER_NOTIFY, hWnd);
+        ::SendNotifyMessage(hWnd, WM_PREFERENCES_ARM_TIMER, (WPARAM)0, (LPARAM)0);
+    }
+    ::ReleaseSRWLockShared(&sm_publicationLock);
 }
 
 /*

@@ -72,8 +72,8 @@ public:
      * (PostPreferencesChanged): when any are kept and the toolkit's PlatformSupport exists, hands them to
      * updatePreferences, as the WM_PREFERENCES_CHANGED arm does. Called with no lock held by both toolkit
      * pumps, gwin_run_loop and GlassApplication::EnterNestedEventLoop, after each DispatchMessage, and by
-     * the toolkit window's WM_DO_ACTION_LATER arm and its WM_PREFERENCES_CHANGED arm for the wake. Toolkit
-     * thread only.
+     * the toolkit window's WM_DO_ACTION_LATER arm, its WM_PREFERENCES_CHANGED arm for the wake and its
+     * WM_TIMER arm for the timer GlassApplication::ArmPreferencesTimer arms. Toolkit thread only.
      */
     static void RunDeferredPreferences();
 
@@ -117,6 +117,7 @@ private:
     void InitializeWinRT();
 
     // What the two sinks do on the OS's thread: post the types to the toolkit window, or keep them for
-    // RunDeferredPreferences when that post fails with the window published (PlatformSupport.cpp).
+    // RunDeferredPreferences when that post fails with the window published, then post a wake or, when that
+    // is refused too, arm a timer (PlatformSupport.cpp).
     static void PostPreferencesChanged(PreferenceType);
 };

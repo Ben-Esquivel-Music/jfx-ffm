@@ -71,6 +71,12 @@ import static org.junit.jupiter.api.Assumptions.assumeFalse;
  * type: once the toolkit thread runs again, {@code preferences_changed} receives it, on the toolkit thread, once -
  * whether the toolkit thread was blocked in a runnable of {@code gwin_invoke_later} or of a
  * {@code gwin_invoke_and_wait} from another thread. After teardown the same delegate is refused and keeps nothing.</li>
+ * <li>So does one under a pump that is not Glass's, which delivers nothing after its dispatches: the toolkit thread
+ * pumps with a loop of its own ({@link WinExternalPumpToolkit}, the shape of an SWT embedder's), and the queue is
+ * full of posts to a window of the embedder's. The wake the sink posts after keeping its type is refused too, so it
+ * arms a one-shot timer on the toolkit window - invoked on another thread through a request the toolkit thread
+ * handles at its next retrieval, invoked on the toolkit thread there and then - and the {@code WM_TIMER}, retrieved
+ * once the posts have drained, delivers the type once, on the toolkit thread, never inside the sink.</li>
  * <li>A delegate invoked on the toolkit thread, whose preference listener calls {@code Platform.exit()}, lets the
  * JVM exit. On the way out the toolkit thread clears the production table and closes
  * {@code WinApplication}'s application arena, which held its stub.</li>
@@ -291,11 +297,7 @@ public class WinPreferenceSinksNativeTest {
      */
     private static void assertKeptTypeDelivered(WinGlassChildJvm.Run run) {
         assertEquals("true", run.value("busy.started"), run.describe());
-        assumeFalse("none".equals(run.value("fill.lastError")), "the fill posted " + run.value("fill.posted")
-                + " messages to the toolkit thread's posted-message queue, its cap, and none was refused: the quota"
-                + " of this machine (" + POST_MESSAGE_LIMIT + ") is above the cap, so the queue cannot be filled");
-        assertEquals(Integer.toString(ERROR_NOT_ENOUGH_QUOTA), run.value("fill.lastError"),
-                "the toolkit thread's posted-message queue was not filled to its quota: " + run.describe());
+        assertTheFillReachedTheQuota(run);
         assertEquals("0", run.value("sink.status"), "no NetworkStatusChanged delegate was kept: " + run.describe());
         assertEquals("false", run.value("probe.posted"), "the queue was no longer full after the sink: "
                 + run.describe());
@@ -314,6 +316,23 @@ public class WinPreferenceSinksNativeTest {
         assertEquals("1", run.value("delivered.prefsDeferredRun"), run.describe());
         assertEquals("0", run.value("terminate.send"), run.describe());
         assertEquals("true", run.value("loop.returned"), run.describe());
+        assertRefusedAfterTeardown(run);
+    }
+
+    /**
+     * The fill reached the quota of the posted-message queue: {@code PostMessageW} failed with
+     * {@code ERROR_NOT_ENOUGH_QUOTA}. A fill that reached {@value #FILL_CAP} posts without a refusal aborts the test.
+     */
+    private static void assertTheFillReachedTheQuota(WinGlassChildJvm.Run run) {
+        assumeFalse("none".equals(run.value("fill.lastError")), "the fill posted " + run.value("fill.posted")
+                + " messages to the toolkit thread's posted-message queue, its cap, and none was refused: the quota"
+                + " of this machine (" + POST_MESSAGE_LIMIT + ") is above the cap, so the queue cannot be filled");
+        assertEquals(Integer.toString(ERROR_NOT_ENOUGH_QUOTA), run.value("fill.lastError"),
+                "the toolkit thread's posted-message queue was not filled to its quota: " + run.describe());
+    }
+
+    /** What {@link #recordAfterTeardown} must show: the sink was refused, kept nothing and caused no call. */
+    private static void assertRefusedAfterTeardown(WinGlassChildJvm.Run run) {
         assertEquals("0", run.value("after.status"), run.describe());
         assertEquals("1", run.value("after.prefsRefusedDelta"),
                 "the sink that ran after the window was gone was not refused: " + run.describe());
@@ -354,7 +373,9 @@ public class WinPreferenceSinksNativeTest {
      * The body of {@link #invokeIntoFullQueue} and {@link #invokeIntoFullQueueDuringInvokeAndWait}: {@code block}
      * hands the toolkit thread the runnable that blocks it. The block ends in a {@code finally}, and by itself after
      * {@value #BLOCK_MILLIS} ms. The delivery is recorded before anything else is posted to the toolkit thread, which
-     * then ends by a send, because a post could still find the queue full.
+     * then ends by a send, because a post could still find the queue full. The sink's wake is refused too, so it also
+     * arms the one-shot timer of {@link #intoFullQueueUnderAnEmbeddersPump}; its {@code WM_TIMER} comes only once
+     * the fill has drained, after the delivery, and finds nothing kept.
      */
     private static void intoFullQueue(Map<String, String> out, BiConsumer<WinNativeToolkit, Runnable> block) {
         WinGlassNativeShim.installRecordingPreferencesTable();
@@ -384,32 +405,139 @@ public class WinPreferenceSinksNativeTest {
         }
         out.put("delivered", Boolean.toString(
                 WinGlassChild.waitFor(WAIT_MILLIS, () -> !networkCallsSince(invoked).isEmpty())));
-        List<PreferencesCall> delivered = networkCallsSince(invoked);
-        out.put("delivered.networkCalls", Integer.toString(delivered.size()));
-        out.put("delivered.types", delivered.stream().map(c -> Integer.toString(c.types()))
-                .collect(Collectors.joining(",")));
-        out.put("delivered.offToolkitThread",
-                Long.toString(delivered.stream().filter(c -> c.thread() != toolkit.thread()).count()));
-        recordSinkCounters(out, "delivered");
+        recordDelivery(out, invoked, toolkit.thread());
 
         // A sent runnable: a post could still find the queue full.
         out.put("terminate.send", Integer.toString(toolkit.terminateBySend()));
         out.put("loop.returned", Boolean.toString(toolkit.awaitLoopReturn(WAIT_MILLIS)));
-        long refused = WinGlassNativeShim.counter(WinGlassNativeShim.COUNTER_PREFS_REFUSED);
-        long posted = WinGlassNativeShim.counter(WinGlassNativeShim.COUNTER_PREFS_POST);
-        long deferred = WinGlassNativeShim.counter(WinGlassNativeShim.COUNTER_PREFS_DEFERRED);
-        long afterTeardown = WinGlassNativeShim.nextSequence();
-        out.put("after.status",
-                Integer.toString(WinGlassNativeShim.prefsInvoke(WinGlassNativeShim.DELEGATE_NETWORK)));
-        out.put("after.prefsRefusedDelta", Long.toString(
-                WinGlassNativeShim.counter(WinGlassNativeShim.COUNTER_PREFS_REFUSED) - refused));
-        out.put("after.prefsPostDelta", Long.toString(
-                WinGlassNativeShim.counter(WinGlassNativeShim.COUNTER_PREFS_POST) - posted));
-        out.put("after.prefsDeferredDelta", Long.toString(
-                WinGlassNativeShim.counter(WinGlassNativeShim.COUNTER_PREFS_DEFERRED) - deferred));
-        out.put("after.prefsCalls", Long.toString(WinGlassNativeShim.recordedPreferencesCalls().stream()
-                .filter(c -> c.sequence() > afterTeardown).count()));
+        recordAfterTeardown(out);
         toolkit.releaseAndAwaitEnd(WAIT_MILLIS);
+    }
+
+    /*
+     * A post and a wake the full queue refuses, under a pump that is not Glass's.
+     */
+
+    @Test
+    @Timeout(120)
+    public void aNetworkChangeWhosePostAndWakeAFullQueueRefusedIsDeliveredUnderAnEmbeddersPump() {
+        WinGlassChildJvm.Run run = WinGlassChildJvm.run(WinPreferenceSinksNativeTest.class,
+                "invokeIntoFullQueueUnderAnEmbeddersPump");
+        System.out.println("sink into a full queue under an embedder's pump: " + run.values() + " ("
+                + run.loadedGlass() + ")");
+        assertEquals("false", run.value("sink.onToolkitThread"), run.describe());
+        assertKeptTypeDeliveredUnderAnEmbeddersPump(run, 0);
+    }
+
+    @Test
+    @Timeout(120)
+    public void aNetworkChangeOnTheToolkitThreadWhosePostAndWakeAFullQueueRefusedIsDeliveredUnderAnEmbeddersPump() {
+        WinGlassChildJvm.Run run = WinGlassChildJvm.run(WinPreferenceSinksNativeTest.class,
+                "invokeOnTheToolkitThreadIntoFullQueueUnderAnEmbeddersPump");
+        System.out.println("sink on the toolkit thread into a full queue under an embedder's pump: " + run.values()
+                + " (" + run.loadedGlass() + ")");
+        assertEquals("true", run.value("sink.onToolkitThread"), run.describe());
+        assertKeptTypeDeliveredUnderAnEmbeddersPump(run, 1);
+    }
+
+    /**
+     * What a run of {@link #intoFullQueueUnderAnEmbeddersPump} must show: the fill reached the quota; the network
+     * sink's post and its wake were refused and its type was kept; by the time the sink had returned, before the
+     * toolkit thread pumped, nothing was delivered and {@code timersBeforePump} wake timers were armed - none for a
+     * sink on another thread, whose request the toolkit thread handles only when it retrieves a message, one for a
+     * sink on the toolkit thread; once the toolkit thread pumped, {@code preferences_changed} received the type once,
+     * on the toolkit thread, with one timer armed in all; the toolkit thread ended its toolkit and left its pump;
+     * after teardown the same sink is refused and keeps nothing.
+     */
+    private static void assertKeptTypeDeliveredUnderAnEmbeddersPump(WinGlassChildJvm.Run run, int timersBeforePump) {
+        assertTheFillReachedTheQuota(run);
+        assertEquals("0", run.value("sink.status"), "no NetworkStatusChanged delegate was kept: " + run.describe());
+        assertEquals("false", run.value("probe.posted"), "the queue was no longer full after the sink: "
+                + run.describe());
+        assertEquals("2", run.value("sunk.prefsPost"), "the refused post and its wake: " + run.describe());
+        assertEquals("0", run.value("sunk.prefsRefused"), run.describe());
+        assertEquals("1", run.value("sunk.prefsDeferred"), run.describe());
+        assertEquals("0", run.value("sunk.networkCalls"),
+                "preferences_changed ran before the toolkit thread pumped, inside the sink: " + run.describe());
+        assertEquals("0", run.value("sunk.prefsDeferredRun"), run.describe());
+        assertEquals("true", run.value("delivered"), "the network change whose post and wake the full queue refused"
+                + " never reached preferences_changed under the embedder's pump: " + run.describe());
+        assertEquals("1", run.value("delivered.networkCalls"), run.describe());
+        assertEquals(Integer.toString(NETWORK_INFORMATION), run.value("delivered.types"), run.describe());
+        assertEquals("0", run.value("delivered.offToolkitThread"),
+                "preferences_changed ran on a thread other than the toolkit thread: " + run.describe());
+        assertEquals(Integer.toString(timersBeforePump), run.value("sunk.prefsWakeTimer"),
+                "wake timers armed by the time the sink returned, before the toolkit thread pumped: " + run.describe());
+        assertEquals("1", run.value("delivered.prefsWakeTimer"), "wake timers armed in all: " + run.describe());
+        assertEquals("1", run.value("delivered.prefsDeferredRun"), run.describe());
+        assertEquals("true", run.value("pump.ended"),
+                "the toolkit thread did not end its toolkit and leave its pump: " + run.describe());
+        assertEquals("true", run.value("embedder.destroyed"), run.describe());
+        assertRefusedAfterTeardown(run);
+    }
+
+    /**
+     * Runs in {@link WinGlassChild}. This thread fills the posted-message queue of the toolkit thread of a
+     * {@link WinExternalPumpToolkit}, which has not retrieved a message yet, with {@code WM_NULL} posts to the
+     * embedder's window until {@code PostMessageW} fails, then invokes the network delegate, whose post and wake the
+     * full queue refuses too, and releases the pump. The sink sends the toolkit thread the request that arms the
+     * timer, handled at its first retrieval; the {@code WM_TIMER}, retrieved once the posts have drained, delivers
+     * the kept type.
+     */
+    static void invokeIntoFullQueueUnderAnEmbeddersPump(Map<String, String> out) {
+        intoFullQueueUnderAnEmbeddersPump(out, (toolkit, sink) -> {
+            sink.run();
+            toolkit.releasePump();
+        });
+    }
+
+    /**
+     * Runs in {@link WinGlassChild}. {@link #invokeIntoFullQueueUnderAnEmbeddersPump}, but the toolkit thread itself
+     * invokes the network delegate once released, before its first retrieval, as an event source that calls the sink
+     * in the toolkit thread's apartment does: the sink arms the timer there and then, and delivers nothing itself.
+     */
+    static void invokeOnTheToolkitThreadIntoFullQueueUnderAnEmbeddersPump(Map<String, String> out) {
+        intoFullQueueUnderAnEmbeddersPump(out, (toolkit, sink) -> toolkit.releasePump(sink));
+    }
+
+    /**
+     * The body of {@link #invokeIntoFullQueueUnderAnEmbeddersPump} and
+     * {@link #invokeOnTheToolkitThreadIntoFullQueueUnderAnEmbeddersPump}: {@code sinkAndRelease} gets the toolkit
+     * and the sink, runs the sink on this thread or on the toolkit thread and releases the pump. The sink records
+     * its status, a probe post that finds the queue still full, and the calls and counters by the time it returned
+     * ({@code sunk.*}). The pump stops once the delivery has been recorded, or after {@value #WAIT_MILLIS} ms
+     * without one, and the toolkit thread ends its toolkit; then the sink runs once more, after teardown.
+     */
+    private static void intoFullQueueUnderAnEmbeddersPump(Map<String, String> out,
+                                                          BiConsumer<WinExternalPumpToolkit, Runnable> sinkAndRelease) {
+        WinGlassNativeShim.installRecordingPreferencesTable();
+        WinGlassNativeShim.prefsCapture(true);
+        WinExternalPumpToolkit toolkit = WinExternalPumpToolkit.start();
+        long invoked = WinGlassNativeShim.nextSequence();
+        try {
+            WinGlassNativeShim.observe(true);
+            fill(out, toolkit.embedderHwnd());
+            sinkAndRelease.accept(toolkit, () -> {
+                out.put("sink.onToolkitThread", Boolean.toString(Thread.currentThread() == toolkit.thread()));
+                out.put("sink.status",
+                        Integer.toString(WinGlassNativeShim.prefsInvoke(WinGlassNativeShim.DELEGATE_NETWORK)));
+                PostedMessage probe = WinGlassNativeShim.postMessage(toolkit.embedderHwnd(), WM_NULL);
+                out.put("probe.posted", Boolean.toString(probe.posted()));
+                out.put("probe.lastError", Integer.toString(probe.lastError()));
+                out.put("sunk.networkCalls", Integer.toString(networkCallsSince(invoked).size()));
+                recordSinkCounters(out, "sunk");
+            });
+            out.put("delivered", Boolean.toString(
+                    WinGlassChild.waitFor(WAIT_MILLIS, () -> !networkCallsSince(invoked).isEmpty())));
+            recordDelivery(out, invoked, toolkit.thread());
+        } finally {
+            out.put("pump.ended", Boolean.toString(toolkit.stopAndAwaitEnd(WAIT_MILLIS)));
+        }
+        out.put("pump.pumped", Boolean.toString(toolkit.pumped()));
+        out.put("pump.messages", Long.toString(toolkit.messages()));
+        out.put("pump.toolkitTimers", Long.toString(toolkit.toolkitTimers()));
+        out.put("embedder.destroyed", Boolean.toString(toolkit.embedderDestroyed()));
+        recordAfterTeardown(out);
     }
 
     /** Posts {@code WM_NULL} to {@code hwnd} until a post fails, {@value #FILL_CAP} times at most. */
@@ -434,6 +562,41 @@ public class WinPreferenceSinksNativeTest {
                 .toList();
     }
 
+    /**
+     * The recorded {@code preferences_changed} calls with the network bit drawn after {@code sequence}: how many,
+     * their types, and how many ran on a thread other than {@code toolkitThread}; then the sink counters.
+     */
+    private static void recordDelivery(Map<String, String> out, long sequence, Thread toolkitThread) {
+        List<PreferencesCall> delivered = networkCallsSince(sequence);
+        out.put("delivered.networkCalls", Integer.toString(delivered.size()));
+        out.put("delivered.types", delivered.stream().map(c -> Integer.toString(c.types()))
+                .collect(Collectors.joining(",")));
+        out.put("delivered.offToolkitThread",
+                Long.toString(delivered.stream().filter(c -> c.thread() != toolkitThread).count()));
+        recordSinkCounters(out, "delivered");
+    }
+
+    /**
+     * Invokes the network delegate once more, once the toolkit window is gone, and records its status, the deltas of
+     * the sink counters and the {@code preferences_changed} calls drawn after it.
+     */
+    private static void recordAfterTeardown(Map<String, String> out) {
+        long refused = WinGlassNativeShim.counter(WinGlassNativeShim.COUNTER_PREFS_REFUSED);
+        long posted = WinGlassNativeShim.counter(WinGlassNativeShim.COUNTER_PREFS_POST);
+        long deferred = WinGlassNativeShim.counter(WinGlassNativeShim.COUNTER_PREFS_DEFERRED);
+        long afterTeardown = WinGlassNativeShim.nextSequence();
+        out.put("after.status",
+                Integer.toString(WinGlassNativeShim.prefsInvoke(WinGlassNativeShim.DELEGATE_NETWORK)));
+        out.put("after.prefsRefusedDelta", Long.toString(
+                WinGlassNativeShim.counter(WinGlassNativeShim.COUNTER_PREFS_REFUSED) - refused));
+        out.put("after.prefsPostDelta", Long.toString(
+                WinGlassNativeShim.counter(WinGlassNativeShim.COUNTER_PREFS_POST) - posted));
+        out.put("after.prefsDeferredDelta", Long.toString(
+                WinGlassNativeShim.counter(WinGlassNativeShim.COUNTER_PREFS_DEFERRED) - deferred));
+        out.put("after.prefsCalls", Long.toString(WinGlassNativeShim.recordedPreferencesCalls().stream()
+                .filter(c -> c.sequence() > afterTeardown).count()));
+    }
+
     private static void recordSinkCounters(Map<String, String> out, String prefix) {
         out.put(prefix + ".prefsPost",
                 Long.toString(WinGlassNativeShim.counter(WinGlassNativeShim.COUNTER_PREFS_POST)));
@@ -443,6 +606,9 @@ public class WinPreferenceSinksNativeTest {
                 Long.toString(WinGlassNativeShim.counter(WinGlassNativeShim.COUNTER_PREFS_DEFERRED)));
         out.put(prefix + ".prefsDeferredRun",
                 Long.toString(WinGlassNativeShim.counter(WinGlassNativeShim.COUNTER_PREFS_DEFERRED_RUN)));
+        out.put(prefix + ".prefsWakeTimer",
+                Long.toString(WinGlassNativeShim.counter(WinGlassNativeShim.COUNTER_PREFS_WAKE_TIMER)));
+        out.put(prefix + ".notify", Long.toString(WinGlassNativeShim.counter(WinGlassNativeShim.COUNTER_NOTIFY)));
     }
 
     /*
