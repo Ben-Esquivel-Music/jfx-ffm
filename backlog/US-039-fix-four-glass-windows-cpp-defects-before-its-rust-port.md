@@ -257,8 +257,9 @@ Paths are relative to `modules/javafx.graphics/src/main/native-glass/win`.
 
   With them:
   - a parked `gwin_invoke_later` holds teardown. `gwin_terminate_loop` on the toolkit thread does not return within
-    a bounded wait while the poster is parked, and returns once it is released. The stale count is 0. A mutant that
-    posts without the shared section, which is the atomic HWND alone, fails both checks;
+    a bounded wait that starts once the runnable that calls it has started, while the poster is parked, and returns
+    once it is released. The stale count is 0. A mutant that posts without the shared section, which is the atomic
+    HWND alone, fails both checks;
   - after the clear, every `gwin_invoke_later` answers `GWIN_ERR_NO_TOOLKIT`, calls `PostMessage` zero times and
     frees its action. That includes one issued by the runnable that called `gwin_terminate_loop`, after that call
     returned. A mutant that clears in `~GlassApplication`, not in the `WM_NCDESTROY` arm, fails this;

@@ -111,6 +111,8 @@ public class WinToolkitWindowGuardNativeTest {
         System.out.println("parked post: " + run.values());
         assertEquals("true", run.value("published.matches"), run.describe());
         assertEquals("true", run.value("parked"), "the poster never reached the gate: " + run.describe());
+        assertEquals("true", run.value("terminate.entered"),
+                "the terminating runnable never started, so the hold proved nothing: " + run.describe());
         assertEquals("false", run.value("terminate.returnedWhileParked"),
                 "gwin_terminate_loop returned while a poster was parked between its load and its PostMessage: "
                         + run.describe());
@@ -121,7 +123,11 @@ public class WinToolkitWindowGuardNativeTest {
         assertEquals("true", run.value("loop.returned"), run.describe());
     }
 
-    /** Runs in {@link WinGlassChild}. Also records what the toolkit thread's queue holds after teardown. */
+    /**
+     * Runs in {@link WinGlassChild}. The hold starts once the terminating runnable has started, so a toolkit thread
+     * that reaches that runnable only after the release cannot make an unheld teardown look held. Also records what
+     * the toolkit thread's queue holds after teardown.
+     */
     static void parkedPost(Map<String, String> out) {
         WinNativeToolkit toolkit = WinNativeToolkit.start();
         long hwnd = toolkit.hwnd();
@@ -139,12 +145,15 @@ public class WinToolkitWindowGuardNativeTest {
         });
         out.put("parked", Boolean.toString(WinGlassNativeShim.parkWait((int) WAIT_MILLIS)));
 
+        CountDownLatch terminateEntered = new CountDownLatch(1);
         CountDownLatch terminateReturned = new CountDownLatch(1);
         out.put("terminate.post", Integer.toString(toolkit.invokeLater(() -> {
+            terminateEntered.countDown();
             WinGlassNativeShim.toolkitTerminateLoop();
             terminateReturned.countDown();
             recordPeek(out, hwnd);
         })));
+        out.put("terminate.entered", Boolean.toString(WinNativeToolkit.await(terminateEntered, WAIT_MILLIS)));
         out.put("terminate.returnedWhileParked",
                 Boolean.toString(WinNativeToolkit.await(terminateReturned, HOLD_MILLIS)));
         out.put("release", Integer.toString(WinGlassNativeShim.parkRelease()));
