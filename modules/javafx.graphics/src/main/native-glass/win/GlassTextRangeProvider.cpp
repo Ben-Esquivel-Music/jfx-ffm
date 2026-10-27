@@ -452,9 +452,11 @@ gwin_text_range_t gwin_a11y_text_range_create(gwin_accessible_t acc, int64_t ran
 
 void gwin_a11y_text_range_destroy(gwin_text_range_t range)
 {
-    /* Release, not delete; no NULL check, exactly as
-     * Java_com_sun_glass_ui_win_WinTextRangeProvider__1destroyTextRangeProvider and
-     * WinTextRangeProvider.dispose() have always been. */
+    /* Release, not delete. NULL is a range that failed to be created, which WinTextRangeProvider.dispose()
+     * passes on unchecked: nothing to release. */
+    if (range == NULL) {
+        return;
+    }
     reinterpret_cast<GlassTextRangeProvider*>(range)->Release();
 }
 

@@ -61,9 +61,27 @@ public:
     /**
      * Hand the specified preference types to GwinPrefsCallbacks.preferences_changed (glass_win_api.h), which
      * collects them, compares them and notifies the JavaFX application in Java. Returns true when it reports
-     * a change; false when it does not, or when no callback table is installed.
+     * a change; false when it does not, or when no callback table is installed. Toolkit thread only: it is
+     * called from GlassApplication::WindowProc, also for what the two WinRT sinks post there, and from
+     * RunDeferredPreferences for what they kept.
      */
     bool updatePreferences(PreferenceType) const;
+
+    /**
+     * The types the two WinRT sinks kept because their post failed with the toolkit window published
+     * (PostPreferencesChanged): when any are kept and the toolkit's PlatformSupport exists, hands them to
+     * updatePreferences, as the WM_PREFERENCES_CHANGED arm does. Called with no lock held by both toolkit
+     * pumps, gwin_run_loop and GlassApplication::EnterNestedEventLoop, after each DispatchMessage, and by
+     * the toolkit window's WM_DO_ACTION_LATER arm, its WM_PREFERENCES_CHANGED arm for the wake and its
+     * WM_TIMER arm for the timer GlassApplication::ArmPreferencesTimer arms. Toolkit thread only.
+     */
+    static void RunDeferredPreferences();
+
+    /**
+     * Drops the kept types: from the toolkit window's WM_CREATE arm before it is published and from its
+     * WM_NCDESTROY arm after the publication is cleared. Toolkit thread only.
+     */
+    static void DiscardDeferredPreferences();
 
     /**
      * Handles the WM_SETTINGCHANGE message.
@@ -81,9 +99,25 @@ public:
     void collectNetworkInfo(GwinNetworkInfo& out) const;
 
 private:
+    /*
+     * Every WinRT object this instance holds, and the two registrations with their tokens. The destructor
+     * unregisters and releases them all in its body, before uninitializeRoActivationSupport ends the
+     * apartment - as members they would only be released after it.
+     */
     Microsoft::WRL::ComPtr<ABI::Windows::UI::ViewManagement::IUISettings> settings;
-    ABI::Windows::Networking::Connectivity::INetworkInformationStatics* networkInformation;
+    Microsoft::WRL::ComPtr<ABI::Windows::UI::ViewManagement::IUISettings5> settings5;
+    Microsoft::WRL::ComPtr<IActivationFactory> networkFactory;
+    Microsoft::WRL::ComPtr<ABI::Windows::Networking::Connectivity::INetworkInformationStatics> networkInformation;
+    EventRegistrationToken autoHideToken;
+    EventRegistrationToken networkToken;
+    bool autoHideRegistered;
+    bool networkRegistered;
 
     // RoInitialize, then UISettings and NetworkInformation with their two event sinks.
     void InitializeWinRT();
+
+    // What the two sinks do on the OS's thread: post the types to the toolkit window, or keep them for
+    // RunDeferredPreferences when that post fails with the window published, then post a wake or, when that
+    // is refused too, arm a timer (PlatformSupport.cpp).
+    static void PostPreferencesChanged(PreferenceType);
 };

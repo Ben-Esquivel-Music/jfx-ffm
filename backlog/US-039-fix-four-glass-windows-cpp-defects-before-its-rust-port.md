@@ -1,25 +1,10 @@
 # US-039 — Fix four Glass Windows C++ defects before its Rust port
 
-**Status:** 📋 Ready (filed 2026-09-30 from the Rust-port survey of `native-glass/win`). Each site was confirmed by
-reading the source. Parts 3 and 4 are already recorded in the ABI header as "separate change" follow-ups, with no
-backlog story until now. Part 2 was redesigned on 2026-10-01 after PR review: re-read
-`PlatformSupport.cpp:36-47,80-143,287-296`, `PlatformSupport.h:84-85`, `RoActivationSupport.cpp:114-131`,
-`GlassApplication.cpp:112-132`, `glass_win_api.cpp:610-626`, `glass_win_api.h:199-201,488-570`, the Java chain from
-`WinGlassNative.onPreferencesChanged` to `PlatformImpl.updatePreferences`, and the SDK's WRL `event.h` and
-`implements.h` (10.0.26100.0). The agility premise of the two Java comments on the sinks was corrected the same
-day. The thread on which the OS invokes the delegates was not checked. Part 1 was redesigned on 2026-10-01 after PR
-review, because publishing the HWND alone leaves a recycled handle reachable: re-read `GlassApplication.cpp:66-92`
-and `:178-217`, `GlassApplication.h:38-104`, `BaseWnd.cpp:30-72` and `:151-190`, `glass_win_api.cpp:396-438` and
-`:534-631`, `glass_win_api.h:157-166`, `:199-250` and `:573-731`, `WinGlassNative.java:3576-3712`,
-`WinApplication.java:185-196`, `:245-304` and `:510-535`, `Application.java:382-399` and `:455-481`,
-`InvokeLaterDispatcher.java:96-151`, and Microsoft's reference pages for `DestroyWindow`, `WM_NCDESTROY`,
-`SendMessage`, `SendNotifyMessage` and "About Messages and Message Queues" as served on 2026-10-01. A review of that
-redesign the same day added `GlassApplication.cpp:44-57`, `KeyTable.cpp:380-390`, `glass_win_api.h:336-349`,
-`QuantumToolkit.java:326-386` and the `InSendMessageEx` and `GetQueueStatus` pages. The Java callers of the 43
-marshalled exports were not audited one by one. Nothing was built or run. · **Found:**
-2026-09-30, Rust-port survey (Glass Windows) ·
-**Blocks:** US-029 slice 3 (part 2), US-030 slices 4-5 (part 3), US-031 slices 3-4 (parts 1 and 4), US-052 part 1
-and US-053 part 2 (part 1)
+**Status:** ✅ Done (2026-10-23, PR pending; filed 2026-09-30 from the Rust-port survey of `native-glass/win`; parts
+1 and 2 redesigned on 2026-10-01 after PR review; all four parts fixed in one change, part 2 on top of part 1, and
+verified on Windows with the natives built from source; see "Resolution" below) · **Found:** 2026-09-30, Rust-port
+survey (Glass Windows) · **Blocks:** US-029 slice 3 (part 2), US-030 slices 4-5 (part 3), US-031 slices 3-4 (parts
+1 and 4), US-052 part 1 and US-053 part 2 (part 1)
 
 ## Story
 As a JavaFX app developer on Windows,
@@ -272,8 +257,9 @@ Paths are relative to `modules/javafx.graphics/src/main/native-glass/win`.
 
   With them:
   - a parked `gwin_invoke_later` holds teardown. `gwin_terminate_loop` on the toolkit thread does not return within
-    a bounded wait while the poster is parked, and returns once it is released. The stale count is 0. A mutant that
-    posts without the shared section, which is the atomic HWND alone, fails both checks;
+    a bounded wait that starts once the runnable that calls it has started, while the poster is parked, and returns
+    once it is released. The stale count is 0. A mutant that posts without the shared section, which is the atomic
+    HWND alone, fails both checks;
   - after the clear, every `gwin_invoke_later` answers `GWIN_ERR_NO_TOOLKIT`, calls `PostMessage` zero times and
     frees its action. That includes one issued by the runnable that called `gwin_terminate_loop`, after that call
     returned. A mutant that clears in `~GlassApplication`, not in the `WM_NCDESTROY` arm, fails this;
@@ -338,3 +324,128 @@ Paths are relative to `modules/javafx.graphics/src/main/native-glass/win`.
 ## Definition of Done
 Merged and verified on Windows. `backlog/README.md` is updated. For each part, the PR checks whether upstream
 openjdk/jfx shares the defect, and drafts an upstream issue where it does.
+
+## Resolution (2026-10-23)
+All four parts are fixed in one change on a branch off master `28b02ef511`, part 2 on top of part 1, as the Proposed
+fix describes. Verified on Windows 10 Pro 10.0.19045 x64.
+
+- **Part 1.** `GlassApplication` publishes the toolkit HWND and thread id as atomics, stored at `WM_CREATE` and
+  cleared in the `WM_NCDESTROY` arm under an exclusive `SRWLOCK`. Every post goes through
+  `GlassApplication::PostToToolkit`, which holds the shared side across one load and one `PostMessage` and refuses
+  with `GWIN_ERR_NO_TOOLKIT` once the HWND is cleared. From another thread `ExecAction` links a stack record into a
+  pending list, sends `WM_DO_ACTION_NOTIFY` (`WM_USER+3`) with `SendNotifyMessage` inside the shared side and waits
+  outside it; the `WM_NCDESTROY` arm runs the list down. On the toolkit thread it keeps `SendMessage` and no lock.
+  The `WM_DO_ACTION_NOTIFY` arm releases its caller on every exit from `Do()`: done when `Do()` returns, not run
+  when it leaves by an exception, which propagates as before. If `MsgWaitForMultipleObjectsEx` fails, the caller's
+  fallback wait still handles sent messages and returns only once its record is done.
+- **Part 2.** The sinks capture nothing and post `WM_PREFERENCES_CHANGED` (`WM_USER+4`) through `PostToToolkit`,
+  and the toolkit `WndProc` runs `updatePreferences`, which loads the slot once. `~PlatformSupport` removes both
+  registrations and releases the WinRT objects and the factory before `RoUninitialize`. The Java stub lives in
+  `WinApplication.APPLICATION_ARENA` (`Arena.ofShared()`), cleared and closed on the toolkit thread after
+  `WinGlassNative.runLoop` returns; embedded mode keeps `Arena.global()`.
+- **Part 3.** `gwin_a11y_text_range_destroy(NULL)` returns early. `gwin_a11y_raise_property_changed` clears both
+  VARIANTs on every path, also when the second conversion fails.
+- **Part 4.** `GetClauseInfo` and `GetAttributeInfo` catch `std::bad_alloc` and return their "no information"
+  result. `WmImeComposition`'s catch block no longer rethrows; it is also the failure branch for the two throwing
+  allocations of `GetContextData`, which the Problem did not list. On that path, and on its error return when the
+  composition changed between the size query and the copy, `GetContextData` frees the buffers it had allocated;
+  both paths leaked them until the review of 2026-10-26.
+- **ABI.** No export `WinGlassNative` binds is added or removed, and no prototype, layout or enum value changes, so
+  `GLASS_WIN_ABI_VERSION` stays 6. The 17 new `gwin_test_*` hooks (declared in `glass_win_api.h`; 15 defined in
+  `glass_win_test.cpp`, 2 in `PlatformSupport.cpp`) are bound by `WinGlassNativeShim` only. The header and Java comments
+  the Proposed fix lists are corrected.
+
+**Tests**, 39 in six new classes (2 of them opt-in), with the mutants each class must kill. Every mutant was built
+from the fix and failed as stated; every test passes on the fix.
+- `WinToolkitInvokeOrderNativeTest` (2): W runs before L, on master and on the fix. Post and wait: no pending send
+  seen, and L ran first. The caller waiting in a cross-thread `gwin_invoke_and_wait` answers the
+  `SendMessageTimeoutW(WM_GETTEXTLENGTH)` its runnable sends from the toolkit thread to the caller's message-only
+  `STATIC` window. A wait that handles no sent message (`WaitForSingleObject`): the send times out after 5,005 ms
+  with `ERROR_TIMEOUT`.
+- `WinToolkitWindowGuardNativeTest` (7, plus the opt-in decoy record): posting without the shared section: teardown
+  not held, stale count 1. Clearing in `~GlassApplication`: still published after `gwin_terminate_loop`, 101 posts
+  to the dead handle. The guard on the toolkit-thread path, and always the cross-thread path: the call never
+  returns. No rundown: the queued caller never returns. The shared side held across the wait: timeout.
+  Dereferencing the `WPARAM`: the child JVM ends with `0xC000041D`. Disarming the park gate from another thread
+  releases the parked poster. A disarm that never sets the release event: the poster is still parked after 10 s.
+- `WinToolkitShutdownHammerTest` (1, statistical): 50 child JVMs, 17,122,286 calls, no access violation, stale 0.
+- `WinPreferenceSinksNativeTest` (9, plus the opt-in manual run): sinks that call `updatePreferences`: 16,130 of
+  16,130 calls off the toolkit thread, 5,300 after the loop returned, and 10 of 10 late delegates still called
+  Java. Across teardown, 50 child JVMs and 97,848,164 invocations: no access violation. With the toolkit thread
+  blocked in a `gwin_invoke_later` runnable, or in a cross-thread `gwin_invoke_and_wait` one, and its
+  posted-message queue at its quota (10,000 `WM_NULL` posts, then `ERROR_NOT_ENOUGH_QUOTA`), the network
+  delegate's type is delivered once, on the toolkit thread, when it runs again: by the `WM_DO_ACTION_LATER` arm, or
+  by `gwin_run_loop` after its next `DispatchMessage`. A sink that ignores its failed post: no delivery in 10 s, in
+  both. No delivery after the pumps' `DispatchMessage`: the `gwin_invoke_and_wait` one fails, the other passes. The
+  nested loop's delivery (the same code) and the wake arm's (no hook frees a queue slot between the two posts) are
+  checked by inspection only. Under a pump that is not Glass's (the toolkit thread runs its own `GetMessageW` /
+  `TranslateMessage` / `DispatchMessageW` loop, the SWT embedder's shape, and the queue is full of posts to a window
+  of the embedder's), the post and the wake are refused, the sink arms the one-shot timer and its `WM_TIMER`
+  delivers the type once, on the toolkit thread, with the sink on another thread or on the toolkit thread. A refused
+  wake that arms no timer, and a `WM_TIMER` arm that does not deliver: both fail. No request from another thread: the
+  cross-thread one fails; no timer on the toolkit thread, or a delivery inside the sink: the toolkit-thread one fails.
+  With the timer as a second delivery path, the invoke-and-wait variant's pump delivery is proven with the cross-thread
+  request removed too.
+- `WinAccessibilityReleaseNativeTest` (3): no `VariantClear`: 0 of 2001 BSTRs freed.
+- `WinImeCompositionFaultNativeTest` (15): the rethrow restored: 13 fail, one per throwing allocation.
+
+**Records.** The order is `busy,W,L` on master and on the fix. The queued cross-thread call at teardown did not
+run and answered `GWIN_ERR_NO_TOOLKIT` (before the fix it did not run either, and answered `GWIN_OK`). The queue peek
+after teardown found no private message, so the `WM_NCDESTROY` arm removes nothing from the queue; an action posted
+just before the clear still leaks, as before (US-053 part 2). On the first mutant a decoy window took the destroyed
+toolkit HWND after 65,536 creations (cap 300,000) and received the released post. After part 2 no reader of
+`pInstance` is reachable off the toolkit thread. In the manual run Windows invoked both delegates on the toolkit
+thread, apartment `MAINSTA`.
+
+**Behaviour changes.**
+- Part 1: a post or send that lost the race with teardown is refused, not attempted, and `ExecActionLater` frees
+  its action then; `gwin_invoke_and_wait` answers `GWIN_ERR_NO_TOOLKIT` when the window goes before its runnable
+  starts (Java ignores the status); teardown waits for a guarded call in flight; the cross-thread caller's wait is
+  the library's; `InSendMessageEx` on the toolkit thread answers `ISMEX_NOTIFY` during a cross-thread call; a
+  `gwin_invoke_later` whose action cannot be allocated answers `GWIN_ERR_NO_TOOLKIT` (its runnable does not run)
+  instead of letting `std::bad_alloc` leave the export; and a toolkit thread that ends with a record pending leaves
+  its caller waiting until US-052 part 1 lands.
+- Part 2: a sink's notification reaches Java asynchronously, on the toolkit thread. A sink whose post fails while
+  the toolkit window is published (the toolkit thread's posted-message queue is at its quota, 10,000 by default)
+  keeps its types, and the toolkit thread delivers them, ORed into one `updatePreferences` call, right after it next
+  handles a posted message: after each `DispatchMessage` of `gwin_run_loop` and of the nested event loop, and in the
+  toolkit window's `WM_DO_ACTION_LATER` arm and in its arm for the wake (`wParam` 0) the sink then posts, which a
+  pump that is not ours (an OS modal loop, the SWT embedder's) dispatches too. When the wake is refused as well, the
+  sink arms a one-shot timer on the toolkit window (`SetTimer` on the toolkit thread, else a `WM_PREFERENCES_ARM_TIMER`
+  request sent with `SendNotifyMessage`, which only arms it), and its `WM_TIMER`, retrieved once the backlog has
+  drained, delivers the types under whichever pump retrieves it. Types kept when the toolkit window goes are dropped.
+- Part 3: destroying a NULL text range no longer crashes, and the cleared VARIANTs also release a `VT_UNKNOWN`
+  reference and a `VT_R8|VT_ARRAY` array, which leaked the same way.
+- Part 4: under out-of-memory a composition is reported without its clauses or attributes, or dropped through the
+  catch block, instead of unwinding through `user32`.
+
+**Gate.** The latest gate, on 2026-10-26, is one build with the natives from source,
+`mvn -o -B -pl modules/javafx.graphics -am test -Djfx.parity.require=true`: javafx.graphics 26198 run, 0 failed, 442
+skipped; javafx.base 5510 run, 0 failed, 22 skipped. When the story was done, the same build without
+`-Djfx.parity.require=true` ran 26070 and skipped 367 in javafx.graphics; the rebase onto master 4745af9f89 added 122
+run and 75 skipped (17 macOS font classes and one `@EnabledOnOs(MAC)` test), and the review rounds added 6 tests (33 to
+39). `WinApplicationNativeTest`, `WinPreferencesNativeTest`, `WinAccessibilityNativeTest` and `WinViewNativeTest` are
+unchanged and pass.
+
+**Upstream.** openjdk/jfx master, read on 2026-10-23, shares part 1 in part (the race and the recycled-HWND post and
+send; the preference-query path is fork-only), part 2 in part (all but the double load of the callback slot and the
+`Arena.global()` stub), and parts 3 and 4 fully. The issue drafts are kept outside the repository until filed.
+
+**Review (2026-10-26).** A local review of the branch, read from the diff: three findings fixed (in parts 1 and 4
+above), five filed (four in existing stories, one as a new story), two accepted and one refuted (a sink
+notification refused before `WM_CREATE` publishes the toolkit window loses nothing, because the startup preference
+map is collected after publication).
+- Filed in US-052 part 1: a toolkit thread that ends with the window alive leaves cross-thread callers waiting, and
+  the `WM_NCDESTROY` arm tears down without comparing the publication with its own window.
+- Filed in US-053 part 2: `WM_DO_ACTION` and `WM_DO_ACTION_LATER` dereference any `WPARAM`, and posted
+  `WM_DO_ACTION_LATER` actions leak at teardown.
+- Filed as US-068: the `gwin_test_*` hooks and their probes ship in the release glass.dll.
+- Accepted: three delivery tiers for preference changes. The post (types in `WPARAM`) gives one `updatePreferences`
+  per notification, as the JNI's synchronous call did; the kept word with its wake, and the timer, are mutant-proven
+  fallbacks for a refused post. One coalescing path would change the call count in a burst and still need the timer.
+  Idle cost: one acquire load (`ReadAcquire`) at each of the five `RunDeferredPreferences` sites; the
+  `InterlockedExchange` runs only once a type was kept.
+- Accepted: a kernel event per cross-thread synchronous call, two kernel calls beside a send, a wait and a context
+  switch. A waiting caller handles sent messages, and a handler may make another such call on that thread, so a
+  cached per-thread event would serve two waits; `WaitOnAddress` and condition variables cannot wait for sent
+  messages. A failed `CreateEventW` refuses the call before anything is queued, as for a toolkit that is gone.

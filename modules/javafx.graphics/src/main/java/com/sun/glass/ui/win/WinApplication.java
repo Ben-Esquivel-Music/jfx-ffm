@@ -33,6 +33,7 @@ import com.sun.javafx.tk.Toolkit;
 import javafx.scene.paint.Color;
 
 import java.io.File;
+import java.lang.foreign.Arena;
 import java.nio.ByteBuffer;
 import java.nio.IntBuffer;
 import java.util.ArrayList;
@@ -120,6 +121,15 @@ final class WinApplication extends Application implements InvokeLaterDispatcher.
         return val;
     }
 
+    /*
+     * The application arena: the preferences upcall stub lives here, and runLoop closes it on the toolkit
+     * thread once WinGlassNative.runLoop has returned there, after clearing the table (the RUNDOWN of
+     * GwinPrefsCallbacks in glass_win_api.h). The SWT-embedded case never calls gwin_run_loop, so it has no
+     * such point: its stub goes to Arena.global() and this arena stays empty and open. Package-private for
+     * WinGlassNativeShim.
+     */
+    static final Arena APPLICATION_ARENA = Arena.ofShared();
+
     static {
         verbose = Boolean.getBoolean("javafx.verbose");
         if (PrismSettings.allowHiDPIScaling) {
@@ -149,10 +159,12 @@ final class WinApplication extends Application implements InvokeLaterDispatcher.
         // that finds no callback installed is not delivered at all. It belongs here and nowhere
         // else: this initializer runs on the launcher thread, after the library is loaded and before
         // Application.run() creates the toolkit window, so the table is installed before the first
-        // WndProc message and is never written from a second thread. Installing it lazily - on the
-        // first preference read, say - would drop every notification that arrives during startup;
-        // installing it in a change set that did not also wire WinPreferences would drop all of them.
-        WinGlassNative.installPreferencesCallback();
+        // WndProc message, and the only later write is runLoop's clear after the pump has returned.
+        // Installing it lazily - on the first preference read, say - would drop every notification that
+        // arrives during startup; installing it in a change set that did not also wire WinPreferences
+        // would drop all of them. The stub goes to APPLICATION_ARENA, except in the SWT-embedded case.
+        WinGlassNative.installPreferencesCallback(
+                Boolean.getBoolean("javafx.embed.isEventThread") ? Arena.global() : APPLICATION_ARENA);
         // Hands glass.dll the one callback that replaces all three of GlassApplication.cpp's
         // Runnable.run upcalls - the launchable, _invokeAndWait and _submitForLaterInvocation, which
         // all resolved the same cached method id. It belongs here for the same reason as the line
@@ -258,6 +270,10 @@ final class WinApplication extends Application implements InvokeLaterDispatcher.
                 initToolkit(awareness);
                 WinGestureSupport.ensureInitialized();
                 WinGlassNative.runLoop(launchable);
+                // This thread retrieves no message from here on, so glass.dll starts no further
+                // preferences_changed call: clear the table, then free the stub.
+                WinGlassNative.clearPreferencesCallback();
+                APPLICATION_ARENA.close();
             }, "WindowsNativeRunloopThread");
         setEventThread(toolkitThread);
         toolkitThread.start();
@@ -508,10 +524,12 @@ final class WinApplication extends Application implements InvokeLaterDispatcher.
     }
 
     /**
-     * Was {@code Java_com_sun_glass_ui_win_WinApplication__1invokeAndWait}: {@code SendMessage} to the
-     * toolkit window, blocking until the runnable has run there. {@code Application.invokeAndWait}
-     * still short-circuits the case where the caller is itself the toolkit thread, so this is reached
-     * only from another thread.
+     * Was {@code Java_com_sun_glass_ui_win_WinApplication__1invokeAndWait}, a {@code SendMessage} to the
+     * toolkit window. {@code Application.invokeAndWait} still short-circuits the case where the caller is
+     * itself the toolkit thread, so this is reached only from another thread, and from another thread the
+     * call is now queued to the toolkit window with {@code SendNotifyMessage} under its publication guard
+     * and waited for outside it. It blocks until the runnable has run there, or until the call is refused
+     * because the toolkit window is gone (see {@link WinGlassNative#invokeAndWait}).
      */
     @Override protected void _invokeAndWait(Runnable runnable) {
         WinGlassNative.invokeAndWait(runnable);
