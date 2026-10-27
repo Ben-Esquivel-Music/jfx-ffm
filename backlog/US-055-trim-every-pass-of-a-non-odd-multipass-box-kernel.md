@@ -1,6 +1,6 @@
 # US-055 — Trim every pass of a multi-pass box kernel whose size is not an odd whole number
 
-**Status:** ✅ Done (2026-10-04, PR pending; option A, trim every pass) · **Found:** 2026-10-02, US-011's
+**Status:** ✅ Done (2026-10-04, PR #26; option A, trim every pass) · **Found:** 2026-10-02, US-011's
 acceptance criterion "decide and record the fractional-size kernel"
 
 ## Story

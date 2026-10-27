@@ -10,7 +10,8 @@ the cross-thread text follows US-039 part 1 as redesigned on 2026-10-01, a guard
 atomic HWND, and US-052 part 1 as revised the same day, a `DllMain` in place of a thread-exit callback; nothing
 built) · **Epic:** Rust port of the remaining
 native code (goal 3) · **Blocked by:** US-027, US-030 (the COM servers the WndProcs hand
-out move first), US-039 part 1, US-039 part 4 (C++ fixes), US-049 part 1 (the ruling on robot capture, and the
+out move first), US-039 part 1, US-039 part 4 (C++ fixes; landed in PR #37),
+US-049 part 1 (the ruling on robot capture, and the
 move to Java if the ruling is yes; if it is no, this story ports `gwin_robot_capture` as a 66th export); slice 3
 should follow US-052 and US-053 (toolkit teardown gaps and two window-procedure hazards, C++ fixes), or it
 reproduces them

@@ -1,6 +1,8 @@
 # US-062 — Fix two fixed-point edge cases in `prism_sw`: a box sliver painted as a column, and REPEAT past 32767 texels
 
-**Status:** 📋 Ready (filed 2026-10-16 from US-059's review; one probed by the reviewer, one read; both the same
+**Status:** 🚧 Implemented, not merged (2026-10-18: commit `4d8454ce46` on the pushed branch
+`US-062-fix-two-prism-sw-fixed-point-edge-cases`, CI green in run 39191326649, no PR; that branch's copy of this story
+says Done). Filed 2026-10-16 from US-059's review; one probed by the reviewer, one read; both the same
 at HEAD, not fixed) · **Found:** 2026-10-16, by the C review of US-059
 
 ## Story

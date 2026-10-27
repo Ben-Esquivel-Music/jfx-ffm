@@ -1,6 +1,6 @@
 # US-014 — Step the software linear convolution along the right destination axis for rotated inputs
 
-**Status:** ✅ Done (2026-10-03) · **Found:** 2026-09-26, hardware check of US-010 (SW `InnerShadow(GAUSSIAN)` under rotation)
+**Status:** ✅ Done (2026-10-03, PR #24) · **Found:** 2026-09-26, hardware check of US-010 (SW `InnerShadow(GAUSSIAN)` under rotation)
 
 ## Story
 As a JavaFX app developer whose app runs on the software pipeline (no usable GPU, `-Dprism.order=sw`, or the SW

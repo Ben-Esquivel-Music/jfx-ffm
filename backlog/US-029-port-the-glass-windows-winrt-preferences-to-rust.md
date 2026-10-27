@@ -5,7 +5,8 @@
 NOT read; nothing built. 2026-10-01, after PR review: the sink text follows US-039 part 2's design, in which the
 sinks only post; re-read `PlatformSupport.cpp:36-47` and `:138-144`, and `GlassApplication.h:97-99` and `:128`; the
 same day the post became US-039 part 1's guarded post, after that part's redesign) ·
-**Epic:** Rust port of the remaining native code (goal 3) · **Blocked by:** US-027, US-039 part 2 (a C++ fix)
+**Epic:** Rust port of the remaining native code (goal 3) · **Blocked by:** US-027, US-039 part 2
+(a C++ fix; landed in PR #37)
 
 ## Story
 As a platform maintainer,

@@ -1,8 +1,9 @@
 # US-028 — Build and link the Rust slices on macOS
 
 **Status:** 🔶 Deferred (filed 2026-09-30). The trigger is the first library also built on macOS whose C is otherwise
-ready to be deleted (`jfxmedia`, US-035/US-036, or `fxplugins`, US-032/US-033). There is no macOS host, but CI builds
-and tests macOS (`macos-15-intel`, `macos-15` in `.github/workflows/submit.yml`), so this can be verified in CI only.
+ready to be deleted (`jfxmedia`, US-035/US-036, or `fxplugins`, US-032/US-033). CI builds and tests
+macOS (`macos-15-intel`, `macos-15` in `.github/workflows/submit.yml`), and a macOS host has built and tested the
+module since 2026-10-24 (US-003).
 Nothing was built. · **Epic:** Rust port of the remaining native code (goal 3) · **Blocked by:** US-027
 
 ## Story
