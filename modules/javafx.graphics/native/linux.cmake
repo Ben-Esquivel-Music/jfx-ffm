@@ -23,9 +23,12 @@
 
 # Linux-specific portion of the javafx.graphics native build. Replicates the
 # compiler/linker flags previously defined by the retired Gradle native build
-# (buildSrc/linux.gradle). Included from CMakeLists.txt; shared input variables
-# (JDK_HOME, GENSRC_DIR, HEADERS_DIR, BIN_DIR, INCLUDE_ES2, GRAPHICS_SRC) are
-# defined there.
+# (buildSrc/linux.gradle). Included from CMakeLists.txt, which defines the
+# shared input variables; of those, this file reads BIN_DIR, INCLUDE_ES2,
+# INCLUDE_ES2_MONOCLE and GRAPHICS_SRC. No Linux target reads JDK_HOME,
+# GENSRC_DIR or HEADERS_DIR: CMakeLists.txt still accepts JDK_HOME and requires
+# GENSRC_DIR and HEADERS_DIR because they are shared configure inputs that
+# win.cmake and mac.cmake use.
 #
 # Notes on Gradle parity:
 #   - Gradle compiled with gcc and linked everything with g++; forcing
@@ -137,19 +140,21 @@ endfunction()
 # library of that name when the deployment has one, which is how a glassgtk3
 # build renamed to libglass.so is found.
 #
-# The only target of this file that still needs HEADERS_DIR and the JDK
-# include directories: the GTK glass sources declare no JNI function and
-# include no jni.h, but they do include the javac -h constant headers of
-# com.sun.glass.events.* and com.sun.glass.ui.* (glass_key.cpp and
-# glass_window.cpp alone read most of them), and every javac -h header starts
-# with #include <jni.h>. The other targets need neither, so both sets
-# are named here instead of in add_jfx_library.
+# The GTK glass sources declare no JNI function and include no jni.h, so this
+# target, like every other target of this file, has neither HEADERS_DIR nor
+# the JDK include directories on its include path. Nine of the sources include
+# javac -h constant headers of com.sun.glass.events.* and com.sun.glass.ui.*
+# by name. native-glass/gtk/constants holds JNI-free headers of the same names,
+# with javac's macro names and literals, for the constants those sources use,
+# so the includes resolve there and compile to the same code;
+# test.com.sun.glass.ui.gtk.GtkConstantsHeaderTest checks them against the
+# Java classes. The directory holds headers only and is not in SOURCE_DIRS.
 # ---------------------------------------------------------------------------
 add_jfx_library(glassgtk3
     OUTPUT_NAME glassgtk3
     SOURCE_DIRS "${GRAPHICS_SRC}/native-glass/gtk"
     INCLUDE_DIRS "${GRAPHICS_SRC}/native-glass/gtk/libpipewire/include"
-        "${HEADERS_DIR}" "${JDK_HOME}/include" "${JDK_HOME}/include/linux"
+        "${GRAPHICS_SRC}/native-glass/gtk/constants"
     COMPILE_OPTIONS -Werror -Wno-deprecated-declarations
         -DGTK_3_MIN_MINOR_VERSION=${GTK3_MIN_MINOR_VERSION}
         -DGTK_3_MIN_MICRO_VERSION=${GTK3_MIN_MICRO_VERSION}

@@ -1024,16 +1024,21 @@ typedef struct GgtkDndTargetValue {
 #define GGTK_DND_VALUE_BYTES  2   /* ByteBuffer.wrap(a byte[count] with the bytes of data) */
 #define GGTK_DND_VALUE_IMAGE  3   /* new GtkPixels(width, height, ByteBuffer.wrap(a byte[count] with the bytes of
                                    * data)); count is rowstride * height of the decoded image */
-#define GGTK_DND_VALUE_FILES  4   /* a String[count] built as glass_general.cpp uris_to_java built it: data holds
-                                   * `records` records, each an int32 index and an int32 len, then - when len is
-                                   * not -1 - len bytes of a path as the JNI handed it to NewStringUTF and a NUL,
+#define GGTK_DND_VALUE_FILES  4   /* a String[count] of the paths of the file uris of the list, in list order: data
+                                   * holds `records` records, each an int32 index and an int32 len, then - when len
+                                   * is not -1 - len bytes of a path as the JNI handed it to NewStringUTF and a NUL,
                                    * then zero bytes up to a multiple of 4. Java stores each decoded path at
                                    * `index`, in record order; len -1 is a null element (g_filename_from_uri
-                                   * failed). index counts ALL uris of the list, not only the file uris (a bug of
-                                   * commit 033187ad90): for an index >= count the JNI's SetObjectArrayElement
-                                   * threw ArrayIndexOutOfBoundsException ("Index <index> out of bounds for length
-                                   * <count>"), reported it (check_and_clear_exception) and went on - Java does the
-                                   * same and leaves that element null. */
+                                   * failed). index is the ordinal of the file uri among the file uris (the n-th
+                                   * file uri at index n), so records == count. Commit 033187ad90
+                                   * (glass_general.cpp uris_to_java) counted ALL uris of the list instead, so a
+                                   * file uri that followed a non-file one landed at a higher index, past the end
+                                   * of the array once that index reached count. An index outside [0, count) is
+                                   * still handled as the JNI handled it: SetObjectArrayElement threw
+                                   * ArrayIndexOutOfBoundsException ("Index <index> out of bounds for length
+                                   * <count>"), the JNI reported it (check_and_clear_exception) and went on - Java
+                                   * reports the same exception and leaves that element null. That path is
+                                   * defensive: this producer writes no such index. */
 
 #if defined(__cplusplus)
 static_assert(sizeof(GgtkDndTargetValue) == (sizeof(void*) == 8 ? 32 : 24),

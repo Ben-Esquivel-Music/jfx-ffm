@@ -1291,10 +1291,10 @@ final class GtkGlassNative {
     }
 
     /**
-     * {@code getUIScale} ({@code glass_screen.cpp}), which the C window and screen code keeps using: the
-     * {@code glass.gtk.uiScale} override when positive; otherwise the screen resolution over 96 dpi, and at exactly
-     * 96 dpi the integer {@code GDK_SCALE} of the C environment ({@code atoi}) when positive, else GNOME's
-     * {@code scaling-factor} when non-zero.
+     * {@code getUIScale} ({@code glass_screen.cpp}): the {@code glass.gtk.uiScale} override when positive; otherwise
+     * the screen resolution over 96 dpi, and at exactly 96 dpi the integer {@code GDK_SCALE} of the C environment
+     * ({@code atoi}) when positive, else GNOME's {@code scaling-factor} when non-zero. No production C calls the C
+     * copy any more; it is kept only as the oracle {@code GtkRobotParityTest} checks this method against.
      */
     static float getUIScale(MemorySegment screen) {
         float uiScale;

@@ -122,6 +122,8 @@ struct selection_data_ctx {
     GdkAtom type;
     gint format;
     gint length;
+    // The requestor window dnd_target_receive_data passed to gdk_selection_convert
+    GdkWindow *requestor;
 };
 
 static gboolean dnd_target_receive_data(GdkAtom target, selection_data_ctx *selection_ctx, int32_t *oom_reports);
@@ -360,7 +362,7 @@ extern "C" int32_t ggtk_dnd_target_get_supported_actions(int32_t* out_actions)
 static void wait_for_selection_data_hook(GdkEvent * event, void * data)
 {
     selection_data_ctx *ctx = (selection_data_ctx*)data;
-    GdkWindow *dest = glass_gdk_drag_context_get_dest_window(enter_ctx.ctx);
+    GdkWindow *dest = ctx->requestor;
     if (event->type == GDK_SELECTION_NOTIFY &&
             event->selection.window == dest) {
         if (event->selection.property) { // if 0, that we received negative response
@@ -378,7 +380,21 @@ static gboolean dnd_target_receive_data(GdkAtom target, selection_data_ctx *sele
 
     memset(selection_ctx, 0, sizeof(selection_data_ctx));
 
-    gdk_selection_convert(glass_gdk_drag_context_get_dest_window(enter_ctx.ctx), gdk_drag_get_selection(enter_ctx.ctx), target,
+    // The loop below runs the main loop, and a drop dispatched there ends the drag: process_dnd_target_drop_start
+    // clears enter_ctx.ctx, which commit 033187ad90 left set. ggtk_dnd_target_get_mimes and ggtk_dnd_target_get_data
+    // check enter_ctx.ctx before they get here, so it is NULL here only after such a drop inside an earlier wait of
+    // the same call. There is no drag left to convert from then - gdk_drag_get_selection(NULL) answers GDK_NONE,
+    // gdk_selection_convert sends nothing and the wait would never end - so nothing is received, as for a refused
+    // conversion.
+    if (enter_ctx.ctx == NULL) {
+        return FALSE;
+    }
+
+    // Captured for wait_for_selection_data_hook, which at commit 033187ad90 recomputed the window from
+    // enter_ctx.ctx at every event. That is the same window unless a drag enters or drops during the wait; after
+    // such a drop it would be NULL and never match the SELECTION_NOTIFY this conversion is answered with.
+    selection_ctx->requestor = glass_gdk_drag_context_get_dest_window(enter_ctx.ctx);
+    gdk_selection_convert(selection_ctx->requestor, gdk_drag_get_selection(enter_ctx.ctx), target,
                           GDK_CURRENT_TIME);
 
     hookReg =
