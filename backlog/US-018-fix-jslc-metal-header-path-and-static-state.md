@@ -254,5 +254,5 @@ Each case runs in a new JVM:
   (`backlog/US-008-remove-dead-jslc-me-backend-and-simd.md:93-94`). Its counts include the two headers each
   generator writes (`FragmentShaderCommon.h` and that generator's `…ShaderCommon.h`). Without them, they are the 208
   and 848 files of the regeneration above, identical by md5, and the headers are identical too.
-- `prism_mtl` itself (`MetalShader.m`) belongs to the macOS half of US-001. This story changes only the build-time
-  compiler, the pom and the jslc tests, and needs a macOS host only for the final native check.
+- `prism_mtl` itself (`MetalShader.m`) belongs to US-001b, the macOS half of US-001. This story changes only the
+  build-time compiler, the pom and the jslc tests, and needs a macOS host only for the final native check.

@@ -1,6 +1,6 @@
 # US-057 — Give `javafx.base` the same module version as the rest of the build
 
-**Status:** ✅ Done (2026-10-04) · **Found:** 2026-10-02, while snapshotting a runtime for the US-011 hardware check
+**Status:** ✅ Done (2026-10-04, PR #25) · **Found:** 2026-10-02, while snapshotting a runtime for the US-011 hardware check
 
 ## Story
 As a JavaFX developer who builds this fork or links its modules into an image,

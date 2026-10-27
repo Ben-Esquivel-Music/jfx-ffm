@@ -17,7 +17,8 @@ Windows 10.0.19045.6466 x64 with glass.dll's compiler and linker flags; nothing 
 itself) ·
 **Evidence:** `US-052-thread-end-probe-results.md` (this folder), with the probe's sources beside it. The scenario
 numbers S1 to S12 below are its sections · **Found:** 2026-10-01, redesign of US-039 part 1 ·
-**Blocked by:** US-039 part 1 (part 1 extends its publication and reuses its test hooks; part 2 is independent) ·
+**Blocked by:** US-039 part 1, landed in PR #37 (part 1 extends its publication and reuses its test hooks;
+part 2 is independent) ·
 **Blocks:** none. Part 1 should follow US-039 part 1 directly, because it ends a hang that part ships with, and the
 story should precede US-031 slice 3, which otherwise reproduces both gaps in Rust
 

@@ -2,7 +2,7 @@
 
 | Field | Value |
 | --- | --- |
-| **Status** | 🟢 **Complete** (all three platforms; macOS 2026-10-24). Windows half done; Linux half done 2026-09-15 (landed in PR #12); macOS half done 2026-10-24|
+| **Status** | 🟢 **Complete** (all three platforms; macOS 2026-10-24). Windows half done; Linux half done 2026-09-15 (landed in PR #12); macOS half done 2026-10-24 (landed in PR #38, `4745af9f89`) |
 | **Parent epic** | Fully remove JNI from `javafx.graphics` (replaced by a functioning FFM API) |
 | **Branch of record** | `ffm/graphics` |
 | **Repository** | `Ben-Esquivel-Music/jfx-ffm` |
@@ -296,7 +296,8 @@ re-capture the macOS goldens; a re-capture needs the C of 28b02ef511 with the na
   `PrismFontFactory` change (`NativeLibLoader.loadLibrary("javafx_font")` becomes
   `CTNative.link()`) is inside its `isMacOSX` branch; the rest is an import swap and a comment.
   Test code is the exception: the Linux golden tests moved onto the shared golden harness, and
-  `JpegNatives` and `ES2Natives` no longer list `javafx_font`. The owner's CI run covers both.
+  `JpegNatives` and `ES2Natives` no longer list `javafx_font`. The owner's CI run covers both: PR #38's run
+  40149053730 passed in all five jobs.
 
 
 **Follow-up:** US-067 fixes the kept crashes and leaks.

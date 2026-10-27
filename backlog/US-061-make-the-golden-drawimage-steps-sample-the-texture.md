@@ -1,6 +1,6 @@
 # US-061 — Make the golden `drawImage` steps sample the texture
 
-**Status:** ✅ Done (2026-10-18, PR pending) · **Found:** 2026-10-16, while attributing the golden steps that
+**Status:** ✅ Done (2026-10-18, `ee923ace41`, PR #33) · **Found:** 2026-10-16, while attributing the golden steps that
 US-059 moved
 
 ## Story

@@ -1,6 +1,6 @@
 # US-016 — Run the GTK display tests in CI on a virtual display
 
-**Status:** 🚧 In progress (2026-10-20, uncommitted: implemented and verified in WSL, see "Implementation"; awaiting the first CI runs, which the user pushes - not Done before them) · **Found:** 2026-09-27, US-008 (F3: the GTK display-test failures depended on the window manager, and CI had never run those tests)
+**Status:** 🔶 Merged, not Done (landed 2026-10-20 as `c666773a96`, PR #35; implemented and verified in WSL, see "Implementation"; the green CI run is Actions run 39505183373, but the failure-path run has not been pushed and "First CI runs" is still TBD - not Done before both) · **Found:** 2026-09-27, US-008 (F3: the GTK display-test failures depended on the window manager, and CI had never run those tests)
 
 ## Story
 As a maintainer of the GTK glass (`glass/gtk` and its FFM bindings),
@@ -126,7 +126,7 @@ with `-Dtest` selecting the classes.
   dispatch (`:46-56`), so the new step runs wherever the two Linux jobs run, and not for a push to `master`.
 - Related: US-015 (the flag and the side effects of these tests on a developer's display), US-008 (F3).
 
-## Implementation (2026-10-20, uncommitted; awaiting the first CI runs)
+## Implementation (2026-10-20, landed in PR #35; the failure-path CI run still to come)
 
 Implemented and verified locally in WSL. **Not Done before CI**: the first CI runs, which the user pushes, are the
 real test (CI has other GTK and Xvfb versions and an aarch64 job that WSL cannot run). Fill in "First CI runs"
@@ -319,7 +319,9 @@ Placeholders marked **TBD**. Source: each Linux job's step summary of "Run the G
 or its log (`gh run view <run> --log --job <job>`, then grep
 `== GTK|Setup proof|  env.|Installed:|Natives unchanged|bus socket`).
 
-**Green run:** Actions run **TBD**, commit **TBD**.
+**Green run:** Actions run 39505183373 (PR #35), commit `0b0d993d78`;
+"Run the GTK display tests on a private Xvfb" passed in both Linux jobs.
+The rest of this run's record is TBD.
 
 | job | installed versions | `env.gtk` / `env.xserver` | bus socket in `XDG_RUNTIME_DIR` | no window manager: classes / tests / failures / skipped / `Tests run: 0`, time | openbox: the same, time | step time |
 | --- | --- | --- | --- | --- | --- | --- |

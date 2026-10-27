@@ -6,7 +6,9 @@
 pages as served on 2026-10-01, "About Window Properties", `SetProp` and `SendMessage`; not read: the procedures of
 `GlassWindow`, `FullScreenWindow` and `ViewContainer`; not checked: every point marked so below; nothing built or
 run) · **Found:** 2026-10-01, review of US-039 part 1 ·
-**Blocked by:** US-039 part 1 for part 2 (it reuses that part's guarded post, list lock and test hook); part 1 is
+**Blocked by:** US-039 part 1, landed in PR #37, for part 2
+(it reuses that part's guarded post, list lock and test hook);
+part 1 is
 independent · **Blocks:** none. It should precede US-031 slice 3, which otherwise reproduces both hazards in the
 first Rust window class and its toolkit `WndProc`
 

@@ -5,7 +5,7 @@
 `GlassDnD.cpp`, `GlassAccessible.cpp` and `GlassTextRangeProvider.cpp` were NOT read; nothing built; on 2026-10-01,
 after PR review, the export count in the acceptance criteria was made relative) · **Epic:** Rust
 port of the remaining native code (goal 3) · **Blocked by:** US-027,
-US-039 part 3 (a C++ fix); should follow
+US-039 part 3 (a C++ fix; landed in PR #37); should follow
 US-029, which proves the mixed-library seam on a small scale
 
 ## Story

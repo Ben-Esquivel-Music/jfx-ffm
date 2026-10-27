@@ -1,6 +1,6 @@
 # US-039 — Fix four Glass Windows C++ defects before its Rust port
 
-**Status:** ✅ Done (2026-10-23, PR pending; filed 2026-09-30 from the Rust-port survey of `native-glass/win`; parts
+**Status:** ✅ Done (2026-10-23; landed 2026-10-27 as `7dcae7baeb`, PR #37; filed 2026-09-30 from the Rust-port survey of `native-glass/win`; parts
 1 and 2 redesigned on 2026-10-01 after PR review; all four parts fixed in one change, part 2 on top of part 1, and
 verified on Windows with the natives built from source; see "Resolution" below) · **Found:** 2026-09-30, Rust-port
 survey (Glass Windows) · **Blocks:** US-029 slice 3 (part 2), US-030 slices 4-5 (part 3), US-031 slices 3-4 (parts
