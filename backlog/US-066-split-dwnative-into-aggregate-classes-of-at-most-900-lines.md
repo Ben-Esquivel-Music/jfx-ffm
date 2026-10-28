@@ -1,6 +1,12 @@
 # US-066 — Split `DWNative` into aggregate classes of at most 900 lines
 
-**Status:** 📋 Ready (filed 2026-10-23 from the macOS `CTNative` facade discussion of US-003) ·
+**Status:** ✅ Done in the working tree (2026-10-27; filed 2026-10-23 from the macOS `CTNative` facade discussion of
+US-003), uncommitted: the owner commits and pushes, and the PR number and the `windows_x64_build` CI result (AC 6,
+third bullet) are added here then. `DWNative` stays the entry point and aggregates eleven package-private classes,
+12 files with the largest at 820 lines; the split is behaviour-neutral, the 84 DirectWrite tests and the full module
+run on Windows give the same counts as `e3b8b21e6d`, and `ffm-reviewer` signed off (AC 8). Evidence:
+[US-066-windows-gate.md](US-066-windows-gate.md) and
+[US-066-windows-full-per-class.tsv](US-066-windows-full-per-class.tsv) ·
 **Found:** 2026-10-23, owner request · **Amended:** 2026-10-24, owner: the story states the requirement; the
 implementer designs the split
 
