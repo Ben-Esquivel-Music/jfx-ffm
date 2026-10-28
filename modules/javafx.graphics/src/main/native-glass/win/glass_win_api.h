@@ -354,7 +354,7 @@ GLASS_WIN_EXPORT int32_t gwin_key_windows_to_java(int32_t vk);
  *                 is applied FIRST, so the shift-state high byte is discarded and never consulted.
  *   an OEM vk goes through MapVirtualKeyEx + OEMCharToJavaKey (bit 31 = dead key); everything else
  *                 through WindowsKeyToJavaKey.
- * c is the UTF-16 code unit the Java char holds. FFM has no char layout, so Java passes it as
+ * c is the UTF-16 code unit the Java char holds. The descriptor matches this uint16_t, so Java passes it as
  * JAVA_SHORT and the C reads the same 16 bits; the parameter is uint16_t, never a signed short.
  *
  * THREADING: this function reads TWO keyboard layouts. VkKeyScanEx and MapVirtualKeyEx use the

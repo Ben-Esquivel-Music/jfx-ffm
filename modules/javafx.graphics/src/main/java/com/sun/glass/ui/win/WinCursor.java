@@ -107,8 +107,8 @@ final class WinCursor extends Cursor {
      * behaviour change, not a migration.
      */
     static Size getBestSize_impl(int width, int height) {
-        return new Size(WinGlassNative.getSystemMetrics(WinGlassNative.SM_CXCURSOR),
-                WinGlassNative.getSystemMetrics(WinGlassNative.SM_CYCURSOR));
+        return new Size(WinGlassNative.getSystemMetrics(WinCursorCalls.SM_CXCURSOR),
+                WinGlassNative.getSystemMetrics(WinCursorCalls.SM_CYCURSOR));
     }
 
     /**
@@ -157,18 +157,18 @@ final class WinCursor extends Cursor {
      */
     static int systemCursorOrdinal(int type) {
         return switch (type) {
-            case CURSOR_DEFAULT, CURSOR_DISAPPEAR -> WinGlassNative.IDC_ARROW;
-            case CURSOR_TEXT -> WinGlassNative.IDC_IBEAM;
-            case CURSOR_CROSSHAIR -> WinGlassNative.IDC_CROSS;
-            case CURSOR_POINTING_HAND -> WinGlassNative.IDC_HAND;
-            case CURSOR_RESIZE_UP, CURSOR_RESIZE_DOWN, CURSOR_RESIZE_UPDOWN -> WinGlassNative.IDC_SIZENS;
-            case CURSOR_RESIZE_LEFT, CURSOR_RESIZE_RIGHT, CURSOR_RESIZE_LEFTRIGHT -> WinGlassNative.IDC_SIZEWE;
-            case CURSOR_RESIZE_SOUTHWEST, CURSOR_RESIZE_NORTHEAST -> WinGlassNative.IDC_SIZENESW;
-            case CURSOR_RESIZE_SOUTHEAST, CURSOR_RESIZE_NORTHWEST -> WinGlassNative.IDC_SIZENWSE;
-            case CURSOR_MOVE -> WinGlassNative.IDC_SIZEALL;
-            case CURSOR_WAIT -> WinGlassNative.IDC_WAIT;
+            case CURSOR_DEFAULT, CURSOR_DISAPPEAR -> WinCursorCalls.IDC_ARROW;
+            case CURSOR_TEXT -> WinCursorCalls.IDC_IBEAM;
+            case CURSOR_CROSSHAIR -> WinCursorCalls.IDC_CROSS;
+            case CURSOR_POINTING_HAND -> WinCursorCalls.IDC_HAND;
+            case CURSOR_RESIZE_UP, CURSOR_RESIZE_DOWN, CURSOR_RESIZE_UPDOWN -> WinCursorCalls.IDC_SIZENS;
+            case CURSOR_RESIZE_LEFT, CURSOR_RESIZE_RIGHT, CURSOR_RESIZE_LEFTRIGHT -> WinCursorCalls.IDC_SIZEWE;
+            case CURSOR_RESIZE_SOUTHWEST, CURSOR_RESIZE_NORTHEAST -> WinCursorCalls.IDC_SIZENESW;
+            case CURSOR_RESIZE_SOUTHEAST, CURSOR_RESIZE_NORTHWEST -> WinCursorCalls.IDC_SIZENWSE;
+            case CURSOR_MOVE -> WinCursorCalls.IDC_SIZEALL;
+            case CURSOR_WAIT -> WinCursorCalls.IDC_WAIT;
             case CURSOR_CLOSED_HAND, CURSOR_OPEN_HAND, CURSOR_NONE -> 0;
-            default -> WinGlassNative.IDC_ARROW;
+            default -> WinCursorCalls.IDC_ARROW;
         };
     }
 
@@ -178,8 +178,8 @@ final class WinCursor extends Cursor {
      */
     static String systemCursorName(int type) {
         return switch (type) {
-            case CURSOR_CLOSED_HAND -> WinGlassNative.IDC_CLOSED_HAND;
-            case CURSOR_OPEN_HAND -> WinGlassNative.IDC_OPEN_HAND;
+            case CURSOR_CLOSED_HAND -> WinCursorCalls.IDC_CLOSED_HAND;
+            case CURSOR_OPEN_HAND -> WinCursorCalls.IDC_OPEN_HAND;
             default -> null;
         };
     }

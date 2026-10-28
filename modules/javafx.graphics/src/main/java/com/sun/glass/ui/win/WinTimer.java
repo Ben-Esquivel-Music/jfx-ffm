@@ -30,7 +30,7 @@ import com.sun.glass.ui.Timer;
  * MS Windows platform implementation class for Timer.
  * <p>
  * Every one of the four natives this class used to declare has become a call into
- * {@link WinGlassNative}, which binds {@code winmm!timeGetDevCaps}, {@code timeBeginPeriod},
+ * {@link WinGlassNative}, whose {@link WinTimerCalls} binds {@code winmm!timeGetDevCaps}, {@code timeBeginPeriod},
  * {@code timeEndPeriod}, {@code timeSetEvent} and {@code timeKillEvent} directly; there is no
  * {@code Timer.cpp} behind it any more. Behaviour is unchanged, including the two period bounds being
  * queried once and cached here for the life of the JVM.

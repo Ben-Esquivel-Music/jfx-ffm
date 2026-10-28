@@ -88,74 +88,66 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 public class WinGlassNativeTest {
 
     /**
-     * Every symbol the facade binds, in binding order: the ABI guard first, then the rest of glass,
-     * then user32 and kernel32, then - once a timer, a cursor, a {@code showDocument} call and a screen
-     * enumeration have forced the four lazy holders, in that order - winmm, gdi32 and shlwapi, with
-     * {@link #SHCORE_SYMBOLS} after them when they resolve. {@link #requireNatives()} forces all four, so
-     * {@link #expectedBoundSymbols()} stays an exact ordered equality instead of depending on which test
-     * class ran first in the shared surefire JVM.
+     * Every symbol the facade binds, in binding order: the ABI guard first, then the two clipboard and drag
+     * installers the facade's own initializer needs, then each aggregate's symbols in the order of
+     * {@code WinGlassNative.ensureLoaded()}'s list (each aggregate starts a new line here), which
+     * {@code WinGlassNatives.require()} runs before any other use of the binding, then - once a timer, a cursor,
+     * a {@code showDocument} call and a screen enumeration have forced the four lazy holders, in that order -
+     * winmm, gdi32 and shlwapi, with {@link #SHCORE_SYMBOLS} after them when they resolve.
+     * {@link #requireNatives()} forces all four, so {@link #expectedBoundSymbols()} stays an exact ordered
+     * equality instead of depending on which test class ran first in the shared surefire JVM.
      */
     static final List<String> BOUND_SYMBOLS = List.of(
-            "glass!gwin_abi_version", "glass!gwin_robot_capture", "glass!gwin_key_java_to_windows",
-            "glass!gwin_key_windows_to_java",
-            "glass!gwin_key_code_for_char", "glass!gwin_sizeof_ui_settings",
-            "glass!gwin_sizeof_network_info", "glass!gwin_prefs_set_callbacks",
-            "glass!gwin_prefs_query_ui_settings", "glass!gwin_prefs_query_network",
+            "glass!gwin_abi_version", "glass!gwin_clipboard_set_callbacks", "glass!gwin_dnd_set_callbacks",
+            "glass!gwin_robot_capture", "glass!gwin_key_java_to_windows", "glass!gwin_key_windows_to_java",
+            "glass!gwin_key_code_for_char", "user32!SendInput", "user32!mouse_event", "user32!GetCursorPos",
+            "user32!GetSystemMetrics", "user32!MapVirtualKeyW", "user32!GetKeyState",
+            "user32!ShowCursor", "user32!LoadCursorW", "kernel32!GetModuleHandleW",
+            "glass!gwin_sizeof_ui_settings", "glass!gwin_sizeof_network_info", "glass!gwin_prefs_set_callbacks",
+            "glass!gwin_prefs_query_ui_settings", "glass!gwin_prefs_query_network", "user32!GetSysColor",
+            "user32!SystemParametersInfoW",
             "glass!gwin_sizeof_app_callbacks", "glass!gwin_app_set_callbacks", "glass!gwin_app_create",
-            "glass!gwin_run_loop",
-            "glass!gwin_terminate_loop", "glass!gwin_enter_nested_event_loop",
-            "glass!gwin_leave_nested_event_loop", "glass!gwin_invoke_and_wait",
-            "glass!gwin_invoke_later", "glass!gwin_sizeof_menu_callbacks",
-            "glass!gwin_menu_set_callbacks",
-            "glass!gwin_sizeof_view_callbacks", "glass!gwin_sizeof_gesture_callbacks",
-            "glass!gwin_view_set_callbacks", "glass!gwin_gesture_set_callbacks",
-            "glass!gwin_test_fire_callback", "glass!gwin_view_create", "glass!gwin_view_close",
-            "glass!gwin_view_get_native_view",
+            "glass!gwin_run_loop", "glass!gwin_terminate_loop", "glass!gwin_enter_nested_event_loop",
+            "glass!gwin_leave_nested_event_loop", "glass!gwin_invoke_and_wait", "glass!gwin_invoke_later",
+            "kernel32!GetVersion",
+            "glass!gwin_sizeof_menu_callbacks", "glass!gwin_menu_set_callbacks", "user32!CreateMenu",
+            "user32!DestroyMenu", "user32!IsMenu", "user32!GetMenuItemCount", "user32!GetMenuItemInfoW",
+            "user32!SetMenuItemInfoW", "user32!InsertMenuItemW", "user32!InsertMenuW", "user32!RemoveMenu",
+            "user32!EnableMenuItem", "user32!CheckMenuItem",
+            "glass!gwin_sizeof_view_callbacks", "glass!gwin_sizeof_gesture_callbacks", "glass!gwin_view_set_callbacks",
+            "glass!gwin_gesture_set_callbacks", "glass!gwin_test_fire_callback",
+            "glass!gwin_view_create", "glass!gwin_view_close", "glass!gwin_view_get_native_view",
             "glass!gwin_view_set_parent", "glass!gwin_view_get_x", "glass!gwin_view_get_y",
-            "glass!gwin_view_schedule_repaint", "glass!gwin_view_upload_pixels",
-            "glass!gwin_view_enter_fullscreen", "glass!gwin_view_exit_fullscreen",
-            "glass!gwin_view_enable_ime", "glass!gwin_view_finish_ime_composition",
+            "glass!gwin_view_schedule_repaint", "glass!gwin_view_upload_pixels", "glass!gwin_view_enter_fullscreen",
+            "glass!gwin_view_exit_fullscreen", "glass!gwin_view_enable_ime", "glass!gwin_view_finish_ime_composition",
+            "user32!GetDoubleClickTime",
             "glass!gwin_sizeof_window_callbacks", "glass!gwin_window_set_callbacks",
             "glass!gwin_window_create", "glass!gwin_window_close", "glass!gwin_window_set_view",
-            "glass!gwin_window_update_view_size", "glass!gwin_window_set_menubar",
-            "glass!gwin_window_set_level", "glass!gwin_window_set_focusable",
-            "glass!gwin_window_set_enabled", "glass!gwin_window_set_alpha",
-            "glass!gwin_window_set_dark_frame", "glass!gwin_window_get_insets",
-            "glass!gwin_window_set_bounds", "glass!gwin_window_set_title",
-            "glass!gwin_window_set_resizable", "glass!gwin_window_set_visible",
-            "glass!gwin_window_request_focus", "glass!gwin_window_grab_focus",
-            "glass!gwin_window_ungrab_focus", "glass!gwin_window_minimize", "glass!gwin_window_maximize",
-            "glass!gwin_window_set_min_size", "glass!gwin_window_set_max_size",
-            "glass!gwin_window_set_icon", "glass!gwin_window_to_front", "glass!gwin_window_to_back",
-            "glass!gwin_window_set_cursor", "glass!gwin_window_show_system_menu",
-            "glass!gwin_sizeof_screen_callbacks", "glass!gwin_screen_set_callbacks",
+            "glass!gwin_window_update_view_size", "glass!gwin_window_set_menubar", "glass!gwin_window_set_level",
+            "glass!gwin_window_set_focusable", "glass!gwin_window_set_enabled", "glass!gwin_window_set_alpha",
+            "glass!gwin_window_set_dark_frame", "glass!gwin_window_get_insets", "glass!gwin_window_set_bounds",
+            "glass!gwin_window_set_title", "glass!gwin_window_set_resizable", "glass!gwin_window_set_visible",
+            "glass!gwin_window_request_focus", "glass!gwin_window_grab_focus", "glass!gwin_window_ungrab_focus",
+            "glass!gwin_window_minimize", "glass!gwin_window_maximize", "glass!gwin_window_set_min_size",
+            "glass!gwin_window_set_max_size", "glass!gwin_window_set_icon", "glass!gwin_window_to_front",
+            "glass!gwin_window_to_back", "glass!gwin_window_set_cursor", "glass!gwin_window_show_system_menu",
+            "user32!IsWindow", "user32!GetCapture", "user32!GetWindowRect",
+            "glass!gwin_sizeof_screen_callbacks", "glass!gwin_screen_set_callbacks", "user32!EnumDisplayMonitors",
+            "user32!GetMonitorInfoW", "user32!SetProcessDPIAware", "kernel32!GetSystemDirectoryW",
             "glass!gwin_sizeof_clipboard_callbacks", "glass!gwin_sizeof_dnd_callbacks",
-            "glass!gwin_clipboard_set_callbacks", "glass!gwin_dnd_set_callbacks",
-            "glass!gwin_test_fire_clipboard_callback", "glass!gwin_test_fire_dnd_callback",
-            "glass!gwin_alloc", "glass!gwin_free", "glass!gwin_clipboard_register_viewer",
-            "glass!gwin_clipboard_dispose", "glass!gwin_clipboard_push", "glass!gwin_clipboard_pop",
-            "glass!gwin_clipboard_pop_bytes", "glass!gwin_clipboard_pop_mimes",
-            "glass!gwin_clipboard_push_target_action", "glass!gwin_clipboard_pop_supported_actions",
-            "glass!gwin_dnd_push", "glass!gwin_dnd_dispose", "glass!gwin_sizeof_file_filter",
-            "glass!gwin_dialog_file", "glass!gwin_dialog_folder",
+            "glass!gwin_test_fire_clipboard_callback", "glass!gwin_test_fire_dnd_callback", "glass!gwin_alloc",
+            "glass!gwin_free", "glass!gwin_clipboard_register_viewer", "glass!gwin_clipboard_dispose",
+            "glass!gwin_clipboard_push", "glass!gwin_clipboard_pop", "glass!gwin_clipboard_pop_bytes",
+            "glass!gwin_clipboard_pop_mimes", "glass!gwin_clipboard_push_target_action",
+            "glass!gwin_clipboard_pop_supported_actions", "glass!gwin_dnd_push", "glass!gwin_dnd_dispose",
+            "glass!gwin_sizeof_file_filter", "glass!gwin_dialog_file", "glass!gwin_dialog_folder",
+            "ole32!OleIsCurrentClipboard",
             "glass!gwin_sizeof_accessible_callbacks", "glass!gwin_sizeof_text_range_callbacks",
-            "glass!gwin_sizeof_variant", "glass!gwin_a11y_set_callbacks",
-            "glass!gwin_a11y_text_range_set_callbacks", "glass!gwin_a11y_create", "glass!gwin_a11y_destroy",
-            "glass!gwin_a11y_text_range_create", "glass!gwin_a11y_text_range_destroy",
-            "glass!gwin_a11y_raise_property_changed",
-            "user32!SendInput", "user32!mouse_event", "user32!GetCursorPos", "user32!GetSystemMetrics",
-            "user32!MapVirtualKeyW", "user32!ShowCursor", "user32!GetKeyState", "user32!GetSysColor",
-            "user32!SystemParametersInfoW", "kernel32!GetVersion",
-            "user32!CreateMenu", "user32!DestroyMenu", "user32!IsMenu", "user32!GetMenuItemCount",
-            "user32!GetMenuItemInfoW", "user32!SetMenuItemInfoW", "user32!InsertMenuItemW",
-            "user32!InsertMenuW", "user32!RemoveMenu", "user32!EnableMenuItem",
-            "user32!CheckMenuItem", "user32!GetDoubleClickTime",
-            "user32!IsWindow", "user32!GetCapture", "user32!GetWindowRect", "user32!LoadCursorW",
-            "kernel32!GetModuleHandleW", "ole32!OleIsCurrentClipboard",
-            "user32!EnumDisplayMonitors", "user32!GetMonitorInfoW", "user32!SetProcessDPIAware",
-            "kernel32!GetSystemDirectoryW",
-            "winmm!timeGetDevCaps", "winmm!timeBeginPeriod", "winmm!timeEndPeriod",
-            "winmm!timeSetEvent", "winmm!timeKillEvent",
+            "glass!gwin_sizeof_variant", "glass!gwin_a11y_set_callbacks", "glass!gwin_a11y_text_range_set_callbacks",
+            "glass!gwin_a11y_create", "glass!gwin_a11y_destroy", "glass!gwin_a11y_text_range_create",
+            "glass!gwin_a11y_text_range_destroy", "glass!gwin_a11y_raise_property_changed",
+            "winmm!timeGetDevCaps", "winmm!timeBeginPeriod", "winmm!timeEndPeriod", "winmm!timeSetEvent",
+            "winmm!timeKillEvent",
             "gdi32!CreateBitmap", "gdi32!CreateDIBSection", "gdi32!DeleteObject", "gdi32!GdiFlush",
             "user32!CreateIconIndirect", "gdi32!CreateDCW", "gdi32!GetDeviceCaps", "gdi32!DeleteDC",
             "shlwapi!AssocQueryStringW");
@@ -444,7 +436,7 @@ public class WinGlassNativeTest {
     }
 
     /**
-     * 0 is the sentinel {@code WinGlassNative.keyEvent} reads as "send nothing", and it is what the C
+     * 0 is the sentinel {@code WinRobotCalls.keyEvent} reads as "send nothing", and it is what the C
      * returns for {@code VK_UNDEFINED} and for a code that is in no table entry and matches no OEM
      * character either.
      */
@@ -810,7 +802,7 @@ public class WinGlassNativeTest {
     /**
      * Every string the facade hands Win32 or {@code glass.dll} - menu and window titles, dialog and filter
      * strings, clipboard mimes, cursor and module names, the association - goes through
-     * {@code WinGlassNative.wideString}, which copies UTF-16 code units and a NUL as {@code JString} did
+     * {@code WinCallSupport.wideString}, which copies UTF-16 code units and a NUL as {@code JString} did
      * ({@code GetStringLength} + {@code GetStringRegion}, {@code native-glass/win/Utils.h:108-112}).
      * Windows does not require well-formed UTF-16, so an unpaired surrogate must reach it as the unit it is; a
      * charset encoder writes U+FFFD in its place. The units are compared as hex first, because a failure message

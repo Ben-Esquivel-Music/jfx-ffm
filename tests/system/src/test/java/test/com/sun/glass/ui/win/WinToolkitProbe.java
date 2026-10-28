@@ -116,7 +116,7 @@ final class WinToolkitProbe {
         abort(missing);
     }
 
-    /** {@code WinGlassNative.GWIN_PT_ALL}, through the shim's constant table. */
+    /** {@code WinPreferenceCalls.GWIN_PT_ALL}, through the shim's constant table. */
     static int preferenceTypeAll() {
         return (Integer) callShim("constant", new Class<?>[] {String.class}, "GWIN_PT_ALL");
     }

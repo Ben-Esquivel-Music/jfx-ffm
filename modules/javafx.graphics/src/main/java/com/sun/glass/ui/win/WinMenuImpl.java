@@ -32,7 +32,7 @@ import com.sun.glass.ui.MenuItem.Callback;
  * Used by WinMenuDelegate & WindowsMenubarDelegate.
  * This is package private class.
  *
- * Every menu operation is a call into WinGlassNative, which binds the user32 entry point
+ * Every menu operation is a call into WinGlassNative, whose WinMenuCalls binds the user32 entry point
  * GlassMenu.cpp used to wrap: CreateMenu, DestroyMenu, InsertMenuItemW, InsertMenuW, RemoveMenu,
  * SetMenuItemInfoW, EnableMenuItem and CheckMenuItem. The HMENU is unchanged - an opaque handle
  * value this class owns as a long and hands to WinMenuBarDelegate.getNativeMenu(), which
@@ -157,7 +157,7 @@ class WinMenuImpl {
 
     /*
      * WM_COMMAND, delivered by GlassMenu.cpp's HandleMenuCommand through the GwinMenuCallbacks table
-     * and WinGlassNative.onNotifyCommand. Runs on the Glass toolkit thread, inside DispatchMessage,
+     * and WinMenuCalls.onNotifyCommand. Runs on the Glass toolkit thread, inside DispatchMessage,
      * and frequently inside the system's modal menu loop; callback.action() below is arbitrary
      * application code that may open a dialog or nest another message loop.
      *
@@ -170,7 +170,7 @@ class WinMenuImpl {
      * GlassMenu.cpp asserted, and the body below never mentioned it: the map from cmdID to peer is
      * CommandIDManager, which the id alone indexes.
      *
-     * Package-private rather than private because WinGlassNative.onNotifyCommand is the upcall stub's
+     * Package-private rather than private because WinMenuCalls.onNotifyCommand is the upcall stub's
      * target and calls this - the same shape as WinPreferences.update behind onPreferencesChanged.
      */
     static boolean notifyCommand(int cmdID) {

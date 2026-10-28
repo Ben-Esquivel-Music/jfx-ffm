@@ -60,8 +60,8 @@ final class WinView extends View {
 
     static {
         multiClickTime = WinGlassNative.getDoubleClickTime();
-        multiClickMaxX = WinGlassNative.getSystemMetrics(WinGlassNative.SM_CXDOUBLECLK);
-        multiClickMaxY = WinGlassNative.getSystemMetrics(WinGlassNative.SM_CYDOUBLECLK);
+        multiClickMaxX = WinGlassNative.getSystemMetrics(WinViewCalls.SM_CXDOUBLECLK);
+        multiClickMaxY = WinGlassNative.getSystemMetrics(WinViewCalls.SM_CYDOUBLECLK);
     }
 
     // Constants

@@ -221,16 +221,16 @@ final class WinPreferences {
      */
     static Map<String, Object> collect(int types) {
         Map<String, Object> preferences = new HashMap<>();
-        if ((types & WinGlassNative.GWIN_PT_SYSTEM_COLORS) != 0) {
+        if ((types & WinPreferenceCalls.GWIN_PT_SYSTEM_COLORS) != 0) {
             systemColors(preferences);
         }
-        if ((types & WinGlassNative.GWIN_PT_SYSTEM_PARAMS) != 0) {
+        if ((types & WinPreferenceCalls.GWIN_PT_SYSTEM_PARAMS) != 0) {
             systemParameters(preferences);
         }
-        if ((types & WinGlassNative.GWIN_PT_UI_SETTINGS) != 0) {
+        if ((types & WinPreferenceCalls.GWIN_PT_UI_SETTINGS) != 0) {
             uiSettings(preferences);
         }
-        if ((types & WinGlassNative.GWIN_PT_NETWORK_INFORMATION) != 0) {
+        if ((types & WinPreferenceCalls.GWIN_PT_NETWORK_INFORMATION) != 0) {
             network(preferences);
         }
         return preferences;
@@ -360,7 +360,7 @@ final class WinPreferences {
      * Nothing in the product calls this: the C's equivalent lived and died with the toolkit's
      * {@code PlatformSupport}. It exists so that the tests of {@link #update} are independent of the
      * order they run in inside a shared surefire JVM, which is the same reason
-     * {@code WinGlassNative.schemeName} is package-private.
+     * {@code WinPreferenceCalls.schemeName} is package-private.
      */
     static void forgetCollected() {
         collected = null;
@@ -374,9 +374,9 @@ final class WinPreferences {
      */
     private static String costTypeName(int costType) {
         return switch (costType) {
-            case WinGlassNative.GWIN_NET_COST_UNRESTRICTED -> "Unrestricted";
-            case WinGlassNative.GWIN_NET_COST_VARIABLE -> "Variable";
-            case WinGlassNative.GWIN_NET_COST_FIXED -> "Fixed";
+            case WinPreferenceCalls.GWIN_NET_COST_UNRESTRICTED -> "Unrestricted";
+            case WinPreferenceCalls.GWIN_NET_COST_VARIABLE -> "Variable";
+            case WinPreferenceCalls.GWIN_NET_COST_FIXED -> "Fixed";
             default -> "Unknown";
         };
     }
@@ -408,14 +408,14 @@ final class WinPreferences {
 
     private static Map<String, Integer> systemColorIndices() {
         Map<String, Integer> indices = new LinkedHashMap<>();
-        indices.put("Windows.SysColor.COLOR_3DFACE", WinGlassNative.COLOR_3DFACE);
-        indices.put("Windows.SysColor.COLOR_BTNTEXT", WinGlassNative.COLOR_BTNTEXT);
-        indices.put("Windows.SysColor.COLOR_GRAYTEXT", WinGlassNative.COLOR_GRAYTEXT);
-        indices.put("Windows.SysColor.COLOR_HIGHLIGHT", WinGlassNative.COLOR_HIGHLIGHT);
-        indices.put("Windows.SysColor.COLOR_HIGHLIGHTTEXT", WinGlassNative.COLOR_HIGHLIGHTTEXT);
-        indices.put("Windows.SysColor.COLOR_HOTLIGHT", WinGlassNative.COLOR_HOTLIGHT);
-        indices.put("Windows.SysColor.COLOR_WINDOW", WinGlassNative.COLOR_WINDOW);
-        indices.put("Windows.SysColor.COLOR_WINDOWTEXT", WinGlassNative.COLOR_WINDOWTEXT);
+        indices.put("Windows.SysColor.COLOR_3DFACE", WinPreferenceCalls.COLOR_3DFACE);
+        indices.put("Windows.SysColor.COLOR_BTNTEXT", WinPreferenceCalls.COLOR_BTNTEXT);
+        indices.put("Windows.SysColor.COLOR_GRAYTEXT", WinPreferenceCalls.COLOR_GRAYTEXT);
+        indices.put("Windows.SysColor.COLOR_HIGHLIGHT", WinPreferenceCalls.COLOR_HIGHLIGHT);
+        indices.put("Windows.SysColor.COLOR_HIGHLIGHTTEXT", WinPreferenceCalls.COLOR_HIGHLIGHTTEXT);
+        indices.put("Windows.SysColor.COLOR_HOTLIGHT", WinPreferenceCalls.COLOR_HOTLIGHT);
+        indices.put("Windows.SysColor.COLOR_WINDOW", WinPreferenceCalls.COLOR_WINDOW);
+        indices.put("Windows.SysColor.COLOR_WINDOWTEXT", WinPreferenceCalls.COLOR_WINDOWTEXT);
         return Collections.unmodifiableMap(indices);
     }
 }

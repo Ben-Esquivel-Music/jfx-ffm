@@ -529,7 +529,7 @@ final class WinApplication extends Application implements InvokeLaterDispatcher.
      * itself the toolkit thread, so this is reached only from another thread, and from another thread the
      * call is now queued to the toolkit window with {@code SendNotifyMessage} under its publication guard
      * and waited for outside it. It blocks until the runnable has run there, or until the call is refused
-     * because the toolkit window is gone (see {@link WinGlassNative#invokeAndWait}).
+     * because the toolkit window is gone (see {@link WinApplicationCalls#invokeAndWait}).
      */
     @Override protected void _invokeAndWait(Runnable runnable) {
         WinGlassNative.invokeAndWait(runnable);
@@ -605,8 +605,8 @@ final class WinApplication extends Application implements InvokeLaterDispatcher.
      * could prove agree on an arbitrary keyboard layout - and it needs
      * {@code GlassApplication::GetMainThreadId()}, which is native-only state.
      * <p>
-     * The {@code char} is narrowed here rather than in {@link WinGlassNative}: FFM has no {@code char}
-     * value layout, the C parameter is a {@code uint16_t}, and the 16 bits are the same either way.
+     * The {@code char} is narrowed here rather than in {@link WinGlassNative}: the C parameter is a
+     * {@code uint16_t}, which the descriptor matches with {@code JAVA_SHORT}, and the 16 bits are the same either way.
      */
     @Override
     protected int _getKeyCodeForChar(char c, int hint) {
@@ -658,7 +658,7 @@ final class WinApplication extends Application implements InvokeLaterDispatcher.
      */
     @Override
     public Map<String, Object> getPlatformPreferences() {
-        return WinPreferences.collect(WinGlassNative.GWIN_PT_ALL);
+        return WinPreferences.collect(WinPreferenceCalls.GWIN_PT_ALL);
     }
 
     /**

@@ -109,7 +109,7 @@ public final class WinGlassNativeShim {
     }
 
     public static boolean resolves(String qualifiedName) {
-        return WinGlassNative.resolves(qualifiedName);
+        return WinCallSupport.resolves(qualifiedName);
     }
 
     public static int expectedAbiVersion() {
@@ -123,116 +123,116 @@ public final class WinGlassNativeShim {
     /** A {@code GwinStatus} / {@code GwinRobotCaptureError} / winuser.h constant the facade defines. */
     public static int constant(String name) {
         return switch (name) {
-            case "GWIN_OK" -> WinGlassNative.GWIN_OK;
-            case "GWIN_ERR_INVALID_ARG" -> WinGlassNative.GWIN_ERR_INVALID_ARG;
-            case "GWIN_ERR_NO_TOOLKIT" -> WinGlassNative.GWIN_ERR_NO_TOOLKIT;
-            case "GWIN_ROBOT_ERR_CREATE_DC" -> WinGlassNative.GWIN_ROBOT_ERR_CREATE_DC;
-            case "GWIN_ROBOT_ERR_CREATE_MEM_DC" -> WinGlassNative.GWIN_ROBOT_ERR_CREATE_MEM_DC;
-            case "GWIN_ROBOT_ERR_CREATE_BITMAP" -> WinGlassNative.GWIN_ROBOT_ERR_CREATE_BITMAP;
-            case "GWIN_ROBOT_ERR_BITBLT" -> WinGlassNative.GWIN_ROBOT_ERR_BITBLT;
-            case "GWIN_ROBOT_ERR_GETDIBITS" -> WinGlassNative.GWIN_ROBOT_ERR_GETDIBITS;
-            case "INPUT_MOUSE" -> WinGlassNative.INPUT_MOUSE;
-            case "INPUT_KEYBOARD" -> WinGlassNative.INPUT_KEYBOARD;
-            case "KEYEVENTF_EXTENDEDKEY" -> WinGlassNative.KEYEVENTF_EXTENDEDKEY;
-            case "KEYEVENTF_KEYUP" -> WinGlassNative.KEYEVENTF_KEYUP;
-            case "MAPVK_VK_TO_VSC" -> WinGlassNative.MAPVK_VK_TO_VSC;
-            case "MOUSEEVENTF_MOVE" -> WinGlassNative.MOUSEEVENTF_MOVE;
-            case "MOUSEEVENTF_LEFTDOWN" -> WinGlassNative.MOUSEEVENTF_LEFTDOWN;
-            case "MOUSEEVENTF_LEFTUP" -> WinGlassNative.MOUSEEVENTF_LEFTUP;
-            case "MOUSEEVENTF_RIGHTDOWN" -> WinGlassNative.MOUSEEVENTF_RIGHTDOWN;
-            case "MOUSEEVENTF_RIGHTUP" -> WinGlassNative.MOUSEEVENTF_RIGHTUP;
-            case "MOUSEEVENTF_MIDDLEDOWN" -> WinGlassNative.MOUSEEVENTF_MIDDLEDOWN;
-            case "MOUSEEVENTF_MIDDLEUP" -> WinGlassNative.MOUSEEVENTF_MIDDLEUP;
-            case "MOUSEEVENTF_XDOWN" -> WinGlassNative.MOUSEEVENTF_XDOWN;
-            case "MOUSEEVENTF_XUP" -> WinGlassNative.MOUSEEVENTF_XUP;
-            case "MOUSEEVENTF_WHEEL" -> WinGlassNative.MOUSEEVENTF_WHEEL;
-            case "MOUSEEVENTF_ABSOLUTE" -> WinGlassNative.MOUSEEVENTF_ABSOLUTE;
-            case "XBUTTON1" -> WinGlassNative.XBUTTON1;
-            case "XBUTTON2" -> WinGlassNative.XBUTTON2;
-            case "WHEEL_DELTA" -> WinGlassNative.WHEEL_DELTA;
-            case "SM_CXSCREEN" -> WinGlassNative.SM_CXSCREEN;
-            case "SM_CYSCREEN" -> WinGlassNative.SM_CYSCREEN;
-            case "SM_SWAPBUTTON" -> WinGlassNative.SM_SWAPBUTTON;
-            case "SM_CXCURSOR" -> WinGlassNative.SM_CXCURSOR;
-            case "SM_CYCURSOR" -> WinGlassNative.SM_CYCURSOR;
-            case "SM_CXDOUBLECLK" -> WinGlassNative.SM_CXDOUBLECLK;
-            case "SM_CYDOUBLECLK" -> WinGlassNative.SM_CYDOUBLECLK;
-            case "BI_RGB" -> WinGlassNative.BI_RGB;
-            case "DIB_RGB_COLORS" -> WinGlassNative.DIB_RGB_COLORS;
-            case "VK_CAPITAL" -> WinGlassNative.VK_CAPITAL;
-            case "VK_NUMLOCK" -> WinGlassNative.VK_NUMLOCK;
-            case "SPI_GETHIGHCONTRAST" -> WinGlassNative.SPI_GETHIGHCONTRAST;
-            case "SPI_GETCLIENTAREAANIMATION" -> WinGlassNative.SPI_GETCLIENTAREAANIMATION;
-            case "HCF_HIGHCONTRASTON" -> WinGlassNative.HCF_HIGHCONTRASTON;
-            case "COLOR_3DFACE" -> WinGlassNative.COLOR_3DFACE;
-            case "COLOR_BTNTEXT" -> WinGlassNative.COLOR_BTNTEXT;
-            case "COLOR_GRAYTEXT" -> WinGlassNative.COLOR_GRAYTEXT;
-            case "COLOR_HIGHLIGHT" -> WinGlassNative.COLOR_HIGHLIGHT;
-            case "COLOR_HIGHLIGHTTEXT" -> WinGlassNative.COLOR_HIGHLIGHTTEXT;
-            case "COLOR_HOTLIGHT" -> WinGlassNative.COLOR_HOTLIGHT;
-            case "COLOR_WINDOW" -> WinGlassNative.COLOR_WINDOW;
-            case "COLOR_WINDOWTEXT" -> WinGlassNative.COLOR_WINDOWTEXT;
-            case "TIMERR_NOERROR" -> WinGlassNative.TIMERR_NOERROR;
-            case "TIME_ONESHOT" -> WinGlassNative.TIME_ONESHOT;
-            case "TIME_PERIODIC" -> WinGlassNative.TIME_PERIODIC;
-            case "GWIN_PT_SYSTEM_COLORS" -> WinGlassNative.GWIN_PT_SYSTEM_COLORS;
-            case "GWIN_PT_SYSTEM_PARAMS" -> WinGlassNative.GWIN_PT_SYSTEM_PARAMS;
-            case "GWIN_PT_UI_SETTINGS" -> WinGlassNative.GWIN_PT_UI_SETTINGS;
-            case "GWIN_PT_NETWORK_INFORMATION" -> WinGlassNative.GWIN_PT_NETWORK_INFORMATION;
-            case "GWIN_PT_ALL" -> WinGlassNative.GWIN_PT_ALL;
-            case "GWIN_UI_COLOR_COUNT" -> WinGlassNative.GWIN_UI_COLOR_COUNT;
-            case "GWIN_NET_COST_UNKNOWN" -> WinGlassNative.GWIN_NET_COST_UNKNOWN;
-            case "GWIN_NET_COST_UNRESTRICTED" -> WinGlassNative.GWIN_NET_COST_UNRESTRICTED;
-            case "GWIN_NET_COST_VARIABLE" -> WinGlassNative.GWIN_NET_COST_VARIABLE;
-            case "GWIN_NET_COST_FIXED" -> WinGlassNative.GWIN_NET_COST_FIXED;
-            case "MIIM_STATE" -> WinGlassNative.MIIM_STATE;
-            case "MIIM_ID" -> WinGlassNative.MIIM_ID;
-            case "MIIM_SUBMENU" -> WinGlassNative.MIIM_SUBMENU;
-            case "MIIM_DATA" -> WinGlassNative.MIIM_DATA;
-            case "MIIM_STRING" -> WinGlassNative.MIIM_STRING;
-            case "MIIM_FTYPE" -> WinGlassNative.MIIM_FTYPE;
-            case "MFT_STRING" -> WinGlassNative.MFT_STRING;
-            case "MFT_SEPARATOR" -> WinGlassNative.MFT_SEPARATOR;
-            case "MFS_ENABLED" -> WinGlassNative.MFS_ENABLED;
-            case "MFS_GRAYED" -> WinGlassNative.MFS_GRAYED;
-            case "MFS_CHECKED" -> WinGlassNative.MFS_CHECKED;
-            case "MFS_UNCHECKED" -> WinGlassNative.MFS_UNCHECKED;
-            case "MF_BYCOMMAND" -> WinGlassNative.MF_BYCOMMAND;
-            case "MF_BYPOSITION" -> WinGlassNative.MF_BYPOSITION;
-            case "MF_SEPARATOR" -> WinGlassNative.MF_SEPARATOR;
-            case "MF_ENABLED" -> WinGlassNative.MF_ENABLED;
-            case "MF_GRAYED" -> WinGlassNative.MF_GRAYED;
-            case "MF_CHECKED" -> WinGlassNative.MF_CHECKED;
-            case "MF_UNCHECKED" -> WinGlassNative.MF_UNCHECKED;
-            case "IDC_ARROW" -> WinGlassNative.IDC_ARROW;
-            case "IDC_IBEAM" -> WinGlassNative.IDC_IBEAM;
-            case "IDC_WAIT" -> WinGlassNative.IDC_WAIT;
-            case "IDC_CROSS" -> WinGlassNative.IDC_CROSS;
-            case "IDC_SIZENWSE" -> WinGlassNative.IDC_SIZENWSE;
-            case "IDC_SIZENESW" -> WinGlassNative.IDC_SIZENESW;
-            case "IDC_SIZEWE" -> WinGlassNative.IDC_SIZEWE;
-            case "IDC_SIZENS" -> WinGlassNative.IDC_SIZENS;
-            case "IDC_SIZEALL" -> WinGlassNative.IDC_SIZEALL;
-            case "IDC_HAND" -> WinGlassNative.IDC_HAND;
-            case "HTNOWHERE" -> WinGlassNative.HTNOWHERE;
+            case "GWIN_OK" -> WinCallSupport.GWIN_OK;
+            case "GWIN_ERR_INVALID_ARG" -> WinCallSupport.GWIN_ERR_INVALID_ARG;
+            case "GWIN_ERR_NO_TOOLKIT" -> WinCallSupport.GWIN_ERR_NO_TOOLKIT;
+            case "GWIN_ROBOT_ERR_CREATE_DC" -> WinRobotCalls.GWIN_ROBOT_ERR_CREATE_DC;
+            case "GWIN_ROBOT_ERR_CREATE_MEM_DC" -> WinRobotCalls.GWIN_ROBOT_ERR_CREATE_MEM_DC;
+            case "GWIN_ROBOT_ERR_CREATE_BITMAP" -> WinRobotCalls.GWIN_ROBOT_ERR_CREATE_BITMAP;
+            case "GWIN_ROBOT_ERR_BITBLT" -> WinRobotCalls.GWIN_ROBOT_ERR_BITBLT;
+            case "GWIN_ROBOT_ERR_GETDIBITS" -> WinRobotCalls.GWIN_ROBOT_ERR_GETDIBITS;
+            case "INPUT_MOUSE" -> WinRobotCalls.INPUT_MOUSE;
+            case "INPUT_KEYBOARD" -> WinRobotCalls.INPUT_KEYBOARD;
+            case "KEYEVENTF_EXTENDEDKEY" -> WinRobotCalls.KEYEVENTF_EXTENDEDKEY;
+            case "KEYEVENTF_KEYUP" -> WinRobotCalls.KEYEVENTF_KEYUP;
+            case "MAPVK_VK_TO_VSC" -> WinRobotCalls.MAPVK_VK_TO_VSC;
+            case "MOUSEEVENTF_MOVE" -> WinRobotCalls.MOUSEEVENTF_MOVE;
+            case "MOUSEEVENTF_LEFTDOWN" -> WinRobotCalls.MOUSEEVENTF_LEFTDOWN;
+            case "MOUSEEVENTF_LEFTUP" -> WinRobotCalls.MOUSEEVENTF_LEFTUP;
+            case "MOUSEEVENTF_RIGHTDOWN" -> WinRobotCalls.MOUSEEVENTF_RIGHTDOWN;
+            case "MOUSEEVENTF_RIGHTUP" -> WinRobotCalls.MOUSEEVENTF_RIGHTUP;
+            case "MOUSEEVENTF_MIDDLEDOWN" -> WinRobotCalls.MOUSEEVENTF_MIDDLEDOWN;
+            case "MOUSEEVENTF_MIDDLEUP" -> WinRobotCalls.MOUSEEVENTF_MIDDLEUP;
+            case "MOUSEEVENTF_XDOWN" -> WinRobotCalls.MOUSEEVENTF_XDOWN;
+            case "MOUSEEVENTF_XUP" -> WinRobotCalls.MOUSEEVENTF_XUP;
+            case "MOUSEEVENTF_WHEEL" -> WinRobotCalls.MOUSEEVENTF_WHEEL;
+            case "MOUSEEVENTF_ABSOLUTE" -> WinRobotCalls.MOUSEEVENTF_ABSOLUTE;
+            case "XBUTTON1" -> WinRobotCalls.XBUTTON1;
+            case "XBUTTON2" -> WinRobotCalls.XBUTTON2;
+            case "WHEEL_DELTA" -> WinRobotCalls.WHEEL_DELTA;
+            case "SM_CXSCREEN" -> WinRobotCalls.SM_CXSCREEN;
+            case "SM_CYSCREEN" -> WinRobotCalls.SM_CYSCREEN;
+            case "SM_SWAPBUTTON" -> WinRobotCalls.SM_SWAPBUTTON;
+            case "SM_CXCURSOR" -> WinCursorCalls.SM_CXCURSOR;
+            case "SM_CYCURSOR" -> WinCursorCalls.SM_CYCURSOR;
+            case "SM_CXDOUBLECLK" -> WinViewCalls.SM_CXDOUBLECLK;
+            case "SM_CYDOUBLECLK" -> WinViewCalls.SM_CYDOUBLECLK;
+            case "BI_RGB" -> WinCursorCalls.BI_RGB;
+            case "DIB_RGB_COLORS" -> WinCursorCalls.DIB_RGB_COLORS;
+            case "VK_CAPITAL" -> WinRobotCalls.VK_CAPITAL;
+            case "VK_NUMLOCK" -> WinRobotCalls.VK_NUMLOCK;
+            case "SPI_GETHIGHCONTRAST" -> WinPreferenceCalls.SPI_GETHIGHCONTRAST;
+            case "SPI_GETCLIENTAREAANIMATION" -> WinPreferenceCalls.SPI_GETCLIENTAREAANIMATION;
+            case "HCF_HIGHCONTRASTON" -> WinPreferenceCalls.HCF_HIGHCONTRASTON;
+            case "COLOR_3DFACE" -> WinPreferenceCalls.COLOR_3DFACE;
+            case "COLOR_BTNTEXT" -> WinPreferenceCalls.COLOR_BTNTEXT;
+            case "COLOR_GRAYTEXT" -> WinPreferenceCalls.COLOR_GRAYTEXT;
+            case "COLOR_HIGHLIGHT" -> WinPreferenceCalls.COLOR_HIGHLIGHT;
+            case "COLOR_HIGHLIGHTTEXT" -> WinPreferenceCalls.COLOR_HIGHLIGHTTEXT;
+            case "COLOR_HOTLIGHT" -> WinPreferenceCalls.COLOR_HOTLIGHT;
+            case "COLOR_WINDOW" -> WinPreferenceCalls.COLOR_WINDOW;
+            case "COLOR_WINDOWTEXT" -> WinPreferenceCalls.COLOR_WINDOWTEXT;
+            case "TIMERR_NOERROR" -> WinTimerCalls.TIMERR_NOERROR;
+            case "TIME_ONESHOT" -> WinTimerCalls.TIME_ONESHOT;
+            case "TIME_PERIODIC" -> WinTimerCalls.TIME_PERIODIC;
+            case "GWIN_PT_SYSTEM_COLORS" -> WinPreferenceCalls.GWIN_PT_SYSTEM_COLORS;
+            case "GWIN_PT_SYSTEM_PARAMS" -> WinPreferenceCalls.GWIN_PT_SYSTEM_PARAMS;
+            case "GWIN_PT_UI_SETTINGS" -> WinPreferenceCalls.GWIN_PT_UI_SETTINGS;
+            case "GWIN_PT_NETWORK_INFORMATION" -> WinPreferenceCalls.GWIN_PT_NETWORK_INFORMATION;
+            case "GWIN_PT_ALL" -> WinPreferenceCalls.GWIN_PT_ALL;
+            case "GWIN_UI_COLOR_COUNT" -> WinPreferenceCalls.GWIN_UI_COLOR_COUNT;
+            case "GWIN_NET_COST_UNKNOWN" -> WinPreferenceCalls.GWIN_NET_COST_UNKNOWN;
+            case "GWIN_NET_COST_UNRESTRICTED" -> WinPreferenceCalls.GWIN_NET_COST_UNRESTRICTED;
+            case "GWIN_NET_COST_VARIABLE" -> WinPreferenceCalls.GWIN_NET_COST_VARIABLE;
+            case "GWIN_NET_COST_FIXED" -> WinPreferenceCalls.GWIN_NET_COST_FIXED;
+            case "MIIM_STATE" -> WinMenuCalls.MIIM_STATE;
+            case "MIIM_ID" -> WinMenuCalls.MIIM_ID;
+            case "MIIM_SUBMENU" -> WinMenuCalls.MIIM_SUBMENU;
+            case "MIIM_DATA" -> WinMenuCalls.MIIM_DATA;
+            case "MIIM_STRING" -> WinMenuCalls.MIIM_STRING;
+            case "MIIM_FTYPE" -> WinMenuCalls.MIIM_FTYPE;
+            case "MFT_STRING" -> WinMenuCalls.MFT_STRING;
+            case "MFT_SEPARATOR" -> WinMenuCalls.MFT_SEPARATOR;
+            case "MFS_ENABLED" -> WinMenuCalls.MFS_ENABLED;
+            case "MFS_GRAYED" -> WinMenuCalls.MFS_GRAYED;
+            case "MFS_CHECKED" -> WinMenuCalls.MFS_CHECKED;
+            case "MFS_UNCHECKED" -> WinMenuCalls.MFS_UNCHECKED;
+            case "MF_BYCOMMAND" -> WinMenuCalls.MF_BYCOMMAND;
+            case "MF_BYPOSITION" -> WinMenuCalls.MF_BYPOSITION;
+            case "MF_SEPARATOR" -> WinMenuCalls.MF_SEPARATOR;
+            case "MF_ENABLED" -> WinMenuCalls.MF_ENABLED;
+            case "MF_GRAYED" -> WinMenuCalls.MF_GRAYED;
+            case "MF_CHECKED" -> WinMenuCalls.MF_CHECKED;
+            case "MF_UNCHECKED" -> WinMenuCalls.MF_UNCHECKED;
+            case "IDC_ARROW" -> WinCursorCalls.IDC_ARROW;
+            case "IDC_IBEAM" -> WinCursorCalls.IDC_IBEAM;
+            case "IDC_WAIT" -> WinCursorCalls.IDC_WAIT;
+            case "IDC_CROSS" -> WinCursorCalls.IDC_CROSS;
+            case "IDC_SIZENWSE" -> WinCursorCalls.IDC_SIZENWSE;
+            case "IDC_SIZENESW" -> WinCursorCalls.IDC_SIZENESW;
+            case "IDC_SIZEWE" -> WinCursorCalls.IDC_SIZEWE;
+            case "IDC_SIZENS" -> WinCursorCalls.IDC_SIZENS;
+            case "IDC_SIZEALL" -> WinCursorCalls.IDC_SIZEALL;
+            case "IDC_HAND" -> WinCursorCalls.IDC_HAND;
+            case "HTNOWHERE" -> WinWindowCallbacks.HTNOWHERE;
             case "RESIZE_DISABLE" -> WinWindow.RESIZE_DISABLE;
             case "RESIZE_AROUND_ANCHOR" -> WinWindow.RESIZE_AROUND_ANCHOR;
             case "RESIZE_TO_FX_ORIGIN" -> WinWindow.RESIZE_TO_FX_ORIGIN;
-            case "GWIN_ERR_UPCALL" -> WinGlassNative.GWIN_ERR_UPCALL;
-            case "GWIN_ERR_OLE" -> WinGlassNative.GWIN_ERR_OLE;
-            case "GWIN_DIALOG_OK" -> WinGlassNative.GWIN_DIALOG_OK;
-            case "GWIN_DIALOG_CANCELLED" -> WinGlassNative.GWIN_DIALOG_CANCELLED;
-            case "GWIN_DIALOG_FAILED" -> WinGlassNative.GWIN_DIALOG_FAILED;
-            case "MONITORINFOF_PRIMARY" -> WinGlassNative.MONITORINFOF_PRIMARY;
-            case "BITSPIXEL" -> WinGlassNative.BITSPIXEL;
-            case "PLANES" -> WinGlassNative.PLANES;
-            case "LOGPIXELSX" -> WinGlassNative.LOGPIXELSX;
-            case "LOGPIXELSY" -> WinGlassNative.LOGPIXELSY;
-            case "CCHDEVICENAME" -> WinGlassNative.CCHDEVICENAME;
-            case "MDT_EFFECTIVE_DPI" -> WinGlassNative.MDT_EFFECTIVE_DPI;
-            case "MDT_RAW_DPI" -> WinGlassNative.MDT_RAW_DPI;
-            case "PROCESS_PER_MONITOR_DPI_AWARE" -> WinGlassNative.PROCESS_PER_MONITOR_DPI_AWARE;
-            case "S_OK" -> WinGlassNative.S_OK;
+            case "GWIN_ERR_UPCALL" -> WinCallSupport.GWIN_ERR_UPCALL;
+            case "GWIN_ERR_OLE" -> WinCallSupport.GWIN_ERR_OLE;
+            case "GWIN_DIALOG_OK" -> WinClipboardCalls.GWIN_DIALOG_OK;
+            case "GWIN_DIALOG_CANCELLED" -> WinClipboardCalls.GWIN_DIALOG_CANCELLED;
+            case "GWIN_DIALOG_FAILED" -> WinClipboardCalls.GWIN_DIALOG_FAILED;
+            case "MONITORINFOF_PRIMARY" -> WinScreenCalls.MONITORINFOF_PRIMARY;
+            case "BITSPIXEL" -> WinScreenCalls.BITSPIXEL;
+            case "PLANES" -> WinScreenCalls.PLANES;
+            case "LOGPIXELSX" -> WinScreenCalls.LOGPIXELSX;
+            case "LOGPIXELSY" -> WinScreenCalls.LOGPIXELSY;
+            case "CCHDEVICENAME" -> WinScreenCalls.CCHDEVICENAME;
+            case "MDT_EFFECTIVE_DPI" -> WinScreenCalls.MDT_EFFECTIVE_DPI;
+            case "MDT_RAW_DPI" -> WinScreenCalls.MDT_RAW_DPI;
+            case "PROCESS_PER_MONITOR_DPI_AWARE" -> WinScreenCalls.PROCESS_PER_MONITOR_DPI_AWARE;
+            case "S_OK" -> WinScreenCalls.S_OK;
             default -> throw new IllegalArgumentException("no such constant: " + name);
         };
     }
@@ -244,7 +244,7 @@ public final class WinGlassNativeShim {
     }
 
     public static long inputOffset(String member, String field) {
-        return WinGlassNative.INPUT_LAYOUT.byteOffset(PathElement.groupElement("u"),
+        return WinRobotCalls.INPUT_LAYOUT.byteOffset(PathElement.groupElement("u"),
                 PathElement.groupElement(member), PathElement.groupElement(field));
     }
 
@@ -254,29 +254,29 @@ public final class WinGlassNativeShim {
 
     private static MemoryLayout layout(String struct) {
         return switch (struct) {
-            case "INPUT" -> WinGlassNative.INPUT_LAYOUT;
-            case "MOUSEINPUT" -> WinGlassNative.MOUSEINPUT_LAYOUT;
-            case "KEYBDINPUT" -> WinGlassNative.KEYBDINPUT_LAYOUT;
-            case "POINT" -> WinGlassNative.POINT_LAYOUT;
-            case "TIMECAPS" -> WinGlassNative.TIMECAPS_LAYOUT;
-            case "BITMAPINFOHEADER" -> WinGlassNative.BITMAPINFOHEADER_LAYOUT;
-            case "ICONINFO" -> WinGlassNative.ICONINFO_LAYOUT;
-            case "HIGHCONTRAST" -> WinGlassNative.HIGHCONTRAST_LAYOUT;
-            case "GwinUiSettings" -> WinGlassNative.GWIN_UI_SETTINGS_LAYOUT;
-            case "GwinNetworkInfo" -> WinGlassNative.GWIN_NETWORK_INFO_LAYOUT;
-            case "GwinPrefsCallbacks" -> WinGlassNative.GWIN_PREFS_CALLBACKS_LAYOUT;
-            case "GwinAppCallbacks" -> WinGlassNative.GWIN_APP_CALLBACKS_LAYOUT;
-            case "GwinMenuCallbacks" -> WinGlassNative.GWIN_MENU_CALLBACKS_LAYOUT;
-            case "GwinViewCallbacks" -> WinGlassNative.GWIN_VIEW_CALLBACKS_LAYOUT;
-            case "GwinGestureCallbacks" -> WinGlassNative.GWIN_GESTURE_CALLBACKS_LAYOUT;
-            case "GwinWindowCallbacks" -> WinGlassNative.GWIN_WINDOW_CALLBACKS_LAYOUT;
-            case "GwinClipboardCallbacks" -> WinGlassNative.GWIN_CLIPBOARD_CALLBACKS_LAYOUT;
-            case "GwinDndCallbacks" -> WinGlassNative.GWIN_DND_CALLBACKS_LAYOUT;
-            case "GwinFileFilter" -> WinGlassNative.GWIN_FILE_FILTER_LAYOUT;
-            case "RECT" -> WinGlassNative.RECT_LAYOUT;
-            case "MENUITEMINFOW" -> WinGlassNative.MENUITEMINFOW_LAYOUT;
-            case "MONITORINFOEXW" -> WinGlassNative.MONITORINFOEXW_LAYOUT;
-            case "GwinScreenCallbacks" -> WinGlassNative.SCREEN_CALLBACKS_LAYOUT;
+            case "INPUT" -> WinRobotCalls.INPUT_LAYOUT;
+            case "MOUSEINPUT" -> WinRobotCalls.MOUSEINPUT_LAYOUT;
+            case "KEYBDINPUT" -> WinRobotCalls.KEYBDINPUT_LAYOUT;
+            case "POINT" -> WinCallSupport.POINT_LAYOUT;
+            case "TIMECAPS" -> WinTimerCalls.TIMECAPS_LAYOUT;
+            case "BITMAPINFOHEADER" -> WinCursorCalls.BITMAPINFOHEADER_LAYOUT;
+            case "ICONINFO" -> WinCursorCalls.ICONINFO_LAYOUT;
+            case "HIGHCONTRAST" -> WinPreferenceCalls.HIGHCONTRAST_LAYOUT;
+            case "GwinUiSettings" -> WinPreferenceCalls.GWIN_UI_SETTINGS_LAYOUT;
+            case "GwinNetworkInfo" -> WinPreferenceCalls.GWIN_NETWORK_INFO_LAYOUT;
+            case "GwinPrefsCallbacks" -> WinPreferenceCalls.GWIN_PREFS_CALLBACKS_LAYOUT;
+            case "GwinAppCallbacks" -> WinApplicationCalls.GWIN_APP_CALLBACKS_LAYOUT;
+            case "GwinMenuCallbacks" -> WinMenuCalls.GWIN_MENU_CALLBACKS_LAYOUT;
+            case "GwinViewCallbacks" -> WinViewCallbacks.GWIN_VIEW_CALLBACKS_LAYOUT;
+            case "GwinGestureCallbacks" -> WinViewCallbacks.GWIN_GESTURE_CALLBACKS_LAYOUT;
+            case "GwinWindowCallbacks" -> WinWindowCallbacks.GWIN_WINDOW_CALLBACKS_LAYOUT;
+            case "GwinClipboardCallbacks" -> WinClipboardCallbacks.GWIN_CLIPBOARD_CALLBACKS_LAYOUT;
+            case "GwinDndCallbacks" -> WinClipboardCallbacks.GWIN_DND_CALLBACKS_LAYOUT;
+            case "GwinFileFilter" -> WinClipboardCalls.GWIN_FILE_FILTER_LAYOUT;
+            case "RECT" -> WinCallSupport.RECT_LAYOUT;
+            case "MENUITEMINFOW" -> WinMenuCalls.MENUITEMINFOW_LAYOUT;
+            case "MONITORINFOEXW" -> WinScreenCalls.MONITORINFOEXW_LAYOUT;
+            case "GwinScreenCallbacks" -> WinScreenCalls.SCREEN_CALLBACKS_LAYOUT;
             case "BITMAP" -> BITMAP_LAYOUT;
             default -> throw new IllegalArgumentException("no such layout: " + struct);
         };
@@ -285,19 +285,19 @@ public final class WinGlassNativeShim {
     /* The key table and the Win32 primitives. */
 
     public static int keyJavaToWindows(int javaKeyCode) {
-        return WinGlassNative.keyJavaToWindows(javaKeyCode);
+        return WinRobotCalls.keyJavaToWindows(javaKeyCode);
     }
 
     public static int keyWindowsToJava(int virtualKey) {
-        return WinGlassNative.keyWindowsToJava(virtualKey);
+        return WinRobotCalls.keyWindowsToJava(virtualKey);
     }
 
     public static boolean isExtendedKey(int virtualKey) {
-        return WinGlassNative.isExtendedKey(virtualKey);
+        return WinRobotCalls.isExtendedKey(virtualKey);
     }
 
     public static int mapVirtualKey(int code, int mapType) {
-        return WinGlassNative.mapVirtualKey(code, mapType);
+        return WinRobotCalls.mapVirtualKey(code, mapType);
     }
 
     public static int getSystemMetrics(int index) {
@@ -311,7 +311,7 @@ public final class WinGlassNativeShim {
     /* The key lock state, and the preference sources that are plain user32 calls. */
 
     public static short getKeyState(int virtualKey) {
-        return WinGlassNative.getKeyState(virtualKey);
+        return WinRobotCalls.getKeyState(virtualKey);
     }
 
     /** The facade's {@code _isKeyLocked}: {@code KEY_LOCK_ON}, {@code OFF} or {@code UNKNOWN}. */
@@ -439,20 +439,20 @@ public final class WinGlassNativeShim {
      * {@code SHCore.dll} and sets nothing.
      */
     public static void bindScreenSymbols() {
-        boolean ignoredResolved = WinGlassNative.dpiFunctionsResolved();
+        boolean ignoredResolved = WinScreenCalls.dpiFunctionsResolved();
     }
 
     /** Whether {@code shcore}'s three DPI functions resolved, i.e. which arm {@code GetMonitorSettings} takes. */
     public static boolean dpiFunctionsResolved() {
-        return WinGlassNative.dpiFunctionsResolved();
+        return WinScreenCalls.dpiFunctionsResolved();
     }
 
     public static int sizeOfScreenCallbacks() {
-        return WinGlassNative.sizeOfScreenCallbacks();
+        return WinScreenCalls.sizeOfScreenCallbacks();
     }
 
     public static boolean screenCallbacksInstalled() {
-        return WinGlassNative.screenCallbacksInstalled();
+        return WinScreenCalls.screenCallbacksInstalled();
     }
 
     /**
@@ -763,7 +763,7 @@ public final class WinGlassNativeShim {
 
     /**
      * {@code gwin_test_fire_screen_callback(slot)} with no table installed; the table is put back
-     * afterwards ({@code WinGlassNative.rewriteScreenCallbacks}).
+     * afterwards ({@code WinScreenCalls.rewriteScreenCallbacks}).
      */
     public static synchronized long fireScreenCallbackWithNoTable(int slot) {
         try {
@@ -772,7 +772,7 @@ public final class WinGlassNativeShim {
         } catch (Throwable t) {
             throw new AssertionError("the screen table could not be cleared or fired", t);
         } finally {
-            WinGlassNative.rewriteScreenCallbacks();
+            WinScreenCalls.rewriteScreenCallbacks();
         }
     }
 
@@ -788,7 +788,7 @@ public final class WinGlassNativeShim {
     public static synchronized ScreenFire fireScreenCallbackIntoRecordingTable(int slot, boolean nullSlot) {
         ScreenHooks.calls = 0;
         try (Arena arena = Arena.ofConfined()) {
-            MemorySegment table = arena.allocate(WinGlassNative.SCREEN_CALLBACKS_LAYOUT);
+            MemorySegment table = arena.allocate(WinScreenCalls.SCREEN_CALLBACKS_LAYOUT);
             table.set(ADDRESS, 0L, nullSlot ? MemorySegment.NULL : ScreenHooks.RECORDING_STUB);
             requireScreenTableWritten((int) ScreenHooks.SET.invokeExact(table));
             long returned = (long) ScreenHooks.FIRE.invokeExact(slot);
@@ -796,12 +796,12 @@ public final class WinGlassNativeShim {
         } catch (Throwable t) {
             throw new AssertionError("the recording screen table could not be installed or fired", t);
         } finally {
-            WinGlassNative.rewriteScreenCallbacks();
+            WinScreenCalls.rewriteScreenCallbacks();
         }
     }
 
     private static void requireScreenTableWritten(int status) {
-        if (status != WinGlassNative.GWIN_OK) {
+        if (status != WinCallSupport.GWIN_OK) {
             throw new AssertionError("gwin_screen_set_callbacks answered " + status);
         }
     }
@@ -846,8 +846,8 @@ public final class WinGlassNativeShim {
         private static MemorySegment recordingStub() {
             try {
                 MethodHandle target = MethodHandles.lookup().findStatic(ScreenHooks.class, "recordSettingsChanged",
-                        WinGlassNative.SCREEN_SETTINGS_CHANGED_FD.toMethodType());
-                return LINKER.upcallStub(target, WinGlassNative.SCREEN_SETTINGS_CHANGED_FD, Arena.global());
+                        WinScreenCalls.SCREEN_SETTINGS_CHANGED_FD.toMethodType());
+                return LINKER.upcallStub(target, WinScreenCalls.SCREEN_SETTINGS_CHANGED_FD, Arena.global());
             } catch (ReflectiveOperationException e) {
                 throw new AssertionError("no recording target recordSettingsChanged", e);
             }
@@ -887,7 +887,7 @@ public final class WinGlassNativeShim {
      */
     public static String schemeNameOf(String value) {
         try (Arena arena = Arena.ofConfined()) {
-            return WinGlassNative.schemeName(arena.allocateFrom(value, StandardCharsets.UTF_16LE));
+            return WinPreferenceCalls.schemeName(arena.allocateFrom(value, StandardCharsets.UTF_16LE));
         }
     }
 
@@ -906,13 +906,13 @@ public final class WinGlassNativeShim {
         try (Arena arena = Arena.ofConfined()) {
             MemorySegment buffer = arena.allocate(JAVA_CHAR, units.length);
             MemorySegment.copy(units, 0, buffer, JAVA_CHAR, 0, units.length);
-            return WinGlassNative.schemeName(buffer);
+            return WinPreferenceCalls.schemeName(buffer);
         }
     }
 
     /** The same reader handed a NULL pointer, which is what a zero-filled struct leaves behind. */
     public static String schemeNameOfNull() {
-        return WinGlassNative.schemeName(MemorySegment.NULL);
+        return WinPreferenceCalls.schemeName(MemorySegment.NULL);
     }
 
     /** {@code PlatformSupport::querySystemColors} in Java, into a map that accepts null values. */
@@ -969,12 +969,12 @@ public final class WinGlassNativeShim {
 
     /** {@code gwin_sizeof_ui_settings}: the C compiler's own {@code sizeof(GwinUiSettings)}. */
     public static int sizeOfUiSettings() {
-        return WinGlassNative.sizeOfUiSettings();
+        return WinPreferenceCalls.sizeOfUiSettings();
     }
 
     /** {@code gwin_sizeof_network_info}. */
     public static int sizeOfNetworkInfo() {
-        return WinGlassNative.sizeOfNetworkInfo();
+        return WinPreferenceCalls.sizeOfNetworkInfo();
     }
 
     /** {@link WinGlassNative.UiSettings} in a shape the test package can name. */
@@ -1046,7 +1046,7 @@ public final class WinGlassNativeShim {
 
     /** Whether the table has been installed in this JVM. */
     public static boolean preferencesCallbackInstalled() {
-        return WinGlassNative.preferencesCallbackInstalled();
+        return WinPreferenceCalls.preferencesCallbackInstalled();
     }
 
     /**
@@ -1059,7 +1059,7 @@ public final class WinGlassNativeShim {
      *         into {@code return 0} versus {@code DefWindowProc}
      */
     public static int firePreferencesChanged(int types) {
-        return WinGlassNative.onPreferencesChanged(MemorySegment.NULL, types);
+        return WinPreferenceCalls.onPreferencesChanged(MemorySegment.NULL, types);
     }
 
     /**
@@ -1108,7 +1108,7 @@ public final class WinGlassNativeShim {
 
     /** {@code gwin_sizeof_app_callbacks}. */
     public static int sizeOfAppCallbacks() {
-        return WinGlassNative.sizeOfAppCallbacks();
+        return WinApplicationCalls.sizeOfAppCallbacks();
     }
 
     /**
@@ -1122,7 +1122,7 @@ public final class WinGlassNativeShim {
 
     /** Whether the table has been installed in this JVM. */
     public static boolean applicationCallbackInstalled() {
-        return WinGlassNative.applicationCallbackInstalled();
+        return WinApplicationCalls.applicationCallbackInstalled();
     }
 
     /**
@@ -1131,7 +1131,7 @@ public final class WinGlassNativeShim {
      * reference crosses the ABI any more".
      */
     public static int runnableRegistrySize() {
-        return WinGlassNative.runnableRegistrySize();
+        return WinApplicationCalls.runnableRegistrySize();
     }
 
     /**
@@ -1139,7 +1139,7 @@ public final class WinGlassNativeShim {
      * library would have been given, so that {@link #runRunnableTarget} can play the callback.
      */
     public static long registerRunnable(Runnable runnable) {
-        return WinGlassNative.registerRunnable(runnable);
+        return WinApplicationCalls.registerRunnable(runnable);
     }
 
     /**
@@ -1148,13 +1148,13 @@ public final class WinGlassNativeShim {
      * {@code Throwable}-swallowing arms testable without a pump.
      */
     public static void runRunnableTarget(long id) {
-        WinGlassNative.onRunRunnable(MemorySegment.NULL, id);
+        WinApplicationCalls.onRunRunnable(MemorySegment.NULL, id);
     }
 
     /**
      * {@code gwin_invoke_later} with no toolkit window. Four of the six loop/invoke exports can be
      * called from a unit-test JVM, which never has a toolkit window: this one and
-     * {@code gwin_invoke_and_wait} answer {@link WinGlassNative#GWIN_ERR_NO_TOOLKIT} and run nothing;
+     * {@code gwin_invoke_and_wait} answer {@link WinCallSupport#GWIN_ERR_NO_TOOLKIT} and run nothing;
      * {@code gwin_terminate_loop} is {@code IsWindow(NULL)} and so a no-op; and
      * {@code gwin_leave_nested_event_loop} only raises a flag that {@code EnterNestedEventLoop}
      * resets first. The two that cannot be called are {@code gwin_run_loop} and
@@ -1164,9 +1164,9 @@ public final class WinGlassNativeShim {
      * @return the number of registry entries this call left behind, which must be 0
      */
     public static int submitWithNoToolkit(Runnable runnable) {
-        int before = WinGlassNative.runnableRegistrySize();
+        int before = WinApplicationCalls.runnableRegistrySize();
         WinGlassNative.submitForLaterInvocation(runnable);
-        return WinGlassNative.runnableRegistrySize() - before;
+        return WinApplicationCalls.runnableRegistrySize() - before;
     }
 
     /**
@@ -1176,9 +1176,9 @@ public final class WinGlassNativeShim {
      * @return the number of registry entries this call left behind, which must be 0
      */
     public static int invokeAndWaitWithNoToolkit(Runnable runnable) {
-        int before = WinGlassNative.runnableRegistrySize();
+        int before = WinApplicationCalls.runnableRegistrySize();
         WinGlassNative.invokeAndWait(runnable);
-        return WinGlassNative.runnableRegistrySize() - before;
+        return WinApplicationCalls.runnableRegistrySize() - before;
     }
 
     /**
@@ -1191,9 +1191,9 @@ public final class WinGlassNativeShim {
      * @return the number of registry entries this call left behind, which must be 0
      */
     public static int terminateLoopWithNoToolkit() {
-        int before = WinGlassNative.runnableRegistrySize();
+        int before = WinApplicationCalls.runnableRegistrySize();
         WinGlassNative.terminateLoop();
-        return WinGlassNative.runnableRegistrySize() - before;
+        return WinApplicationCalls.runnableRegistrySize() - before;
     }
 
     /**
@@ -1211,7 +1211,7 @@ public final class WinGlassNativeShim {
 
     /** {@code gwin_sizeof_menu_callbacks}. */
     public static int sizeOfMenuCallbacks() {
-        return WinGlassNative.sizeOfMenuCallbacks();
+        return WinMenuCalls.sizeOfMenuCallbacks();
     }
 
     /**
@@ -1224,7 +1224,7 @@ public final class WinGlassNativeShim {
 
     /** Whether the table has been installed in this JVM. */
     public static boolean menuCallbackInstalled() {
-        return WinGlassNative.menuCallbackInstalled();
+        return WinMenuCalls.menuCallbackInstalled();
     }
 
     /**
@@ -1247,7 +1247,7 @@ public final class WinGlassNativeShim {
      * @return 1 if handled, 0 if not - never a wider value, and never compared with {@code == 1}
      */
     public static int notifyMenuCommand(int cmdID) {
-        return WinGlassNative.onNotifyCommand(MemorySegment.NULL, cmdID);
+        return WinMenuCalls.onNotifyCommand(MemorySegment.NULL, cmdID);
     }
 
     /**
@@ -1282,12 +1282,12 @@ public final class WinGlassNativeShim {
      */
     public static int captureDirect(int x, int y, int width, int height, int[] buffer, long declaredLength) {
         if (buffer == null) {
-            return WinGlassNative.captureInto(x, y, width, height, MemorySegment.NULL, declaredLength);
+            return WinRobotCalls.captureInto(x, y, width, height, MemorySegment.NULL, declaredLength);
         }
         try (Arena arena = Arena.ofConfined()) {
             MemorySegment pixels = arena.allocate(JAVA_INT, buffer.length);
             MemorySegment.copy(buffer, 0, pixels, JAVA_INT, 0, buffer.length);
-            int status = WinGlassNative.captureInto(x, y, width, height, pixels, declaredLength);
+            int status = WinRobotCalls.captureInto(x, y, width, height, pixels, declaredLength);
             MemorySegment.copy(pixels, JAVA_INT, 0, buffer, 0, buffer.length);
             return status;
         }
@@ -1338,7 +1338,7 @@ public final class WinGlassNativeShim {
     /* The multimedia timer: winmm, bound lazily behind the facade. */
 
     /**
-     * Forces {@link WinGlassNative}'s lazy {@code winmm} block to bind, so that
+     * Forces the lazy {@code winmm} holder of {@link WinTimerCalls} to bind, so that
      * {@link #boundSymbols()} is the whole list whatever order the tests run in. Called from the
      * {@code @BeforeAll} of both Windows Glass binding test classes.
      */
@@ -1356,7 +1356,7 @@ public final class WinGlassNativeShim {
 
     /** {@code Timer::wTimerRes}: the resolution every {@code timeSetEvent} is given. */
     public static int timerResolution() {
-        return WinGlassNative.timerResolution();
+        return WinTimerCalls.timerResolution();
     }
 
     public static long timerStart(Runnable runnable, int period) {
@@ -1369,18 +1369,18 @@ public final class WinGlassNativeShim {
 
     /** How many timers are running: the registry that replaced the JNI global refs. */
     public static int timerRegistrySize() {
-        return WinGlassNative.timerRegistrySize();
+        return WinTimerCalls.timerRegistrySize();
     }
 
     /** {@code Timer::timersCount}: the {@code timeBeginPeriod}/{@code timeEndPeriod} refcount. */
     public static int timerPeriodRefCount() {
-        return WinGlassNative.timerPeriodRefCount();
+        return WinTimerCalls.timerPeriodRefCount();
     }
 
     /* WinCursor: the GDI cursor sequence and the two Win32 one-liners. */
 
     /**
-     * Forces {@link WinGlassNative}'s lazy {@code gdi32} block to bind, so that
+     * Forces the lazy {@code gdi32} holder of {@link WinCursorCalls} to bind, so that
      * {@link #boundSymbols()} is the whole list whatever order the tests run in. Called from the
      * {@code @BeforeAll} of both Windows Glass binding test classes, after
      * {@link #bindTimerSymbols()}, which fixes the order of the two lazy blocks.
@@ -1602,7 +1602,7 @@ public final class WinGlassNativeShim {
      */
     public static int[] readCursor(long cursor) {
         try (Arena arena = Arena.ofConfined()) {
-            MemorySegment iconInfo = arena.allocate(WinGlassNative.ICONINFO_LAYOUT);
+            MemorySegment iconInfo = arena.allocate(WinCursorCalls.ICONINFO_LAYOUT);
             if (call(Readback.GET_ICON_INFO, MemorySegment.ofAddress(cursor), iconInfo) == 0) {
                 return null;
             }
@@ -1634,21 +1634,21 @@ public final class WinGlassNativeShim {
     /** {@code GetDIBits} into {@code result[4..]}, top-down and 32 bits per pixel. */
     private static void readPixels(Arena arena, MemorySegment colour, int width, int height,
                                    int[] result) {
-        MemorySegment header = arena.allocate(WinGlassNative.BITMAPINFOHEADER_LAYOUT);
+        MemorySegment header = arena.allocate(WinCursorCalls.BITMAPINFOHEADER_LAYOUT);
         header.set(JAVA_INT, offset("BITMAPINFOHEADER", "biSize"),
-                (int) WinGlassNative.BITMAPINFOHEADER_LAYOUT.byteSize());
+                (int) WinCursorCalls.BITMAPINFOHEADER_LAYOUT.byteSize());
         header.set(JAVA_INT, offset("BITMAPINFOHEADER", "biWidth"), width);
         header.set(JAVA_INT, offset("BITMAPINFOHEADER", "biHeight"), -height);
         header.set(JAVA_SHORT, offset("BITMAPINFOHEADER", "biPlanes"), (short) 1);
         header.set(JAVA_SHORT, offset("BITMAPINFOHEADER", "biBitCount"), (short) 32);
-        header.set(JAVA_INT, offset("BITMAPINFOHEADER", "biCompression"), WinGlassNative.BI_RGB);
+        header.set(JAVA_INT, offset("BITMAPINFOHEADER", "biCompression"), WinCursorCalls.BI_RGB);
         header.set(JAVA_INT, offset("BITMAPINFOHEADER", "biSizeImage"), width * height * 4);
 
         MemorySegment pixels = arena.allocate(JAVA_INT, (long) width * height);
         MemorySegment dc = callAddress(Readback.GET_DC, MemorySegment.NULL);
         try {
             call(Readback.GET_DIBITS, dc, colour, 0, height, pixels, header,
-                    WinGlassNative.DIB_RGB_COLORS);
+                    WinCursorCalls.DIB_RGB_COLORS);
         } finally {
             call(Readback.RELEASE_DC, MemorySegment.NULL, dc);
         }
@@ -1690,7 +1690,7 @@ public final class WinGlassNativeShim {
 
     /** {@code kernel32!GetVersion}, raw, so a test can check the decoding rather than the platform. */
     public static int windowsVersion() {
-        return WinGlassNative.windowsVersion();
+        return WinApplicationCalls.windowsVersion();
     }
 
     /** {@code Utils.h}'s {@code IS_WINVER_ATLEAST(major, minor)}, now Java over {@code GetVersion}. */
@@ -1712,7 +1712,7 @@ public final class WinGlassNativeShim {
 
     /** {@code AssocQueryStringW(ASSOCF_NONE, ASSOCSTR_COMMAND, ...)} on any association. */
     public static String assocQueryCommand(String association) {
-        return WinGlassNative.assocQueryCommand(association);
+        return WinApplicationCalls.assocQueryCommand(association);
     }
 
     /** {@code WinApplication._getDefaultBrowser}'s replacement: the {@code https} command line. */
@@ -1802,36 +1802,36 @@ public final class WinGlassNativeShim {
     /* Menu read-back: what user32 says a menu contains, whoever built it. */
 
     public static boolean menuIsMenu(long hMenu) {
-        return WinGlassNative.menuIsMenu(hMenu);
+        return WinMenuCalls.menuIsMenu(hMenu);
     }
 
     public static int menuItemCount(long hMenu) {
-        return WinGlassNative.menuItemCount(hMenu);
+        return WinMenuCalls.menuItemCount(hMenu);
     }
 
     /** {@code {fType, fState, wID}}, or {@code null} when the item cannot be read. */
     public static int[] menuItemFlags(long hMenu, int pos) {
-        return WinGlassNative.menuItemFlags(hMenu, pos);
+        return WinMenuCalls.menuItemFlags(hMenu, pos);
     }
 
     public static long menuItemSubmenu(long hMenu, int pos) {
-        return WinGlassNative.menuItemSubmenu(hMenu, pos);
+        return WinMenuCalls.menuItemSubmenu(hMenu, pos);
     }
 
     public static String menuItemTitle(long hMenu, int pos) {
-        return WinGlassNative.menuItemTitle(hMenu, pos);
+        return WinMenuCalls.menuItemTitle(hMenu, pos);
     }
 
     /* The view: the gwin_view_* section, its two callback tables and the fifteen targets behind them. */
 
     /** {@code gwin_sizeof_view_callbacks}. */
     public static int sizeOfViewCallbacks() {
-        return WinGlassNative.sizeOfViewCallbacks();
+        return WinViewCallbacks.sizeOfViewCallbacks();
     }
 
     /** {@code gwin_sizeof_gesture_callbacks}. */
     public static int sizeOfGestureCallbacks() {
-        return WinGlassNative.sizeOfGestureCallbacks();
+        return WinViewCallbacks.sizeOfGestureCallbacks();
     }
 
     /** Installs both tables, which is idempotent and which {@code WinApplication}'s initializer has done. */
@@ -1840,25 +1840,25 @@ public final class WinGlassNativeShim {
     }
 
     public static boolean viewCallbacksInstalled() {
-        return WinGlassNative.viewCallbacksInstalled();
+        return WinViewCallbacks.viewCallbacksInstalled();
     }
 
     /** Writes the production tables again; what {@link #fireIntoRecordingTable} restores with. */
     public static void reinstallViewCallbacks() {
-        WinGlassNative.reinstallViewCallbacks();
+        WinViewCallbacks.reinstallViewCallbacks();
     }
 
     /** The addresses of the fifteen installed stubs, view slots then gesture slots; 0 would be a NULL slot. */
     public static List<Long> installedViewCallbackStubAddresses() {
-        return WinGlassNative.installedViewCallbackStubs().stream().map(MemorySegment::address).toList();
+        return WinViewCallbacks.installedViewCallbackStubs().stream().map(MemorySegment::address).toList();
     }
 
     public static List<String> viewSlotNames() {
-        return WinGlassNative.VIEW_SLOT_NAMES;
+        return WinViewCallbacks.VIEW_SLOT_NAMES;
     }
 
     public static List<String> gestureSlotNames() {
-        return WinGlassNative.GESTURE_SLOT_NAMES;
+        return WinViewCallbacks.GESTURE_SLOT_NAMES;
     }
 
     /**
@@ -1868,7 +1868,7 @@ public final class WinGlassNativeShim {
      * which check the thread.
      */
     public static long fireCallback(int slot, long viewId) {
-        return asEventThread(() -> WinGlassNative.testFireCallback(slot, viewId));
+        return asEventThread(() -> WinViewCallbacks.testFireCallback(slot, viewId));
     }
 
     /**
@@ -1959,7 +1959,7 @@ public final class WinGlassNativeShim {
 
     public static void notifyViewTarget(long id, int type) {
         asEventThread(() -> {
-            WinGlassNative.onNotifyView(id, type);
+            WinViewCallbacks.onNotifyView(id, type);
             return null;
         });
     }
@@ -1967,7 +1967,7 @@ public final class WinGlassNativeShim {
     /** {@code notify_key} with a {@code NULL} pointer and {@code count} code units. */
     public static void notifyKeyTargetWithNullChars(long id, int type, int keyCode, int count, int modifiers) {
         asEventThread(() -> {
-            WinGlassNative.onNotifyKey(id, type, keyCode, MemorySegment.NULL, count, modifiers);
+            WinViewCallbacks.onNotifyKey(id, type, keyCode, MemorySegment.NULL, count, modifiers);
             return null;
         });
     }
@@ -1977,7 +1977,7 @@ public final class WinGlassNativeShim {
                                                               int committedTextLength, int caretPos,
                                                               int visiblePos) {
         asEventThread(() -> {
-            WinGlassNative.onNotifyInputMethod(id, MemorySegment.NULL, textLen, MemorySegment.NULL, clauseCount,
+            WinViewCallbacks.onNotifyInputMethod(id, MemorySegment.NULL, textLen, MemorySegment.NULL, clauseCount,
                     MemorySegment.NULL, MemorySegment.NULL, attrCount, committedTextLength, caretPos, visiblePos);
             return null;
         });
@@ -1997,14 +1997,14 @@ public final class WinGlassNativeShim {
                 MemorySegment out = arena.allocate(JAVA_DOUBLE, 2);
                 out.setAtIndex(JAVA_DOUBLE, 0, Double.NaN);
                 out.setAtIndex(JAVA_DOUBLE, 1, Double.NaN);
-                int status = WinGlassNative.onNotifyImeCandidatePosRequest(id, offset, out);
+                int status = WinViewCallbacks.onNotifyImeCandidatePosRequest(id, offset, out);
                 return new CandidatePos(status, out.getAtIndex(JAVA_DOUBLE, 0), out.getAtIndex(JAVA_DOUBLE, 1));
             }
         });
     }
 
     public static long getAccessibleTarget(long id) {
-        return asEventThread(() -> WinGlassNative.onGetAccessible(id));
+        return asEventThread(() -> WinViewCallbacks.onGetAccessible(id));
     }
 
     public static void gesturePerformedTarget(long id, int modifiers, boolean isDirect, boolean isInertia,
@@ -2012,7 +2012,7 @@ public final class WinGlassNativeShim {
                                               float totalDx, float totalDy, float totalScale,
                                               float totalExpansion, float totalRotation) {
         asEventThread(() -> {
-            WinGlassNative.onGesturePerformed(id, modifiers, isDirect ? 1 : 0, isInertia ? 1 : 0, x, y, xAbs,
+            WinViewCallbacks.onGesturePerformed(id, modifiers, isDirect ? 1 : 0, isInertia ? 1 : 0, x, y, xAbs,
                     yAbs, dx, dy, totalDx, totalDy, totalScale, totalExpansion, totalRotation);
             return null;
         });
@@ -2020,14 +2020,14 @@ public final class WinGlassNativeShim {
 
     public static void inertiaGestureFinishedTarget(long id) {
         asEventThread(() -> {
-            WinGlassNative.onInertiaGestureFinished(id);
+            WinViewCallbacks.onInertiaGestureFinished(id);
             return null;
         });
     }
 
     public static void notifyBeginTouchEventTarget(long id, int modifiers, boolean isDirect, int touchEventCount) {
         asEventThread(() -> {
-            WinGlassNative.onNotifyBeginTouchEvent(id, modifiers, isDirect ? 1 : 0, touchEventCount);
+            WinViewCallbacks.onNotifyBeginTouchEvent(id, modifiers, isDirect ? 1 : 0, touchEventCount);
             return null;
         });
     }
@@ -2035,14 +2035,14 @@ public final class WinGlassNativeShim {
     public static void notifyNextTouchEventTarget(long id, int state, long touchId, int x, int y, int xAbs,
                                                   int yAbs) {
         asEventThread(() -> {
-            WinGlassNative.onNotifyNextTouchEvent(id, state, touchId, x, y, xAbs, yAbs);
+            WinViewCallbacks.onNotifyNextTouchEvent(id, state, touchId, x, y, xAbs, yAbs);
             return null;
         });
     }
 
     public static void notifyEndTouchEventTarget(long id) {
         asEventThread(() -> {
-            WinGlassNative.onNotifyEndTouchEvent(id);
+            WinViewCallbacks.onNotifyEndTouchEvent(id);
             return null;
         });
     }
@@ -2070,23 +2070,23 @@ public final class WinGlassNativeShim {
     public static synchronized RecordedCall fireIntoRecordingTable(int slot, long viewId) {
         Recording.ARGUMENTS.clear();
         try (Arena arena = Arena.ofConfined()) {
-            MemorySegment viewTable = arena.allocate(WinGlassNative.GWIN_VIEW_CALLBACKS_LAYOUT);
-            WinGlassNative.fillCallbackTable(viewTable, WinGlassNative.GWIN_VIEW_CALLBACKS_LAYOUT,
-                    WinGlassNative.VIEW_SLOT_NAMES, Recording.VIEW_STUBS);
+            MemorySegment viewTable = arena.allocate(WinViewCallbacks.GWIN_VIEW_CALLBACKS_LAYOUT);
+            WinCallSupport.fillCallbackTable(viewTable, WinViewCallbacks.GWIN_VIEW_CALLBACKS_LAYOUT,
+                    WinViewCallbacks.VIEW_SLOT_NAMES, Recording.VIEW_STUBS);
             int viewStatus = (int) Recording.SET_VIEW_CALLBACKS.invokeExact(viewTable);
-            MemorySegment gestureTable = arena.allocate(WinGlassNative.GWIN_GESTURE_CALLBACKS_LAYOUT);
-            WinGlassNative.fillCallbackTable(gestureTable, WinGlassNative.GWIN_GESTURE_CALLBACKS_LAYOUT,
-                    WinGlassNative.GESTURE_SLOT_NAMES, Recording.GESTURE_STUBS);
+            MemorySegment gestureTable = arena.allocate(WinViewCallbacks.GWIN_GESTURE_CALLBACKS_LAYOUT);
+            WinCallSupport.fillCallbackTable(gestureTable, WinViewCallbacks.GWIN_GESTURE_CALLBACKS_LAYOUT,
+                    WinViewCallbacks.GESTURE_SLOT_NAMES, Recording.GESTURE_STUBS);
             int gestureStatus = (int) Recording.SET_GESTURE_CALLBACKS.invokeExact(gestureTable);
-            if (viewStatus != WinGlassNative.GWIN_OK || gestureStatus != WinGlassNative.GWIN_OK) {
+            if (viewStatus != WinCallSupport.GWIN_OK || gestureStatus != WinCallSupport.GWIN_OK) {
                 throw new AssertionError("gwin_*_set_callbacks answered " + viewStatus + " / " + gestureStatus);
             }
-            long returned = WinGlassNative.testFireCallback(slot, viewId);
+            long returned = WinViewCallbacks.testFireCallback(slot, viewId);
             return new RecordedCall(returned, List.copyOf(Recording.ARGUMENTS));
         } catch (Throwable t) {
             throw new AssertionError("the recording table could not be installed or fired", t);
         } finally {
-            WinGlassNative.reinstallViewCallbacks();
+            WinViewCallbacks.reinstallViewCallbacks();
         }
     }
 
@@ -2112,18 +2112,18 @@ public final class WinGlassNativeShim {
                 new String[] {"recordNotifyView", "recordNotifyResize", "recordNotifyRepaint", "recordNotifyMenu",
                     "recordNotifyKey", "recordNotifyMouse", "recordNotifyScroll", "recordNotifyInputMethod",
                     "recordNotifyImeCandidatePosRequest", "recordGetAccessible"},
-                new FunctionDescriptor[] {WinGlassNative.NOTIFY_VIEW_FD, WinGlassNative.NOTIFY_RESIZE_FD,
-                    WinGlassNative.NOTIFY_REPAINT_FD, WinGlassNative.NOTIFY_MENU_FD, WinGlassNative.NOTIFY_KEY_FD,
-                    WinGlassNative.NOTIFY_MOUSE_FD, WinGlassNative.NOTIFY_SCROLL_FD,
-                    WinGlassNative.NOTIFY_INPUT_METHOD_FD, WinGlassNative.NOTIFY_IME_CANDIDATE_POS_REQUEST_FD,
-                    WinGlassNative.GET_ACCESSIBLE_FD});
+                new FunctionDescriptor[] {WinViewCallbacks.NOTIFY_VIEW_FD, WinViewCallbacks.NOTIFY_RESIZE_FD,
+                    WinViewCallbacks.NOTIFY_REPAINT_FD, WinViewCallbacks.NOTIFY_MENU_FD, WinViewCallbacks.NOTIFY_KEY_FD,
+                    WinViewCallbacks.NOTIFY_MOUSE_FD, WinViewCallbacks.NOTIFY_SCROLL_FD,
+                    WinViewCallbacks.NOTIFY_INPUT_METHOD_FD, WinViewCallbacks.NOTIFY_IME_CANDIDATE_POS_REQUEST_FD,
+                    WinViewCallbacks.GET_ACCESSIBLE_FD});
 
         private static final MemorySegment[] GESTURE_STUBS = stubs(
                 new String[] {"recordGesturePerformed", "recordInertiaGestureFinished",
                     "recordNotifyBeginTouchEvent", "recordNotifyNextTouchEvent", "recordNotifyEndTouchEvent"},
-                new FunctionDescriptor[] {WinGlassNative.GESTURE_PERFORMED_FD,
-                    WinGlassNative.INERTIA_GESTURE_FINISHED_FD, WinGlassNative.NOTIFY_BEGIN_TOUCH_EVENT_FD,
-                    WinGlassNative.NOTIFY_NEXT_TOUCH_EVENT_FD, WinGlassNative.NOTIFY_END_TOUCH_EVENT_FD});
+                new FunctionDescriptor[] {WinViewCallbacks.GESTURE_PERFORMED_FD,
+                    WinViewCallbacks.INERTIA_GESTURE_FINISHED_FD, WinViewCallbacks.NOTIFY_BEGIN_TOUCH_EVENT_FD,
+                    WinViewCallbacks.NOTIFY_NEXT_TOUCH_EVENT_FD, WinViewCallbacks.NOTIFY_END_TOUCH_EVENT_FD});
 
         private Recording() {
         }
@@ -2245,7 +2245,7 @@ public final class WinGlassNativeShim {
     /* The Pixels resolution of _uploadPixels, and the multi-click A/B. */
 
     /**
-     * What {@code WinGlassNative.pixelBits} produced for {@code buffer}: whether it was {@code NULL},
+     * What {@code WinViewCalls.pixelBits} produced for {@code buffer}: whether it was {@code NULL},
      * its address, the address {@link MemorySegment#ofBuffer} would give the buffer <em>as
      * positioned</em> (direct buffers only, 0 otherwise), and the first {@code width * height} ints
      * behind it.
@@ -2256,7 +2256,7 @@ public final class WinGlassNativeShim {
     @SuppressWarnings("restricted")
     public static PixelBits pixelBits(Buffer buffer, int width, int height) {
         try (Arena arena = Arena.ofConfined()) {
-            MemorySegment bits = WinGlassNative.pixelBits(arena, buffer, width, height);
+            MemorySegment bits = WinViewCalls.pixelBits(arena, buffer, width, height);
             if (bits.equals(MemorySegment.NULL)) {
                 return new PixelBits(true, 0L, 0L, null);
             }
@@ -2272,7 +2272,7 @@ public final class WinGlassNativeShim {
      */
 
     public static int sizeOfWindowCallbacks() {
-        return WinGlassNative.sizeOfWindowCallbacks();
+        return WinWindowCallbacks.sizeOfWindowCallbacks();
     }
 
     public static void installWindowCallbacks() {
@@ -2280,20 +2280,20 @@ public final class WinGlassNativeShim {
     }
 
     public static boolean windowCallbacksInstalled() {
-        return WinGlassNative.windowCallbacksInstalled();
+        return WinWindowCallbacks.windowCallbacksInstalled();
     }
 
     public static void reinstallWindowCallbacks() {
-        WinGlassNative.reinstallWindowCallbacks();
+        WinWindowCallbacks.reinstallWindowCallbacks();
     }
 
     /** The addresses of the twelve installed stubs in slot order; 0 would be a NULL slot. */
     public static List<Long> installedWindowCallbackStubAddresses() {
-        return WinGlassNative.installedWindowCallbackStubs().stream().map(MemorySegment::address).toList();
+        return WinWindowCallbacks.installedWindowCallbackStubs().stream().map(MemorySegment::address).toList();
     }
 
     public static List<String> windowSlotNames() {
-        return WinGlassNative.WINDOW_SLOT_NAMES;
+        return WinWindowCallbacks.WINDOW_SLOT_NAMES;
     }
 
     /**
@@ -2433,14 +2433,14 @@ public final class WinGlassNativeShim {
 
     public static void windowCloseTarget(long id) {
         asEventThread(() -> {
-            WinGlassNative.onWindowClose(id);
+            WinWindowCallbacks.onWindowClose(id);
             return null;
         });
     }
 
     public static void windowDestroyTarget(long id) {
         asEventThread(() -> {
-            WinGlassNative.onWindowDestroy(id);
+            WinWindowCallbacks.onWindowDestroy(id);
             return null;
         });
     }
@@ -2461,7 +2461,7 @@ public final class WinGlassNativeShim {
                 for (int i = 0; i < 4; i++) {
                     out.setAtIndex(JAVA_INT, i, UNTOUCHED);
                 }
-                int status = WinGlassNative.onWindowMoving(id, x, y, w, h, fxX, fxY, anchorX, anchorY, resizeMode,
+                int status = WinWindowCallbacks.onWindowMoving(id, x, y, w, h, fxX, fxY, anchorX, anchorY, resizeMode,
                         iLft, iTop, iRgt, iBot, out);
                 return new MovingResult(status, out.toArray(JAVA_INT));
             }
@@ -2470,14 +2470,14 @@ public final class WinGlassNativeShim {
 
     public static void windowMoveTarget(long id, int x, int y) {
         asEventThread(() -> {
-            WinGlassNative.onWindowMove(id, x, y);
+            WinWindowCallbacks.onWindowMove(id, x, y);
             return null;
         });
     }
 
     public static void windowResizeTarget(long id, int type, int width, int height) {
         asEventThread(() -> {
-            WinGlassNative.onWindowResize(id, type, width, height);
+            WinWindowCallbacks.onWindowResize(id, type, width, height);
             return null;
         });
     }
@@ -2485,46 +2485,46 @@ public final class WinGlassNativeShim {
     public static void windowScaleChangedTarget(long id, float platformX, float platformY, float outputX,
                                                 float outputY) {
         asEventThread(() -> {
-            WinGlassNative.onWindowScaleChanged(id, platformX, platformY, outputX, outputY);
+            WinWindowCallbacks.onWindowScaleChanged(id, platformX, platformY, outputX, outputY);
             return null;
         });
     }
 
     public static void windowFocusTarget(long id, int event) {
         asEventThread(() -> {
-            WinGlassNative.onWindowFocus(id, event);
+            WinWindowCallbacks.onWindowFocus(id, event);
             return null;
         });
     }
 
     public static void windowFocusDisabledTarget(long id) {
         asEventThread(() -> {
-            WinGlassNative.onWindowFocusDisabled(id);
+            WinWindowCallbacks.onWindowFocusDisabled(id);
             return null;
         });
     }
 
     public static void windowFocusUngrabTarget(long id) {
         asEventThread(() -> {
-            WinGlassNative.onWindowFocusUngrab(id);
+            WinWindowCallbacks.onWindowFocusUngrab(id);
             return null;
         });
     }
 
     public static void windowDelegatePtrTarget(long id, long delegateHwnd) {
         asEventThread(() -> {
-            WinGlassNative.onWindowDelegatePtr(id, MemorySegment.ofAddress(delegateHwnd));
+            WinWindowCallbacks.onWindowDelegatePtr(id, MemorySegment.ofAddress(delegateHwnd));
             return null;
         });
     }
 
     public static int windowNonClientHitTestTarget(long id, int x, int y) {
-        return asEventThread(() -> WinGlassNative.onWindowNonClientHitTest(id, x, y));
+        return asEventThread(() -> WinWindowCallbacks.onWindowNonClientHitTest(id, x, y));
     }
 
     public static void windowDisposeTarget(long id) {
         asEventThread(() -> {
-            WinGlassNative.onWindowDispose(id);
+            WinWindowCallbacks.onWindowDispose(id);
             return null;
         });
     }
@@ -2558,14 +2558,14 @@ public final class WinGlassNativeShim {
     public static synchronized long fireWindowCallbackWithNoTable(int slot, long windowId) {
         try (Arena arena = Arena.ofConfined()) {
             int status = (int) WindowRecording.SET_WINDOW_CALLBACKS.invokeExact(MemorySegment.NULL);
-            if (status != WinGlassNative.GWIN_OK) {
+            if (status != WinCallSupport.GWIN_OK) {
                 throw new AssertionError("gwin_window_set_callbacks(NULL) answered " + status);
             }
             return WindowRecording.fire(slot, windowId, untouchedBounds(arena));
         } catch (Throwable t) {
             throw new AssertionError("the window table could not be cleared or fired", t);
         } finally {
-            WinGlassNative.reinstallWindowCallbacks();
+            WinWindowCallbacks.reinstallWindowCallbacks();
         }
     }
 
@@ -2601,11 +2601,11 @@ public final class WinGlassNativeShim {
         WindowRecording.ARGUMENTS.clear();
         WindowRecording.movingWrites = movingWrites;
         try (Arena arena = Arena.ofConfined()) {
-            MemorySegment table = arena.allocate(WinGlassNative.GWIN_WINDOW_CALLBACKS_LAYOUT);
-            WinGlassNative.fillCallbackTable(table, WinGlassNative.GWIN_WINDOW_CALLBACKS_LAYOUT,
-                    WinGlassNative.WINDOW_SLOT_NAMES, WindowRecording.STUBS);
+            MemorySegment table = arena.allocate(WinWindowCallbacks.GWIN_WINDOW_CALLBACKS_LAYOUT);
+            WinCallSupport.fillCallbackTable(table, WinWindowCallbacks.GWIN_WINDOW_CALLBACKS_LAYOUT,
+                    WinWindowCallbacks.WINDOW_SLOT_NAMES, WindowRecording.STUBS);
             int status = (int) WindowRecording.SET_WINDOW_CALLBACKS.invokeExact(table);
-            if (status != WinGlassNative.GWIN_OK) {
+            if (status != WinCallSupport.GWIN_OK) {
                 throw new AssertionError("gwin_window_set_callbacks answered " + status);
             }
             MemorySegment out = withOut ? untouchedBounds(arena) : MemorySegment.NULL;
@@ -2615,7 +2615,7 @@ public final class WinGlassNativeShim {
         } catch (Throwable t) {
             throw new AssertionError("the recording window table could not be installed or fired", t);
         } finally {
-            WinGlassNative.reinstallWindowCallbacks();
+            WinWindowCallbacks.reinstallWindowCallbacks();
         }
     }
 
@@ -2657,13 +2657,13 @@ public final class WinGlassNativeShim {
                     "recordNotifyResize", "recordNotifyScaleChanged", "recordNotifyFocus",
                     "recordNotifyFocusDisabled", "recordNotifyFocusUngrab", "recordNotifyDelegatePtr",
                     "recordNonClientHitTest", "recordNotifyDispose"},
-                new FunctionDescriptor[] {WinGlassNative.WINDOW_NOTIFY_CLOSE_FD,
-                    WinGlassNative.WINDOW_NOTIFY_DESTROY_FD, WinGlassNative.WINDOW_NOTIFY_MOVING_FD,
-                    WinGlassNative.WINDOW_NOTIFY_MOVE_FD, WinGlassNative.WINDOW_NOTIFY_RESIZE_FD,
-                    WinGlassNative.WINDOW_NOTIFY_SCALE_CHANGED_FD, WinGlassNative.WINDOW_NOTIFY_FOCUS_FD,
-                    WinGlassNative.WINDOW_NOTIFY_FOCUS_DISABLED_FD, WinGlassNative.WINDOW_NOTIFY_FOCUS_UNGRAB_FD,
-                    WinGlassNative.WINDOW_NOTIFY_DELEGATE_PTR_FD, WinGlassNative.WINDOW_NON_CLIENT_HIT_TEST_FD,
-                    WinGlassNative.WINDOW_NOTIFY_DISPOSE_FD});
+                new FunctionDescriptor[] {WinWindowCallbacks.WINDOW_NOTIFY_CLOSE_FD,
+                    WinWindowCallbacks.WINDOW_NOTIFY_DESTROY_FD, WinWindowCallbacks.WINDOW_NOTIFY_MOVING_FD,
+                    WinWindowCallbacks.WINDOW_NOTIFY_MOVE_FD, WinWindowCallbacks.WINDOW_NOTIFY_RESIZE_FD,
+                    WinWindowCallbacks.WINDOW_NOTIFY_SCALE_CHANGED_FD, WinWindowCallbacks.WINDOW_NOTIFY_FOCUS_FD,
+                    WinWindowCallbacks.WINDOW_NOTIFY_FOCUS_DISABLED_FD,
+                    WinWindowCallbacks.WINDOW_NOTIFY_FOCUS_UNGRAB_FD, WinWindowCallbacks.WINDOW_NOTIFY_DELEGATE_PTR_FD,
+                    WinWindowCallbacks.WINDOW_NON_CLIENT_HIT_TEST_FD, WinWindowCallbacks.WINDOW_NOTIFY_DISPOSE_FD});
 
         private WindowRecording() {
         }
@@ -2840,7 +2840,7 @@ public final class WinGlassNativeShim {
     }
 
     public static long packAnchor(int deltaX, int deltaY) {
-        return WinGlassNative.packAnchor(deltaX, deltaY);
+        return WinWindowCalls.packAnchor(deltaX, deltaY);
     }
 
     public static long anchorNoCapture() {
@@ -2988,7 +2988,7 @@ public final class WinGlassNativeShim {
     /** {@code GetCursorPos} through the read-back's own bind: {@code {x, y}}, or {@code null} if it failed. */
     public static int[] cursorPosNow() {
         try (Arena arena = Arena.ofConfined()) {
-            MemorySegment point = arena.allocate(WinGlassNative.POINT_LAYOUT);
+            MemorySegment point = arena.allocate(WinCallSupport.POINT_LAYOUT);
             if ((int) Readback.GET_CURSOR_POS.invokeExact(point) == 0) {
                 return null;
             }
@@ -3001,7 +3001,7 @@ public final class WinGlassNativeShim {
     /** {@code GetWindowRect} through the read-back's own bind: {@code {left, top, right, bottom}}, or {@code null}. */
     public static int[] windowRectNow(long hwnd) {
         try (Arena arena = Arena.ofConfined()) {
-            MemorySegment rect = arena.allocate(WinGlassNative.RECT_LAYOUT);
+            MemorySegment rect = arena.allocate(WinCallSupport.RECT_LAYOUT);
             if ((int) Readback.GET_WINDOW_RECT.invokeExact(MemorySegment.ofAddress(hwnd), rect) == 0) {
                 return null;
             }
@@ -3053,7 +3053,7 @@ public final class WinGlassNativeShim {
     }
 
     public static long moduleHandle(String fileName) {
-        return WinGlassNative.moduleHandle(fileName);
+        return WinCursorCalls.moduleHandle(fileName);
     }
 
     /** {@code LoadCursorW(module, MAKEINTRESOURCE(ordinal))} through the read-back's own bind: the oracle. */
@@ -3079,7 +3079,7 @@ public final class WinGlassNativeShim {
      */
     public static int iconKind(long handle) {
         try (Arena arena = Arena.ofConfined()) {
-            MemorySegment iconInfo = arena.allocate(WinGlassNative.ICONINFO_LAYOUT);
+            MemorySegment iconInfo = arena.allocate(WinCursorCalls.ICONINFO_LAYOUT);
             if (call(Readback.GET_ICON_INFO, MemorySegment.ofAddress(handle), iconInfo) == 0) {
                 return -1;
             }
@@ -3100,15 +3100,15 @@ public final class WinGlassNativeShim {
     /* The clipboard, drag-and-drop and dialog section: two tables, sixteen targets, nineteen exports. */
 
     public static int sizeOfClipboardCallbacks() {
-        return WinGlassNative.sizeOfClipboardCallbacks();
+        return WinClipboardCalls.sizeOfClipboardCallbacks();
     }
 
     public static int sizeOfDndCallbacks() {
-        return WinGlassNative.sizeOfDndCallbacks();
+        return WinClipboardCalls.sizeOfDndCallbacks();
     }
 
     public static int sizeOfFileFilter() {
-        return WinGlassNative.sizeOfFileFilter();
+        return WinClipboardCalls.sizeOfFileFilter();
     }
 
     /** Installs the clipboard table; idempotent, and already done by {@code WinGlassNative}'s own initializer. */
@@ -3147,11 +3147,11 @@ public final class WinGlassNativeShim {
     }
 
     public static List<String> clipboardSlotNames() {
-        return WinGlassNative.CLIPBOARD_SLOT_NAMES;
+        return WinClipboardCallbacks.CLIPBOARD_SLOT_NAMES;
     }
 
     public static List<String> dndSlotNames() {
-        return WinGlassNative.DND_SLOT_NAMES;
+        return WinClipboardCallbacks.DND_SLOT_NAMES;
     }
 
     /* Headless clipboard peers and their registry. */
@@ -3314,10 +3314,10 @@ public final class WinGlassNativeShim {
             MemorySegment outLen = arena.allocate(JAVA_INT);
             outData.set(ADDRESS, 0, MemorySegment.ofAddress(0x5A5A_5A5AL));
             outLen.set(JAVA_INT, 0, 0x5A5A);
-            int status = WinGlassNative.onFosSerialize(id, cString(arena, mime), lindex, outData, outLen);
+            int status = WinClipboardCallbacks.onFosSerialize(id, cString(arena, mime), lindex, outData, outLen);
             MemorySegment block = outData.get(ADDRESS, 0);
             int length = outLen.get(JAVA_INT, 0);
-            if (status != WinGlassNative.GWIN_OK) {
+            if (status != WinCallSupport.GWIN_OK) {
                 // On a throw nothing may have been written: report the sentinels as "untouched".
                 boolean untouched = block.address() == 0x5A5A_5A5AL && length == 0x5A5A;
                 return new FosResult(status, null, untouched ? -1 : length, false);
@@ -3328,33 +3328,33 @@ public final class WinGlassNativeShim {
             try {
                 return new FosResult(status, bounded(block, length).toArray(JAVA_BYTE), length, false);
             } finally {
-                WinGlassNative.gwinFree(block);
+                WinClipboardCalls.gwinFree(block);
             }
         }
     }
 
     public static int actionPerformedTarget(long id, int action) {
-        return WinGlassNative.onActionPerformed(id, action);
+        return WinClipboardCallbacks.onActionPerformed(id, action);
     }
 
     public static void dragActionPerformedTarget(long id, int action) {
-        WinGlassNative.onDragActionPerformed(id, action);
+        WinClipboardCallbacks.onDragActionPerformed(id, action);
     }
 
     public static void contentChangedTarget(long id) {
-        WinGlassNative.onContentChanged(id);
+        WinClipboardCallbacks.onContentChanged(id);
     }
 
     public static void disposePeerTarget(long id) {
-        WinGlassNative.onDisposePeer(id);
+        WinClipboardCallbacks.onDisposePeer(id);
     }
 
     public static void setDataObjectTarget(long id, long handle) {
-        WinGlassNative.onSetDataObject(id, MemorySegment.ofAddress(handle));
+        WinClipboardCallbacks.onSetDataObject(id, MemorySegment.ofAddress(handle));
     }
 
     public static void dataObjectDisposedTarget(long id) {
-        WinGlassNative.onDataObjectDisposed(id);
+        WinClipboardCallbacks.onDataObjectDisposed(id);
     }
 
     /* The nine drag targets, driven directly. */
@@ -3367,15 +3367,15 @@ public final class WinGlassNativeShim {
     private static final int UNTOUCHED_ACTION = 0x7E7E_7E7E;
 
     public static DragResult dragEnterTarget(long viewId, int x, int y, int xAbs, int yAbs, int recommended) {
-        return dragTarget(out -> WinGlassNative.onDragEnter(viewId, x, y, xAbs, yAbs, recommended, out));
+        return dragTarget(out -> WinClipboardCallbacks.onDragEnter(viewId, x, y, xAbs, yAbs, recommended, out));
     }
 
     public static DragResult dragOverTarget(long viewId, int x, int y, int xAbs, int yAbs, int recommended) {
-        return dragTarget(out -> WinGlassNative.onDragOver(viewId, x, y, xAbs, yAbs, recommended, out));
+        return dragTarget(out -> WinClipboardCallbacks.onDragOver(viewId, x, y, xAbs, yAbs, recommended, out));
     }
 
     public static DragResult dragDropTarget(long viewId, int x, int y, int xAbs, int yAbs, int recommended) {
-        return dragTarget(out -> WinGlassNative.onDragDrop(viewId, x, y, xAbs, yAbs, recommended, out));
+        return dragTarget(out -> WinClipboardCallbacks.onDragDrop(viewId, x, y, xAbs, yAbs, recommended, out));
     }
 
     private static DragResult dragTarget(java.util.function.ToIntFunction<MemorySegment> target) {
@@ -3389,7 +3389,7 @@ public final class WinGlassNativeShim {
     }
 
     public static int dragLeaveTarget(long viewId) {
-        return WinGlassNative.onDragLeave(viewId);
+        return WinClipboardCallbacks.onDragLeave(viewId);
     }
 
     /**
@@ -3403,22 +3403,22 @@ public final class WinGlassNativeShim {
         try (Arena arena = Arena.ofConfined()) {
             MemorySegment out = arena.allocate(ADDRESS);
             out.set(ADDRESS, 0, MemorySegment.ofAddress(0x5A5A_5A5AL));
-            int status = WinGlassNative.onDndGetDataObject(out);
+            int status = WinClipboardCallbacks.onDndGetDataObject(out);
             long handle = out.get(ADDRESS, 0).address();
             return new HandleResult(status, handle == 0x5A5A_5A5AL ? -1L : handle);
         }
     }
 
     public static int dndSetDataObjectTarget(long handle) {
-        return WinGlassNative.onDndSetDataObject(MemorySegment.ofAddress(handle));
+        return WinClipboardCallbacks.onDndSetDataObject(MemorySegment.ofAddress(handle));
     }
 
     public static int dndSetSourceSupportedActionsTarget(int actions) {
-        return WinGlassNative.onDndSetSourceSupportedActions(actions);
+        return WinClipboardCallbacks.onDndSetSourceSupportedActions(actions);
     }
 
     public static int dndSetDragButtonTarget(int button) {
-        return WinGlassNative.onDndSetDragButton(button);
+        return WinClipboardCallbacks.onDndSetDragButton(button);
     }
 
     /** What {@code dnd_get_drag_button} answered: the status and {@code *out_button} (-1 when untouched). */
@@ -3429,7 +3429,7 @@ public final class WinGlassNativeShim {
         try (Arena arena = Arena.ofConfined()) {
             MemorySegment out = arena.allocate(JAVA_INT);
             out.set(JAVA_INT, 0, UNTOUCHED_ACTION);
-            int status = WinGlassNative.onDndGetDragButton(out);
+            int status = WinClipboardCallbacks.onDndGetDragButton(out);
             int button = out.get(JAVA_INT, 0);
             return new ButtonResult(status, button == UNTOUCHED_ACTION ? -1 : button);
         }
@@ -3438,16 +3438,16 @@ public final class WinGlassNativeShim {
     /* The downcalls, headless: every marshalled one answers its defined no-toolkit value. */
 
     public static long gwinAlloc(long size) {
-        return WinGlassNative.gwinAlloc(size).address();
+        return WinClipboardCalls.gwinAlloc(size).address();
     }
 
     public static void gwinFree(long block) {
-        WinGlassNative.gwinFree(MemorySegment.ofAddress(block));
+        WinClipboardCalls.gwinFree(MemorySegment.ofAddress(block));
     }
 
     /** The UTF-16 code units the block of {@code strings} occupies. */
     public static long stringBlockUnits(String[] strings) {
-        return WinGlassNative.stringBlockUnits(strings);
+        return WinClipboardCalls.stringBlockUnits(strings);
     }
 
     /**
@@ -3457,23 +3457,23 @@ public final class WinGlassNativeShim {
      */
     @SuppressWarnings("restricted")
     public static String[] stringBlockRoundTrip(String[] strings) {
-        long bytes = WinGlassNative.stringBlockUnits(strings) * JAVA_CHAR.byteSize();
-        MemorySegment block = WinGlassNative.gwinAlloc(bytes);
+        long bytes = WinClipboardCalls.stringBlockUnits(strings) * JAVA_CHAR.byteSize();
+        MemorySegment block = WinClipboardCalls.gwinAlloc(bytes);
         if (block.equals(MemorySegment.NULL)) {
             throw new AssertionError("gwin_alloc(" + bytes + ") returned NULL");
         }
         try {
-            WinGlassNative.writeStringBlock(block.reinterpret(bytes), strings);
-            return WinGlassNative.readStringBlock(block, strings.length);
+            WinClipboardCalls.writeStringBlock(block.reinterpret(bytes), strings);
+            return WinClipboardCalls.readStringBlock(block, strings.length);
         } finally {
-            WinGlassNative.gwinFree(block);
+            WinClipboardCalls.gwinFree(block);
         }
     }
 
     /** The raw code units of the block of {@code strings}, for the layout assertion. */
     public static char[] stringBlockUnitsOf(String[] strings) {
         try (Arena arena = Arena.ofConfined()) {
-            return WinGlassNative.allocStringBlock(arena, strings).toArray(JAVA_CHAR);
+            return WinClipboardCalls.allocStringBlock(arena, strings).toArray(JAVA_CHAR);
         }
     }
 
@@ -3532,32 +3532,32 @@ public final class WinGlassNativeShim {
 
     public static FilterBlock fileFilterBlock(String[] descriptions, String[] extensions) {
         try (Arena arena = Arena.ofConfined()) {
-            MemorySegment filters = WinGlassNative.allocFileFilters(arena, descriptions, extensions);
+            MemorySegment filters = WinClipboardCalls.allocFileFilters(arena, descriptions, extensions);
             if (filters.equals(MemorySegment.NULL)) {
                 return new FilterBlock(true, List.of(), List.of());
             }
             List<String> readDescriptions = new ArrayList<>();
             List<String> readExtensions = new ArrayList<>();
-            long size = WinGlassNative.GWIN_FILE_FILTER_LAYOUT.byteSize();
+            long size = WinClipboardCalls.GWIN_FILE_FILTER_LAYOUT.byteSize();
             long descriptionOffset = offset("GwinFileFilter", "description");
             long extensionsOffset = offset("GwinFileFilter", "extensions");
             for (int i = 0; i < descriptions.length; i++) {
-                readDescriptions.add(WinGlassNative.readStringBlock(
+                readDescriptions.add(WinClipboardCalls.readStringBlock(
                         filters.get(ADDRESS, i * size + descriptionOffset), 1)[0]);
-                readExtensions.add(WinGlassNative.readStringBlock(
+                readExtensions.add(WinClipboardCalls.readStringBlock(
                         filters.get(ADDRESS, i * size + extensionsOffset), 1)[0]);
             }
             return new FilterBlock(false, readDescriptions, readExtensions);
         }
     }
 
-    /** {@code WinGlassNative.dialogString}: the never-NULL rule for folder, filename, title and filter strings. */
+    /** {@code WinClipboardCalls.dialogString}: the never-NULL rule for folder, filename, title and filter strings. */
     public static String dialogString(String text) {
-        return WinGlassNative.dialogString(text);
+        return WinClipboardCalls.dialogString(text);
     }
 
     /**
-     * The {@code WCHAR}s {@code WinGlassNative.wideString} writes for {@code text}, the terminating NUL included,
+     * The {@code WCHAR}s {@code WinCallSupport.wideString} writes for {@code text}, the terminating NUL included,
      * read back from native memory. {@code wideString} is private and used by every string the facade hands
      * Win32 or {@code glass.dll}; {@code allocFileFilters} is a package-private caller that hands its segment out,
      * as a filter's {@code description} pointer, so {@code text} goes in as a one-entry filter array.
@@ -3567,7 +3567,7 @@ public final class WinGlassNativeShim {
     @SuppressWarnings("restricted")
     public static char[] wideStringCodeUnits(String text) {
         try (Arena arena = Arena.ofConfined()) {
-            MemorySegment filters = WinGlassNative.allocFileFilters(arena, new String[] {text}, new String[] {""});
+            MemorySegment filters = WinClipboardCalls.allocFileFilters(arena, new String[] {text}, new String[] {""});
             MemorySegment description = filters.get(ADDRESS, offset("GwinFileFilter", "description"));
             return description.reinterpret((text.length() + 1L) * JAVA_CHAR_UNALIGNED.byteSize())
                     .toArray(JAVA_CHAR_UNALIGNED);
@@ -3656,7 +3656,7 @@ public final class WinGlassNativeShim {
 
     /** {@code gwin_test_fire_clipboard_callback} through the production table, as the event thread. */
     public static long fireClipboardCallback(int slot, long clipboardId) {
-        return asEventThread(() -> WinGlassNative.testFireClipboardCallback(slot, clipboardId));
+        return asEventThread(() -> WinClipboardCalls.testFireClipboardCallback(slot, clipboardId));
     }
 
     /** What the drag hook returned and what its {@code out} block held afterwards, read as an int and as a long. */
@@ -3673,7 +3673,7 @@ public final class WinGlassNativeShim {
             if (withOut) {
                 out.set(java.lang.foreign.ValueLayout.JAVA_LONG, 0, UNTOUCHED_OUT);
             }
-            long returned = asEventThread(() -> WinGlassNative.testFireDndCallback(slot, viewId, out));
+            long returned = asEventThread(() -> WinClipboardCalls.testFireDndCallback(slot, viewId, out));
             return withOut
                     ? new DndFire(returned, out.get(JAVA_INT, 0), out.get(java.lang.foreign.ValueLayout.JAVA_LONG, 0))
                     : new DndFire(returned, 0, 0L);
@@ -3707,15 +3707,15 @@ public final class WinGlassNativeShim {
             int status = SliceNineRecording.testStringBlock(outBlock, outCount);
             MemorySegment block = outBlock.get(ADDRESS, 0);
             int count = outCount.get(JAVA_INT, 0);
-            if (status != WinGlassNative.GWIN_OK || block.equals(MemorySegment.NULL)) {
+            if (status != WinCallSupport.GWIN_OK || block.equals(MemorySegment.NULL)) {
                 return new CBuiltStringBlock(status, count, null, null);
             }
             try {
-                String[] strings = WinGlassNative.readStringBlock(block, count);
-                long bytes = WinGlassNative.stringBlockUnits(strings) * JAVA_CHAR.byteSize();
+                String[] strings = WinClipboardCalls.readStringBlock(block, count);
+                long bytes = WinClipboardCalls.stringBlockUnits(strings) * JAVA_CHAR.byteSize();
                 return new CBuiltStringBlock(status, count, strings, bounded(block, bytes).toArray(JAVA_CHAR));
             } finally {
-                WinGlassNative.gwinFree(block);
+                WinClipboardCalls.gwinFree(block);
             }
         }
     }
@@ -3754,14 +3754,14 @@ public final class WinGlassNativeShim {
     public static synchronized RecordedCall fireClipboardIntoRecordingTable(int slot, long clipboardId) {
         SliceNineRecording.ARGUMENTS.clear();
         try (Arena arena = Arena.ofConfined()) {
-            MemorySegment table = arena.allocate(WinGlassNative.GWIN_CLIPBOARD_CALLBACKS_LAYOUT);
-            WinGlassNative.fillCallbackTable(table, WinGlassNative.GWIN_CLIPBOARD_CALLBACKS_LAYOUT,
-                    WinGlassNative.CLIPBOARD_SLOT_NAMES, SliceNineRecording.CLIPBOARD_STUBS);
+            MemorySegment table = arena.allocate(WinClipboardCallbacks.GWIN_CLIPBOARD_CALLBACKS_LAYOUT);
+            WinCallSupport.fillCallbackTable(table, WinClipboardCallbacks.GWIN_CLIPBOARD_CALLBACKS_LAYOUT,
+                    WinClipboardCallbacks.CLIPBOARD_SLOT_NAMES, SliceNineRecording.CLIPBOARD_STUBS);
             int status = (int) SliceNineRecording.SET_CLIPBOARD_CALLBACKS.invokeExact(table);
-            if (status != WinGlassNative.GWIN_OK) {
+            if (status != WinCallSupport.GWIN_OK) {
                 throw new AssertionError("gwin_clipboard_set_callbacks answered " + status);
             }
-            long returned = WinGlassNative.testFireClipboardCallback(slot, clipboardId);
+            long returned = WinClipboardCalls.testFireClipboardCallback(slot, clipboardId);
             return new RecordedCall(returned, List.copyOf(SliceNineRecording.ARGUMENTS));
         } catch (Throwable t) {
             throw new AssertionError("the recording clipboard table could not be installed or fired", t);
@@ -3777,18 +3777,18 @@ public final class WinGlassNativeShim {
     public static synchronized RecordedDndCall fireDndIntoRecordingTable(int slot, long viewId, boolean withOut) {
         SliceNineRecording.ARGUMENTS.clear();
         try (Arena arena = Arena.ofConfined()) {
-            MemorySegment table = arena.allocate(WinGlassNative.GWIN_DND_CALLBACKS_LAYOUT);
-            WinGlassNative.fillCallbackTable(table, WinGlassNative.GWIN_DND_CALLBACKS_LAYOUT,
-                    WinGlassNative.DND_SLOT_NAMES, SliceNineRecording.DND_STUBS);
+            MemorySegment table = arena.allocate(WinClipboardCallbacks.GWIN_DND_CALLBACKS_LAYOUT);
+            WinCallSupport.fillCallbackTable(table, WinClipboardCallbacks.GWIN_DND_CALLBACKS_LAYOUT,
+                    WinClipboardCallbacks.DND_SLOT_NAMES, SliceNineRecording.DND_STUBS);
             int status = (int) SliceNineRecording.SET_DND_CALLBACKS.invokeExact(table);
-            if (status != WinGlassNative.GWIN_OK) {
+            if (status != WinCallSupport.GWIN_OK) {
                 throw new AssertionError("gwin_dnd_set_callbacks answered " + status);
             }
             MemorySegment out = withOut ? arena.allocate(8, 8) : MemorySegment.NULL;
             if (withOut) {
                 out.set(java.lang.foreign.ValueLayout.JAVA_LONG, 0, UNTOUCHED_OUT);
             }
-            long returned = WinGlassNative.testFireDndCallback(slot, viewId, out);
+            long returned = WinClipboardCalls.testFireDndCallback(slot, viewId, out);
             List<Object> arguments = List.copyOf(SliceNineRecording.ARGUMENTS);
             return withOut
                     ? new RecordedDndCall(returned, arguments, out.get(JAVA_INT, 0),
@@ -3825,20 +3825,23 @@ public final class WinGlassNativeShim {
         private static final MemorySegment[] CLIPBOARD_STUBS = stubs(
                 new String[] {"recordFosSerialize", "recordActionPerformed", "recordDragActionPerformed",
                     "recordContentChanged", "recordDisposePeer", "recordSetDataObject", "recordDataObjectDisposed"},
-                new FunctionDescriptor[] {WinGlassNative.CLIPBOARD_FOS_SERIALIZE_FD,
-                    WinGlassNative.CLIPBOARD_ACTION_PERFORMED_FD, WinGlassNative.CLIPBOARD_DRAG_ACTION_PERFORMED_FD,
-                    WinGlassNative.CLIPBOARD_CONTENT_CHANGED_FD, WinGlassNative.CLIPBOARD_DISPOSE_PEER_FD,
-                    WinGlassNative.CLIPBOARD_SET_DATA_OBJECT_FD, WinGlassNative.CLIPBOARD_DATA_OBJECT_DISPOSED_FD});
+                new FunctionDescriptor[] {WinClipboardCallbacks.CLIPBOARD_FOS_SERIALIZE_FD,
+                    WinClipboardCallbacks.CLIPBOARD_ACTION_PERFORMED_FD,
+                    WinClipboardCallbacks.CLIPBOARD_DRAG_ACTION_PERFORMED_FD,
+                    WinClipboardCallbacks.CLIPBOARD_CONTENT_CHANGED_FD, WinClipboardCallbacks.CLIPBOARD_DISPOSE_PEER_FD,
+                    WinClipboardCallbacks.CLIPBOARD_SET_DATA_OBJECT_FD,
+                    WinClipboardCallbacks.CLIPBOARD_DATA_OBJECT_DISPOSED_FD});
 
         private static final MemorySegment[] DND_STUBS = stubs(
                 new String[] {"recordDragEnter", "recordDragOver", "recordDragDrop", "recordDragLeave",
                     "recordDndGetDataObject", "recordDndSetDataObject", "recordDndSetSourceSupportedActions",
                     "recordDndSetDragButton", "recordDndGetDragButton"},
-                new FunctionDescriptor[] {WinGlassNative.DND_DRAG_ENTER_FD, WinGlassNative.DND_DRAG_OVER_FD,
-                    WinGlassNative.DND_DRAG_DROP_FD, WinGlassNative.DND_DRAG_LEAVE_FD,
-                    WinGlassNative.DND_GET_DATA_OBJECT_FD, WinGlassNative.DND_SET_DATA_OBJECT_FD,
-                    WinGlassNative.DND_SET_SOURCE_SUPPORTED_ACTIONS_FD, WinGlassNative.DND_SET_DRAG_BUTTON_FD,
-                    WinGlassNative.DND_GET_DRAG_BUTTON_FD});
+                new FunctionDescriptor[] {WinClipboardCallbacks.DND_DRAG_ENTER_FD,
+                    WinClipboardCallbacks.DND_DRAG_OVER_FD, WinClipboardCallbacks.DND_DRAG_DROP_FD,
+                    WinClipboardCallbacks.DND_DRAG_LEAVE_FD, WinClipboardCallbacks.DND_GET_DATA_OBJECT_FD,
+                    WinClipboardCallbacks.DND_SET_DATA_OBJECT_FD,
+                    WinClipboardCallbacks.DND_SET_SOURCE_SUPPORTED_ACTIONS_FD,
+                    WinClipboardCallbacks.DND_SET_DRAG_BUTTON_FD, WinClipboardCallbacks.DND_GET_DRAG_BUTTON_FD});
 
         private SliceNineRecording() {
         }
@@ -3881,13 +3884,13 @@ public final class WinGlassNativeShim {
         /** Records the tuple and hands the hook a real {@code gwin_alloc} block, which the hook frees. */
         static int recordFosSerialize(long clipboardId, MemorySegment mime, long lindex, MemorySegment outData,
                                       MemorySegment outLen) {
-            record(clipboardId, WinGlassNative.readStringBlock(mime, 1)[0], lindex);
-            MemorySegment block = WinGlassNative.gwinAlloc(RECORDING_FOS_BYTES.length);
+            record(clipboardId, WinClipboardCalls.readStringBlock(mime, 1)[0], lindex);
+            MemorySegment block = WinClipboardCalls.gwinAlloc(RECORDING_FOS_BYTES.length);
             MemorySegment.copy(RECORDING_FOS_BYTES, 0, bounded(block, RECORDING_FOS_BYTES.length), JAVA_BYTE, 0,
                     RECORDING_FOS_BYTES.length);
             bounded(outData, ADDRESS.byteSize()).set(ADDRESS, 0, block);
             bounded(outLen, JAVA_INT.byteSize()).set(JAVA_INT, 0, RECORDING_FOS_BYTES.length);
-            return WinGlassNative.GWIN_OK;
+            return WinCallSupport.GWIN_OK;
         }
 
         static int recordActionPerformed(long clipboardId, int action) {
@@ -3985,12 +3988,12 @@ public final class WinGlassNativeShim {
 
     /** Whether {@code WinGlassNative.installAccessibilityCallbacks} has run in this JVM. */
     public static boolean accessibilityCallbacksInstalled() {
-        return WinGlassNative.accessibilityCallbacksInstalled();
+        return WinAccessibilityCalls.accessibilityCallbacksInstalled();
     }
 
     /** The 89 installed stubs, accessible slots then text-range slots. */
     public static List<MemorySegment> installedAccessibilityCallbackStubs() {
-        return WinGlassNative.installedAccessibilityCallbackStubs();
+        return WinAccessibilityCalls.installedAccessibilityCallbackStubs();
     }
 
     /**
@@ -4009,22 +4012,22 @@ public final class WinGlassNativeShim {
 
     /** {@code gwin_sizeof_accessible_callbacks()}. */
     public static int sizeOfAccessibleCallbacks() {
-        return WinGlassNative.sizeOfAccessibleCallbacks();
+        return WinAccessibilityCalls.sizeOfAccessibleCallbacks();
     }
 
     /** {@code gwin_sizeof_text_range_callbacks()}. */
     public static int sizeOfTextRangeCallbacks() {
-        return WinGlassNative.sizeOfTextRangeCallbacks();
+        return WinAccessibilityCalls.sizeOfTextRangeCallbacks();
     }
 
     /** {@code gwin_sizeof_variant()}. */
     public static int sizeOfVariant() {
-        return WinGlassNative.sizeOfVariant();
+        return WinAccessibilityCalls.sizeOfVariant();
     }
 
     /** {@code GWIN_VARIANT_LAYOUT.byteSize()} - what the Java side believes {@code GwinVariant} is. */
     public static long variantLayoutSize() {
-        return WinGlassNative.GWIN_VARIANT_LAYOUT.byteSize();
+        return WinAccessibilityMarshalling.GWIN_VARIANT_LAYOUT.byteSize();
     }
 
     /** The eleven {@code GwinVariant} field names, in declaration order. */
@@ -4035,7 +4038,7 @@ public final class WinGlassNativeShim {
     public static int[] variantLayoutOffsets() {
         int[] offsets = new int[VARIANT_FIELDS.size()];
         for (int i = 0; i < offsets.length; i++) {
-            offsets[i] = (int) WinGlassNative.GWIN_VARIANT_LAYOUT.byteOffset(
+            offsets[i] = (int) WinAccessibilityMarshalling.GWIN_VARIANT_LAYOUT.byteOffset(
                     PathElement.groupElement(VARIANT_FIELDS.get(i)));
         }
         return offsets;
@@ -4046,7 +4049,7 @@ public final class WinGlassNativeShim {
         try (Arena arena = Arena.ofConfined()) {
             MemorySegment out = arena.allocate(JAVA_INT, VARIANT_FIELDS.size());
             int status = (int) Accessibility.VARIANT_OFFSETS.invokeExact(out);
-            if (status != WinGlassNative.GWIN_OK) {
+            if (status != WinCallSupport.GWIN_OK) {
                 throw new AssertionError("gwin_test_variant_offsets answered " + status);
             }
             return out.toArray(JAVA_INT);
@@ -4057,12 +4060,12 @@ public final class WinGlassNativeShim {
 
     /** The slot names of {@code GwinAccessibleCallbacks}, in declaration order. */
     public static List<String> accessibleSlotNames() {
-        return WinGlassNative.ACCESSIBLE_SLOT_NAMES;
+        return WinAccessibilityCalls.ACCESSIBLE_SLOT_NAMES;
     }
 
     /** The slot names of {@code GwinTextRangeCallbacks}, in declaration order. */
     public static List<String> textRangeSlotNames() {
-        return WinGlassNative.TEXT_RANGE_SLOT_NAMES;
+        return WinAccessibilityCalls.TEXT_RANGE_SLOT_NAMES;
     }
 
     /** How many accessibles the {@code WinAccessible} registry holds. */
@@ -4331,26 +4334,26 @@ public final class WinGlassNativeShim {
          * it.
          */
         private static final Map<FunctionDescriptor, String> RECORDERS = Map.ofEntries(
-                Map.entry(WinGlassNative.A11Y_ACT_FD, "recordAct"),
-                Map.entry(WinGlassNative.A11Y_ACT_I_FD, "recordActI"),
-                Map.entry(WinGlassNative.A11Y_ACT_II_FD, "recordActII"),
-                Map.entry(WinGlassNative.A11Y_ACT_D_FD, "recordActD"),
-                Map.entry(WinGlassNative.A11Y_ACT_DD_FD, "recordActDD"),
-                Map.entry(WinGlassNative.A11Y_ACT_IJ_FD, "recordActIJ"),
-                Map.entry(WinGlassNative.A11Y_ACT_IJI_FD, "recordActIJI"),
-                Map.entry(WinGlassNative.A11Y_ACT_TEXT_FD, "recordActText"),
-                Map.entry(WinGlassNative.A11Y_OUT_FD, "recordOut"),
-                Map.entry(WinGlassNative.A11Y_OUT2_FD, "recordOut2"),
-                Map.entry(WinGlassNative.A11Y_I_OUT_FD, "recordIOut"),
-                Map.entry(WinGlassNative.A11Y_I_OUT2_FD, "recordIOut2"),
-                Map.entry(WinGlassNative.A11Y_J_OUT_FD, "recordJOut"),
-                Map.entry(WinGlassNative.A11Y_DD_OUT_FD, "recordDDOut"),
-                Map.entry(WinGlassNative.A11Y_II_OUT_FD, "recordIIOut"),
-                Map.entry(WinGlassNative.A11Y_III_OUT_FD, "recordIIIOut"),
-                Map.entry(WinGlassNative.A11Y_IJI_OUT_FD, "recordIJIOut"),
-                Map.entry(WinGlassNative.A11Y_IVB_OUT_FD, "recordIVBOut"),
-                Map.entry(WinGlassNative.A11Y_FIND_TEXT_FD, "recordFindText"),
-                Map.entry(WinGlassNative.A11Y_DISPOSED_FD, "recordDisposed"));
+                Map.entry(WinAccessibilityCalls.A11Y_ACT_FD, "recordAct"),
+                Map.entry(WinAccessibilityCalls.A11Y_ACT_I_FD, "recordActI"),
+                Map.entry(WinAccessibilityCalls.A11Y_ACT_II_FD, "recordActII"),
+                Map.entry(WinAccessibilityCalls.A11Y_ACT_D_FD, "recordActD"),
+                Map.entry(WinAccessibilityCalls.A11Y_ACT_DD_FD, "recordActDD"),
+                Map.entry(WinAccessibilityCalls.A11Y_ACT_IJ_FD, "recordActIJ"),
+                Map.entry(WinAccessibilityCalls.A11Y_ACT_IJI_FD, "recordActIJI"),
+                Map.entry(WinAccessibilityCalls.A11Y_ACT_TEXT_FD, "recordActText"),
+                Map.entry(WinAccessibilityCalls.A11Y_OUT_FD, "recordOut"),
+                Map.entry(WinAccessibilityCalls.A11Y_OUT2_FD, "recordOut2"),
+                Map.entry(WinAccessibilityCalls.A11Y_I_OUT_FD, "recordIOut"),
+                Map.entry(WinAccessibilityCalls.A11Y_I_OUT2_FD, "recordIOut2"),
+                Map.entry(WinAccessibilityCalls.A11Y_J_OUT_FD, "recordJOut"),
+                Map.entry(WinAccessibilityCalls.A11Y_DD_OUT_FD, "recordDDOut"),
+                Map.entry(WinAccessibilityCalls.A11Y_II_OUT_FD, "recordIIOut"),
+                Map.entry(WinAccessibilityCalls.A11Y_III_OUT_FD, "recordIIIOut"),
+                Map.entry(WinAccessibilityCalls.A11Y_IJI_OUT_FD, "recordIJIOut"),
+                Map.entry(WinAccessibilityCalls.A11Y_IVB_OUT_FD, "recordIVBOut"),
+                Map.entry(WinAccessibilityCalls.A11Y_FIND_TEXT_FD, "recordFindText"),
+                Map.entry(WinAccessibilityCalls.A11Y_DISPOSED_FD, "recordDisposed"));
 
         /** One stub per distinct descriptor: a fire drives one slot at a time, so the target is unambiguous. */
         private static final Map<FunctionDescriptor, MemorySegment> STUBS = buildStubs();
@@ -4368,8 +4371,8 @@ public final class WinGlassNativeShim {
         @SuppressWarnings("restricted")
         private static Map<FunctionDescriptor, MemorySegment> buildStubs() {
             Map<FunctionDescriptor, MemorySegment> stubs = new HashMap<>();
-            List<FunctionDescriptor> descriptors = new ArrayList<>(WinGlassNative.ACCESSIBLE_SLOT_DESCRIPTORS);
-            descriptors.addAll(WinGlassNative.TEXT_RANGE_SLOT_DESCRIPTORS);
+            List<FunctionDescriptor> descriptors = new ArrayList<>(WinAccessibilityCalls.ACCESSIBLE_SLOT_DESCRIPTORS);
+            descriptors.addAll(WinAccessibilityCalls.TEXT_RANGE_SLOT_DESCRIPTORS);
             for (FunctionDescriptor descriptor : descriptors) {
                 if (stubs.containsKey(descriptor)) {
                     continue;
@@ -4392,16 +4395,16 @@ public final class WinGlassNativeShim {
         private static void writeTables() {
             try (Arena arena = Arena.ofConfined()) {
                 MemorySegment accessibleTable =
-                        arena.allocate(WinGlassNative.GWIN_ACCESSIBLE_CALLBACKS_LAYOUT);
-                fill(accessibleTable, WinGlassNative.GWIN_ACCESSIBLE_CALLBACKS_LAYOUT,
-                        WinGlassNative.ACCESSIBLE_SLOT_NAMES, WinGlassNative.ACCESSIBLE_SLOT_DESCRIPTORS);
+                        arena.allocate(WinAccessibilityCalls.GWIN_ACCESSIBLE_CALLBACKS_LAYOUT);
+                fill(accessibleTable, WinAccessibilityCalls.GWIN_ACCESSIBLE_CALLBACKS_LAYOUT,
+                        WinAccessibilityCalls.ACCESSIBLE_SLOT_NAMES, WinAccessibilityCalls.ACCESSIBLE_SLOT_DESCRIPTORS);
                 int accessibleStatus = (int) SET_ACCESSIBLE_CALLBACKS.invokeExact(accessibleTable);
                 MemorySegment textRangeTable =
-                        arena.allocate(WinGlassNative.GWIN_TEXT_RANGE_CALLBACKS_LAYOUT);
-                fill(textRangeTable, WinGlassNative.GWIN_TEXT_RANGE_CALLBACKS_LAYOUT,
-                        WinGlassNative.TEXT_RANGE_SLOT_NAMES, WinGlassNative.TEXT_RANGE_SLOT_DESCRIPTORS);
+                        arena.allocate(WinAccessibilityCalls.GWIN_TEXT_RANGE_CALLBACKS_LAYOUT);
+                fill(textRangeTable, WinAccessibilityCalls.GWIN_TEXT_RANGE_CALLBACKS_LAYOUT,
+                        WinAccessibilityCalls.TEXT_RANGE_SLOT_NAMES, WinAccessibilityCalls.TEXT_RANGE_SLOT_DESCRIPTORS);
                 int textRangeStatus = (int) SET_TEXT_RANGE_CALLBACKS.invokeExact(textRangeTable);
-                if (accessibleStatus != WinGlassNative.GWIN_OK || textRangeStatus != WinGlassNative.GWIN_OK) {
+                if (accessibleStatus != WinCallSupport.GWIN_OK || textRangeStatus != WinCallSupport.GWIN_OK) {
                     throw new AssertionError("gwin_a11y_*_set_callbacks answered " + accessibleStatus + " / "
                             + textRangeStatus);
                 }
@@ -4416,7 +4419,7 @@ public final class WinGlassNativeShim {
             for (int i = 0; i < stubs.length; i++) {
                 stubs[i] = STUBS.get(descriptors.get(i));
             }
-            WinGlassNative.fillCallbackTable(table, layout, names, stubs);
+            WinCallSupport.fillCallbackTable(table, layout, names, stubs);
         }
 
         static RecordedSlot fireIntoRecordingTable(boolean accessible, int slot, long id, MemorySegment out) {
@@ -4430,7 +4433,7 @@ public final class WinGlassNativeShim {
             } catch (Throwable t) {
                 throw new AssertionError("the recording accessibility table could not be fired", t);
             } finally {
-                WinGlassNative.reinstallAccessibilityCallbacks();
+                WinAccessibilityCalls.reinstallAccessibilityCallbacks();
             }
         }
 
@@ -4451,7 +4454,7 @@ public final class WinGlassNativeShim {
                 destroy.run();
                 return List.copyOf(ARGUMENTS);
             } finally {
-                WinGlassNative.reinstallAccessibilityCallbacks();
+                WinAccessibilityCalls.reinstallAccessibilityCallbacks();
             }
         }
 
@@ -4465,14 +4468,14 @@ public final class WinGlassNativeShim {
                 throw new AssertionError("the throwing accessibility table could not be fired", t);
             } finally {
                 throwing = false;
-                WinGlassNative.reinstallAccessibilityCallbacks();
+                WinAccessibilityCalls.reinstallAccessibilityCallbacks();
             }
         }
 
         private static int record(Object... values) {
             ARGUMENTS.addAll(Arrays.asList(values));
             if (!throwing) {
-                return WinGlassNative.GWIN_OK;
+                return WinCallSupport.GWIN_OK;
             }
             // What every production stub does with a Throwable from its target, in the same two steps:
             // report it where CheckAndClearException sent it, then answer GWIN_ERR_UPCALL. Letting it out
@@ -4482,7 +4485,7 @@ public final class WinGlassNativeShim {
             } catch (Throwable ignored) {
                 // Nothing left to try: this is an upcall.
             }
-            return WinGlassNative.GWIN_ERR_UPCALL;
+            return WinCallSupport.GWIN_ERR_UPCALL;
         }
 
         static int recordAct(long id) {
@@ -4905,11 +4908,11 @@ public final class WinGlassNativeShim {
     public static synchronized ImeComposition imeComposition(long hwnd, long viewId, long lparam, int faultAt) {
         ToolkitHooks.IME_EVENTS.clear();
         try (Arena arena = Arena.ofConfined()) {
-            MemorySegment viewTable = arena.allocate(WinGlassNative.GWIN_VIEW_CALLBACKS_LAYOUT);
+            MemorySegment viewTable = arena.allocate(WinViewCallbacks.GWIN_VIEW_CALLBACKS_LAYOUT);
             MemorySegment[] stubs = Recording.VIEW_STUBS.clone();
-            stubs[WinGlassNative.VIEW_SLOT_NAMES.indexOf("notify_input_method")] = ToolkitHooks.IME_STUB;
-            WinGlassNative.fillCallbackTable(viewTable, WinGlassNative.GWIN_VIEW_CALLBACKS_LAYOUT,
-                    WinGlassNative.VIEW_SLOT_NAMES, stubs);
+            stubs[WinViewCallbacks.VIEW_SLOT_NAMES.indexOf("notify_input_method")] = ToolkitHooks.IME_STUB;
+            WinCallSupport.fillCallbackTable(viewTable, WinViewCallbacks.GWIN_VIEW_CALLBACKS_LAYOUT,
+                    WinViewCallbacks.VIEW_SLOT_NAMES, stubs);
             requireHookOk((int) Recording.SET_VIEW_CALLBACKS.invokeExact(viewTable), "gwin_view_set_callbacks");
             MemorySegment out = arena.allocate(JAVA_INT, 4);
             out.fill((byte) 0xFF);
@@ -4923,7 +4926,7 @@ public final class WinGlassNativeShim {
         } catch (Throwable t) {
             throw hookFailure("gwin_test_ime_composition", t);
         } finally {
-            WinGlassNative.reinstallViewCallbacks();
+            WinViewCallbacks.reinstallViewCallbacks();
         }
     }
 
@@ -4954,21 +4957,21 @@ public final class WinGlassNativeShim {
 
     /**
      * {@code gwin_invoke_later} for {@code runnable}, registered as the facade registers it, returning the status
-     * the facade turns into a boolean. On {@link WinGlassNative#GWIN_ERR_NO_TOOLKIT} nothing was posted (an action
+     * the facade turns into a boolean. On {@link WinCallSupport#GWIN_ERR_NO_TOOLKIT} nothing was posted (an action
      * the library allocated has been destroyed) and no callback will arrive, so the id is dropped from the facade's
      * registry, as {@code submitForLaterInvocation} drops it; the status is returned unchanged. Only a post still
      * queued at shutdown stays registered, as in the facade.
      */
     public static int toolkitInvokeLater(Runnable runnable) {
-        long id = WinGlassNative.registerRunnable(runnable);
+        long id = WinApplicationCalls.registerRunnable(runnable);
         int status;
         try {
             status = (int) ToolkitDriver.INVOKE_LATER.invokeExact(id);
         } catch (Throwable t) {
             throw hookFailure("gwin_invoke_later", t);
         }
-        if (status == WinGlassNative.GWIN_ERR_NO_TOOLKIT) {
-            WinGlassNative.unregisterRunnable(id);
+        if (status == WinCallSupport.GWIN_ERR_NO_TOOLKIT) {
+            WinApplicationCalls.unregisterRunnable(id);
         }
         return status;
     }
@@ -4980,13 +4983,13 @@ public final class WinGlassNativeShim {
      * registry in a {@code finally} once it has, whatever it answered, as {@code invokeAndWait} removes it.
      */
     public static int toolkitInvokeAndWait(Runnable runnable) {
-        long id = WinGlassNative.registerRunnable(runnable);
+        long id = WinApplicationCalls.registerRunnable(runnable);
         try {
             return (int) ToolkitDriver.INVOKE_AND_WAIT.invokeExact(id);
         } catch (Throwable t) {
             throw hookFailure("gwin_invoke_and_wait", t);
         } finally {
-            WinGlassNative.unregisterRunnable(id);
+            WinApplicationCalls.unregisterRunnable(id);
         }
     }
 
@@ -5079,8 +5082,8 @@ public final class WinGlassNativeShim {
      */
     public static synchronized void installRecordingPreferencesTable() {
         try (Arena arena = Arena.ofConfined()) {
-            MemorySegment table = arena.allocate(WinGlassNative.GWIN_PREFS_CALLBACKS_LAYOUT);
-            table.set(ADDRESS, WinGlassNative.GWIN_PREFS_CALLBACKS_LAYOUT.byteOffset(
+            MemorySegment table = arena.allocate(WinPreferenceCalls.GWIN_PREFS_CALLBACKS_LAYOUT);
+            table.set(ADDRESS, WinPreferenceCalls.GWIN_PREFS_CALLBACKS_LAYOUT.byteOffset(
                     PathElement.groupElement("preferences_changed")), ToolkitDriver.PREFS_STUB);
             int status = (int) ToolkitDriver.PREFS_SET_CALLBACKS.invokeExact(table, MemorySegment.NULL);
             requireHookOk(status, "gwin_prefs_set_callbacks");
@@ -5110,7 +5113,7 @@ public final class WinGlassNativeShim {
     }
 
     private static void requireHookOk(int status, String function) {
-        if (status != WinGlassNative.GWIN_OK) {
+        if (status != WinCallSupport.GWIN_OK) {
             throw new AssertionError(function + " answered " + status);
         }
     }
@@ -5203,8 +5206,8 @@ public final class WinGlassNativeShim {
         private static MemorySegment imeStub() {
             try {
                 MethodHandle target = MethodHandles.lookup().findStatic(ToolkitHooks.class, "recordInputMethod",
-                        WinGlassNative.NOTIFY_INPUT_METHOD_FD.toMethodType());
-                return LINKER.upcallStub(target, WinGlassNative.NOTIFY_INPUT_METHOD_FD, Arena.global());
+                        WinViewCallbacks.NOTIFY_INPUT_METHOD_FD.toMethodType());
+                return LINKER.upcallStub(target, WinViewCallbacks.NOTIFY_INPUT_METHOD_FD, Arena.global());
             } catch (ReflectiveOperationException e) {
                 throw new AssertionError("no recording target recordInputMethod", e);
             }

@@ -472,10 +472,10 @@ class WinWindow extends Window {
         }
     }
 
-    /** {@link WinGlassNative#HTNOWHERE} for an unknown id, as for a throw. */
+    /** {@link WinWindowCallbacks#HTNOWHERE} for an unknown id, as for a throw. */
     static int dispatchNonClientHitTest(long id, int x, int y) {
         WinWindow window = WINDOWS.get(id);
-        return window == null ? WinGlassNative.HTNOWHERE : window.nonClientHitTest(x, y);
+        return window == null ? WinWindowCallbacks.HTNOWHERE : window.nonClientHitTest(x, y);
     }
 
     /**
