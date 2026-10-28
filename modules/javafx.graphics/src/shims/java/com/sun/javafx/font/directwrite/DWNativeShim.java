@@ -315,7 +315,7 @@ public final class DWNativeShim {
      * Linkage and constants of the facade
      * ------------------------------------------------------------------------------------------- */
 
-    /** Runs {@link DWNative}'s class initializer. */
+    /** Runs the initializers of {@link DWNative} and of its aggregates. */
     public static void ensureLoaded() {
         DWNative.ensureLoaded();
     }
@@ -425,42 +425,42 @@ public final class DWNativeShim {
 
     /** {@code IDWriteFontFace::GetType}, slot 3. */
     public static int fontFaceType(long fontFace) {
-        return DWNative.getFontFaceType(fontFace);
+        return DWFontFaceCalls.getFontFaceType(fontFace);
     }
 
     /** {@code IDWriteFontFace::GetIndex}, slot 5. */
     public static int fontFaceIndex(long fontFace) {
-        return DWNative.getFontFaceIndex(fontFace);
+        return DWFontFaceCalls.getFontFaceIndex(fontFace);
     }
 
     /** {@code IDWriteFontFace::GetSimulations}, slot 6. */
     public static int fontFaceSimulations(long fontFace) {
-        return DWNative.getFontFaceSimulations(fontFace);
+        return DWFontFaceCalls.getFontFaceSimulations(fontFace);
     }
 
     /** {@code IDWriteFontFace::IsSymbolFont}, slot 7. */
     public static boolean isSymbolFont(long fontFace) {
-        return DWNative.isSymbolFont(fontFace);
+        return DWFontFaceCalls.isSymbolFont(fontFace);
     }
 
     /** {@code IDWriteFontFace::GetMetrics}, slot 8: the ten {@code DWRITE_FONT_METRICS} fields. */
     public static int[] fontFaceMetrics(long fontFace) {
-        return DWNative.getFontFaceMetrics(fontFace);
+        return DWFontFaceCalls.getFontFaceMetrics(fontFace);
     }
 
     /** {@code IDWriteFontFace::GetGlyphCount}, slot 9, widened from {@code UINT16}. */
     public static int glyphCount(long fontFace) {
-        return DWNative.getGlyphCount(fontFace);
+        return DWFontFaceCalls.getGlyphCount(fontFace);
     }
 
     /** {@code IDWriteFontFace::GetGlyphIndices}, slot 11: the nominal cmap mapping. */
     public static short[] glyphIndices(long fontFace, int[] codePoints) {
-        return DWNative.getGlyphIndices(fontFace, codePoints);
+        return DWFontFaceCalls.getGlyphIndices(fontFace, codePoints);
     }
 
     /** {@code IDWriteFontFace::TryGetFontTable} plus {@code ReleaseFontTable}, slots 12 and 13. */
     public static byte[] fontTable(long fontFace, int openTypeTableTag) {
-        return DWNative.tryGetFontTable(fontFace, openTypeTableTag);
+        return DWFontFaceCalls.tryGetFontTable(fontFace, openTypeTableTag);
     }
 
     /* ---------------------------------------------------------------------------------------------
@@ -469,12 +469,12 @@ public final class DWNativeShim {
 
     /** {@code DWRITE_TEXTURE_CLEARTYPE_3x1}, the texture type whose pixels are three bytes deep. */
     public static int textureClearType3x1() {
-        return DWNative.DWRITE_TEXTURE_CLEARTYPE_3x1;
+        return DWFontFaceCalls.DWRITE_TEXTURE_CLEARTYPE_3x1;
     }
 
     /** {@code ID2D1SimplifiedGeometrySink} / {@code IDWriteGeometrySink}. */
     public static String iidGeometrySink() {
-        return DWNative.IID_ID2D1_SIMPLIFIED_GEOMETRY_SINK;
+        return DWGeometrySinkObject.IID_ID2D1_SIMPLIFIED_GEOMETRY_SINK;
     }
 
     /** The size in bytes of one of the layouts named by {@link #layout}. */
@@ -489,46 +489,46 @@ public final class DWNativeShim {
 
     private static StructLayout layout(String name) {
         return switch (name) {
-            case "DWRITE_GLYPH_METRICS" -> DWNative.DWRITE_GLYPH_METRICS_LAYOUT;
-            case "DWRITE_FONT_METRICS" -> DWNative.DWRITE_FONT_METRICS_LAYOUT;
-            case "DWRITE_GLYPH_OFFSET" -> DWNative.DWRITE_GLYPH_OFFSET_LAYOUT;
-            case "DWRITE_GLYPH_RUN" -> DWNative.DWRITE_GLYPH_RUN_LAYOUT;
-            case "DWRITE_MATRIX" -> DWNative.DWRITE_MATRIX_LAYOUT;
-            case "RECT" -> DWNative.RECT_LAYOUT;
-            case "D2D1_POINT_2F" -> DWNative.D2D1_POINT_2F_LAYOUT;
-            case "D2D1_BEZIER_SEGMENT" -> DWNative.D2D1_BEZIER_SEGMENT_LAYOUT;
+            case "DWRITE_GLYPH_METRICS" -> DWLayouts.DWRITE_GLYPH_METRICS_LAYOUT;
+            case "DWRITE_FONT_METRICS" -> DWLayouts.DWRITE_FONT_METRICS_LAYOUT;
+            case "DWRITE_GLYPH_OFFSET" -> DWLayouts.DWRITE_GLYPH_OFFSET_LAYOUT;
+            case "DWRITE_GLYPH_RUN" -> DWLayouts.DWRITE_GLYPH_RUN_LAYOUT;
+            case "DWRITE_MATRIX" -> DWLayouts.DWRITE_MATRIX_LAYOUT;
+            case "RECT" -> DWLayouts.RECT_LAYOUT;
+            case "D2D1_POINT_2F" -> DWLayouts.D2D1_POINT_2F_LAYOUT;
+            case "D2D1_BEZIER_SEGMENT" -> DWLayouts.D2D1_BEZIER_SEGMENT_LAYOUT;
             case "GUID" -> DWNative.GUID_LAYOUT;
-            case "DWRITE_SCRIPT_ANALYSIS" -> DWNative.DWRITE_SCRIPT_ANALYSIS_LAYOUT;
-            case "DWRITE_GLYPH_RUN_DESCRIPTION" -> DWNative.DWRITE_GLYPH_RUN_DESCRIPTION_LAYOUT;
-            case "ANALYSIS_SINK_OBJECT" -> DWNative.ANALYSIS_SINK_OBJECT_LAYOUT;
-            case "TEXT_RENDERER_OBJECT" -> DWNative.TEXT_RENDERER_OBJECT_LAYOUT;
+            case "DWRITE_SCRIPT_ANALYSIS" -> DWLayouts.DWRITE_SCRIPT_ANALYSIS_LAYOUT;
+            case "DWRITE_GLYPH_RUN_DESCRIPTION" -> DWLayouts.DWRITE_GLYPH_RUN_DESCRIPTION_LAYOUT;
+            case "ANALYSIS_SINK_OBJECT" -> DWAnalysisSinkObject.ANALYSIS_SINK_OBJECT_LAYOUT;
+            case "TEXT_RENDERER_OBJECT" -> DWTextRendererObject.TEXT_RENDERER_OBJECT_LAYOUT;
             default -> throw new IllegalArgumentException("no such layout: " + name);
         };
     }
 
     /** Outline calls currently on some stack: 0 between calls. */
     public static int sinkRegistrySize() {
-        return DWNative.sinkRegistrySize();
+        return DWGeometrySinkObject.sinkRegistrySize();
     }
 
     /** {@code QueryInterface}, {@code AddRef}, {@code Release} and {@code Close} through the sink vtable. */
     public static long[] sinkSelfTest() {
-        return DWNative.sinkSelfTest();
+        return DWGeometrySinkObject.sinkSelfTest();
     }
 
     /** One whole figure driven through the sink vtable, including the by-value point. */
     public static Path2D sinkSelfTestOutline() {
-        return DWNative.sinkSelfTestOutline();
+        return DWGeometrySinkObject.sinkSelfTestOutline();
     }
 
     /** The same figure with a callback that throws: what the sink does with a failure. */
     public static long[] sinkSelfTestFailure() {
-        return DWNative.sinkSelfTestFailure();
+        return DWGeometrySinkObject.sinkSelfTestFailure();
     }
 
     /** The twelve coordinates {@link #sinkSelfTestOutline} feeds the sink, in call order. */
     public static float[] sinkSelfTestFigure() {
-        return DWNative.SINK_SELF_TEST_FIGURE.clone();
+        return DWGeometrySinkObject.SINK_SELF_TEST_FIGURE.clone();
     }
 
     /* ---------------------------------------------------------------------------------------------
@@ -600,37 +600,37 @@ public final class DWNativeShim {
 
     /** {@code IDWriteTextAnalysisSink}. */
     public static String iidAnalysisSink() {
-        return DWNative.IID_IDWRITE_TEXT_ANALYSIS_SINK;
+        return DWAnalysisSinkObject.IID_IDWRITE_TEXT_ANALYSIS_SINK;
     }
 
     /** {@code IDWriteTextAnalysisSource}. */
     public static String iidAnalysisSource() {
-        return DWNative.IID_IDWRITE_TEXT_ANALYSIS_SOURCE;
+        return DWAnalysisSinkObject.IID_IDWRITE_TEXT_ANALYSIS_SOURCE;
     }
 
     /** {@code IDWriteTextRenderer}. */
     public static String iidTextRenderer() {
-        return DWNative.IID_IDWRITE_TEXT_RENDERER;
+        return DWTextRendererObject.IID_IDWRITE_TEXT_RENDERER;
     }
 
     /** {@code IDWritePixelSnapping}, the renderer's base interface. */
     public static String iidPixelSnapping() {
-        return DWNative.IID_IDWRITE_PIXEL_SNAPPING;
+        return DWTextRendererObject.IID_IDWRITE_PIXEL_SNAPPING;
     }
 
     /** The vtable slot the facade uses for {@code name}, as derived from {@code dwrite.h}. */
     public static int layoutSlot(String name) {
-        return DWNative.layoutSlot(name);
+        return DWShapingCalls.layoutSlot(name);
     }
 
     /** The distance from an analysis object's sink interface to its source interface. */
     public static long analysisSourceOffset() {
-        return DWNative.analysisSourceOffset();
+        return DWAnalysisSinkObject.analysisSourceOffset();
     }
 
     /** {@code IDWriteTextAnalysisSource::GetParagraphReadingDirection} on any source pointer. */
     public static int paragraphReadingDirection(long source) {
-        return DWNative.getParagraphReadingDirection(source);
+        return DWAnalysisSinkObject.getParagraphReadingDirection(source);
     }
 
     /**
@@ -672,15 +672,15 @@ public final class DWNativeShim {
                     runs++;
                 }
                 answers = new long[] { sinkPointer, sourcePointer,
-                        DWNative.getParagraphReadingDirection(sourcePointer),
-                        DWNative.getParagraphReadingDirection(sinkPointer), hr, runs, 0 };
+                        DWAnalysisSinkObject.getParagraphReadingDirection(sourcePointer),
+                        DWAnalysisSinkObject.getParagraphReadingDirection(sinkPointer), hr, runs, 0 };
             } finally {
                 analyzer.Release();
                 sink.Release();
                 sink.dispose();
             }
             // Read after the dispose, which is the property the last entry reports.
-            answers[6] = DWNative.analysisSinkRegistrySize();
+            answers[6] = DWAnalysisSinkObject.analysisSinkRegistrySize();
             return answers;
         } finally {
             factory.Release();
@@ -689,129 +689,129 @@ public final class DWNativeShim {
 
     /** {@code IDWriteTextAnalyzer::AnalyzeBidi}: no JNI counterpart, it was never a native. */
     public static int analyzeBidi(long analyzer, long source, int position, int length, long sink) {
-        return DWNative.analyzeBidi(analyzer, source, position, length, sink);
+        return DWShapingCalls.analyzeBidi(analyzer, source, position, length, sink);
     }
 
     /** {@code IDWriteTextAnalyzer::AnalyzeLineBreakpoints}. */
     public static int analyzeLineBreakpoints(long analyzer, long source, int position, int length,
                                              long sink) {
-        return DWNative.analyzeLineBreakpoints(analyzer, source, position, length, sink);
+        return DWShapingCalls.analyzeLineBreakpoints(analyzer, source, position, length, sink);
     }
 
     /** {@code IDWriteTextAnalyzer::AnalyzeNumberSubstitution}. */
     public static int analyzeNumberSubstitution(long analyzer, long source, int position, int length,
                                                 long sink) {
-        return DWNative.analyzeNumberSubstitution(analyzer, source, position, length, sink);
+        return DWShapingCalls.analyzeNumberSubstitution(analyzer, source, position, length, sink);
     }
 
     /* The format and layout accessors: never natives, bound to pin the slot arithmetic. */
 
     public static int textFormatFontWeight(long format) {
-        return DWNative.getTextFormatFontWeight(format);
+        return DWShapingCalls.getTextFormatFontWeight(format);
     }
 
     public static int textFormatFontStyle(long format) {
-        return DWNative.getTextFormatFontStyle(format);
+        return DWShapingCalls.getTextFormatFontStyle(format);
     }
 
     public static int textFormatFontStretch(long format) {
-        return DWNative.getTextFormatFontStretch(format);
+        return DWShapingCalls.getTextFormatFontStretch(format);
     }
 
     public static float textFormatFontSize(long format) {
-        return DWNative.getTextFormatFontSize(format);
+        return DWShapingCalls.getTextFormatFontSize(format);
     }
 
     public static String textFormatFontFamilyName(long format) {
-        return DWNative.getTextFormatFontFamilyName(format);
+        return DWShapingCalls.getTextFormatFontFamilyName(format);
     }
 
     public static String textFormatLocaleName(long format) {
-        return DWNative.getTextFormatLocaleName(format);
+        return DWShapingCalls.getTextFormatLocaleName(format);
     }
 
     public static int textFormatFontFamilyNameLength(long format) {
-        return DWNative.getTextFormatFontFamilyNameLength(format);
+        return DWShapingCalls.getTextFormatFontFamilyNameLength(format);
     }
 
     public static int textFormatLocaleNameLength(long format) {
-        return DWNative.getTextFormatLocaleNameLength(format);
+        return DWShapingCalls.getTextFormatLocaleNameLength(format);
     }
 
     public static float textLayoutMaxWidth(long layout) {
-        return DWNative.getTextLayoutMaxWidth(layout);
+        return DWShapingCalls.getTextLayoutMaxWidth(layout);
     }
 
     public static float textLayoutMaxHeight(long layout) {
-        return DWNative.getTextLayoutMaxHeight(layout);
+        return DWShapingCalls.getTextLayoutMaxHeight(layout);
     }
 
     /* The two inbound objects, as only the FFM path can expose them. */
 
     /** Live analysis sinks: the leak check. */
     public static int analysisSinkRegistrySize() {
-        return DWNative.analysisSinkRegistrySize();
+        return DWAnalysisSinkObject.analysisSinkRegistrySize();
     }
 
     /** Live text renderers: the leak check. */
     public static int textRendererRegistrySize() {
-        return DWNative.textRendererRegistrySize();
+        return DWTextRendererObject.textRendererRegistrySize();
     }
 
     /** An analysis sink that records every callback it receives, in order. */
     public static long newRecordingAnalysisSink(char[] text, int start, int length, String locale,
                                                 int direction) {
-        return DWNative.newRecordingAnalysisSink(text, start, length, terminated(locale), direction, 0L);
+        return DWAnalysisSinkObject.newRecordingAnalysisSink(text, start, length, terminated(locale), direction, 0L);
     }
 
     /** A text renderer that records every callback it receives, in order. */
     public static long newRecordingTextRenderer() {
-        return DWNative.newRecordingTextRenderer();
+        return DWTextRendererObject.newRecordingTextRenderer();
     }
 
     public static List<String> analysisSinkCallbacks(long handle) {
-        return DWNative.analysisSinkCallbacks(handle);
+        return DWAnalysisSinkObject.analysisSinkCallbacks(handle);
     }
 
     public static List<String> textRendererCallbacks(long handle) {
-        return DWNative.textRendererCallbacks(handle);
+        return DWTextRendererObject.textRendererCallbacks(handle);
     }
 
     /** The IIDs DirectWrite asked the object for - empty when it never asked. */
     public static List<String> analysisSinkQueriedIids(long handle) {
-        return DWNative.analysisSinkQueriedIids(handle);
+        return DWAnalysisSinkObject.analysisSinkQueriedIids(handle);
     }
 
     /** The IIDs DirectWrite asked the renderer for. */
     public static List<String> textRendererQueriedIids(long handle) {
-        return DWNative.textRendererQueriedIids(handle);
+        return DWTextRendererObject.textRendererQueriedIids(handle);
     }
 
     /** {@code QueryInterface}, {@code AddRef} and {@code Release} through both analysis vtables. */
     public static long[] analysisSinkSelfTest(long handle) {
-        return DWNative.analysisSinkSelfTest(handle);
+        return DWInboundTestHooks.analysisSinkSelfTest(handle);
     }
 
     /** All nine collectors and queries driven through the analysis vtables. */
     public static long[] analysisSinkDriveCallbacks(long handle, int position, int length, short script,
                                                     int shapes, int explicitLevel, int resolvedLevel) {
-        return DWNative.analysisSinkDriveCallbacks(handle, position, length, script, shapes,
+        return DWInboundTestHooks.analysisSinkDriveCallbacks(handle, position, length, script, shapes,
                 explicitLevel, resolvedLevel);
     }
 
     /** {@code QueryInterface}, {@code AddRef} and {@code Release} through the renderer vtable. */
     public static long[] textRendererSelfTest(long handle) {
-        return DWNative.textRendererSelfTest(handle);
+        return DWInboundTestHooks.textRendererSelfTest(handle);
     }
 
     /** The three pixel-snapping queries driven through the renderer vtable. */
     public static long[] textRendererDriveQueries(long handle) {
-        return DWNative.textRendererDriveQueries(handle);
+        return DWInboundTestHooks.textRendererDriveQueries(handle);
     }
 
     /** {@code DrawUnderline}, {@code DrawStrikethrough} and {@code DrawInlineObject}. */
     public static long[] textRendererDriveIgnored(long handle) {
-        return DWNative.textRendererDriveIgnored(handle);
+        return DWInboundTestHooks.textRendererDriveIgnored(handle);
     }
 
     /** One synthetic glyph run fed through {@code DrawGlyphRun} with values the test chooses. */
@@ -821,24 +821,24 @@ public final class DWNativeShim {
                                           float[] glyphOffsets, short[] clusterMap, int textPosition,
                                           int stringLength, int isSideways, int bidiLevel,
                                           boolean withDescription) {
-        return DWNative.textRendererFeedRun(handle, baselineOriginX, baselineOriginY, measuringMode,
+        return DWInboundTestHooks.textRendererFeedRun(handle, baselineOriginX, baselineOriginY, measuringMode,
                 fontFace, fontEmSize, glyphIndices, glyphAdvances, glyphOffsets, clusterMap,
                 textPosition, stringLength, isSideways, bidiLevel, withDescription);
     }
 
     /** The baseline origin and measuring mode of one collected run, as raw float bits. */
     public static long[] textRendererRunGeometry(long handle, int index) {
-        return DWNative.textRendererRunGeometry(handle, index);
+        return DWTextRendererObject.textRendererRunGeometry(handle, index);
     }
 
     /** How many runs the renderer collected, without moving its cursor. */
     public static int textRendererRunCount(long handle) {
-        return DWNative.textRendererRunCount(handle);
+        return DWTextRendererObject.textRendererRunCount(handle);
     }
 
     /** Both objects called through pointers whose arenas are gone: no record, no crash. */
     public static long[] staleCallbackProbe(long sinkBlock, long rendererBlock) {
-        return DWNative.staleCallbackProbe(sinkBlock, rendererBlock);
+        return DWInboundTestHooks.staleCallbackProbe(sinkBlock, rendererBlock);
     }
 
     /** What the peers do to a locale before it crosses: append the terminator the C never added. */
@@ -970,12 +970,12 @@ public final class DWNativeShim {
 
     /** {@code RPC_E_CHANGED_MODE}: the one HRESULT {@code CoInitializeEx} reports as failure. */
     public static int rpcEChangedMode() {
-        return DWNative.RPC_E_CHANGED_MODE;
+        return DWWicCalls.RPC_E_CHANGED_MODE;
     }
 
     /** {@code S_FALSE}, what a second {@code CoInitializeEx} on one thread answers. */
     public static int sFalse() {
-        return DWNative.S_FALSE;
+        return DWWicCalls.S_FALSE;
     }
 
     /** {@code COINIT_MULTITHREADED}, which is 0 and which no production code passes. */
@@ -984,59 +984,59 @@ public final class DWNativeShim {
     }
 
     public static String clsidWicImagingFactory() {
-        return DWNative.CLSID_WIC_IMAGING_FACTORY;
+        return DWWicCalls.CLSID_WIC_IMAGING_FACTORY;
     }
 
     public static String clsidWicImagingFactory2() {
-        return DWNative.CLSID_WIC_IMAGING_FACTORY2;
+        return DWWicCalls.CLSID_WIC_IMAGING_FACTORY2;
     }
 
     public static String iidWicImagingFactory() {
-        return DWNative.IID_IWIC_IMAGING_FACTORY;
+        return DWWicCalls.IID_IWIC_IMAGING_FACTORY;
     }
 
     public static String iidD2D1Factory() {
-        return DWNative.IID_ID2D1_FACTORY;
+        return DWWicCalls.IID_ID2D1_FACTORY;
     }
 
     /** Whether ole32.dll loaded and exports the three COM entry points; loads it if it has not been. */
     public static boolean isOle32Available() {
-        return DWNative.isOle32Available();
+        return DWWicCalls.isOle32Available();
     }
 
     /** Whether d2d1.dll loaded and exports {@code D2D1CreateFactory}; loads it if it has not been. */
     public static boolean isD2D1Available() {
-        return DWNative.isD2D1Available();
+        return DWWicCalls.isD2D1Available();
     }
 
     /** The 16 bytes of a {@code GUID_WICPixelFormat*}, or {@code null} for an unlisted value. */
     public static byte[] wicPixelFormatGuidBytes(int pixelFormat) {
-        return DWNative.wicPixelFormatGuidBytes(pixelFormat);
+        return DWWicCalls.wicPixelFormatGuidBytes(pixelFormat);
     }
 
     /** How many pixel formats the facade table carries. */
     public static int wicPixelFormatCount() {
-        return DWNative.wicPixelFormatCount();
+        return DWWicCalls.wicPixelFormatCount();
     }
 
     /** The vtable slot a named Direct2D/WIC method occupies, as the facade records it. */
     public static int renderSlot(String name) {
-        return DWNative.renderSlot(name);
+        return DWD2DCalls.renderSlot(name);
     }
 
     /** The byte size of a named Direct2D/WIC struct layout. */
     public static long renderLayoutByteSize(String name) {
-        return DWNative.layoutByteSize(name);
+        return DWD2DCalls.layoutByteSize(name);
     }
 
     /** The byte offset of a named field of a named Direct2D/WIC struct layout. */
     public static long renderLayoutOffset(String name, String field) {
-        return DWNative.layoutOffset(name, field);
+        return DWD2DCalls.layoutOffset(name, field);
     }
 
     /** {@code ID2D1RenderTarget::GetSize} - the only 8-byte struct return in the port. FFM only. */
     public static float[] renderTargetSize(long target) {
-        return DWNative.renderTargetSize(target);
+        return DWD2DCalls.renderTargetSize(target);
     }
 
     /**
@@ -1044,37 +1044,37 @@ public final class DWNativeShim {
      * render target. FFM only - the JNI path never made a struct-returning COM call.
      */
     public static boolean renderTargetStructReturnEchoesItsBuffer(long target) {
-        return DWNative.renderTargetStructReturnEchoesItsBuffer(target);
+        return DWD2DCalls.renderTargetStructReturnEchoesItsBuffer(target);
     }
 
     /** {@code ID2D1RenderTarget::GetPixelSize}, as {width, height}. FFM only. */
     public static int[] renderTargetPixelSize(long target) {
-        return DWNative.renderTargetPixelSize(target);
+        return DWD2DCalls.renderTargetPixelSize(target);
     }
 
     /** {@code ID2D1RenderTarget::GetPixelFormat}, as {DXGI_FORMAT, D2D1_ALPHA_MODE}. FFM only. */
     public static int[] renderTargetPixelFormat(long target) {
-        return DWNative.renderTargetPixelFormat(target);
+        return DWD2DCalls.renderTargetPixelFormat(target);
     }
 
     /** {@code ID2D1RenderTarget::GetMaximumBitmapSize}. FFM only. */
     public static int renderTargetMaximumBitmapSize(long target) {
-        return DWNative.renderTargetMaximumBitmapSize(target);
+        return DWD2DCalls.renderTargetMaximumBitmapSize(target);
     }
 
     /** {@code IWICBitmapSource::GetSize} through an {@code IWICBitmap} pointer. FFM only. */
     public static int[] wicBitmapSize(long bitmap) {
-        return DWNative.wicBitmapSize(bitmap);
+        return DWWicCalls.wicBitmapSize(bitmap);
     }
 
     /** {@code IWICBitmapSource::GetPixelFormat}, as the raw 16 GUID bytes. FFM only. */
     public static byte[] wicBitmapPixelFormat(long bitmap) {
-        return DWNative.wicBitmapPixelFormat(bitmap);
+        return DWWicCalls.wicBitmapPixelFormat(bitmap);
     }
 
     /** {@code IWICBitmapLock::GetSize}, as {width, height}. FFM only. */
     public static int[] wicBitmapLockSize(long bitmapLock) {
-        return DWNative.wicBitmapLockSize(bitmapLock);
+        return DWWicCalls.wicBitmapLockSize(bitmapLock);
     }
 
     private static final Api FFM = new Api() {
