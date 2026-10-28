@@ -43,7 +43,7 @@ import java.util.concurrent.atomic.AtomicLong;
  * {@code OleSetClipboard} / {@code OleGetClipboard} / {@code IDataObject} bodies of
  * {@code GlassClipboard.cpp} stay in C, because {@code ClipboardData} is a COM vtable that Windows and
  * other processes call through the OLE marshaller - except {@code isOwner}, whose whole JNI body was
- * {@code ole32!OleIsCurrentClipboard} behind a NULL test and which {@link WinGlassNative} binds
+ * {@code ole32!OleIsCurrentClipboard} behind a NULL test and which {@link WinClipboardCalls} binds
  * directly, and {@code initIDs}, which cached the three method ids and one field id the callback
  * table below replaces.
  * <p>

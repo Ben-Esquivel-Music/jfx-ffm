@@ -127,7 +127,7 @@ static_assert(sizeof(POINT) == 8 && offsetof(POINT, x) == 0 && offsetof(POINT, y
  * SetMenuItemInfoW / GetMenuItemInfoW (WinMenuNativeTest asserts the same thirteen numbers from the
  * Java side), pinned in the same way as the WinRobot INPUT layouts above.
  */
-static_assert(sizeof(MENUITEMINFOW) == 80, "MENUITEMINFOW: WinGlassNative's Java layout assumes 80 bytes on x64");
+static_assert(sizeof(MENUITEMINFOW) == 80, "MENUITEMINFOW: WinMenuCalls.MENUITEMINFOW_LAYOUT assumes 80 bytes on x64");
 static_assert(offsetof(MENUITEMINFOW, cbSize) == 0 && offsetof(MENUITEMINFOW, fMask) == 4 &&
               offsetof(MENUITEMINFOW, fType) == 8 && offsetof(MENUITEMINFOW, fState) == 12 &&
               offsetof(MENUITEMINFOW, wID) == 16 && offsetof(MENUITEMINFOW, hSubMenu) == 24 &&
@@ -155,7 +155,7 @@ static_assert(VK_PRIOR == 0x21 && VK_NEXT == 0x22 && VK_END == 0x23 && VK_HOME =
               VK_NUMPAD0 == 0x60 && VK_NUMPAD9 == 0x69 && VK_NUMLOCK == 0x90, "extended VK_* values");
 
 /*
- * WinTimer exports nothing: WinGlassNative binds winmm!timeGetDevCaps, timeBeginPeriod,
+ * WinTimer exports nothing: WinTimerCalls binds winmm!timeGetDevCaps, timeBeginPeriod,
  * timeEndPeriod, timeSetEvent and timeKillEvent itself, so glass.dll no longer links winmm. These
  * pin the layout and the constants that binding assumes (mmsystem.h still arrives via common.h).
  */
@@ -164,43 +164,43 @@ static_assert(sizeof(TIMECAPS) == 8 && offsetof(TIMECAPS, wPeriodMin) == 0
 static_assert(TIME_PERIODIC == 0x0001 && TIMERR_NOERROR == 0, "mmsystem timer constants");
 
 /*
- * WinCursor / WinPixels export nothing either: WinGlassNative binds user32!ShowCursor,
+ * WinCursor / WinPixels export nothing either: WinCursorCalls binds user32!ShowCursor,
  * user32!CreateIconIndirect, gdi32!CreateBitmap, gdi32!CreateDIBSection, gdi32!GdiFlush and
  * gdi32!DeleteObject itself and builds the ICONINFO / BITMAPINFOHEADER by hand. These pin the
  * constants and the two struct layouts that binding hardcodes; a Windows SDK that disagrees is a
  * compile error here instead of a wrong cursor at runtime.
  */
-static_assert(SM_CXCURSOR == 13, "WinGlassNative.SM_CXCURSOR");
-static_assert(SM_CYCURSOR == 14, "WinGlassNative.SM_CYCURSOR");
-static_assert(sizeof(BITMAPINFOHEADER) == 40, "WinGlassNative.BITMAPINFOHEADER_LAYOUT");
-static_assert(offsetof(BITMAPINFOHEADER, biBitCount) == 14, "WinGlassNative.BITMAPINFOHEADER_LAYOUT");
-static_assert(offsetof(BITMAPINFOHEADER, biCompression) == 16, "WinGlassNative.BITMAPINFOHEADER_LAYOUT");
-static_assert(offsetof(BITMAPINFOHEADER, biSizeImage) == 20, "WinGlassNative.BITMAPINFOHEADER_LAYOUT");
-static_assert(sizeof(ICONINFO) == 32, "WinGlassNative.ICONINFO_LAYOUT");
-static_assert(offsetof(ICONINFO, xHotspot) == 4, "WinGlassNative.ICONINFO_LAYOUT");
-static_assert(offsetof(ICONINFO, yHotspot) == 8, "WinGlassNative.ICONINFO_LAYOUT");
-static_assert(offsetof(ICONINFO, hbmMask) == 16, "WinGlassNative.ICONINFO_LAYOUT");
-static_assert(offsetof(ICONINFO, hbmColor) == 24, "WinGlassNative.ICONINFO_LAYOUT");
-static_assert(BI_RGB == 0, "WinGlassNative.BI_RGB");
-static_assert(DIB_RGB_COLORS == 0, "WinGlassNative.DIB_RGB_COLORS");
+static_assert(SM_CXCURSOR == 13, "WinCursorCalls.SM_CXCURSOR");
+static_assert(SM_CYCURSOR == 14, "WinCursorCalls.SM_CYCURSOR");
+static_assert(sizeof(BITMAPINFOHEADER) == 40, "WinCursorCalls.BITMAPINFOHEADER_LAYOUT");
+static_assert(offsetof(BITMAPINFOHEADER, biBitCount) == 14, "WinCursorCalls.BITMAPINFOHEADER_LAYOUT");
+static_assert(offsetof(BITMAPINFOHEADER, biCompression) == 16, "WinCursorCalls.BITMAPINFOHEADER_LAYOUT");
+static_assert(offsetof(BITMAPINFOHEADER, biSizeImage) == 20, "WinCursorCalls.BITMAPINFOHEADER_LAYOUT");
+static_assert(sizeof(ICONINFO) == 32, "WinCursorCalls.ICONINFO_LAYOUT");
+static_assert(offsetof(ICONINFO, xHotspot) == 4, "WinCursorCalls.ICONINFO_LAYOUT");
+static_assert(offsetof(ICONINFO, yHotspot) == 8, "WinCursorCalls.ICONINFO_LAYOUT");
+static_assert(offsetof(ICONINFO, hbmMask) == 16, "WinCursorCalls.ICONINFO_LAYOUT");
+static_assert(offsetof(ICONINFO, hbmColor) == 24, "WinCursorCalls.ICONINFO_LAYOUT");
+static_assert(BI_RGB == 0, "WinCursorCalls.BI_RGB");
+static_assert(DIB_RGB_COLORS == 0, "WinCursorCalls.DIB_RGB_COLORS");
 
 /*
  * The Glass helper files (ABI 2). WinPreferences reads the eight GetSysColor indices and the two
  * SystemParametersInfoW keys from Java now, with the constants and the HIGHCONTRAST layout hard-coded
- * in WinGlassNative. These pin every one of them to the Windows SDK: a wrong Java constant becomes a
+ * in WinPreferenceCalls. These pin every one of them to the Windows SDK: a wrong Java constant becomes a
  * compile error here instead of a plausible wrong colour, a silently missing preference key, or - for
  * the layout - a SystemParametersInfoW that returns FALSE and drops both high-contrast keys.
  * WinPreferencesNativeTest and WinGlassNativeTest.constantsMatchWinuser assert the same numbers from
  * the Java side, which catches a mistake on this machine; these catch an SDK that disagrees.
  */
-static_assert(VK_CAPITAL == 0x14, "WinGlassNative.VK_CAPITAL");
-static_assert(SPI_GETHIGHCONTRAST == 0x0042, "WinGlassNative.SPI_GETHIGHCONTRAST");
-static_assert(SPI_GETCLIENTAREAANIMATION == 0x1042, "WinGlassNative.SPI_GETCLIENTAREAANIMATION");
-static_assert(HCF_HIGHCONTRASTON == 0x00000001, "WinGlassNative.HCF_HIGHCONTRASTON");
-static_assert(sizeof(HIGHCONTRASTW) == 16, "WinGlassNative.HIGHCONTRAST_LAYOUT");
-static_assert(offsetof(HIGHCONTRASTW, cbSize) == 0, "WinGlassNative.HIGHCONTRAST_LAYOUT");
-static_assert(offsetof(HIGHCONTRASTW, dwFlags) == 4, "WinGlassNative.HIGHCONTRAST_LAYOUT");
-static_assert(offsetof(HIGHCONTRASTW, lpszDefaultScheme) == 8, "WinGlassNative.HIGHCONTRAST_LAYOUT");
+static_assert(VK_CAPITAL == 0x14, "WinRobotCalls.VK_CAPITAL");
+static_assert(SPI_GETHIGHCONTRAST == 0x0042, "WinPreferenceCalls.SPI_GETHIGHCONTRAST");
+static_assert(SPI_GETCLIENTAREAANIMATION == 0x1042, "WinPreferenceCalls.SPI_GETCLIENTAREAANIMATION");
+static_assert(HCF_HIGHCONTRASTON == 0x00000001, "WinPreferenceCalls.HCF_HIGHCONTRASTON");
+static_assert(sizeof(HIGHCONTRASTW) == 16, "WinPreferenceCalls.HIGHCONTRAST_LAYOUT");
+static_assert(offsetof(HIGHCONTRASTW, cbSize) == 0, "WinPreferenceCalls.HIGHCONTRAST_LAYOUT");
+static_assert(offsetof(HIGHCONTRASTW, dwFlags) == 4, "WinPreferenceCalls.HIGHCONTRAST_LAYOUT");
+static_assert(offsetof(HIGHCONTRASTW, lpszDefaultScheme) == 8, "WinPreferenceCalls.HIGHCONTRAST_LAYOUT");
 static_assert(COLOR_3DFACE == 15 && COLOR_BTNTEXT == 18 && COLOR_GRAYTEXT == 17
         && COLOR_HIGHLIGHT == 13 && COLOR_HIGHLIGHTTEXT == 14 && COLOR_HOTLIGHT == 26
         && COLOR_WINDOW == 5 && COLOR_WINDOWTEXT == 8, "WinPreferences GetSysColor indices");
@@ -219,36 +219,36 @@ static_assert(offsetof(GwinNetworkInfo, cost_type) == 4, "GwinNetworkInfo.cost_t
 
 /*
  * WinView / WinGestureSupport (ABI 4). The two multi-click metrics Java reads through
- * user32!GetSystemMetrics with the indices hard-coded in WinGlassNative (the former
+ * user32!GetSystemMetrics with the indices hard-coded in WinViewCalls (the former
  * _getMultiClickMaxX_impl / _getMultiClickMaxY_impl), and the byte sizes of the two callback tables
  * the Java layouts hard-code - glass_win_api.h pins them as N * sizeof(void*) on every platform,
  * this pins the x64 number the MemoryLayouts carry.
  */
-static_assert(SM_CXDOUBLECLK == 36, "WinGlassNative.SM_CXDOUBLECLK");
-static_assert(SM_CYDOUBLECLK == 37, "WinGlassNative.SM_CYDOUBLECLK");
+static_assert(SM_CXDOUBLECLK == 36, "WinViewCalls.SM_CXDOUBLECLK");
+static_assert(SM_CYDOUBLECLK == 37, "WinViewCalls.SM_CYDOUBLECLK");
 #if defined(_WIN64)
-static_assert(sizeof(GwinViewCallbacks) == 80, "WinGlassNative.VIEW_CALLBACKS_LAYOUT");
-static_assert(sizeof(GwinGestureCallbacks) == 40, "WinGlassNative.GESTURE_CALLBACKS_LAYOUT");
+static_assert(sizeof(GwinViewCallbacks) == 80, "WinViewCallbacks.GWIN_VIEW_CALLBACKS_LAYOUT");
+static_assert(sizeof(GwinGestureCallbacks) == 40, "WinViewCallbacks.GWIN_GESTURE_CALLBACKS_LAYOUT");
 #endif
 
 /*
- * WinWindow (ABI 4): the table size, the RECT WinGlassNative fills for the _getAnchor WRAPPER's
+ * WinWindow (ABI 4): the table size, the RECT WinWindowCalls fills for the _getAnchor WRAPPER's
  * user32!GetWindowRect, the IDC_* ordinals the Java Cursor -> HCURSOR mapping passes to
  * user32!LoadCursorW (MAKEINTRESOURCE values, the ones GlassCursor.cpp's GetNativeCursor picked), and
  * the HT* values WinWindow.nonClientHitTest returns / GwinWindowCallbacks.non_client_hit_test
  * documents. Java hardcodes every one of these; nothing else pins them.
  */
 #if defined(_WIN64)
-static_assert(sizeof(GwinWindowCallbacks) == 96, "WinGlassNative.WINDOW_CALLBACKS_LAYOUT");
+static_assert(sizeof(GwinWindowCallbacks) == 96, "WinWindowCallbacks.GWIN_WINDOW_CALLBACKS_LAYOUT");
 #endif
 static_assert(sizeof(RECT) == 16 && offsetof(RECT, left) == 0 && offsetof(RECT, top) == 4 &&
-              offsetof(RECT, right) == 8 && offsetof(RECT, bottom) == 12, "WinGlassNative.RECT_LAYOUT");
+              offsetof(RECT, right) == 8 && offsetof(RECT, bottom) == 12, "WinCallSupport.RECT_LAYOUT");
 static_assert((uintptr_t) IDC_ARROW == 32512 && (uintptr_t) IDC_IBEAM == 32513 &&
               (uintptr_t) IDC_WAIT == 32514 && (uintptr_t) IDC_CROSS == 32515 &&
               (uintptr_t) IDC_SIZENWSE == 32642 && (uintptr_t) IDC_SIZENESW == 32643 &&
               (uintptr_t) IDC_SIZEWE == 32644 && (uintptr_t) IDC_SIZENS == 32645 &&
               (uintptr_t) IDC_SIZEALL == 32646 && (uintptr_t) IDC_HAND == 32649,
-              "WinGlassNative.IDC_* - the ordinals the former GlassCursor.cpp GetNativeCursor picked");
+              "WinCursorCalls.IDC_* - the ordinals the former GlassCursor.cpp GetNativeCursor picked");
 static_assert(HTNOWHERE == 0 && HTCLIENT == 1 && HTCAPTION == 2 && HTMINBUTTON == 8 && HTMAXBUTTON == 9 &&
               HTTOP == 12 && HTCLOSE == 20, "WinWindow.nonClientHitTest HT* values");
 
@@ -259,10 +259,10 @@ static_assert(HTNOWHERE == 0 && HTCLIENT == 1 && HTCAPTION == 2 && HTMINBUTTON =
  * C reads through the generated Clipboard header - Java pins its own copies of the same five.
  */
 #if defined(_WIN64)
-static_assert(sizeof(GwinClipboardCallbacks) == 56, "WinGlassNative.CLIPBOARD_CALLBACKS_LAYOUT");
-static_assert(sizeof(GwinDndCallbacks) == 72, "WinGlassNative.DND_CALLBACKS_LAYOUT");
-static_assert(sizeof(GwinFileFilter) == 16, "WinGlassNative.FILE_FILTER_LAYOUT");
-static_assert(offsetof(GwinFileFilter, extensions) == 8, "WinGlassNative.FILE_FILTER_LAYOUT.extensions");
+static_assert(sizeof(GwinClipboardCallbacks) == 56, "WinClipboardCallbacks.GWIN_CLIPBOARD_CALLBACKS_LAYOUT");
+static_assert(sizeof(GwinDndCallbacks) == 72, "WinClipboardCallbacks.GWIN_DND_CALLBACKS_LAYOUT");
+static_assert(sizeof(GwinFileFilter) == 16, "WinClipboardCalls.GWIN_FILE_FILTER_LAYOUT");
+static_assert(offsetof(GwinFileFilter, extensions) == 8, "WinClipboardCalls.GWIN_FILE_FILTER_LAYOUT.extensions");
 #endif
 static_assert(com_sun_glass_ui_CommonDialogs_Type_OPEN == 0 && com_sun_glass_ui_CommonDialogs_Type_SAVE == 1,
               "CommonDialogs.Type.OPEN / SAVE - gwin_dialog_file's `type` argument");
@@ -279,26 +279,26 @@ static_assert(com_sun_glass_ui_Clipboard_ACTION_NONE == 0 && com_sun_glass_ui_Cl
  * headers, so offsetof is taken on the base (a standard-layout type).
  */
 #if defined(_WIN64)
-static_assert(sizeof(GwinScreenCallbacks) == 8, "WinGlassNative.SCREEN_CALLBACKS_LAYOUT");
+static_assert(sizeof(GwinScreenCallbacks) == 8, "WinScreenCalls.SCREEN_CALLBACKS_LAYOUT");
 #endif
 static_assert(sizeof(MONITORINFO) == 40 && offsetof(MONITORINFO, rcMonitor) == 4
         && offsetof(MONITORINFO, rcWork) == 20 && offsetof(MONITORINFO, dwFlags) == 36
         && sizeof(MONITORINFOEXW) == 104 && CCHDEVICENAME == 32,
-        "WinGlassNative.MONITORINFOEXW_LAYOUT (szDevice at 40)");
-static_assert(MONITORINFOF_PRIMARY == 1, "WinGlassNative.MONITORINFOF_PRIMARY");
+        "WinScreenCalls.MONITORINFOEXW_LAYOUT (szDevice at 40)");
+static_assert(MONITORINFOF_PRIMARY == 1, "WinScreenCalls.MONITORINFOF_PRIMARY");
 static_assert(BITSPIXEL == 12 && PLANES == 14 && LOGPIXELSX == 88 && LOGPIXELSY == 90, "GetDeviceCaps indices");
 static_assert(USER_DEFAULT_SCREEN_DPI == 96, "WinScreenLayout's 96.0f");
 static_assert(WM_SETTINGCHANGE == 0x001A && SPI_SETWORKAREA == 0x002F && WM_DISPLAYCHANGE == 0x007E
         && WM_DPICHANGED == 0x02E0, "the tests/system display-change probe");
 /*
- * The two shcore enums Java passes as ints: GetDpiForMonitor's MONITOR_DPI_TYPE (WinGlassNative.MDT_*)
+ * The two shcore enums Java passes as ints: GetDpiForMonitor's MONITOR_DPI_TYPE (WinScreenCalls.MDT_*)
  * and all three PROCESS_DPI_AWARENESS levels WinApplication can hand SetProcessDpiAwareness. Pinned to
  * the SDK's own definitions; the former GlassScreen.cpp pin checked only that file's private copies of
  * the enums and went with them.
  */
-static_assert(MDT_EFFECTIVE_DPI == 0 && MDT_RAW_DPI == 2, "WinGlassNative.MDT_EFFECTIVE_DPI / MDT_RAW_DPI");
+static_assert(MDT_EFFECTIVE_DPI == 0 && MDT_RAW_DPI == 2, "WinScreenCalls.MDT_EFFECTIVE_DPI / MDT_RAW_DPI");
 static_assert(PROCESS_DPI_UNAWARE == 0 && PROCESS_SYSTEM_DPI_AWARE == 1 && PROCESS_PER_MONITOR_DPI_AWARE == 2,
-              "WinApplication's three DPI awareness levels (WinGlassNative.PROCESS_PER_MONITOR_DPI_AWARE)");
+              "WinApplication's three DPI awareness levels (WinScreenCalls.PROCESS_PER_MONITOR_DPI_AWARE)");
 
 /* Robot.cpp WinToJavaPixel, verbatim (jint -> int32_t). */
 inline static int32_t WinToJavaPixel(USHORT r, USHORT g, USHORT b)

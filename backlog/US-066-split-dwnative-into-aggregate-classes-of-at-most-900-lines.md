@@ -88,8 +88,8 @@ A crashed fork writes its `hs_err_pid*.log` in the module directory (`.claude/sk
 so the first `find` searches there.
 
 ## Out of scope
-- **Other facades over 900 lines** (`wc -l`), each a possible story of its own: `WinGlassNative` 9,150,
-  `GtkGlassNative` 6,019, `JfxMediaNative` 2,481, `WebPageNative` 2,301, `WebKitNative` 1,717, `ES2Native` 1,458,
+- **Other facades over 900 lines** (`wc -l`), each a possible story of its own: `WinGlassNative` 9,150 (US-070),
+  `GtkGlassNative` 6,019 (US-071), `JfxMediaNative` 2,481, `WebPageNative` 2,301, `WebKitNative` 1,717, `ES2Native` 1,458,
   `D3DNative` 1,293, `LiveConnectNative` 1,013, the monocle `LinuxSystem` 1,132 and `X` 938, and the generated DOM
   bindings `DocumentNative` 2,638, `ElementNative` 2,352, `DOMWindowNative` 2,227 and `HTMLInputElementNative` 1,132.
 - **The test side.** `DWNativeShim` (1,515) and `DWLayoutTest` (1,005) are over 900 lines but exempt, because the

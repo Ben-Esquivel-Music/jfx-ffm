@@ -37,7 +37,7 @@ import java.nio.IntBuffer;
  * was a {@code memcpy} between two buffers Java can already reach, and {@code _attachInt} /
  * {@code _attachByte} were the return leg of the {@code Pixels.attachData} upcall that the JNI bodies of
  * {@code GlassView._uploadPixels} and {@code GlassWindow._setIcon} made. Both peers are flipped
- * ({@code WinView} resolves the buffer in {@code WinGlassNative.pixelBits}, {@code WinWindow} builds the
+ * ({@code WinView} resolves the buffer in {@code WinViewCalls.pixelBits}, {@code WinWindow} builds the
  * {@code HICON} with {@code WinGlassNative.iconCreate}) and the C constructor that dialled
  * {@code attachData} is deleted, so the two attach overrides below cannot be reached on Windows: they
  * throw, as {@code HeadlessPixels} does, rather than accept a handle with no native {@code Pixels} behind

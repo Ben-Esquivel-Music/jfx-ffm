@@ -43,7 +43,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
  * hook; its answers live on in {@code screen-anchor-golden.txt}.
  * <p>
  * The table tests install a table of their own and put back what was there
- * ({@code WinGlassNative.rewriteScreenCallbacks}): the production table once {@code WinApplication} installs
+ * ({@code WinScreenCalls.rewriteScreenCallbacks}): the production table once {@code WinApplication} installs
  * it, no table before.
  */
 @EnabledOnOs(OS.WINDOWS)
