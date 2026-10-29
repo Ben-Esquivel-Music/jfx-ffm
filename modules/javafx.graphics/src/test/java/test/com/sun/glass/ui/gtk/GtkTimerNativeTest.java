@@ -105,8 +105,8 @@ public class GtkTimerNativeTest {
 
     /**
      * {@code call_runnable_in_timer} freed the context and answered {@code FALSE}, removing the GLib source, in the
-     * first tick after {@code _stop}: the facade's registry holds one more timer while it runs and is back to its
-     * size afterwards, so no source keeps waking the loop for the life of the process.
+     * first tick after {@code _stop}: {@code GtkMainLoopCalls}' registry holds one more timer while it runs and is
+     * back to its size afterwards, so no source keeps waking the loop for the life of the process.
      */
     @Test
     public void aStoppedTimerIsForgottenAtItsNextTick() {

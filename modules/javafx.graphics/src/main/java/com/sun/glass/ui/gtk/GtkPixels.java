@@ -67,9 +67,9 @@ final class GtkPixels extends Pixels {
     }
 
     /**
-     * Called by {@code Pixels.attachData} from {@link GtkGlassNative} - for the cursor, the window icon, the clipboard
-     * and the drag source's image, where the C of commit {@code 033187ad90} called it - which also binds
-     * {@code gdk_pixbuf_new_from_data} where {@code GlassPixels.cpp} wrapped it.
+     * Called by {@code Pixels.attachData} through {@link GtkPixelsCalls#PIXELS_ATTACH_DATA} - for the cursor, the
+     * window icon, the clipboard and the drag source's image, where the C of commit {@code 033187ad90} called it - and
+     * {@code GtkPixelsCalls} also binds {@code gdk_pixbuf_new_from_data} where {@code GlassPixels.cpp} wrapped it.
      */
     @Override
     protected void _attachInt(long ptr, int w, int h, IntBuffer ints, int[] array, int offset) {

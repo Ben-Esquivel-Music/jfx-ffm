@@ -79,7 +79,7 @@ import static java.lang.foreign.ValueLayout.JAVA_SHORT;
  * implementation that is built - the JNI one of commit {@code 033187ad90} or the {@code java.lang.foreign}
  * one that replaced it - without naming either. The few {@code java.lang.foreign} bindings of its own are
  * yardsticks the scenarios measure glass against (GLib sources with a chosen priority, settings and properties
- * read back, the struct layouts {@code GtkGlassNative} hard-codes probed against the libraries); they stay in this
+ * read back, the struct layouts the binding hard-codes probed against the libraries); they stay in this
  * class so that the restricted calls stay inside the module {@code --enable-native-access} names.
  */
 public final class GtkGlassShim {
@@ -103,23 +103,37 @@ public final class GtkGlassShim {
     }
 
     /**
-     * {@code library!symbol} of every symbol {@code GtkGlassNative} bound, in binding order; initializes that class.
-     * Reached reflectively, so that this shim also compiles against the JNI build of commit {@code 033187ad90},
-     * where the class does not exist and the base-build runs of the behaviour tests use the rest of the shim.
+     * {@code library!symbol} of every symbol {@code GtkGlassNative} bound, in binding order; links that class first
+     * ({@code GtkGlassNative.link}), which binds every system symbol. Reached reflectively, so that this shim also
+     * compiles against the JNI build of commit {@code 033187ad90}, where the class does not exist and the base-build
+     * runs of the behaviour tests use the rest of the shim.
      */
     @SuppressWarnings("unchecked")
     public static List<String> boundSymbols() {
-        return (List<String>) facade("boundSymbols", new Class<?>[0]);
+        facade(FACADE, "link", new Class<?>[0]);
+        return (List<String>) facade(FACADE, "boundSymbols", new Class<?>[0]);
     }
 
-    /** The address {@code GtkGlassNative} bound {@code library!symbol} at, or 0. */
+    /**
+     * The address {@code GtkGlassNative} bound {@code library!symbol} at, or 0; links that class first, as
+     * {@link #boundSymbols} does.
+     */
     public static long boundAddress(String qualifiedName) {
-        return (Long) facade("boundAddress", new Class<?>[] {String.class}, qualifiedName);
+        facade(FACADE, "link", new Class<?>[0]);
+        return (Long) facade(FACADE, "boundAddress", new Class<?>[] {String.class}, qualifiedName);
     }
 
-    private static Object facade(String name, Class<?>[] types, Object... arguments) {
+    /** The simple name of the facade of the {@code java.lang.foreign} binding; the other classes are its aggregates. */
+    private static final String FACADE = "GtkGlassNative";
+
+    /**
+     * The static method {@code name} of the class {@code owner} of the binding. A class other than the facade is
+     * reached only after {@code GtkGlassNative.link}, so that no test initializes an aggregate ahead of it and changes
+     * the order of {@link #boundSymbols}.
+     */
+    private static Object facade(String owner, String name, Class<?>[] types, Object... arguments) {
         try {
-            Method method = Class.forName("com.sun.glass.ui.gtk.GtkGlassNative").getDeclaredMethod(name, types);
+            Method method = bindingClass(owner).getDeclaredMethod(name, types);
             method.setAccessible(true);
             return method.invoke(null, arguments);
         } catch (InvocationTargetException e) {
@@ -129,22 +143,22 @@ public final class GtkGlassShim {
         }
     }
 
-    /** The value of the {@code static final long} constant {@code name} of {@code GtkGlassNative}. */
-    public static long facadeConstant(String name) {
-        return (Long) facadeField(name);
+    /** The value of the {@code static final long} constant {@code name} of the class {@code owner} of the binding. */
+    public static long facadeConstant(String owner, String name) {
+        return (Long) facadeField(owner, name);
     }
 
     /**
-     * The number of timers {@code GtkGlassNative} still keeps a context for: a timer's entry leaves in the first tick
+     * The number of timers {@code GtkMainLoopCalls} still keeps a context for: a timer's entry leaves in the first tick
      * after it was stopped, the tick whose {@code FALSE} removes its GLib source.
      */
     public static int timerRegistrySize() {
-        return ((Map<?, ?>) facadeField("TIMERS")).size();
+        return ((Map<?, ?>) facadeField("GtkMainLoopCalls", "TIMERS")).size();
     }
 
-    private static Object facadeField(String name) {
+    private static Object facadeField(String owner, String name) {
         try {
-            Field field = Class.forName("com.sun.glass.ui.gtk.GtkGlassNative").getDeclaredField(name);
+            Field field = bindingClass(owner).getDeclaredField(name);
             field.setAccessible(true);
             return field.get(null);
         } catch (ReflectiveOperationException e) {
@@ -152,13 +166,20 @@ public final class GtkGlassShim {
         }
     }
 
+    private static Class<?> bindingClass(String owner) throws ReflectiveOperationException {
+        if (!owner.equals(FACADE)) {
+            facade(FACADE, "link", new Class<?>[0]);
+        }
+        return Class.forName("com.sun.glass.ui.gtk." + owner);
+    }
+
     /**
      * {@code domain=<matches> code=<code> message=<message>} of a {@code GError} that {@code g_error_new_literal}
-     * made, read at {@code GtkGlassNative.G_ERROR_MESSAGE_OFFSET}. Needs no display.
+     * made, read at {@code GtkApplicationCalls.G_ERROR_MESSAGE_OFFSET}. Needs no display.
      */
     @SuppressWarnings("restricted")
     public static String gErrorLayout() {
-        long messageOffset = facadeConstant("G_ERROR_MESSAGE_OFFSET");
+        long messageOffset = facadeConstant("GtkApplicationCalls", "G_ERROR_MESSAGE_OFFSET");
         try (Arena arena = Arena.ofConfined()) {
             int quark = (int) Layout.G_QUARK_FROM_STRING.invokeExact(arena.allocateFrom("jfx-gtk-glass-test"));
             MemorySegment error = (MemorySegment) Layout.G_ERROR_NEW_LITERAL.invokeExact(quark, 42,
@@ -175,12 +196,12 @@ public final class GtkGlassShim {
     }
 
     /**
-     * A {@code GHashTableIter} of {@code GtkGlassNative.G_HASH_TABLE_ITER_SIZE} bytes followed by 32 canary bytes,
+     * A {@code GHashTableIter} of {@code GtkKeyCalls.G_HASH_TABLE_ITER_SIZE} bytes followed by 32 canary bytes,
      * through {@code g_hash_table_iter_init} and {@code g_hash_table_iter_next} over a one-entry table:
      * {@code entries=<key>:<value>,... tableAtStart=<bool> canary=<intact|overwritten>}. Needs no display.
      */
     public static String hashTableIterLayout() {
-        long size = facadeConstant("G_HASH_TABLE_ITER_SIZE");
+        long size = facadeConstant("GtkKeyCalls", "G_HASH_TABLE_ITER_SIZE");
         try (Arena arena = Arena.ofConfined()) {
             MemorySegment iter = arena.allocate(size + 32);
             iter.fill(CANARY);
@@ -205,11 +226,11 @@ public final class GtkGlassShim {
     }
 
     /**
-     * {@code XkbGetState(display, XkbUseCoreKbd, state)} into {@code GtkGlassNative.XKB_STATE_REC_SIZE} bytes followed
+     * {@code XkbGetState(display, XkbUseCoreKbd, state)} into {@code GtkKeyCalls.XKB_STATE_REC_SIZE} bytes followed
      * by 32 canary bytes: {@code status=<status> canary=<intact|overwritten>}; on the FX thread.
      */
     public static String xkbStateRecLayout() {
-        long size = facadeConstant("XKB_STATE_REC_SIZE");
+        long size = facadeConstant("GtkKeyCalls", "XKB_STATE_REC_SIZE");
         try (Arena arena = Arena.ofConfined()) {
             MemorySegment state = arena.allocate(size + 32);
             state.fill(CANARY);
@@ -223,14 +244,14 @@ public final class GtkGlassShim {
 
     /**
      * Every {@code GdkKeymapKey} that {@code gdk_keymap_get_entries_for_keyval} answers for the keyvals 0x20..0x7e
-     * and 0xff00..0xffff, read in steps of {@code GtkGlassNative.GDK_KEYMAP_KEY_SIZE} and checked against
+     * and 0xff00..0xffff, read in steps of {@code GtkKeyCalls.GDK_KEYMAP_KEY_SIZE} and checked against
      * {@code XkbKeycodeToKeysym(display, keycode, group, level)}:
      * {@code entries=<n> laterEntries=<entries at index 1 or more> mismatches=<keyval:index:keycode/group/level ...>};
      * on the FX thread.
      */
     @SuppressWarnings("restricted")
     public static String keymapKeyLayout() {
-        long size = facadeConstant("GDK_KEYMAP_KEY_SIZE");
+        long size = facadeConstant("GtkKeyCalls", "GDK_KEYMAP_KEY_SIZE");
         try (Arena arena = Arena.ofConfined()) {
             MemorySegment keysOut = arena.allocate(ADDRESS);
             MemorySegment countOut = arena.allocate(JAVA_INT);
@@ -651,20 +672,28 @@ public final class GtkGlassShim {
     }
 
     /**
-     * {@code GtkGlassNative.Loader.sniffLibs} over the two chains of library names: the decision table of
+     * {@code GtkLibraryLoader.sniffLibs} over the two chains of library names: the decision table of
      * {@code sniffLibs} ({@code launcher.c}), driven with names this machine has.
      */
     public static int sniffLibs(int wantVersion, boolean verbose, String[] gtk3, String[] gtk2) {
-        return GtkGlassNative.Loader.sniffLibs(wantVersion, verbose, gtk3, gtk2);
+        return GtkLibraryLoader.sniffLibs(wantVersion, verbose, gtk3, gtk2);
     }
 
-    /** {@code GtkGlassNative.Loader.tryLibrariesNoload}: is {@code soname} loaded in this process already? */
+    /** {@code GtkLibraryLoader.tryLibrariesNoload}: is {@code soname} loaded in this process already? */
     public static boolean libraryIsLoaded(String soname) {
-        return GtkGlassNative.Loader.tryLibrariesNoload(soname);
+        return GtkLibraryLoader.tryLibrariesNoload(soname);
     }
 
-    /** {@code library!symbol} of every symbol the library query binds, in binding order. */
+    /**
+     * {@code library!symbol} of every symbol the library query binds, in binding order; initializes the query's holder
+     * {@code GtkLibraryLoader} first, whose initializer binds them all.
+     */
     public static List<String> loaderBoundSymbols() {
+        try {
+            MethodHandles.lookup().ensureInitialized(GtkLibraryLoader.class);
+        } catch (IllegalAccessException e) {
+            throw new IllegalStateException(e);
+        }
         return GtkGlassNative.Loader.boundSymbols();
     }
 
@@ -722,21 +751,21 @@ public final class GtkGlassShim {
         }
     }
 
-    /** {@code GtkGlassNative.findGdkKeyvalForGlassKeycode}. */
+    /** {@code GtkKeyCalls.findGdkKeyvalForGlassKeycode}. */
     public static int javaFindGdkKeyvalForGlassKeycode(int code) {
-        return (Integer) facade("findGdkKeyvalForGlassKeycode", new Class<?>[] {int.class}, code);
+        return (Integer) facade("GtkKeyCalls", "findGdkKeyvalForGlassKeycode", new Class<?>[] {int.class}, code);
     }
 
-    /** {@code GtkGlassNative.findGdkKeycodeForKeyval}. */
+    /** {@code GtkKeyCalls.findGdkKeycodeForKeyval}. */
     public static int javaFindGdkKeycodeForKeyval(int keyval) {
-        return (Integer) facade("findGdkKeycodeForKeyval", new Class<?>[] {int.class}, keyval);
+        return (Integer) facade("GtkKeyCalls", "findGdkKeycodeForKeyval", new Class<?>[] {int.class}, keyval);
     }
 
-    /** {@code GtkGlassNative.getUIScale(gdk_screen_get_default())}. */
+    /** {@code GtkRobotCalls.getUIScale(gdk_screen_get_default())}. */
     public static float javaGetUIScale() {
         try {
             MemorySegment screen = (MemorySegment) Readback.GDK_SCREEN_GET_DEFAULT.invokeExact();
-            return (Float) facade("getUIScale", new Class<?>[] {MemorySegment.class}, screen);
+            return (Float) facade("GtkRobotCalls", "getUIScale", new Class<?>[] {MemorySegment.class}, screen);
         } catch (Throwable t) {
             throw new IllegalStateException(t);
         }
@@ -1344,15 +1373,9 @@ public final class GtkGlassShim {
     /** {@code PropModeReplace} of {@code X.h}. */
     private static final int PROP_MODE_REPLACE = 0;
 
-    /** A copy of the {@code int[]} constant {@code name} of {@code GtkGlassNative}. */
+    /** A copy of the {@code int[]} constant {@code name} of {@code GtkKeyCalls}. */
     public static int[] javaTable(String name) {
-        try {
-            Field field = Class.forName("com.sun.glass.ui.gtk.GtkGlassNative").getDeclaredField(name);
-            field.setAccessible(true);
-            return ((int[]) field.get(null)).clone();
-        } catch (ReflectiveOperationException e) {
-            throw new IllegalStateException(e);
-        }
+        return ((int[]) facadeField("GtkKeyCalls", name)).clone();
     }
 
     /** {@code ClientMessage} of {@code X.h}. */
@@ -1772,7 +1795,7 @@ public final class GtkGlassShim {
     /** The value every out-parameter is filled with before a slot is fired, per byte. */
     private static final byte SENTINEL = (byte) 0x5A;
 
-    /** The slot numbers of {@code ggtk_test_fire_callback}, table by table in the facade's order. */
+    /** The slot numbers of {@code ggtk_test_fire_callback}, table by table in the binding's order. */
     public static final List<Integer> APP_SLOTS = List.of(0, 1);
     public static final List<Integer> WINDOW_SLOTS = List.of(100, 101, 102, 103, 104, 105, 106, 107, 108, 109, 110,
             111);
@@ -1800,7 +1823,7 @@ public final class GtkGlassShim {
 
     /** The number of distinct production stubs installed, and whether each table has one per slot. */
     public static String installedStubs() {
-        List<List<MemorySegment>> tables = GtkGlassNative.installedCallbackStubs();
+        List<List<MemorySegment>> tables = GtkCallbackTables.installedCallbackStubs();
         Set<Long> distinct = new HashSet<>();
         StringBuilder sb = new StringBuilder();
         for (int t = 0; t < tables.size(); t++) {
@@ -1813,32 +1836,33 @@ public final class GtkGlassShim {
     }
 
     /**
-     * The four callback tables and {@code GgtkDndData} as the facade lays them out, with the {@code sizeof} the C
-     * compiler gave each: {@code <struct> size=<java> c=<c>}, then {@code <slot>@<offset>} per member.
+     * The four callback tables and {@code GgtkDndData} as {@code GtkCallbackTables} lays them out, with the
+     * {@code sizeof} the C compiler gave each: {@code <struct> size=<java> c=<c>}, then
+     * {@code <slot>@<offset>} per member.
      */
     public static List<String> callbackLayouts() {
         List<String> lines = new ArrayList<>();
-        int[] sizes = GtkGlassNative.callbackLayoutSizes();
+        int[] sizes = GtkCallbackTables.callbackLayoutSizes();
         String[] names = {"GgtkAppCallbacks", "GgtkWindowCallbacks", "GgtkViewCallbacks", "GgtkDndCallbacks"};
-        for (int t = 0; t < GtkGlassNative.CALLBACK_TABLES.size(); t++) {
-            GtkGlassNative.CallbackTable table = GtkGlassNative.CALLBACK_TABLES.get(t);
+        for (int t = 0; t < GtkCallbackTables.CALLBACK_TABLES.size(); t++) {
+            GtkCallbackTables.CallbackTable table = GtkCallbackTables.CALLBACK_TABLES.get(t);
             lines.add(names[t] + " size=" + table.layout().byteSize() + " c=" + sizes[t]);
             for (String slot : table.slots()) {
                 lines.add(slot + "@" + table.layout().byteOffset(PathElement.groupElement(slot)));
             }
         }
-        lines.add("GgtkDndData size=" + GtkGlassNative.GGTK_DND_DATA_LAYOUT.byteSize() + " c=" + sizes[4]);
+        lines.add("GgtkDndData size=" + GtkCallbackTables.GGTK_DND_DATA_LAYOUT.byteSize() + " c=" + sizes[4]);
         for (String field : List.of("kind", "count", "data", "pixbuf")) {
-            lines.add(field + "@" + GtkGlassNative.GGTK_DND_DATA_LAYOUT.byteOffset(
+            lines.add(field + "@" + GtkCallbackTables.GGTK_DND_DATA_LAYOUT.byteOffset(
                     PathElement.groupElement(field)));
         }
         return lines;
     }
 
     /**
-     * Installs recording tables whose stubs are built from the facade's own slot descriptors, dials every slot
+     * Installs recording tables whose stubs are built from the binding's own slot descriptors, dials every slot
      * through {@code ggtk_test_fire_callback} with the header's fixed patterns, then a table with a {@code NULL} slot
-     * and an unknown slot number, and restores the production tables ({@code GtkGlassNative.reinstallCallbacks}). A
+     * and an unknown slot number, and restores the production tables ({@code GtkCallbackTables.reinstallCallbacks}). A
      * descriptor that disagrees with the C prototype shows as a garbled pattern. Answers, per slot, the call the
      * recorder saw - {@code <table>.<slot>(<args>)}, pointers decoded where the header says what they hold - and
      * {@code fire <n> -> <status> <outs>}: what the hook returned and what the recorder's writes left in the
@@ -1848,8 +1872,8 @@ public final class GtkGlassShim {
         List<String> lines = new ArrayList<>();
         List<MemorySegment[]> stubs = new ArrayList<>();
         String[] prefixes = {"app.", "window.", "view.", "dnd."};
-        for (int t = 0; t < GtkGlassNative.CALLBACK_TABLES.size(); t++) {
-            GtkGlassNative.CallbackTable table = GtkGlassNative.CALLBACK_TABLES.get(t);
+        for (int t = 0; t < GtkCallbackTables.CALLBACK_TABLES.size(); t++) {
+            GtkCallbackTables.CallbackTable table = GtkCallbackTables.CALLBACK_TABLES.get(t);
             MemorySegment[] tableStubs = new MemorySegment[table.slots().size()];
             for (int i = 0; i < tableStubs.length; i++) {
                 tableStubs[i] = Recorder.stub(lines, prefixes[t] + table.slots().get(i),
@@ -1858,21 +1882,21 @@ public final class GtkGlassShim {
             stubs.add(tableStubs);
         }
         try {
-            GtkGlassNative.writeCallbackTables(stubs);
+            GtkCallbackTables.writeCallbackTables(stubs);
             List<Integer> all = new ArrayList<>(APP_SLOTS);
             all.addAll(WINDOW_SLOTS);
             all.addAll(VIEW_SLOTS);
             all.addAll(DND_SLOTS);
             for (int slot : all) {
-                long id = slot == 304 ? GtkGlassNative.DND_AS_RAW : RECORDING_ID;
+                long id = slot == 304 ? GtkCallbackTables.DND_AS_RAW : RECORDING_ID;
                 lines.add(fireAndRead(slot, id));
             }
             lines.add("fire 999 -> " + fire(999, RECORDING_ID));
             stubs.get(2)[6] = null;
-            GtkGlassNative.writeCallbackTables(stubs);
+            GtkCallbackTables.writeCallbackTables(stubs);
             lines.add("fire 206 with notify_key NULL -> " + fire(206, RECORDING_ID));
         } finally {
-            GtkGlassNative.reinstallCallbacks();
+            GtkCallbackTables.reinstallCallbacks();
         }
         return lines;
     }
@@ -1884,7 +1908,7 @@ public final class GtkGlassShim {
      */
     public static String fireAndRead(int slot, long id) {
         try (Arena arena = Arena.ofConfined()) {
-            MemorySegment out = arena.allocate(GtkGlassNative.GGTK_DND_DATA_LAYOUT.byteSize(), 8);
+            MemorySegment out = arena.allocate(GtkCallbackTables.GGTK_DND_DATA_LAYOUT.byteSize(), 8);
             MemorySegment out2 = arena.allocate(8, 8);
             out.fill(SENTINEL);
             out2.fill(SENTINEL);
@@ -1942,7 +1966,7 @@ public final class GtkGlassShim {
     }
 
     /**
-     * {@code GtkGlassNative.onSourceGetData} through the installed dnd table ({@code ggtk_test_fire_callback} slot
+     * {@code GtkCallbackTargets.onSourceGetData} through the installed dnd table ({@code ggtk_test_fire_callback} slot
      * 304, key {@code "text/plain"}) with the drag data map {@code data} in progress and the conversion {@code as};
      * answers {@code status=<s> kind=<k> count=<n> data=<hex>|NULL pixbuf=<w>x<h>|NULL}, and frees what the slot
      * handed over as the C would. FX thread.
@@ -1951,7 +1975,7 @@ public final class GtkGlassShim {
         HashMap<String, Object> previous = GtkDnDClipboard.dragInProgress();
         try (Arena arena = Arena.ofConfined()) {
             Tables.DRAG_IN_PROGRESS.set(data);
-            MemorySegment out = arena.allocate(GtkGlassNative.GGTK_DND_DATA_LAYOUT);
+            MemorySegment out = arena.allocate(GtkCallbackTables.GGTK_DND_DATA_LAYOUT);
             int status = (int) Tables.TEST_FIRE_CALLBACK.invokeExact(304, (long) as, out, MemorySegment.NULL);
             int kind = out.get(JAVA_INT, 0);
             int count = out.get(JAVA_INT, 4);
@@ -2416,9 +2440,9 @@ public final class GtkGlassShim {
         return ((GtkView) view).uploadStagingBytes();
     }
 
-    /** {@code GtkGlassNative.frameLength}: the frame the upload copies, -1 where the C refuses the frame. */
+    /** {@code GtkViewCalls.frameLength}: the frame the upload copies, -1 where the C refuses the frame. */
     public static int frameLength(int length, int offset, int width, int height, int unit) {
-        return GtkGlassNative.frameLength(length, offset, width, height, unit);
+        return GtkViewCalls.frameLength(length, offset, width, height, unit);
     }
 
     // ---------------------------------------------------------------------------------------------
@@ -2432,22 +2456,22 @@ public final class GtkGlassShim {
      */
     public static void installNullTablesExcept(Set<String> kept) {
         String[] prefixes = {"app.", "window.", "view.", "dnd."};
-        List<List<MemorySegment>> production = GtkGlassNative.installedCallbackStubs();
+        List<List<MemorySegment>> production = GtkCallbackTables.installedCallbackStubs();
         List<MemorySegment[]> stubs = new ArrayList<>();
-        for (int t = 0; t < GtkGlassNative.CALLBACK_TABLES.size(); t++) {
-            List<String> slots = GtkGlassNative.CALLBACK_TABLES.get(t).slots();
+        for (int t = 0; t < GtkCallbackTables.CALLBACK_TABLES.size(); t++) {
+            List<String> slots = GtkCallbackTables.CALLBACK_TABLES.get(t).slots();
             MemorySegment[] tableStubs = new MemorySegment[slots.size()];
             for (int i = 0; i < tableStubs.length; i++) {
                 tableStubs[i] = kept.contains(prefixes[t] + slots.get(i)) ? production.get(t).get(i) : null;
             }
             stubs.add(tableStubs);
         }
-        GtkGlassNative.writeCallbackTables(stubs);
+        GtkCallbackTables.writeCallbackTables(stubs);
     }
 
-    /** The production tables again ({@code GtkGlassNative.reinstallCallbacks}). FX thread. */
+    /** The production tables again ({@code GtkCallbackTables.reinstallCallbacks}). FX thread. */
     public static void reinstallProductionTables() {
-        GtkGlassNative.reinstallCallbacks();
+        GtkCallbackTables.reinstallCallbacks();
     }
 
     /**
@@ -2456,7 +2480,7 @@ public final class GtkGlassShim {
      * FX thread; answers the slot's status.
      */
     public static int notifyDestroyThroughTheSlotTarget(long windowId) {
-        return GtkGlassNative.onNotifyDestroy(windowId);
+        return GtkCallbackTargets.onNotifyDestroy(windowId);
     }
 
     /**
@@ -2468,9 +2492,9 @@ public final class GtkGlassShim {
         try (Arena arena = Arena.ofConfined()) {
             MemorySegment key = arena.allocate(JAVA_SHORT);
             key.set(JAVA_SHORT, 0, (short) c);
-            int pressed = GtkGlassNative.onNotifyKey(viewId, KeyEvent.PRESS,
+            int pressed = GtkCallbackTargets.onNotifyKey(viewId, KeyEvent.PRESS,
                     KeyEvent.VK_Q, key, 1, 0);
-            int typed = GtkGlassNative.onNotifyKey(viewId, KeyEvent.TYPED,
+            int typed = GtkCallbackTargets.onNotifyKey(viewId, KeyEvent.TYPED,
                     KeyEvent.VK_UNDEFINED, key, 1, 0);
             if (pressed != 0 || typed != 0) {
                 throw new IllegalStateException("notify_key answered " + pressed + ", " + typed);
@@ -2483,7 +2507,7 @@ public final class GtkGlassShim {
      * has ({@code ggtk_test_fire_callback} passes monitor 1001); answers its status. FX thread.
      */
     public static int notifyMoveToAnotherScreen(long windowId, int monitor) {
-        return GtkGlassNative.onNotifyMoveToAnotherScreen(windowId, monitor);
+        return GtkCallbackTargets.onNotifyMoveToAnotherScreen(windowId, monitor);
     }
 
     /** A generic recording target for every slot prototype, turned into upcall stubs. */

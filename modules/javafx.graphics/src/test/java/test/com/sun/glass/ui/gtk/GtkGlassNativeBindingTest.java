@@ -302,7 +302,7 @@ public class GtkGlassNativeBindingTest {
     }
 
     /**
-     * The two struct layouts of the facade that need a display, against the libraries themselves: {@code XkbGetState}
+     * The two struct layouts of the binding that need a display, against the libraries themselves: {@code XkbGetState}
      * writes nothing past {@code XKB_STATE_REC_SIZE} bytes, and every {@code GdkKeymapKey} read in steps of
      * {@code GDK_KEYMAP_KEY_SIZE} names a key that XKB maps to the keyval it was asked for.
      */

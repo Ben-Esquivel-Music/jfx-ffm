@@ -180,7 +180,7 @@ GGTK_EXPORT int32_t ggtk_abi_version(void);
 
 /*
  * What GtkApplication._queryLibrary(int, boolean) answers: which glass GTK library to load, or why none can be.
- * No C reads them any more - com.sun.glass.ui.gtk.GtkGlassNative answers the query in Java and pins these
+ * No C reads them any more - com.sun.glass.ui.gtk.GtkLibraryLoader answers the query in Java and pins these
  * values against this header. Up to commit 033187ad90 launcher.c (the whole of libglass.so) answered
  * GGTK_QUERY_NO_DISPLAY, GGTK_QUERY_LOAD_GTK3 or GGTK_QUERY_ERROR, and the copy of it in GlassApplication.cpp,
  * which answered when a libglassgtk3.so build had itself been renamed to libglass.so, answered
@@ -652,7 +652,7 @@ GGTK_EXPORT int32_t ggtk_test_fire_callback(int32_t slot, int64_t id, void* out,
  * Java_com_sun_glass_ui_gtk_* function named at it, as of commit 033187ad90; that JNI function is gone and
  * GtkGlassNative binds this one in its place. The other five JNI functions are gone without a function here,
  * because nothing they did needs the C of this library, and Java does it: GtkApplication._queryLibrary chose
- * the glass GTK library, and the query is GtkGlassNative's (launcher.c, the whole of libglass.so, and the copy
+ * the glass GTK library, and the query is GtkLibraryLoader's (launcher.c, the whole of libglass.so, and the copy
  * of it in GlassApplication.cpp, are deleted with it); GtkApplication._terminateLoop called gtk_main_quit(),
  * which GtkGlassNative binds from libgtk-3 directly, and then deleted the PlatformSupport, which is Java's now;
  * GtkView._getNativeView answered 0; GtkView._scheduleRepaint ("Seems to be unused") and
@@ -913,7 +913,7 @@ GGTK_EXPORT void ggtk_view_upload_pixels_direct(ggtk_view_t view, void* data, in
  * width > (INT_MAX - offset) / height, width * height + offset > pixels_len (the length of `pixels` in ints;
  * the JNI's array length). Then, when the view has a window, paints from pixels + offset as
  * ggtk_view_upload_pixels_direct does. `pixels` is borrowed for the call and only read. No slot on this path
- * (by reading); the JNI held the array with GetPrimitiveArrayCritical around the paint. GtkGlassNative never
+ * (by reading); the JNI held the array with GetPrimitiveArrayCritical around the paint. GtkViewCalls never
  * hands the C the Java array: it copies the frame alone (the width * height ints at offset) into a native block
  * of the view and passes that block with pixels_len = the frame's length and offset 0, through an ordinary
  * downcall (see critical(true) above). It copies only a frame the checks above accept, so they pass on the
@@ -926,7 +926,7 @@ GGTK_EXPORT void ggtk_view_upload_pixels_int(ggtk_view_t view, const int32_t* pi
  * GtkView._uploadPixelsByteArray(long viewPtr, byte[] pixels, int offset, int width, int height)
  * (Java_com_sun_glass_ui_gtk_GtkView__1uploadPixelsByteArray): as ggtk_view_upload_pixels_int with bytes -
  * width > ((INT_MAX - offset) / 4) / height, 4 * width * height + offset > pixels_len (the length of `pixels`
- * in bytes), and the paint from pixels + offset bytes. GtkGlassNative passes a native copy of the frame alone
+ * in bytes), and the paint from pixels + offset bytes. GtkViewCalls passes a native copy of the frame alone
  * (the 4 * width * height bytes at offset; pixels_len = that length, offset 0), as for
  * ggtk_view_upload_pixels_int.
  */

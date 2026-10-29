@@ -46,8 +46,8 @@ import static org.junit.jupiter.api.Assumptions.assumeTrue;
 /**
  * {@code com.sun.glass.ui.gtk.GtkGlassNative} without a display, so that every Linux build that has the glass
  * natives - every CI job, where the display tests of this package skip - links it: in a child JVM with no
- * {@code DISPLAY} and no toolkit, the facade initializes and binds exactly
- * {@link GtkGlassNativeBindingTest#SYMBOLS}, and the two struct layouts of GLib it hard-codes hold against the
+ * {@code DISPLAY} and no toolkit, the facade links ({@code GtkGlassNative.link}) and binds exactly
+ * {@link GtkGlassNativeBindingTest#SYMBOLS}, and the two struct layouts of GLib the binding hard-codes hold against the
  * library:
  * <ul>
  * <li>{@code GError.message} is at {@code G_ERROR_MESSAGE_OFFSET}, after {@code domain} and {@code code};</li>
@@ -102,7 +102,7 @@ public class GtkGlassNativeHeadlessTest {
     }
 
     /**
-     * The frame an array upload copies before the paint ({@code GtkGlassNative.frameLength}) is the frame the C
+     * The frame an array upload copies before the paint ({@code GtkViewCalls.frameLength}) is the frame the C
      * accepts: over offsets, sizes and array lengths around every boundary, including the overflow of
      * {@code unit * width * height + offset}, it answers -1 exactly where {@code ggtk_view_upload_pixels_int}
      * ({@code unit} 1) or {@code _byte} ({@code unit} 4) returns without painting, and the frame's element count

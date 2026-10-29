@@ -110,7 +110,7 @@ final class GtkApplication extends Application implements
 
     /**
      * {@code jdk.gtk.verbose}, as {@code _initGTK} stored it in the C global {@code gtk_verbose}; read by the
-     * verbose messages {@link GtkGlassNative} reproduces.
+     * verbose messages {@link GtkRobotCalls} reproduces.
      */
     static volatile boolean verbose;
 

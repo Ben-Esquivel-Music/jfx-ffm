@@ -68,7 +68,7 @@ float getUIScale(GdkScreen* screen) {
 // createJavaScreen, the C that built a com.sun.glass.ui.Screen at commit 033187ad90 for process_configure's
 // Window.notifyMoveToAnotherScreen (with the work-area and current-desktop reads it alone used), served only
 // that JNI upcall: the notify_move_to_another_screen slot passes the monitor index and Java builds the Screen
-// with its own copy of this arithmetic (GtkGlassNative).
+// with its own copy of this arithmetic (GtkScreenCalls.createScreen).
 //
 // getUIScale above has no caller left in this library, and OverrideUIScale - which ggtk_application_init_gtk
 // still writes - no reader but getUIScale; both are kept deliberately, as the oracle the Java copy is checked
