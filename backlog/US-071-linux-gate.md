@@ -89,6 +89,66 @@ same three lists. After the final run the source changed only by one javadoc sen
 
 ## CI
 
-The `linux_x64_build` and `linux_aarch64_build` jobs of `.github/workflows/submit.yml`, which run the same display
-step after their install step, run after the owner pushes; their runs and results are added here and in the story
-then.
+Two runs of `.github/workflows/submit.yml`, each green in all five jobs. The `linux_x64_build` and
+`linux_aarch64_build` jobs run the same display step after their install step.
+
+| Run | Actions run | Commit | Linux x64 job | Linux aarch64 job |
+| --- | --- | --- | --- | --- |
+| Before | 40718289172 | `df067e6d23`, the head of PR #43 | 122921873348 | 122921872981 |
+| After | 40875501864 | `6839f9b650`, the head of PR #44 | 123453152778 | 123453152667 |
+
+PR #43 was squash-merged as `14d7e2a18d`, and no run exists on the merge itself. Its head `df067e6d23` has the same
+tree as `14d7e2a18d` (`d1fd3c825c`), the before tree of the WSL runs, so its run is the before run. Both runs used the
+same environment: Temurin JDK 27+35; Maven 3.10.0 on x64 (image `ubuntu-24.04` 20261025.353.1) and 3.9.12 on aarch64
+(`ubuntu-24.04-arm` 20261025.165.1); `libgtk-3-dev` and `libgtk-3-0t64` 3.24.41-4ubuntu1.3, `xvfb`
+2:21.1.12-1ubuntu1.9 and openbox 3.6.1-12build5. The display step's test JVMs recorded GTK 3.24.41 and the X server
+`The X.Org Foundation 12101011`. In each of the four jobs every step succeeded except "Upload the GTK display test
+reports", which runs on failure only and was skipped. No log contains `hs_err_pid` or `A fatal error has been
+detected`.
+
+Counts from the Maven logs (run / failures / errors / skipped). The `test.com.sun.glass.ui.gtk` row is the 36 GTK
+classes in the build step, part of `javafx-graphics`; the display rows are the display script's two passes over them.
+
+| Tests | x64, before | x64, after | aarch64, before | aarch64, after |
+| --- | --- | --- | --- | --- |
+| `javafx-jslc` | 159 / 0 / 0 / 0 | 159 / 0 / 0 / 0 | 159 / 0 / 0 / 0 | 159 / 0 / 0 / 0 |
+| `javafx-base` | 5,510 / 0 / 0 / 22 | 5,510 / 0 / 0 / 22 | 5,510 / 0 / 0 / 22 | 5,510 / 0 / 0 / 22 |
+| `javafx-graphics` | 26,005 / 0 / 0 / 606 | 26,005 / 0 / 0 / 606 | 26,005 / 0 / 0 / 606 | 26,005 / 0 / 0 / 606 |
+| `javafx-controls` | 9,445 / 0 / 0 / 185 | 9,445 / 0 / 0 / 185 | 9,445 / 0 / 0 / 185 | 9,445 / 0 / 0 / 185 |
+| `jfx-incubator-richtext` | 186 / 0 / 0 / 0 | 186 / 0 / 0 / 0 | 186 / 0 / 0 / 0 | 186 / 0 / 0 / 0 |
+| `javafx-fxml` | 123 / 0 / 0 / 3 | 123 / 0 / 0 / 3 | 123 / 0 / 0 / 3 | 123 / 0 / 0 / 3 |
+| `javafx-media` | 33 / 0 / 0 / 2 | 33 / 0 / 0 / 2 | 33 / 0 / 0 / 2 | 33 / 0 / 0 / 2 |
+| `javafx-web` (`ffm-binding-test`) | 194 / 0 / 0 / 0 | 194 / 0 / 0 / 0 | 194 / 0 / 0 / 0 | 194 / 0 / 0 / 0 |
+| `test.com.sun.glass.ui.gtk`, build step | 43 / 0 / 0 / 0 | 43 / 0 / 0 / 0 | 43 / 0 / 0 / 0 | 43 / 0 / 0 / 0 |
+| Display, no window manager | 227 / 0 / 0 / 8 | 227 / 0 / 0 / 8 | 227 / 0 / 0 / 8 | 227 / 0 / 0 / 8 |
+| Display, openbox | 200 / 0 / 0 / 5 | 200 / 0 / 0 / 5 | 200 / 0 / 0 / 5 | 200 / 0 / 0 / 5 |
+
+`jfx-incubator-input` and `javafx-swing` print no results; `javafx-swt`, the default tests of `javafx-web` and
+`javafx-system-tests` are skipped; `jdk-jsobject` has no tests. Every display pass printed `passed`, Maven exit code
+0, with no class at 0 tests with no window manager and 5 classes at 0 tests under openbox.
+
+Before and after, in both jobs, the per-class lists are identical: the build step's 1,204 test classes, the 36
+headless GTK classes among them, and each display pass's 36 classes, with no window manager and under openbox. The
+x64 and aarch64 jobs give the same lists as each other.
+
+Against the WSL tables above, the totals of `javafx-jslc`, `javafx-base` and `javafx-graphics`, the 43 headless GTK
+tests and the 911-class list of [US-071-linux-headless-per-class.tsv](US-071-linux-headless-per-class.tsv) are the
+same in CI. CI also runs `javafx-controls`, `jfx-incubator-richtext`, `javafx-fxml`, `javafx-media` and `javafx-web`,
+which the WSL install step does not build. The display passes run the same number of tests per class as in WSL, with
+no failure or error, but CI skips more:
+
+- No window manager: 8 skipped, not 0, in six classes: `GtkDnDTraceTest` 3, and `GtkEventTraceTest`,
+  `GtkPixelsCursorNativeTest`, `GtkRobotNativeTest`, `GtkUpcallExceptionTest` and `GtkWindowStateTraceTest` 1 each.
+- Openbox: 5 skipped, not 3: `GtkPixelsCursorNativeTest` 1, not 0, and `GtkRobotNativeTest` 3, not 2. The five
+  classes that run no test under openbox are the same.
+
+The display script prints the reason for each skip. With no window manager, the six trace tests
+(`GtkDnDTraceTest`'s three and the `traceMatchesTheJniGolden` of `GtkEventTraceTest`, `GtkUpcallExceptionTest` and
+`GtkWindowStateTraceTest`) report goldens captured with GTK 3.24.52 and X server 12101022, and
+`GtkPixelsCursorNativeTest.attachDataStillServesTheRemainingJniWindowIcon` and
+`GtkRobotNativeTest.screenCaptureLeavesTheArrayUntouchedWhenItReturnsEarly` expectations captured with GTK 3.24.52,
+where the runners have GTK 3.24.41 and X server 12101011; 3.24.52 is the GTK of the WSL host above. Under openbox,
+those two tests skip for the same reason, `GtkEventTraceTest.traceMatchesTheJniGolden` because its golden is for a
+display with no window manager, and `GtkRobotNativeTest.keyLockStatesOfAFreshServer` and
+`.screenCaptureReadsARGBFromTheRootWindow` because they were captured with no window manager. This record does not
+name the three tests that WSL skipped under openbox.

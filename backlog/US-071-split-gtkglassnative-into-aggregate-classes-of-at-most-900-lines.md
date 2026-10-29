@@ -1,8 +1,8 @@
 # US-071 — Split `GtkGlassNative` into aggregate classes of at most 900 lines
 
-**Status:** ✅ Done in the working tree (2026-10-28; filed 2026-10-27, owner request; US-066 listed it as out of
-scope), uncommitted: the owner commits and pushes, and the PR number and the `linux_x64_build` and
-`linux_aarch64_build` CI results (AC 6, third bullet) are added here then. `GtkGlassNative` stays the entry point
+**Status:** ✅ Done (2026-10-28; filed 2026-10-27, owner request; US-066 listed it as out of scope), pushed as
+`6839f9b650`, PR #44 (open). Actions run 40875501864 is green in all five jobs, the GTK display step of both Linux
+jobs included (AC 6, third bullet). `GtkGlassNative` stays the entry point
 and aggregates fifteen package-private binding classes and the library query's holder: 17 files, the largest 744
 lines (`GtkGlassNative`; the largest aggregate is `GtkCallbackTables`, 653). The split is behaviour-neutral: in WSL,
 the module run with `DISPLAY` unset (911 test classes) and the GTK display suite with no window manager and under
@@ -143,8 +143,8 @@ Built on `14d7e2a18d`, where `GtkGlassNative.java` is the same as at `e9d25742bc
   - AC 3: the guarantees above, with the census order unchanged.
   - AC 4: no descriptor, layout, export, arena, ownership or threading change; the `ggtk` ABI version is unchanged.
   - AC 5: comment pass done and reviewed.
-  - AC 6: bullets 1 and 2 met ([gate](US-071-linux-gate.md)); bullet 3, `linux_x64_build` and
-    `linux_aarch64_build`, runs after the push.
+  - AC 6: bullets 1 and 2 met ([gate](US-071-linux-gate.md)); bullet 3 met: `linux_x64_build` and
+    `linux_aarch64_build` are green in Actions run 40875501864, GTK display step included (the gate's "CI" section).
   - AC 7: `ffm-reviewer` signed off.
 - **Skill.** `jni-to-ffm-migration` §2 rule 2 now names `GtkGlassNative` as the third worked example, and adds its
   shape: when the binding must resolve at one startup point, the facade's initializer opens only the libraries, and

@@ -154,7 +154,7 @@ jobs:
         run: |
           set -x
           export PATH="$JAVA_HOME/bin:$PATH"
-          # The install step runs the GTK glass tests without a display, so only the five
+          # The install step runs the GTK glass tests without a display, so only the
           # headless classes of test/com/sun/glass/ui/gtk run there. This runs all of them on a
           # private Xvfb at 1920x1080x24, against the natives that step built: first with no
           # window manager, then under openbox, with -DPRIVATE_DISPLAY=true and
@@ -297,7 +297,7 @@ jobs:
         run: |
           set -x
           export PATH="$JAVA_HOME/bin:$PATH"
-          # The install step runs the GTK glass tests without a display, so only the five
+          # The install step runs the GTK glass tests without a display, so only the
           # headless classes of test/com/sun/glass/ui/gtk run there. This runs all of them on a
           # private Xvfb at 1920x1080x24, against the natives that step built: first with no
           # window manager, then under openbox, with -DPRIVATE_DISPLAY=true and

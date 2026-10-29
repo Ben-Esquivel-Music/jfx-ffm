@@ -71,8 +71,17 @@ All three `find` commands printed nothing for either tree: no crash file.
 
 ## CI
 
-The `windows_x64_build` job of `.github/workflows/submit.yml` runs after the owner pushes; its run and result are
-added here and in the story then.
+The `windows_x64_build` job of `.github/workflows/submit.yml` ran in Actions run 40718289172, job 122921873045, on
+`df067e6d23`, the head of PR #43, which was squash-merged as `14d7e2a18d` with the same tree (`d1fd3c825c`). Every
+step succeeded: BUILD SUCCESS in all 15 reactor modules in 12:24 min, with Temurin 27+35, Maven 3.9.16 and the image
+`windows-2022` 20261022.344.1. No log line contains `hs_err_pid` or `A fatal error has been detected`. Its module
+totals, 0 failures and 0 errors in every module, equal those of the local replay below in all but one value:
+`javafx-graphics` skipped 454, not 447 (run 26,215 in both). The replay has no per-class list; against the full
+module run's [US-070-windows-full-per-class.tsv](US-070-windows-full-per-class.tsv) (26,215 / 0 / 0 / 447 in
+`javafx-graphics`), 906 of the 911 classes have the same counts, and five run the same tests and skip more:
+`WinScreenParityTest` 2, not 0, `PiscesCorpusGoldenTest` 2, not 0, and `DirectWriteMetricsGoldenTest`,
+`FontEnumerationGoldenTest` and `test.javafx.print.MarginsTest` 1 each, not 0. `test.com.sun.glass.ui.win` thus gives
+299 / 0 / 0 / 5 in CI against the 299 / 0 / 0 / 3 of the targeted run above.
 
 A local replay of the job's build step on this host, on the final tree (the round-4 tree, over `e9d25742bc`), with
 `clean` because CI starts from a fresh checkout and `verify` in place of the job's `install` (`submit.yml:534`), so

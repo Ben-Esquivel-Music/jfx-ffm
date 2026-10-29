@@ -1,7 +1,8 @@
 # US-070 — Split `WinGlassNative` into aggregate classes of at most 900 lines
 
-**Status:** ✅ Done in the working tree (2026-10-28; filed 2026-10-27, owner request), uncommitted: the owner commits
-and pushes, and the PR number and the `windows_x64_build` CI result (AC 6, third bullet) are added here then.
+**Status:** ✅ Done (2026-10-28; landed 2026-10-28 as `14d7e2a18d`, PR #43; filed 2026-10-27, owner request). Actions
+run 40718289172 on the PR's head `df067e6d23`, which has the tree of `14d7e2a18d`, is green in all five jobs, among
+them `windows_x64_build` (AC 6, third bullet).
 `WinGlassNative` stays the entry point and aggregates eighteen package-private classes, 19 files with the largest at
 852 lines (`WinGlassNative`; the largest aggregate is `WinMenuCalls`, 751); the split is behaviour-neutral, the
 targeted run of the 24 `test.com.sun.glass.ui.win` classes and the full module run on Windows give the same counts per
