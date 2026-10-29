@@ -50,7 +50,8 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * UI scale as {@code float}s and truncated towards zero, and all four scales are that UI scale;</li>
  * <li>the visible bounds are the {@code _NET_WORKAREA} rectangle of the {@code _NET_CURRENT_DESKTOP} intersected
  * with the monitor geometry, scaled the same way - and the whole screen when the property, the atom or the
- * desktop index is missing;</li>
+ * desktop index is missing; a {@code _NET_CURRENT_DESKTOP} with no item is desktop 0, where the C read past the
+ * end of it;</li>
  * <li>the resolution is {@code width * 254 / (width_mm * 10)}, in integer arithmetic, from the monitor's
  * physical size, or the screen's when the monitor reports none and there is exactly one monitor, and 96 when
  * neither is positive.</li>
@@ -144,6 +145,17 @@ public class GtkScreenNativeTest {
     @Test
     public void aDesktopWithoutAWorkareaRectangleFallsBackToTheWholeScreen() {
         assertVisible("workareaOutOfRange", fullScreen());
+    }
+
+    /**
+     * A 32-bit {@code CARDINAL} {@code _NET_CURRENT_DESKTOP} with no item is desktop 0, as a missing one is, so the
+     * first rectangle is the work area. The property read back after the write shows that it was there and empty:
+     * a deleted one would reach desktop 0 without the item count being checked at all.
+     */
+    @Test
+    public void anEmptyCurrentDesktopIsDesktopZero() {
+        assertEquals("type=" + XA_CARDINAL + " format=32 items=", value("emptyDesktop.property"));
+        assertVisible("emptyDesktop", rectangle(WORKAREA_0));
     }
 
     /** Putting the saved properties back puts the visible bounds back to the saved work area, where they were. */
@@ -335,6 +347,10 @@ public class GtkScreenNativeTest {
                 record(out, "workarea1", GtkGlassShim.screens());
                 GtkGlassShim.setRootCardinals("_NET_CURRENT_DESKTOP", new long[] {7});
                 record(out, "workareaOutOfRange", GtkGlassShim.screens());
+                GtkGlassShim.restoreRootProperty("_NET_CURRENT_DESKTOP",
+                        new GtkGlassShim.RootProperty(XA_CARDINAL, 32, new long[0]));
+                out.put("emptyDesktop.property", describe(GtkGlassShim.readRootProperty("_NET_CURRENT_DESKTOP")));
+                record(out, "emptyDesktop", GtkGlassShim.screens());
                 return null;
             });
         } finally {
