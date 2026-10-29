@@ -88,7 +88,7 @@ uint8_t gtk_verbose = 0;
  * Each ggtk_application_* function below is the body of the Java_com_sun_glass_ui_gtk_GtkApplication_* function
  * of the same name at commit 033187ad90, which GtkApplication now calls through GtkGlassNative. The contracts are
  * in glass_gtk_api.h. Two of the natives of commit 033187ad90 have no function here: _queryLibrary, the query
- * for the glass GTK library, which launcher.c and a copy in this file answered and GtkGlassNative now answers
+ * for the glass GTK library, which launcher.c and a copy in this file answered and GtkLibraryLoader now answers
  * in Java; and _terminateLoop, because GtkApplication calls gtk_main_quit through GtkGlassNative itself, and
  * the PlatformSupport the JNI function deleted next is Java's.
  */

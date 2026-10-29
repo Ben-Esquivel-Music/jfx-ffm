@@ -67,10 +67,10 @@ import static org.junit.jupiter.api.Assumptions.assumeTrue;
  * and application C of {@code libglassgtk3.so} calls Java since {@code GtkGlassNative.installCallbacks}, checked in
  * a child JVM on the X11 display of {@code DISPLAY}:
  * <ul>
- * <li>the ABI version and the {@code sizeof} of every table and of {@code GgtkDndData} agree with the facade's
+ * <li>the ABI version and the {@code sizeof} of every table and of {@code GgtkDndData} agree with the binding's
  * layouts, and every slot is where its name puts it;</li>
  * <li>every slot, dialled through the C ({@code ggtk_test_fire_callback}) with the header's fixed patterns into a
- * recording table built from the facade's own descriptors, arrives with exactly those arguments and hands its
+ * recording table built from the binding's own descriptors, arrives with exactly those arguments and hands its
  * status and out-parameters back - the only check of a descriptor against its C prototype, including the slots no
  * test display reaches;</li>
  * <li>the production slots keep the id contract of the header: 0 is the {@code NullPointerException} HotSpot raised
@@ -194,7 +194,7 @@ public class GtkCallbackTableTest {
         }
     }
 
-    /** Every slot through the C into a recording table built from the facade's descriptors. */
+    /** Every slot through the C into a recording table built from the binding's descriptors. */
     @Test
     public void everySlotArrivesThroughTheCWithTheHeaderPattern() {
         String id = Long.toString(GtkGlassShim.RECORDING_ID);
@@ -415,7 +415,7 @@ public class GtkCallbackTableTest {
         assertEquals(value("registry.before"), value("registry.after"));
     }
 
-    /** {@code notify_move_to_another_screen} builds the Screen of the monitor with the facade's screen code. */
+    /** {@code notify_move_to_another_screen} builds the Screen of the monitor with the binding's screen code. */
     @Test
     public void anotherScreenIsBuiltForTheMonitor() {
         List<String> lines = section(value("trace"), "move to monitor 0");
@@ -679,9 +679,9 @@ public class GtkCallbackTableTest {
 
     /**
      * Mouse, key and window events injected with the robot reach the Java peers through the upcall stubs of
-     * {@code GtkGlassNative}: every recorded call has an {@code on*} target of that class on its stack, and none has a
-     * native method anywhere on it - neither on the event path nor below it, where the toolkit thread runs the main
-     * loop and the scenario's calls into the peers ({@code setView}, {@code setBounds}, {@code setVisible},
+     * {@code GtkCallbackTargets}: every recorded call has an {@code on*} target of that class on its stack, and none
+     * has a native method anywhere on it - neither on the event path nor below it, where the toolkit thread runs the
+     * main loop and the scenario's calls into the peers ({@code setView}, {@code setBounds}, {@code setVisible},
      * {@code close}).
      */
     @Test
@@ -758,8 +758,8 @@ public class GtkCallbackTableTest {
      * How the call being handled came from native code, read from the whole stack of the thread that handles it. A
      * native method anywhere on it is a JNI native - one whose C called Java through JNI, or one the thread was
      * running when a downcall it made called back - and is recorded in {@code offTable} with the frames above it.
-     * Otherwise the frame nearest to the call that is an upcall target of {@code GtkGlassNative} decides: a slot
-     * target of the callback tables is the table path, recorded in {@code kinds}; another upcall
+     * Otherwise the frame nearest to the call that is an upcall target of the binding ({@link #UPCALL_TARGET_CLASSES})
+     * decides: a slot target of the callback tables is the table path, recorded in {@code kinds}; another upcall
      * ({@code onInvokeLater}, a timer tick) ran Java code that made the call itself, which is not counted.
      */
     static void stack(String kind, Set<String> kinds, List<String> offTable) {
@@ -779,13 +779,18 @@ public class GtkCallbackTableTest {
                 .filter(GtkCallbackTableTest::isSlotTarget).ifPresent(frame -> kinds.add(kind));
     }
 
+    /** The classes of the binding that hold upcall targets: GLib sources, GTK signal handlers, the slot targets. */
+    private static final Set<String> UPCALL_TARGET_CLASSES = Set.of("com.sun.glass.ui.gtk.GtkMainLoopCalls",
+            "com.sun.glass.ui.gtk.GtkPreferenceCalls", "com.sun.glass.ui.gtk.GtkClipboardCalls",
+            "com.sun.glass.ui.gtk.GtkCallbackTargets");
+
     private static boolean isUpcallTarget(StackWalker.StackFrame frame) {
-        return frame.getClassName().equals("com.sun.glass.ui.gtk.GtkGlassNative")
+        return UPCALL_TARGET_CLASSES.contains(frame.getClassName())
                 && frame.getMethodName().startsWith("on");
     }
 
     private static boolean isSlotTarget(StackWalker.StackFrame frame) {
-        return frame.getClassName().equals("com.sun.glass.ui.gtk.GtkGlassNative") && frame.getMethodName()
+        return frame.getClassName().equals("com.sun.glass.ui.gtk.GtkCallbackTargets") && frame.getMethodName()
                 .matches("on(IsEnabled|Notify[A-Za-z]*|NonClientHitTest|GetApplicationName|SourceGetData)");
     }
 }

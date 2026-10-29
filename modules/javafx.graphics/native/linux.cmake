@@ -136,7 +136,7 @@ endfunction()
 # libglassgtk3.so (the GTK glass sources). Linux builds no libglass.so: the
 # launcher.c of commit 033187ad90 was the whole of it, and the library query it
 # answered, GtkApplication._queryLibrary, is done by
-# com.sun.glass.ui.gtk.GtkGlassNative in Java. GtkApplication still maps a
+# com.sun.glass.ui.gtk.GtkLibraryLoader in Java. GtkApplication still maps a
 # library of that name when the deployment has one, which is how a glassgtk3
 # build renamed to libglass.so is found.
 #

@@ -14,6 +14,7 @@ about lines 2053-2074) calls `XGetWindowProperty` for `_NET_CURRENT_DESKTOP` wit
 `type == XA_CARDINAL && format == 32`, reads `reinterpretLongs(data, 1).get(JAVA_LONG, 0)` without checking that
 `nitems > 0`. For a property of type `CARDINAL`, format 32 and zero items, Xlib returns a non-null 1-byte allocation
 (the trailing NUL it always adds), so the read takes 8 bytes from a 1-byte block.
+- Since US-071 the method is `GtkScreenCalls.currentDesktop` (`GtkScreenCalls.java`, lines 246-269), unchanged.
 - Inherited from the C: `get_current_desktop` of `glass_screen.cpp` at commit `033187ad90` did `ret = data[0]` under
   the same two conditions and no `num` check (confirmed in git history, `git show 033187ad90:...glass_screen.cpp`).
 - Pathological: no window manager publishes an empty `_NET_CURRENT_DESKTOP` (EWMH defines it as one cardinal). It

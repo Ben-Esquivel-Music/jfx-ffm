@@ -31,7 +31,8 @@ import java.util.HashMap;
 /**
  * The GTK clipboard peer. Every method below was a {@code native} of
  * {@code GlassSystemClipboard.cpp} at commit {@code 033187ad90}; the GTK calls they made are now in
- * {@code GtkGlassNative}, which names each of them.
+ * {@code GtkClipboardCalls} and {@code GtkClipboardReadCalls} (reached through {@code GtkGlassNative}), which name
+ * each of them.
  */
 final class GtkSystemClipboard extends SystemClipboard {
 

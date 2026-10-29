@@ -2,7 +2,7 @@
 
 | Field | Value |
 | --- | --- |
-| **Status** | 🔀 **Split by OS** (2026-10-27) into [US-001a](US-001a-migrate-glass-gtk-jni-to-ffm-on-linux.md) (Linux, `glass/gtk`: done in the working tree on 2026-10-27, uncommitted) and [US-001b](US-001b-migrate-glass-mac-and-prism-mtl-jni-to-ffm-on-macos.md) (macOS, `glass/mac` + `prism_mtl`: not started). This story is done when both are |
+| **Status** | 🔀 **Split by OS** (2026-10-27) into [US-001a](US-001a-migrate-glass-gtk-jni-to-ffm-on-linux.md) (Linux, `glass/gtk`: done on 2026-10-27, landed as `e3b8b21e6d`, PR #40) and [US-001b](US-001b-migrate-glass-mac-and-prism-mtl-jni-to-ffm-on-macos.md) (macOS, `glass/mac` + `prism_mtl`: not started). This story is done when both are |
 | **Parent epic** | Fully remove JNI from `javafx.graphics` (replaced by a functioning FFM API) |
 | **Branch of record** | `ffm/graphics` |
 | **Repository** | `Ben-Esquivel-Music/jfx-ffm` |
@@ -20,7 +20,7 @@ story keeps the original rationale and measurements for the record.
 
 | Substory | OS | Libraries | State on 2026-10-27 |
 | --- | --- | --- | --- |
-| [US-001a](US-001a-migrate-glass-gtk-jni-to-ffm-on-linux.md) | Linux | `glass/gtk` | ✅ Done in the working tree (2026-10-27), uncommitted; the PR number and the CI result follow the push. JNI removed in PR #12 (`26ce75d02f`): 0 Java `native` declarations, 0 `JNIEXPORT`. The `glassgtk3` target builds without `HEADERS_DIR` and the JDK headers (AC 9), and AC 5, AC 6 and AC 10 are recorded |
+| [US-001a](US-001a-migrate-glass-gtk-jni-to-ffm-on-linux.md) | Linux | `glass/gtk` | ✅ Done (2026-10-27), landed as `e3b8b21e6d`, PR #40; `linux_x64_build` and `linux_aarch64_build` green, GTK display step included (run 40584664686). JNI removed in PR #12 (`26ce75d02f`): 0 Java `native` declarations, 0 `JNIEXPORT`. The `glassgtk3` target builds without `HEADERS_DIR` and the JDK headers (AC 9), and AC 5, AC 6 and AC 10 are recorded |
 | [US-001b](US-001b-migrate-glass-mac-and-prism-mtl-jni-to-ffm-on-macos.md) | macOS | `glass/mac`, `prism_mtl` | 🔶 Not started: 155 + 60 Java `native` declarations, 128 upcall sites. Next: the JNI baseline on the macOS host, then `prism_mtl` |
 
 Windows has no part in this story: its libraries were delivered by the parent epic.
@@ -34,7 +34,7 @@ Windows has no part in this story: its libraries were delivered by the parent ep
 | 3 | A plain C ABI | ✅ Met | Open |
 | 4 | Upcalls through callback tables | ✅ Met | Open |
 | 5 | Thread confinement preserved | ✅ Met | Open |
-| 6 | Behaviour equal to the JNI baseline | ✅ Met on Linux x64; aarch64 and CI after the push | Open |
+| 6 | Behaviour equal to the JNI baseline | ✅ Met on Linux x64; CI green on x64 and aarch64 and equal per class to `26ed4ba2f2` apart from US-001a's two new classes (run 40584664686; no `tests/system`) | Open |
 | 7 | Metal pixel parity | Not applicable | Open |
 | 8 | Accessibility against a real screen reader | Not applicable (GTK Glass has no accessibility bridge) | Open (VoiceOver) |
 | 9 | No JDK headers, `HEADERS_DIR` or `javac -h` for the targets | ✅ Met | Open |

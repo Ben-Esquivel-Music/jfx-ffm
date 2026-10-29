@@ -2,7 +2,7 @@
 
 | Field | Value |
 | --- | --- |
-| **Status** | ✅ **Done** in the working tree (2026-10-27), uncommitted: the owner commits and pushes, and the PR number and the CI result (Linux x64 and aarch64) are added here then. The JNI went in PR #12 (`26ce75d02f`, 2026-09-24): no Java `native` method in `com.sun.glass.ui.gtk`, no `JNIEXPORT` or `jni.h` in `native-glass/gtk`, `libglass.so` no longer built. This change met AC 9 (`glassgtk3` builds without `HEADERS_DIR` and the JDK include directories), fixed a hang that PR #12 brought to the drop target (see Notes), and recorded AC 5, AC 6 and AC 10 |
+| **Status** | ✅ **Done** (2026-10-27; landed 2026-10-27 as `e3b8b21e6d`, PR #40). Actions run 40584664686 on the PR's head `fa1461d98e`, which has the tree of `e3b8b21e6d`, is green in all five jobs, the GTK display step of `linux_x64_build` and `linux_aarch64_build` included (see "Verified in CI"). The JNI went in PR #12 (`26ce75d02f`, 2026-09-24): no Java `native` method in `com.sun.glass.ui.gtk`, no `JNIEXPORT` or `jni.h` in `native-glass/gtk`, `libglass.so` no longer built. This change met AC 9 (`glassgtk3` builds without `HEADERS_DIR` and the JDK include directories), fixed a hang that PR #12 brought to the drop target (see Notes), and recorded AC 5, AC 6 and AC 10 |
 | **Parent** | [US-001](US-001-descope-glass-gtk-glass-mac-prism-mtl-ffm-migration.md), split by OS on 2026-10-27; the macOS half is [US-001b](US-001b-migrate-glass-mac-and-prism-mtl-jni-to-ffm-on-macos.md) |
 | **Branch of record** | `ffm/graphics` |
 | **Repository** | `Ben-Esquivel-Music/jfx-ffm` |
@@ -51,7 +51,7 @@ The criteria of US-001 that apply to Linux, with their state on 2026-10-27:
 | 3 | A plain C ABI with primitive-typed parameters | ✅ Met: `glass_gtk_api.h`, `screencast_api.h` |
 | 4 | Every upcall goes through a callback table registered from Java; no Java exception crosses the native boundary | ✅ Met in PR #12 (`GtkCallbackTableTest`, `GtkNullSlotsTest`, `GtkUpcallExceptionTest`) |
 | 5 | GTK calls stay on the GTK main-loop thread; upcall stubs outlive every native use | ✅ Met: PR #12's tests for it, `GtkInvokeLaterNativeTest` (6 tests), `GtkViewLifetimeTest` (3) and `GtkPeerRegistryTest` (5), ran and passed in both runs of the final gate's GTK display tests (no window manager, and openbox); `GtkPeerRegistryTest` also passed in its module gate. See "AC 6 — the final gate" |
-| 6 | Module tests and `tests/system` on Linux equal the JNI baseline; nothing deleted or `@Disabled` | ✅ Met on Linux x64 (WSL2, 2026-10-27), see "AC 6 — the final gate". Against `033187ad90`, no module test class that both trees have fails or runs fewer tests, and every `tests/system` test that fails on this tree fails at `033187ad90` too: 25 need `jfxwebkit`, which this WSL lacks, and 2 failed at `033187ad90` only when rerun. No test was `@Disabled` between `033187ad90` and this tree; the only test deleted is `PiscesNativeTest`, which went with the Pisces C (US-046). Linux aarch64 and CI: after the push |
+| 6 | Module tests and `tests/system` on Linux equal the JNI baseline; nothing deleted or `@Disabled` | ✅ Met on Linux x64 (WSL2, 2026-10-27), see "AC 6 — the final gate". Against `033187ad90`, no module test class that both trees have fails or runs fewer tests, and every `tests/system` test that fails on this tree fails at `033187ad90` too: 25 need `jfxwebkit`, which this WSL lacks, and 2 failed at `033187ad90` only when rerun. No test was `@Disabled` between `033187ad90` and this tree; the only test deleted is `PiscesNativeTest`, which went with the Pisces C (US-046). In CI, Linux x64 and aarch64 (run 40584664686): module tests and GTK display tests green; against run 40502077586 on the tree of `26ed4ba2f2`, every class both runs have gives the same counts, and the two new classes are the only change, see "Verified in CI". CI runs no `tests/system`, and no aarch64 run compares with `033187ad90` |
 | 7 | Metal pixel parity | Not applicable (macOS only, US-001b) |
 | 8 | Accessibility checked against a real screen reader | Not applicable: GTK Glass has no accessibility bridge. `native-glass/gtk` has no ATK code, and `com.sun.glass.ui.gtk` does not override `Application.createAccessible()`, which returns `null` |
 | 9 | `linux.cmake` no longer gives the GTK target `HEADERS_DIR` or the JDK include directories, and the target needs no `javac -h` step | ✅ Met, see "AC 9 — how it was done": `glassgtk3` includes `native-glass/gtk/constants` instead, and it builds with `HEADERS_DIR` and `JDK_HOME` pointing nowhere and with the `javac -h` output deleted |
@@ -236,11 +236,48 @@ height should remain the same ==> expected: <300.0> but was: <304.0>") and passe
 `033187ad90`. Run alone, it fails the same way at `033187ad90` (3 of 3) and on this change (3 of 3), so this
 change does not cause it. Why the full runs differ was not investigated.
 
-### Verified only after the push
+### Verified in CI
 
-Linux aarch64 is built and tested only in CI, and the CI run needs the push: the Linux x64 and Linux aarch64 jobs
-of `submit.yml`, each with its GTK display tests. `glass_dnd.cpp` changed, so the merge waits for a green
-`submit.yml` run. The PR number and both results are to be added to this story then.
+Linux aarch64 is built and tested only in CI. Two runs of `submit.yml`, each green in all five jobs; the
+`linux_x64_build` and `linux_aarch64_build` jobs run the GTK display tests on a private Xvfb after their build step.
+CI runs no `tests/system`.
+
+| Run | Actions run | Commit | Linux x64 job | Linux aarch64 job |
+| --- | --- | --- | --- | --- |
+| Before | 40502077586 | `c6d6beb38d`, the head of PR #39 | 122181986938 | 122181986775 |
+| After | 40584664686 | `fa1461d98e`, the head of PR #40 | 122472839394 | 122472839373 |
+
+PR #39 and PR #40 were squash-merged as `26ed4ba2f2` and `e3b8b21e6d`, each with its head's tree (`5cc7d2add2`,
+`929b2beae3`), and no run exists on either merge. Both runs used Temurin JDK 27+35, Maven 3.10.0 on x64 and 3.9.12
+on aarch64, and `libgtk-3-0t64` 3.24.41-4ubuntu1.3; the display step's test JVMs recorded GTK 3.24.41 and the X
+server `The X.Org Foundation 12101011`. Between the runs the x64 image `ubuntu-24.04` moved from 20261012.334.1 to
+20261025.353.1; the aarch64 image `ubuntu-24.04-arm` stayed at 20261012.149.1. In each of the four jobs every step
+succeeded except "Upload the GTK display test reports", which runs on failure only and was skipped. No log contains
+`hs_err_pid` or `A fatal error has been detected`.
+
+Counts from the Maven logs, run / failures / errors / skipped, the same in the x64 and the aarch64 job of each run:
+
+| Tests | Before | After |
+| --- | --- | --- |
+| `javafx-graphics` | 25,993 / 0 / 0 / 606 | 26,005 / 0 / 0 / 606 |
+| `test.com.sun.glass.ui.gtk`, build step | 34 classes, 31 / 0 / 0 / 0 | 36 classes, 43 / 0 / 0 / 0 |
+| Display, no window manager | 34 classes, 210 / 0 / 0 / 8 | 36 classes, 227 / 0 / 0 / 8 |
+| Display, openbox | 34 classes, 183 / 0 / 0 / 5 | 36 classes, 200 / 0 / 0 / 5 |
+
+The other modules give the same totals in both runs: `javafx-jslc` 159 / 0 / 0 / 0, `javafx-base`
+5,510 / 0 / 0 / 22, `javafx-controls` 9,445 / 0 / 0 / 185, `jfx-incubator-richtext` 186 / 0 / 0 / 0, `javafx-fxml`
+123 / 0 / 0 / 3, `javafx-media` 33 / 0 / 0 / 2 and `javafx-web` (`ffm-binding-test`) 194 / 0 / 0 / 0.
+
+In both jobs the per-class lists of the two runs differ only by the two new classes: `GtkConstantsHeaderTest`, 12
+tests in the build step and in each display pass, and `GtkDnDReentrantDropTest`, 0 in the build step, as in the WSL
+module run, and 5 in each display pass. The build step has 1,202 test classes before and 1,204 after. No class was
+removed, and every class both runs have gives the same counts. Every display pass printed `passed`, Maven exit code
+0; under openbox the same 5 classes run no test in both runs (`GtkTraceGolden.requireNoWindowManager`). The x64 and
+aarch64 jobs give the same lists as each other.
+
+CI skips more display tests than the WSL gate above, on both trees: 8, not 0, with no window manager, and 5, not 3,
+under openbox. The display script reports the reasons: trace goldens and expectations captured with GTK 3.24.52,
+where the runners have 3.24.41, and, under openbox, expectations captured with no window manager.
 
 ---
 
@@ -260,9 +297,10 @@ of `submit.yml`, each with its GTK display tests. `glass_dnd.cpp` changed, so th
 
 - AC 9 met, and the AC 6 and AC 10 rows above filled in with what was run. Done (2026-10-27).
 - Module tests and the GTK display tests green on WSL and in CI, with counts equal to the gate before the change.
-  WSL: done (the final gate). CI: after the push.
+  WSL: done (the final gate). CI: done, run 40584664686 against run 40502077586 on Linux x64 and aarch64, equal
+  apart from the two new classes ("Verified in CI").
 - Changes left in the working tree or a review branch; no commits, merges or PRs without the owner's approval.
-  Done: the change is uncommitted in the working tree.
+  Done: the owner landed it on 2026-10-27 as `e3b8b21e6d`, PR #40.
 
 ---
 

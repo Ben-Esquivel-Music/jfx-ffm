@@ -1,7 +1,16 @@
 # US-071 — Split `GtkGlassNative` into aggregate classes of at most 900 lines
 
-**Status:** 📋 Ready (filed 2026-10-27, owner request; US-066 listed it as out of scope) · **Found:** 2026-10-23,
-the US-066 survey · The story states the requirement; the implementer designs the split, as for US-066
+**Status:** ✅ Done (2026-10-28; filed 2026-10-27, owner request; US-066 listed it as out of scope), pushed as
+`6839f9b650`, PR #44 (open). Actions run 40875501864 is green in all five jobs, the GTK display step of both Linux
+jobs included (AC 6, third bullet). `GtkGlassNative` stays the entry point
+and aggregates fifteen package-private binding classes and the library query's holder: 17 files, the largest 744
+lines (`GtkGlassNative`; the largest aggregate is `GtkCallbackTables`, 653). The split is behaviour-neutral: in WSL,
+the module run with `DISPLAY` unset (911 test classes) and the GTK display suite with no window manager and under
+openbox give the same counts per class as `14d7e2a18d`, with no crash file, and `ffm-reviewer` signed off (AC 7).
+Evidence: [US-071-linux-gate.md](US-071-linux-gate.md),
+[US-071-linux-headless-per-class.tsv](US-071-linux-headless-per-class.tsv) and
+[US-071-linux-display-per-class.tsv](US-071-linux-display-per-class.tsv) · **Found:** 2026-10-23, the US-066
+survey · The story states the requirement; the implementer designs the split, as for US-066
 
 ## Story
 As a maintainer of the Glass GTK binding,
@@ -79,7 +88,69 @@ US-016 used. The robot classes never run on WSLg's `:0`.
 - The changes stay in the working tree or a review branch. **No commits, merges or PRs without explicit approval
   from the repository owner.**
 
+## Resolution
+Built on `14d7e2a18d`, where `GtkGlassNative.java` is the same as at `e9d25742bc`.
+- **The 17 files** (`wc -l`, 7,199 in total): `GtkGlassNative` 744, `GtkCallbackTables` 653, `GtkRobotCalls` 641,
+  `GtkCallbackTargets` 634, `GtkClipboardCalls` 571, `GtkKeyCalls` 494, `GtkClipboardReadCalls` 391,
+  `GtkWindowCalls` 369, `GtkPreferenceCalls` 358, `GtkDialogCalls` 350, `GtkApplicationCalls` 331, `GtkDndCalls`
+  296, `GtkPixelsCalls` 293, `GtkLibraryLoader` 293, `GtkScreenCalls` 278, `GtkMainLoopCalls` 265, `GtkViewCalls`
+  238. Every peer still calls `GtkGlassNative`, which delegates; `SetView` and `UploadStaging` stay nested in it, and
+  `PlatformSupport` moved into `GtkPreferenceCalls`.
+- **One initialization point.** The facade's initializer only opens the libraries. `link()` initializes the fifteen
+  binding classes, in a fixed order, with `MethodHandles.Lookup.ensureInitialized`, and each class binds its
+  handles in its initializer. So every system symbol still resolves inside `link()`, and a missing one is still an
+  `UnsatisfiedLinkError` out of the `GtkApplication` constructor that names the library and the symbol (checked
+  with a renamed `XTestFakeKeyEvent`). `link()`'s order is also the census order.
+- **The two holders.** `Glass`, now nested in `GtkCallbackTables`, still binds the `ggtk_*` exports when
+  `installCallbacks` first runs and checks `ggtk_abi_version` before anything else. The library query's body is
+  `GtkLibraryLoader`, which opens libc and `libX11.so.6` only and reaches no class `link()` lists. The nested
+  `GtkGlassNative.Loader` stays the peers' entry point (`QUERY_*`, `queryLibrary`) and holds the query's linker,
+  census and two restricted calls. Its initializer reaches only JDK classes.
+- **Restricted calls stay in `GtkGlassNative.java`.** The aggregates reach them through the facade's `bind`,
+  `address`, `optional`, `upcallStub` (still `Arena.global()`) and `bounded` (`reinterpret`). There is no `critical`
+  downcall, and `UploadStaging` is unchanged.
+- **Accepted, behaviour-neutral differences:**
+  - The four `static synchronized` install methods (`installCallbacks`, `callbacksInstalled`, `reinstallCallbacks`,
+    `installedCallbackStubs`) moved together to `GtkCallbackTables` and now lock that class instead of
+    `GtkGlassNative`. They share only `callbackStubs`, and nothing else synchronizes on either class.
+  - A missing system symbol now fails the initializer of the aggregate that binds it, inside
+    `GtkGlassNative.link()`, with the same `UnsatisfiedLinkError` out of the `GtkApplication` constructor.
+    Afterwards that aggregate's methods throw `NoClassDefFoundError` instead of the whole facade's, which nothing can
+    observe because the toolkit never starts.
+- **Shim and tests.** `GtkGlassShim` reaches an aggregate by reflection only after `link()`, so no test changes the
+  census order. `boundSymbols()` and `boundAddress()` link first, and `loaderBoundSymbols()` initializes
+  `GtkLibraryLoader` first: at `14d7e2a18d`, reading either census bound what it read. Its direct references now
+  name `GtkLibraryLoader`, `GtkCallbackTables`, `GtkCallbackTargets` and `GtkViewCalls`. `GtkCallbackTableTest`'s
+  upcall-target classes are the four aggregates that own stubs. Comments in three more tests now name the binding
+  instead of the facade. `SYMBOLS` and every test method are unchanged.
+- **Comments elsewhere.** Four peers (`GtkApplication`, `GtkCommonDialogs`, `GtkSystemClipboard`, `GtkPixels`),
+  `glass_gtk_api.h`, `GlassApplication.cpp`, `glass_screen.cpp` and `linux.cmake` now name the class that owns what
+  they describe (comments only).
+- **Neutrality**, from the sources and the bytecode:
+  - The census has 142 entries, no entry twice, equal to `SYMBOLS` in the original order. `g_free`, bound at two
+    sites as at `14d7e2a18d` (the `GtkPixelsCalls` address and the `GtkRobotCalls` handle), keeps its first position.
+  - The class-initialization graph from `javap` is acyclic (24 classes).
+  - No restricted call or `@SuppressWarnings("restricted")` is outside `GtkGlassNative.java`.
+  - Every one of the original's 930 facts is still present: descriptors, census calls, constants, layouts, arenas,
+    `reinterpret` sizes, upcall stubs, and the `synchronized` and `catch (Throwable` sites. The 8 added facts are
+    the `link()` list, the four `QUERY_*` re-exports, `bounded`, and the `Loader`'s two restricted calls.
+  - Token counts differ only for those: 24 `reinterpret` calls became `bounded`, which leaves 9 of the 21
+    `@SuppressWarnings("restricted")`.
+  - 88 members went from private to package-private, and none narrowed.
+- **Acceptance criteria.**
+  - AC 1: the line check prints nothing.
+  - AC 2: entry point, package-private, no `*Native` name.
+  - AC 3: the guarantees above, with the census order unchanged.
+  - AC 4: no descriptor, layout, export, arena, ownership or threading change; the `ggtk` ABI version is unchanged.
+  - AC 5: comment pass done and reviewed.
+  - AC 6: bullets 1 and 2 met ([gate](US-071-linux-gate.md)); bullet 3 met: `linux_x64_build` and
+    `linux_aarch64_build` are green in Actions run 40875501864, GTK display step included (the gate's "CI" section).
+  - AC 7: `ffm-reviewer` signed off.
+- **Skill.** `jni-to-ffm-migration` §2 rule 2 now names `GtkGlassNative` as the third worked example, and adds its
+  shape: when the binding must resolve at one startup point, the facade's initializer opens only the libraries, and
+  an explicit `link()` initializes the binding classes in a fixed order after it, which also fixes the symbol list's
+  order.
+
 ## Notes
-- US-064 edits `GtkGlassNative.currentDesktop`. Whichever lands second rebases; the split is the cheaper one to
-  redo.
+- US-064 fixes `currentDesktop`, which this split moved to `GtkScreenCalls`; its story points there.
 - Related: US-066 (the pattern and the rule text) and US-001a (it produced `GtkGlassNative`).

@@ -32,7 +32,8 @@ import java.io.File;
 
 /**
  * The GTK file and folder choosers. Both were {@code native} methods of {@code GlassCommonDialogs.cpp} at commit
- * {@code 033187ad90}; the GTK calls they made are now in {@code GtkGlassNative}, which names each of them.
+ * {@code 033187ad90}; the GTK calls they made are now in {@code GtkDialogCalls} (reached through
+ * {@code GtkGlassNative}), which names each of them.
  * <p>
  * The C took the owner as its {@code WindowContext *} and asked that object for its {@code GtkWindow}; here the
  * owner is identified by the X11 window id its peer already exposes, and GDK is asked for the widget of that

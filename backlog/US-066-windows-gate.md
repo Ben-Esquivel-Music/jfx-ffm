@@ -49,8 +49,23 @@ Both `find` commands printed nothing for either tree: no crash file.
 
 ## CI
 
-The `windows_x64_build` job of `.github/workflows/submit.yml` runs after the owner pushes; its run and result are
-added here and in the story then.
+The `windows_x64_build` job of `.github/workflows/submit.yml` ran in Actions run 40617510930, job 122583360108, on
+`d587a06a41`, the head of PR #41, which was squash-merged as `e9d25742bc` with the same tree (`1dfdb738b4`). Every
+step succeeded: BUILD SUCCESS in all 15 reactor modules in 08:47 min, with Temurin 27+35, Maven 3.9.16 and the image
+`windows-2022` 20261022.344.1. No log line contains `hs_err_pid` or `A fatal error has been detected`.
+
+The before run is the same job of run 40584664686, job 122472839491, on `fa1461d98e`, the head of PR #40, which has
+the tree of `e3b8b21e6d` (`929b2beae3`), the before tree above; it used the same image, Maven and JDK. Its module
+totals and its per-class list (1,204 test classes) are identical to the after run's.
+
+The after run's module totals, 0 failures and 0 errors in every module, equal those of the local replay below in all
+but one value: `javafx-graphics` skipped 454, not 447 (run 26,215 in both). The replay has no per-class list;
+against the full module run's [US-066-windows-full-per-class.tsv](US-066-windows-full-per-class.tsv)
+(26,215 / 0 / 0 / 447 in `javafx-graphics`), 906 of the 911 classes have the same counts, and five run the same
+tests and skip more: `WinScreenParityTest` 2, not 0, `PiscesCorpusGoldenTest` 2, not 0, and
+`DirectWriteMetricsGoldenTest`, `FontEnumerationGoldenTest` and `test.javafx.print.MarginsTest` 1 each, not 0. Of
+the targeted run's 84 tests, the four `DW*Test` classes give the same counts in CI, and the two golden tests skip one
+test each. The log prints no reason for a skip.
 
 A local replay of the job's build step on this host, on the final tree (2026-10-27, 19:40 to 19:54 EDT), with
 `clean` because CI starts from a fresh checkout and `verify` instead of `install` so that `~/.m2` is not overwritten:
