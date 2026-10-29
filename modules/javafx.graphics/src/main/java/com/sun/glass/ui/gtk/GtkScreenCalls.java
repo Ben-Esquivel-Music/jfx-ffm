@@ -242,7 +242,11 @@ final class GtkScreenCalls {
         return rectangle;
     }
 
-    /** {@code get_current_desktop} ({@code glass_screen.cpp}). */
+    /**
+     * {@code get_current_desktop} ({@code glass_screen.cpp}), except that a property with no item answers 0, as a
+     * missing one does: the C of commit {@code 033187ad90} read {@code data[0]} of it anyway, 8 bytes from the
+     * 1-byte block (the terminating NUL) that Xlib allocates for an empty property.
+     */
     private static int currentDesktop(Arena call, MemorySegment display, MemorySegment screen) throws Throwable {
         long atom = (long) X_INTERN_ATOM.invokeExact(display, call.allocateFrom("_NET_CURRENT_DESKTOP"), 1);
         if (atom == X_ANY_PROPERTY_TYPE) {
@@ -260,7 +264,7 @@ final class GtkScreenCalls {
         MemorySegment data = dataOut.get(ADDRESS, 0);
         int desktop = 0;
         if (result == 0 && data.address() != 0) {
-            if (type.get(JAVA_LONG, 0) == XA_CARDINAL && format.get(JAVA_INT, 0) == 32) {
+            if (type.get(JAVA_LONG, 0) == XA_CARDINAL && format.get(JAVA_INT, 0) == 32 && num.get(JAVA_LONG, 0) > 0) {
                 desktop = (int) reinterpretLongs(data, 1).get(JAVA_LONG, 0);
             }
             int freed = (int) X_FREE.invokeExact(data);
