@@ -214,6 +214,18 @@ static void process_events(GdkEvent* event, gpointer data)
 
     if ((window != NULL)
             && !is_window_enabled_for_event(window, ctx, event->type)) {
+        // The WM's events still reach a disabled window, as its configure and state do: at its first map it stops
+        // waiting for the WM to place it (WindowContextTop::process_map), and its property changes carry the WM's
+        // frame extents and state. GTK does not get them.
+        if (ctx != NULL && !gdk_window_is_destroyed(window)) {
+            if (event->type == GDK_MAP) {
+                EventsCounterHelper helper(ctx);
+                ctx->process_map();
+            } else if (event->type == GDK_PROPERTY_NOTIFY) {
+                EventsCounterHelper helper(ctx);
+                ctx->process_property_notify(&event->property);
+            }
+        }
         return;
     }
 
@@ -282,7 +294,9 @@ static void process_events(GdkEvent* event, gpointer data)
                 process_dnd_target(ctx, &event->dnd);
                 break;
             case GDK_MAP:
-                // fall-through
+                ctx->process_map();
+                gtk_main_do_event(event);
+                break;
             case GDK_UNMAP:
             case GDK_CLIENT_EVENT:
             case GDK_VISIBILITY_NOTIFY:

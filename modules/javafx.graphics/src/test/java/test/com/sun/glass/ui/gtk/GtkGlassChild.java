@@ -84,16 +84,7 @@ public final class GtkGlassChild {
                     .getDeclaredMethod(target.substring(hash + 1), Map.class);
             scenario.setAccessible(true);
             if (Boolean.parseBoolean(System.getProperty(TOOLKIT_PROPERTY, "true"))) {
-                CountDownLatch started = new CountDownLatch(1);
-                Platform.startup(started::countDown);
-                if (!started.await(60, TimeUnit.SECONDS)) {
-                    throw new IllegalStateException("the toolkit did not start within 60 s");
-                }
-                onFx(() -> {
-                    Thread.currentThread().setUncaughtExceptionHandler((thread, throwable) ->
-                            REPORTS.add(new Report(thread, throwable, Application.isEventThread())));
-                    return null;
-                });
+                startToolkit();
             }
             try {
                 scenario.invoke(null, values);
@@ -114,6 +105,24 @@ public final class GtkGlassChild {
         System.out.flush();
         System.err.flush();
         Runtime.getRuntime().halt(status);
+    }
+
+    /**
+     * Starts the toolkit and records into {@link #REPORTS} what reaches the FX thread's uncaught-exception handler:
+     * what {@link #main} does before the scenario unless {@link #TOOLKIT_PROPERTY} is {@code false}, for a scenario
+     * that has to do something first.
+     */
+    static void startToolkit() throws Exception {
+        CountDownLatch started = new CountDownLatch(1);
+        Platform.startup(started::countDown);
+        if (!started.await(60, TimeUnit.SECONDS)) {
+            throw new IllegalStateException("the toolkit did not start within 60 s");
+        }
+        onFx(() -> {
+            Thread.currentThread().setUncaughtExceptionHandler((thread, throwable) ->
+                    REPORTS.add(new Report(thread, throwable, Application.isEventThread())));
+            return null;
+        });
     }
 
     /** Runs {@code body} on the FX thread and returns its result; rethrows what it threw. */

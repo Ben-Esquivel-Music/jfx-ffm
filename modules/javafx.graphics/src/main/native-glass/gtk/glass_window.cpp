@@ -761,6 +761,10 @@ static int geometry_get_content_height(WindowGeometry *windowGeometry) {
                          - windowGeometry->extents.bottom;
 }
 
+static bool same_extents(const WindowFrameExtents& a, const WindowFrameExtents& b) {
+    return a.top == b.top && a.left == b.left && a.bottom == b.bottom && a.right == b.right;
+}
+
 static GdkAtom get_net_frame_extents_atom() {
     static const char * extents_str = "_NET_FRAME_EXTENTS";
     return gdk_atom_intern(extents_str, FALSE);
@@ -779,7 +783,12 @@ WindowContextTop::WindowContextTop(int64_t _window_id, WindowContext* _owner, lo
             geometry(),
             resizable(),
             on_top(false),
-            is_fullscreen(false) {
+            is_fullscreen(false),
+            frame_extents(),
+            requested_x(0),
+            requested_y(0),
+            mapped(false),
+            floating_frame_seen(false) {
     window_id = _window_id;
     gdk_windowManagerFunctions = wmf;
 
@@ -822,6 +831,7 @@ WindowContextTop::WindowContextTop(int64_t _window_id, WindowContext* _owner, lo
         gtk_window_set_decorated(GTK_WINDOW(gtk_widget), FALSE);
     } else {
         geometry.extents = get_cached_extents();
+        frame_extents = geometry.extents;
     }
 }
 
@@ -855,42 +865,196 @@ void WindowContextTop::update_frame_extents() {
 
     int top, left, bottom, right;
 
-    if (get_frame_extents_property(&top, &left, &bottom, &right)) {
-        if (top > 0 || right > 0 || bottom > 0 || left > 0) {
-            bool changed = geometry.extents.top != top
-                            || geometry.extents.left != left
-                            || geometry.extents.bottom != bottom
-                            || geometry.extents.right != right;
+    if (!get_frame_extents_property(&top, &left, &bottom, &right)) {
+        return;
+    }
 
-            if (changed) {
-                geometry.extents.top = top;
-                geometry.extents.left = left;
-                geometry.extents.bottom = bottom;
-                geometry.extents.right = right;
+    WindowFrameExtents reported = {top, left, bottom, right};
+    bool has_frame = top > 0 || left > 0 || bottom > 0 || right > 0;
+    bool floating = wm_floating() && net_wm_state_floating();
 
-                set_cached_extents(geometry.extents);
+    // Floating all-zero extents before the window's first floating extents of a frame describe no frame yet: Mutter
+    // answers _NET_REQUEST_FRAME_EXTENTS with all zero and writes its frame's extents later. They are ignored.
+    if (floating && !has_frame && !floating_frame_seen) {
+        return;
+    }
 
-                // set bounds again to correct window size
-                // accounting decorations
-                int w = geometry_get_window_width(&geometry);
-                int h = geometry_get_window_height(&geometry);
-                int cw = geometry_get_content_width(&geometry);
-                int ch = geometry_get_content_height(&geometry);
+    bool in_force_changed = !same_extents(frame_extents, reported);
 
-                int x = geometry.x;
-                int y = geometry.y;
+    // The window is the frame the extents describe now: all zero in full screen (EWMH), the maximized frame's while
+    // maximized (openbox 0,0,19,0, Weston 6,6,27,6 without its shadow margin).
+    frame_extents = reported;
 
-                if (geometry.gravity_x != 0) {
-                    x -= geometry.gravity_x * (float) (left + right);
-                }
-
-                if (geometry.gravity_y != 0) {
-                    y -= geometry.gravity_y * (float) (top + bottom);
-                }
-
-                set_bounds(x, y, true, true, w, h, cw, ch, 0, 0);
-           }
+    // While the WM has the window maximized or full screen, those extents are not the floating frame's. They are
+    // reported, but neither stored for size requests and hints nor cached for the next window, and glass asks the WM
+    // for nothing: Weston obeys a resize of a maximized window, and a maximized frame's extents taken for the
+    // floating frame's size and place the restored window wrong. JDK-8354943 (openjdk/jfx#2139) holds the change
+    // back while the window is not floating for the same reasons.
+    if (!floating) {
+        if (in_force_changed) {
+            report_frame_in_force();
         }
+        return;
+    }
+
+    // The gravity the window was shown with (centerOnScreen) corrects the place asked for, which was computed without
+    // the frame. It counts up to and including the window's first floating extents of a frame, a cache hit that
+    // changes nothing included. After them the window is where the WM or the user put it, and a later change
+    // (openbox's Un/Decorate, a theme or border width change) must not take it back there. A stage shown maximized
+    // has its first floating extents at the restore, and Weston writes them only after the map.
+    bool honour_gravity = !floating_frame_seen;
+    floating_frame_seen = true;
+
+    // A change is one against the floating frame's extents: going back from the maximized frame's to them on a
+    // restore is none, and the restored window keeps the size and place the WM gives it.
+    if (same_extents(geometry.extents, reported)) {
+        if (in_force_changed) {
+            report_frame_in_force();
+        }
+        return;
+    }
+
+    // The window size before the change, for the gravity below
+    int old_w = geometry_get_window_width(&geometry);
+    int old_h = geometry_get_window_height(&geometry);
+
+    geometry.extents = reported;
+
+    // All zero while floating is a WM that dropped the frame (openbox's undecorate, i3's border none). The window
+    // is that frame now, but the next window should not start from it.
+    if (has_frame) {
+        set_cached_extents(geometry.extents);
+    }
+
+    // set bounds again to correct window size
+    // accounting decorations
+    int w = geometry_get_window_width(&geometry);
+    int h = geometry_get_window_height(&geometry);
+    int cw = geometry_get_content_width(&geometry);
+    int ch = geometry_get_content_height(&geometry);
+
+    // No position read back from X goes back to the WM. A reparenting WM can have its frame unplaced while glass
+    // reads it (openbox before it maps the frame), and Weston puts its visible frame, not the frame with the shadow
+    // margin its extents include, at the position asked for: either way the window would really move there. A size
+    // request alone keeps the frame's corner (NorthWest gravity, ICCCM 4.1.2.3). Only a window placed by gravity
+    // (centerOnScreen) moves, at its first floating extents (above), from the position the application asked for, by
+    // its share of the change of the window size, as in JDK-8354943 (openjdk/jfx#2139).
+    bool move_x = honour_gravity && geometry.gravity_x != 0;
+    bool move_y = honour_gravity && geometry.gravity_y != 0;
+
+    int x = requested_x;
+    int y = requested_y;
+
+    if (move_x) {
+        x -= geometry.gravity_x * (float) (w - old_w);
+    }
+
+    if (move_y) {
+        y -= geometry.gravity_y * (float) (h - old_h);
+    }
+
+    set_bounds(x, y, move_x, move_y, w, h, cw, ch, 0, 0);
+}
+
+// Reports the window as the frame the extents in force describe around the client as it is, and asks the WM for
+// nothing.
+void WindowContextTop::report_frame_in_force() {
+    // The position only once the WM has placed the window (process_map)
+    if (mapped) {
+        int x, y, view_x, view_y;
+        read_frame_position(&x, &y, &view_x, &view_y);
+
+        if (x != geometry.x || y != geometry.y || view_x != geometry.view_x || view_y != geometry.view_y) {
+            geometry.x = x;
+            geometry.y = y;
+            geometry.view_x = view_x;
+            geometry.view_y = view_y;
+            notify_window_move();
+        }
+    }
+
+    // Not if iconified, as in process_configure
+    if (has_window_peer() && !is_iconified) {
+        if (glass_window_cb.notify_resize) {
+            int cw, ch;
+            glass_gdk_window_get_size(gdk_window, &cw, &ch);
+
+            if (glass_window_cb.notify_resize(window_id,
+                    (is_maximized)
+                        ? com_sun_glass_events_WindowEvent_MAXIMIZE
+                        : com_sun_glass_events_WindowEvent_RESIZE,
+                    cw + frame_extents.left + frame_extents.right,
+                    ch + frame_extents.top + frame_extents.bottom)) {
+                return;
+            }
+        }
+    }
+}
+
+// Whether the WM has the window floating, neither maximized nor full screen, as GDK last read _NET_WM_STATE, in
+// event order. Unlike is_maximized and is_fullscreen, which set_maximized and enter_fullscreen set at the request,
+// it waits for the WM, and it follows a maximize the WM starts by itself (a double click on the title bar).
+bool WindowContextTop::wm_floating() {
+    return !(gdk_window_get_state(gdk_window) & (GDK_WINDOW_STATE_MAXIMIZED | GDK_WINDOW_STATE_FULLSCREEN));
+}
+
+// The same from _NET_WM_STATE as it is now, one round trip. GDK reads the property only when it handles its
+// PropertyNotify, so for a WM that writes _NET_FRAME_EXTENTS before _NET_WM_STATE, GDK still says floating when the
+// maximized frame's extents arrive. Maximized, as for GDK, means maximized both ways.
+bool WindowContextTop::net_wm_state_floating() {
+    static GdkAtom atom_atom = gdk_atom_intern_static_string("ATOM");
+    static GdkAtom atom_net_wm_state = gdk_atom_intern_static_string("_NET_WM_STATE");
+    static GdkAtom atom_maximized_vert = gdk_atom_intern_static_string("_NET_WM_STATE_MAXIMIZED_VERT");
+    static GdkAtom atom_maximized_horz = gdk_atom_intern_static_string("_NET_WM_STATE_MAXIMIZED_HORZ");
+    static GdkAtom atom_fullscreen = gdk_atom_intern_static_string("_NET_WM_STATE_FULLSCREEN");
+
+    gint length = 0;
+    glong* atoms = NULL;
+
+    bool maximized_vert = false;
+    bool maximized_horz = false;
+    bool fullscreen = false;
+
+    if (gdk_property_get(gdk_window, atom_net_wm_state, atom_atom,
+            0, G_MAXLONG, FALSE, NULL, NULL, &length, (guchar**) &atoms)) {
+
+        for (gint i = 0; i < (gint)(length / sizeof(glong)); i++) {
+            if (atom_maximized_vert == (GdkAtom)atoms[i]) {
+                maximized_vert = true;
+            } else if (atom_maximized_horz == (GdkAtom)atoms[i]) {
+                maximized_horz = true;
+            } else if (atom_fullscreen == (GdkAtom)atoms[i]) {
+                fullscreen = true;
+            }
+        }
+
+        g_free(atoms);
+    }
+
+    return !(maximized_vert && maximized_horz) && !fullscreen;
+}
+
+// The window's position as X has it now. A TITLED window is at GDK's frame origin, which GDK takes from
+// _NET_FRAME_EXTENTS where the WM lists it in _NET_SUPPORTED and from the client's top-level ancestor elsewhere, and
+// its view at the client's offset from it. An undecorated window is its client.
+void WindowContextTop::read_frame_position(int *x, int *y, int *view_x, int *view_y) {
+    if (has_wm_frame()) {
+        gint root_x, root_y, origin_x, origin_y;
+        gdk_window_get_root_origin(gdk_window, &root_x, &root_y);
+        gdk_window_get_origin(gdk_window, &origin_x, &origin_y);
+
+        // x and y represent the position of the top-left corner of the window relative to the desktop area
+        *x = root_x;
+        *y = root_y;
+
+        // view_x and view_y represent the position of the content relative to the top-left corner of the window,
+        // taking into account window decorations (such as title bars and borders) applied by the window manager.
+        *view_x = origin_x - root_x;
+        *view_y = origin_y - root_y;
+    } else {
+        gdk_window_get_origin(gdk_window, x, y);
+        *view_x = 0;
+        *view_y = 0;
     }
 }
 
@@ -1015,9 +1179,39 @@ void WindowContextTop::process_realize() {
     }
 }
 
+// The window's first GDK_MAP. A reparenting WM can make glass handle a configure while its new frame is not placed
+// yet, so process_configure keeps the requested position until now. openbox places the frame before it maps the
+// client (client_manage in its client.c runs place_client and client_apply_startup_state before client_show), and
+// maps the frame before the client gets its MapNotify (frame_show in its frame.c), so the position read now is the
+// placed one. A change is reported; without a WM the window is where it was asked to be and was reported there
+// already. An override-redirect POPUP is placed by glass alone. The gate is that of JDK-8354943 (openjdk/jfx#2139).
+void WindowContextTop::process_map() {
+    if (mapped) {
+        return;
+    }
+    mapped = true;
+
+    if (window_type == POPUP) {
+        return;
+    }
+
+    int x, y, view_x, view_y;
+    read_frame_position(&x, &y, &view_x, &view_y);
+
+    if (x != geometry.x || y != geometry.y || view_x != geometry.view_x || view_y != geometry.view_y) {
+        geometry.x = x;
+        geometry.y = y;
+        geometry.view_x = view_x;
+        geometry.view_y = view_y;
+        notify_window_move();
+        notify_screen_change();
+    }
+}
+
 void WindowContextTop::process_configure(GdkEventConfigure* event) {
-    int ww = event->width + geometry.extents.left + geometry.extents.right;
-    int wh = event->height + geometry.extents.top + geometry.extents.bottom;
+    // The window is the frame the extents in force describe around the client
+    int ww = event->width + frame_extents.left + frame_extents.right;
+    int wh = event->height + frame_extents.top + frame_extents.bottom;
 
     // Do not report if iconified, because Java side would set the state to NORMAL
     if (has_window_peer() && !is_iconified) {
@@ -1040,38 +1234,43 @@ void WindowContextTop::process_configure(GdkEventConfigure* event) {
         }
     }
 
-    if (!is_iconified && !is_fullscreen && !is_maximized) {
+    // The size to come back to (unmaximize, update_frame_extents) comes only from a configure of a window that glass
+    // and the WM both have floating: after maximize(false) glass says floating at once, while the WM can still
+    // deliver a configure of the maximized window. It is the client plus the floating frame's extents, so that its
+    // client size is the client's.
+    if (!is_iconified && !is_fullscreen && !is_maximized && wm_floating()) {
         geometry.final_width.value = (geometry.final_width.type == BOUNDSTYPE_CONTENT)
-                ? event->width : ww;
+                ? event->width : event->width + geometry.extents.left + geometry.extents.right;
 
         geometry.final_height.value = (geometry.final_height.type == BOUNDSTYPE_CONTENT)
-                ? event->height : wh;
+                ? event->height : event->height + geometry.extents.top + geometry.extents.bottom;
     }
 
+    // The position only once the WM has placed the window (process_map); until then the one asked for stays
     if (has_wm_frame()) {
-        gint root_x, root_y, origin_x, origin_y;
-        gdk_window_get_root_origin(gdk_window, &root_x, &root_y);
-        gdk_window_get_origin(gdk_window, &origin_x, &origin_y);
+        int x, y;
+        read_frame_position(&x, &y, &geometry.view_x, &geometry.view_y);
 
-        // x and y represent the position of the top-left corner of the window relative to the desktop area
-        geometry.x = root_x;
-        geometry.y = root_y;
-
-        // view_x and view_y represent the position of the content relative to the top-left corner of the window,
-        // taking into account window decorations (such as title bars and borders) applied by the window manager.
-        geometry.view_x = origin_x - root_x;
-        geometry.view_y = origin_y - root_y;
+        if (mapped) {
+            geometry.x = x;
+            geometry.y = y;
+        }
     } else {
         // An undecorated window is its client area: the event gives the client's root position. GDK's frame
         // origin would subtract the extents a WM may publish for it anyway (Weston on WSLg), see
         // update_frame_extents and JDK-8354943 (openjdk/jfx#2139).
-        geometry.x = event->x;
-        geometry.y = event->y;
+        if (mapped) {
+            geometry.x = event->x;
+            geometry.y = event->y;
+        }
         geometry.view_x = 0;
         geometry.view_y = 0;
     }
     notify_window_move();
+    notify_screen_change();
+}
 
+void WindowContextTop::notify_screen_change() {
     glong to_screen = getScreenPtrForLocation(geometry.x, geometry.y);
     if (to_screen != -1) {
         if (to_screen != screen) {
@@ -1206,15 +1405,43 @@ void WindowContextTop::set_bounds(int x, int y, bool xSet, bool ySet, int w, int
     if (xSet || ySet) {
         if (xSet) {
             geometry.x = x;
+            requested_x = x;
         }
 
         if (ySet) {
             geometry.y = y;
+            requested_y = y;
         }
 
-        gtk_window_move(GTK_WINDOW(gtk_widget), geometry.x, geometry.y);
+        move_window(xSet, ySet);
         notify_window_move();
     }
+}
+
+// Asks for the window at geometry.x, geometry.y, of which the application set the coordinates xSet and ySet.
+void WindowContextTop::move_window(bool xSet, bool ySet) {
+    if ((xSet && ySet) || !mapped || window_type == POPUP || !gtk_widget_get_mapped(gtk_widget)) {
+        // Before the first map geometry holds the position asked for (process_configure keeps it), which GTK sends
+        // with the map; a hidden window keeps the place it had for the next show; an override-redirect POPUP has
+        // no WM.
+        gtk_window_move(GTK_WINDOW(gtk_widget), geometry.x, geometry.y);
+        return;
+    }
+
+    // One coordinate of a window on screen: a ConfigureRequest with that coordinate only (CWX or CWY). The X
+    // server without a WM, and a WM that keeps what a request leaves out (ICCCM 4.1.5), keep the other coordinate
+    // where the window is, wherever the user has dragged it. Filled in with the position read back, it would move
+    // the window wherever that reading is stale or differs from where the WM places a window asked for there.
+    // gtk_window_move of a mapped window is gdk_window_move, an XMoveWindow outside GTK's own position bookkeeping,
+    // so this request leaves GTK as gtk_window_move does.
+    XWindowChanges changes;
+    memset(&changes, 0, sizeof(changes));
+
+    gint scale = gdk_window_get_scale_factor(gdk_window);
+    changes.x = geometry.x * scale;
+    changes.y = geometry.y * scale;
+
+    XConfigureWindow(GDK_WINDOW_XDISPLAY(gdk_window), GDK_WINDOW_XID(gdk_window), xSet ? CWX : CWY, &changes);
 }
 
 void WindowContextTop::applyShapeMask(void* data, uint width, uint height) {
