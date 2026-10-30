@@ -2231,6 +2231,58 @@ public final class GtkGlassShim {
     }
 
     /**
+     * Sets the {@code _NET_WM_STATE} of the X11 window {@code xid} to the atoms {@code states} (none for a floating
+     * window), as a window manager does when it maximizes, takes full screen or restores a window
+     * ({@code XChangeProperty} of 32-bit {@code ATOM}s on the window itself), and waits for the server; FX thread.
+     * GDK reads the property when it handles the {@code PropertyNotify} of a mapped window, whether or not a window
+     * manager runs, and reports the state it finds ({@code gdk_window_get_state}, {@code GDK_WINDOW_STATE}); without
+     * a window manager a test writes it to stand in for one.
+     */
+    public static void setNetWmState(long xid, String... states) {
+        try (Arena arena = Arena.ofConfined()) {
+            MemorySegment display = (MemorySegment) Readback.GDK_X11_GET_DEFAULT_XDISPLAY.invokeExact();
+            long property = (long) Readback.X_INTERN_ATOM.invokeExact(display, arena.allocateFrom("_NET_WM_STATE"), 0);
+            MemorySegment data = arena.allocate(JAVA_LONG, Math.max(1, states.length));
+            for (int i = 0; i < states.length; i++) {
+                long atom = (long) Readback.X_INTERN_ATOM.invokeExact(display, arena.allocateFrom(states[i]), 0);
+                data.setAtIndex(JAVA_LONG, i, atom);
+            }
+            int status = (int) Readback.X_CHANGE_PROPERTY.invokeExact(display, xid, property, XA_ATOM, 32,
+                    PROP_MODE_REPLACE, data, states.length);
+            int synced = (int) Readback.X_SYNC.invokeExact(display, 0);
+        } catch (Throwable t) {
+            throw new IllegalStateException(t);
+        }
+    }
+
+    /**
+     * {@code XMoveWindow} of the X11 window {@code xid} to {@code x, y} on GDK's display, and {@code XSync}: moves
+     * the window as a window manager or the user does, behind glass's back. Without a window manager the server
+     * applies it at once; glass sees the {@code ConfigureNotify} once the task that moved it has returned. FX
+     * thread.
+     */
+    public static void moveWindow(long xid, int x, int y) {
+        try {
+            MemorySegment display = (MemorySegment) Readback.GDK_X11_GET_DEFAULT_XDISPLAY.invokeExact();
+            int status = (int) EventDriver.X_MOVE_WINDOW.invokeExact(display, xid, x, y);
+            int synced = (int) Readback.X_SYNC.invokeExact(display, 0);
+        } catch (Throwable t) {
+            throw new IllegalStateException(t);
+        }
+    }
+
+    /** {@link #moveWindow} that also sizes the window: {@code XMoveResizeWindow} and {@code XSync}; FX thread. */
+    public static void moveResizeWindow(long xid, int x, int y, int width, int height) {
+        try {
+            MemorySegment display = (MemorySegment) Readback.GDK_X11_GET_DEFAULT_XDISPLAY.invokeExact();
+            int status = (int) EventDriver.X_MOVE_RESIZE_WINDOW.invokeExact(display, xid, x, y, width, height);
+            int synced = (int) Readback.X_SYNC.invokeExact(display, 0);
+        } catch (Throwable t) {
+            throw new IllegalStateException(t);
+        }
+    }
+
+    /**
      * The size of the X11 window {@code xid} as {@code {width, height}}: {@code XGetGeometry} on GDK's display. For
      * the X window of a glass window that is its client area, without any frame a window manager puts around it; FX
      * thread.
@@ -3057,6 +3109,12 @@ public final class GtkGlassShim {
         /** {@code int XSetInputFocus(Display *, Window, int revert_to, Time)}. */
         static final MethodHandle X_SET_INPUT_FOCUS = downcall("libX11.so.6", "XSetInputFocus",
                 FunctionDescriptor.of(JAVA_INT, ADDRESS, JAVA_LONG, JAVA_INT, JAVA_LONG));
+        /** {@code int XMoveWindow(Display *, Window, int x, int y)}. */
+        static final MethodHandle X_MOVE_WINDOW = downcall("libX11.so.6", "XMoveWindow",
+                FunctionDescriptor.of(JAVA_INT, ADDRESS, JAVA_LONG, JAVA_INT, JAVA_INT));
+        /** {@code int XMoveResizeWindow(Display *, Window, int x, int y, unsigned int width, unsigned int height)}. */
+        static final MethodHandle X_MOVE_RESIZE_WINDOW = downcall("libX11.so.6", "XMoveResizeWindow",
+                FunctionDescriptor.of(JAVA_INT, ADDRESS, JAVA_LONG, JAVA_INT, JAVA_INT, JAVA_INT, JAVA_INT));
         /** {@code Display *XOpenDisplay(const char *)}. */
         static final MethodHandle X_OPEN_DISPLAY = downcall("libX11.so.6", "XOpenDisplay",
                 FunctionDescriptor.of(ADDRESS, ADDRESS));

@@ -143,6 +143,7 @@ public:
     virtual void set_background(float, float, float) = 0;
 
     virtual void process_realize() = 0;
+    virtual void process_map() = 0;
     virtual void process_property_notify(GdkEventProperty*) = 0;
     virtual void process_configure(GdkEventConfigure*) = 0;
     virtual void process_focus(GdkEventFocus*) = 0;
@@ -306,6 +307,26 @@ class WindowContextTop: public WindowContextBase {
     bool on_top;
     bool is_fullscreen;
 
+    // The extents in force: _NET_FRAME_EXTENTS as the WM last wrote it, all zero in full screen (EWMH) and those of
+    // a maximized frame while maximized; floating all-zero extents before the first frame are ignored (see
+    // floating_frame_seen). The reported window size is the client plus these. geometry.extents keeps the extents
+    // of the floating frame, which size requests, size hints and the per-process cache use.
+    WindowFrameExtents frame_extents;
+
+    // The position the application last asked for (set_bounds), per axis. A move glass makes by itself starts from
+    // it, never from a position read back from X.
+    int requested_x;
+    int requested_y;
+
+    // Whether GDK has delivered the window's first GDK_MAP. Until then a reparenting WM may not have placed its
+    // frame, so process_configure keeps the requested position.
+    bool mapped;
+
+    // Whether update_frame_extents has had the window's first non-zero extents while the WM has it floating. Until
+    // then floating all-zero extents are ignored, and the gravity the window was shown with (centerOnScreen) is
+    // honoured only up to and including that report.
+    bool floating_frame_seen;
+
     static WindowFrameExtents normal_extents;
     static WindowFrameExtents utility_extents;
 
@@ -314,6 +335,7 @@ public:
     WindowContextTop(int64_t, WindowContext*, long, WindowFrameType, WindowType, GdkWMFunction, glong);
 
     void process_realize();
+    void process_map();
     void process_property_notify(GdkEventProperty*);
     void process_state(GdkEventWindowState*);
     void process_configure(GdkEventConfigure*);
@@ -365,9 +387,15 @@ private:
 
     void request_frame_extents();
     void update_frame_extents();
+    void report_frame_in_force();
     void set_cached_extents(WindowFrameExtents ex);
     WindowFrameExtents get_cached_extents();
     bool get_frame_extents_property(int *, int *, int *, int *);
+    bool wm_floating();
+    bool net_wm_state_floating();
+    void read_frame_position(int *, int *, int *, int *);
+    void move_window(bool, bool);
+    void notify_screen_change();
     void update_window_constraints();
     void update_ontop_tree(bool);
     bool on_top_inherited();
