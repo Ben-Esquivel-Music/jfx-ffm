@@ -588,3 +588,20 @@ round 1 was checked by an adversarial verification before it was fixed; rounds 2
 - **Round 3: no findings.** The reviewer traced every path of the gravity rule (disabled windows, Mutter's zero
   answer, a stage shown maximized, Weston's order, hide and show, `centerOnScreen()` after the show), ran the gate
   without a WM on the final tree and caught m8 and m13-m16 again.
+- **CI run 41307952109** (the pull request at bfd94a69b0, Linux x64). The pass without a WM failed 1 of 255:
+  `GtkWindowPlacementTest.anUndecoratedWindowIsReportedWhereTheWindowManagerPlacedIt`, whose child threw
+  `XOpenDisplay(NULL) failed: no X server at DISPLAY` as it started the scripted WM. The scenario checked
+  `_NET_SUPPORTING_WM_CHECK` on an X connection of its own, closed it and then opened the WM's. With nothing else
+  connected, Xvfb (which resets when its last client goes, and the no-WM trace goldens need it to) could handle that
+  close and accept the new connection in the same wake-up, and its reset then closed the new connection unread. At
+  bfd94a69b0, 40 of 87 children failed this way under load.
+  - The fix: `GtkScriptedWindowManager.startUnlessOneRuns` checks on the connection the WM keeps.
+  - The next test of the scenario had relaunched the child into the same work directory and deleted the failed
+    child's files. `GtkGlassChildJvm` now gives each later child of a scenario its own directory (`<scenario>.2`,
+    ...).
+  - After the fix, under 16 busy loops: 0 of 160 children and 0 of 520 bare starts failed. Idle: 0 of 300 children
+    failed.
+  - The close-then-reopen put back as a mutant, under the same load: 30 of 40 children and 82 of 120 bare starts
+    failed, and so did 3 of the 4 tests of its scenario, each failed child's files kept.
+  - Gates: no WM 38 classes, 255 tests, 0 failures; openbox 38, 228, 0. Each class as on bfd94a69b0. The run without
+    a WM makes 3 X server generations fewer (58, against 61 on bfd94a69b0).

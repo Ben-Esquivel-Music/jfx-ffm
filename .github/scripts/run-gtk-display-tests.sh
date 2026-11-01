@@ -54,8 +54,9 @@
 # the script exits 1 at the end if either failed (2 if it could not start at all).
 #
 # The setup proof: every child that calls GtkGlassChild.recordEnvironment writes env.* into
-# target/gtk-glass-child/<scenario>/values.txt. At least one child of each run must have, every env.screen must be
-# 1920x1080 and every env.depth 24, and every env.windowManager must be "unknown" without a window manager and
+# target/gtk-glass-child/<scenario>/values.txt, or <scenario>.2/, .3/ ... for the children of a scenario that the test
+# JVM launches after its first (GtkGlassChildJvm.launch). At least one child of each run must have, every env.screen
+# must be 1920x1080 and every env.depth 24, and every env.windowManager must be "unknown" without a window manager and
 # "Openbox" under openbox. So a window manager that died during the run, or an X server with another screen
 # (xvfb-run's default is 1280x1024x24), fails the run instead of passing as something it is not.
 #

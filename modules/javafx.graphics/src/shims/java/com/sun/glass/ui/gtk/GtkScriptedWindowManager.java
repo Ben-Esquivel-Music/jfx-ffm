@@ -70,8 +70,9 @@ import static java.lang.foreign.ValueLayout.JAVA_LONG;
  * Nothing runs by itself: the scenario's own thread calls {@link #awaitMapRequest}, {@link #serviceUntilQuiet} and
  * {@link #place}, and a request waits in the X server until then. Its X errors go to the process's Xlib error
  * handler, which before the toolkit starts is Xlib's own and ends the process - selecting {@code SubstructureRedirect}
- * where another window manager runs is one - so a scenario starts it only where {@link #runningWindowManager} finds
- * none. LP64 only, like the rest of the GTK glass binding. Scenarios only; not a production class.
+ * where another window manager runs is one - so {@link #startUnlessOneRuns} starts it only where the root window names
+ * no window manager, which it checks on the connection the window manager then keeps. LP64 only, like the rest of the
+ * GTK glass binding. Scenarios only; not a production class.
  */
 public final class GtkScriptedWindowManager implements AutoCloseable {
 
@@ -154,6 +155,14 @@ public final class GtkScriptedWindowManager implements AutoCloseable {
         }
     }
 
+    /**
+     * What {@link #startUnlessOneRuns} found on the X server of {@code DISPLAY}: the window manager it started there,
+     * or, where an EWMH window manager runs already, the window that one names in the root window's
+     * {@code _NET_SUPPORTING_WM_CHECK}, as {@code 0x...}. Exactly one of the two is {@code null}.
+     */
+    public record Startup(GtkScriptedWindowManager started, String running) {
+    }
+
     /** A window the window manager has framed. */
     private static final class Frame {
         final long frame;
@@ -220,16 +229,37 @@ public final class GtkScriptedWindowManager implements AutoCloseable {
 
     /**
      * Starts the window manager on a connection of its own to the X server of {@code DISPLAY}, published under
-     * {@code name}. Called where {@link #runningWindowManager} answered {@code null}: another window manager holds
-     * {@code SubstructureRedirect} on the root window, and asking for it as well is an X error.
+     * {@code name}, unless an EWMH window manager runs there already - one that names a window in the root window's
+     * {@code _NET_SUPPORTING_WM_CHECK} - which holds {@code SubstructureRedirect} on the root window, so that asking
+     * for it as well is an X error. Where one runs, answers its window and closes the connection again, which changes
+     * nothing on the X server: that window manager keeps a connection of its own.
+     * <p>
+     * The check is made on the connection that the window manager then keeps, not on one of its own. Before the
+     * toolkit starts, on an X server without a window manager, a check's connection is the server's only client, so
+     * closing it before the window manager's connection is open leaves the server with no client at all. An Xvfb that
+     * resets when its last client goes (its default) can handle that close and accept the next connection in the same
+     * wake-up; the reset then closes the new connection before the server has read its setup, and
+     * {@code XOpenDisplay} fails.
      */
-    public static GtkScriptedWindowManager start(String name) {
+    public static Startup startUnlessOneRuns(String name) {
         try {
             MemorySegment display = (MemorySegment) X.OPEN_DISPLAY.invokeExact(MemorySegment.NULL);
             if (display.address() == 0) {
                 throw new IllegalStateException("XOpenDisplay(NULL) failed: no X server at DISPLAY");
             }
-            return new GtkScriptedWindowManager(display, name);
+            GtkScriptedWindowManager started = null;
+            try {
+                String running = supportingWindowManagerCheck(display);
+                if (running != null) {
+                    return new Startup(null, running);
+                }
+                started = new GtkScriptedWindowManager(display, name);
+                return new Startup(started, null);
+            } finally {
+                if (started == null) {
+                    int closed = (int) X.CLOSE_DISPLAY.invokeExact(display);
+                }
+            }
         } catch (RuntimeException | Error e) {
             throw e;
         } catch (Throwable t) {
@@ -238,44 +268,31 @@ public final class GtkScriptedWindowManager implements AutoCloseable {
     }
 
     /**
-     * The window an EWMH window manager names in the root window's {@code _NET_SUPPORTING_WM_CHECK} on the X server of
-     * {@code DISPLAY}, as {@code 0x...}, or {@code null} where there is none: read on a connection of its own, closed
-     * again.
+     * The window an EWMH window manager names in the root window's {@code _NET_SUPPORTING_WM_CHECK} on
+     * {@code display}, as {@code 0x...}, or {@code null} where there is none.
      */
     @SuppressWarnings("restricted")
-    public static String runningWindowManager() {
+    private static String supportingWindowManagerCheck(MemorySegment display) throws Throwable {
         try (Arena local = Arena.ofConfined()) {
-            MemorySegment display = (MemorySegment) X.OPEN_DISPLAY.invokeExact(MemorySegment.NULL);
-            if (display.address() == 0) {
-                throw new IllegalStateException("XOpenDisplay(NULL) failed: no X server at DISPLAY");
+            long root = (long) X.DEFAULT_ROOT_WINDOW.invokeExact(display);
+            long property = (long) X.INTERN_ATOM.invokeExact(display,
+                    local.allocateFrom("_NET_SUPPORTING_WM_CHECK"), 0);
+            MemorySegment type = local.allocate(JAVA_LONG);
+            MemorySegment format = local.allocate(JAVA_INT);
+            MemorySegment count = local.allocate(JAVA_LONG);
+            MemorySegment after = local.allocate(JAVA_LONG);
+            MemorySegment data = local.allocate(ADDRESS);
+            int status = (int) X.GET_WINDOW_PROPERTY.invokeExact(display, root, property, 0L, 1L, 0, XA_WINDOW,
+                    type, format, count, after, data);
+            MemorySegment items = data.get(ADDRESS, 0);
+            String answer = null;
+            if (status == 0 && items.address() != 0 && count.get(JAVA_LONG, 0) > 0) {
+                answer = "0x" + Long.toHexString(items.reinterpret(JAVA_LONG.byteSize()).get(JAVA_LONG, 0));
             }
-            try {
-                long root = (long) X.DEFAULT_ROOT_WINDOW.invokeExact(display);
-                long property = (long) X.INTERN_ATOM.invokeExact(display,
-                        local.allocateFrom("_NET_SUPPORTING_WM_CHECK"), 0);
-                MemorySegment type = local.allocate(JAVA_LONG);
-                MemorySegment format = local.allocate(JAVA_INT);
-                MemorySegment count = local.allocate(JAVA_LONG);
-                MemorySegment after = local.allocate(JAVA_LONG);
-                MemorySegment data = local.allocate(ADDRESS);
-                int status = (int) X.GET_WINDOW_PROPERTY.invokeExact(display, root, property, 0L, 1L, 0, XA_WINDOW,
-                        type, format, count, after, data);
-                MemorySegment items = data.get(ADDRESS, 0);
-                String answer = null;
-                if (status == 0 && items.address() != 0 && count.get(JAVA_LONG, 0) > 0) {
-                    answer = "0x" + Long.toHexString(items.reinterpret(JAVA_LONG.byteSize()).get(JAVA_LONG, 0));
-                }
-                if (items.address() != 0) {
-                    int freed = (int) X.FREE.invokeExact(items);
-                }
-                return answer;
-            } finally {
-                int closed = (int) X.CLOSE_DISPLAY.invokeExact(display);
+            if (items.address() != 0) {
+                int freed = (int) X.FREE.invokeExact(items);
             }
-        } catch (RuntimeException | Error e) {
-            throw e;
-        } catch (Throwable t) {
-            throw new IllegalStateException(t);
+            return answer;
         }
     }
 

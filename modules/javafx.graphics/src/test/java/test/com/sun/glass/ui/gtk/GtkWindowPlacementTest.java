@@ -933,16 +933,22 @@ public class GtkWindowPlacementTest {
      * toolkit; {@code null} where the display runs a window manager of its own, which is recorded under
      * {@code env.windowManager} and {@link GtkBoundsSteps#SKIPPED}. Records what GDK sees under
      * {@code scripted.windowManager} and {@code gdk.frameFromExtents}.
+     * <p>
+     * The check for a window manager and the start of the scripted one are one call on one X connection
+     * ({@link GtkScriptedWindowManager#startUnlessOneRuns}): without a window manager, a check on a connection closed
+     * before the scripted window manager's is opened leaves Xvfb with no client, and an Xvfb that resets on its last
+     * client's close can kill a connection made in the same wake-up.
      */
     private static GtkScriptedWindowManager startScriptedWindowManager(Map<String, String> out) throws Exception {
-        String running = GtkScriptedWindowManager.runningWindowManager();
+        GtkScriptedWindowManager.Startup startup = GtkScriptedWindowManager.startUnlessOneRuns(WINDOW_MANAGER);
+        String running = startup.running();
         out.put("env.windowManager", running == null ? GtkBoundsSteps.NO_WINDOW_MANAGER
                 : "the window manager of _NET_SUPPORTING_WM_CHECK " + running);
         if (running != null) {
             out.put(GtkBoundsSteps.SKIPPED, "this display runs a window manager");
             return null;
         }
-        GtkScriptedWindowManager wm = GtkScriptedWindowManager.start(WINDOW_MANAGER);
+        GtkScriptedWindowManager wm = startup.started();
         try {
             GtkGlassChild.startToolkit();
             out.put("scripted.windowManager", GtkGlassChild.onFx(GtkGlassShim::windowManagerName));
