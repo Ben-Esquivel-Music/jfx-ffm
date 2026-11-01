@@ -72,6 +72,9 @@ final class GtkBoundsSteps {
     /** {@code skipped}: why a child did not run its scenario. */
     static final String SKIPPED = "skipped";
 
+    /** The options every child is launched with: a UI scale of 1 ({@link #run}). */
+    private static final List<String> UI_SCALE_ONE = List.of("-Dglass.gtk.uiScale=1.0");
+
     /** The children launched so far, by test class and scenario. */
     private static final Map<String, GtkGlassChildJvm.Run> RUNS = new HashMap<>();
 
@@ -199,6 +202,10 @@ final class GtkBoundsSteps {
      * toolkit, or, for a scenario that has to set the display up first, without
      * ({@link GtkGlassChildJvm#runWithoutToolkit}). Skips the calling test unless the display runs a window manager
      * as {@code needsWindowManager} says.
+     * <p>
+     * The child runs at a UI scale of 1 ({@code -Dglass.gtk.uiScale=1.0}): {@code Window.setBounds} scales the bounds
+     * it is given by the screen's UI scale, the readings are X11 pixels, so at {@code GDK_SCALE=2} or on a high-dpi
+     * screen a correct window would differ from the scenarios' fixed numbers by that factor.
      */
     static GtkGlassChildJvm.Run run(Class<?> testClass, String scenario, boolean needsWindowManager,
                                     boolean startsItsOwnToolkit) {
@@ -210,8 +217,8 @@ final class GtkBoundsSteps {
         GtkGlassChildJvm.Run run = RUNS.get(key);
         if (run == null) {
             run = startsItsOwnToolkit
-                    ? GtkGlassChildJvm.runWithoutToolkit(testClass, scenario, List.of(), true)
-                    : GtkGlassChildJvm.run(testClass, scenario, List.of());
+                    ? GtkGlassChildJvm.runWithoutToolkit(testClass, scenario, UI_SCALE_ONE, true)
+                    : GtkGlassChildJvm.run(testClass, scenario, UI_SCALE_ONE);
             RUNS.put(key, run);
         }
         String recorded = run.values().get("env.windowManager");
