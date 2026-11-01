@@ -48,7 +48,8 @@ import static java.lang.foreign.ValueLayout.JAVA_LONG;
  * window's {@code ConfigureRequest}s, and on its {@code MapRequest} creates a frame at a provisional position,
  * reparents the window into it at (left, top) and writes the extents; only when the scenario says so does it put
  * the frame where the window asked to be (NorthWest gravity, ICCCM 4.1.2.3), or where the scenario says, and map
- * frame and window.
+ * frame and window. It can also write all-zero extents in both places for a frame made for others, as Mutter answers
+ * the request ({@link #frameNextWithZeroExtents}).
  * <ul>
  * <li>It selects {@code SubstructureRedirect} on the root window, as every window manager does, and publishes itself
  * as EWMH asks ({@code _NET_SUPPORTING_WM_CHECK}, {@code _NET_WM_NAME}, {@code _NET_SUPPORTED} with
@@ -189,6 +190,7 @@ public final class GtkScriptedWindowManager implements AutoCloseable {
     private final long requestFrameExtents;
     private final long frameExtentsAtom;
     private int[] nextExtents = new int[4];
+    private int[] nextWritten = nextExtents;
     private int provisionalX;
     private int provisionalY;
     private long lastMapped;
@@ -284,8 +286,20 @@ public final class GtkScriptedWindowManager implements AutoCloseable {
      */
     public void frameNext(int left, int right, int top, int bottom, int x, int y) {
         nextExtents = new int[] {left, right, top, bottom};
+        nextWritten = nextExtents;
         provisionalX = x;
         provisionalY = y;
+    }
+
+    /**
+     * As {@link #frameNext}, the frame made for those extents and the window reparented into it at (left, top), but
+     * with all-zero extents written in answer to the window's {@code _NET_REQUEST_FRAME_EXTENTS} and on its
+     * {@code MapRequest}: Mutter answers the request with all zero and writes its frame's extents later, which the
+     * scenario then writes itself.
+     */
+    public void frameNextWithZeroExtents(int left, int right, int top, int bottom, int x, int y) {
+        frameNext(left, right, top, bottom, x, y);
+        nextWritten = new int[4];
     }
 
     /**
@@ -417,7 +431,7 @@ public final class GtkScriptedWindowManager implements AutoCloseable {
                 if (event.get(JAVA_LONG, MESSAGE_TYPE_OFFSET) != requestFrameExtents) {
                     return false;
                 }
-                writeExtents(event.get(JAVA_LONG, CLIENT_MESSAGE_WINDOW_OFFSET), nextExtents);
+                writeExtents(event.get(JAVA_LONG, CLIENT_MESSAGE_WINDOW_OFFSET), nextWritten);
             }
             case DESTROY_NOTIFY -> {
                 Frame f = frames.remove(event.get(JAVA_LONG, WINDOW_OFFSET));
@@ -472,20 +486,22 @@ public final class GtkScriptedWindowManager implements AutoCloseable {
 
     /**
      * A {@code MapRequest}: a frame around the window at the provisional position, the window reparented into it at
-     * (left, top) and kept in the save-set, the extents written on it; neither is mapped yet.
+     * (left, top) and kept in the save-set, the extents written on it (all zero after
+     * {@link #frameNextWithZeroExtents}); neither is mapped yet.
      */
     private void manage(long window) throws Throwable {
         if (frames.containsKey(window)) {
             return;
         }
         int[] extents = nextExtents;
+        int[] written = nextWritten;
         int[] geometry = geometry(window);
         long frame = (long) X.CREATE_SIMPLE_WINDOW.invokeExact(display, root, provisionalX, provisionalY,
                 geometry[2] + extents[0] + extents[1], geometry[3] + extents[2] + extents[3], 0, 0L, 0L);
         int selected = (int) X.SELECT_INPUT.invokeExact(display, frame, SUBSTRUCTURE_MASKS);
         int saved = (int) X.ADD_TO_SAVE_SET.invokeExact(display, window);
         int reparented = (int) X.REPARENT_WINDOW.invokeExact(display, window, frame, extents[0], extents[2]);
-        writeExtents(window, extents);
+        writeExtents(window, written);
         frames.put(window, new Frame(frame, extents, geometry[0], geometry[1], geometry[2], geometry[3]));
         lastMapped = window;
     }

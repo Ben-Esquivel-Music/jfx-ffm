@@ -788,7 +788,9 @@ WindowContextTop::WindowContextTop(int64_t _window_id, WindowContext* _owner, lo
             requested_x(0),
             requested_y(0),
             mapped(false),
-            floating_frame_seen(false) {
+            floating_frame_seen(false),
+            nonfloating_frame_in_force(false),
+            floating_extents_deferred(false) {
     window_id = _window_id;
     gdk_windowManagerFunctions = wmf;
 
@@ -891,11 +893,26 @@ void WindowContextTop::update_frame_extents() {
     // floating frame's size and place the restored window wrong. JDK-8354943 (openjdk/jfx#2139) holds the change
     // back while the window is not floating for the same reasons.
     if (!floating) {
+        // GDK reads _NET_WM_STATE only when it handles its PropertyNotify, one X event at a time, so for a WM that
+        // writes _NET_FRAME_EXTENTS before it clears _NET_WM_STATE, GDK still says maximized or full screen when the
+        // floating frame's extents arrive. Once the window is mapped _NET_WM_STATE is the WM's: extents read after it
+        // says floating, in place of those the WM reported for its maximized or full-screen frame, are the floating
+        // frame's, and process_state takes them when GDK's state follows. Other extents read after the WM cleared the
+        // state can be its maximized frame's, which a WM that writes the state first has not rewritten yet; they are
+        // not taken.
+        bool state_cleared = mapped && !wm_floating() && net_wm_state_floating();
+        floating_extents_deferred = state_cleared
+                && (floating_extents_deferred || (nonfloating_frame_in_force && in_force_changed));
+        nonfloating_frame_in_force = mapped && !state_cleared;
+
         if (in_force_changed) {
             report_frame_in_force();
         }
         return;
     }
+
+    floating_extents_deferred = false;
+    nonfloating_frame_in_force = false;
 
     // The gravity the window was shown with (centerOnScreen) corrects the place asked for, which was computed without
     // the frame. It counts up to and including the window's first floating extents of a frame, a cache hit that
@@ -910,6 +927,15 @@ void WindowContextTop::update_frame_extents() {
     if (same_extents(geometry.extents, reported)) {
         if (in_force_changed) {
             report_frame_in_force();
+        } else if (honour_gravity) {
+            // The window's first floating extents of a frame are those it started from (the per-process cache), so
+            // nothing changes and nothing is asked for. The position read at the map and at the configures since can
+            // still be the client's: GDK's frame origin follows _NET_FRAME_EXTENTS as X had it, and a WM that writes
+            // all zero first (ignored above) had it at zero. It is reported as X has it now. No gravity move can be
+            // pending: the position a window is shown at goes to the WM with its map (gtk_window_move of an unmapped
+            // window), before the position is read, and glass moves a window by itself only when these extents
+            // change its size (below).
+            report_frame_position();
         }
         return;
     }
@@ -954,24 +980,20 @@ void WindowContextTop::update_frame_extents() {
     }
 
     set_bounds(x, y, move_x, move_y, w, h, cw, ch, 0, 0);
+
+    // Without a move no configure need follow: GTK sends no request for the client size the window has already
+    // (gtk_window_move_resize), which a content-sized window keeps. The frame's position and the view's offset in it
+    // change with the extents all the same, so they are reported as X has them now. A move is answered by a
+    // configure, which process_configure reads.
+    if (!move_x && !move_y) {
+        report_frame_position();
+    }
 }
 
 // Reports the window as the frame the extents in force describe around the client as it is, and asks the WM for
 // nothing.
 void WindowContextTop::report_frame_in_force() {
-    // The position only once the WM has placed the window (process_map)
-    if (mapped) {
-        int x, y, view_x, view_y;
-        read_frame_position(&x, &y, &view_x, &view_y);
-
-        if (x != geometry.x || y != geometry.y || view_x != geometry.view_x || view_y != geometry.view_y) {
-            geometry.x = x;
-            geometry.y = y;
-            geometry.view_x = view_x;
-            geometry.view_y = view_y;
-            notify_window_move();
-        }
-    }
+    report_frame_position();
 
     // Not if iconified, as in process_configure
     if (has_window_peer() && !is_iconified) {
@@ -987,6 +1009,23 @@ void WindowContextTop::report_frame_in_force() {
                     ch + frame_extents.top + frame_extents.bottom)) {
                 return;
             }
+        }
+    }
+}
+
+// Reports the window's position and its view's offset in it as X has them now, and asks the WM for nothing.
+void WindowContextTop::report_frame_position() {
+    // The position only once the WM has placed the window (process_map)
+    if (mapped) {
+        int x, y, view_x, view_y;
+        read_frame_position(&x, &y, &view_x, &view_y);
+
+        if (x != geometry.x || y != geometry.y || view_x != geometry.view_x || view_y != geometry.view_y) {
+            geometry.x = x;
+            geometry.y = y;
+            geometry.view_x = view_x;
+            geometry.view_y = view_y;
+            notify_window_move();
         }
     }
 }
@@ -1162,6 +1201,15 @@ void WindowContextTop::process_state(GdkEventWindowState* event) {
     }
 
     WindowContextBase::process_state(event);
+
+    // The floating frame's extents a WM wrote before it cleared _NET_WM_STATE (update_frame_extents) are taken once
+    // GDK's state says floating, after the state change is reported, where they would be taken had the WM written
+    // them after the state. A size request they make replaces the unmaximize one above: gtk_window_resize only
+    // records the size, and GTK sends one configure request for both. The state upcall may have closed the window.
+    if (floating_extents_deferred && wm_floating() && !is_dead()) {
+        floating_extents_deferred = false;
+        update_frame_extents();
+    }
 }
 
 void WindowContextTop::process_realize() {

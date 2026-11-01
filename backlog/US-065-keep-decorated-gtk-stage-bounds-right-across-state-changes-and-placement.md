@@ -166,10 +166,10 @@ D2 is kept: a `TITLED` stage is the WM's frame as `_NET_FRAME_EXTENTS` describes
 limits are still the sizes asked less the floating frame's extents (`GtkWindowNativeTest` pins them).
 
 ### The fix
-`glass_window.cpp`, `glass_window.h` and `GlassApplication.cpp` in `native-glass/gtk`, +323/-54 lines; no Java change
+`glass_window.cpp`, `glass_window.h` and `GlassApplication.cpp` in `native-glass/gtk`, +381/-54 lines; no Java change
 outside the tests, and no ABI change (`process_map` is internal). `WindowContextTop` keeps two sets of extents:
 `frame_extents`, the extents in force, and `geometry.extents`, the floating frame's, which size requests,
-`WM_NORMAL_HINTS` and the per-process cache use. The fix follows eight rules:
+`WM_NORMAL_HINTS` and the per-process cache use. The fix follows ten rules:
 1. **No position read back from X is ever sent to the WM.** Glass sends only positions the application asked for
    (`requested_x`, `requested_y`, kept per axis by `set_bounds`). When a floating window's extents change,
    `update_frame_extents` asks for the size only, and a size request keeps the frame's corner (NorthWest gravity,
@@ -215,10 +215,36 @@ outside the tests, and no ABI change (`process_map` is internal). `WindowContext
    and its `GDK_PROPERTY_NOTIFY` to `process_property_notify` (the WM's `_NET_FRAME_EXTENTS`, and `_NET_WM_STATE` for
    Compiz), each under its own `EventsCounterHelper`; GTK still gets neither. Without it such a window kept its
    requested position for good, and never took its extents or ended its gravity.
+9. **Floating extents a WM writes before it clears `_NET_WM_STATE` are taken at the state change, never a maximized
+   frame's.** GDK reads one X event at a time, so when a WM restores a window (or ends its full screen) writing the
+   floating frame's extents first, glass handles them while GDK's state still says maximized, and rule 2 only reports
+   them. If such a report, read once mapped with the live `_NET_WM_STATE` already floating, replaces the extents the
+   WM had in force for its maximized or full-screen frame (`nonfloating_frame_in_force`), it is held back
+   (`floating_extents_deferred`), and `process_state` runs `update_frame_extents` again once GDK says floating, after
+   the state change is reported. The extents are then stored and cached as in the state-first order, and their size
+   request replaces the unmaximize one (`gtk_window_resize` only records the size; GTK sends one configure request). A
+   maximized frame's report that glass handles after the WM cleared the state replaced no confirmed maximized frame,
+   so it is not taken (rule 3). Without it a window shown maximized with no cached extents was restored a frame too
+   large (client 400x300, `Window` 476x397, for a 400x300 window) and kept zero extents for later requests and hints.
+10. **Extents that move nothing still move the reported frame.** After a window's first floating extents of a frame,
+    or a floating change of them, that asks for no move, `update_frame_extents` reports the frame's position and the
+    View's offset as X has them now (`report_frame_position`: once mapped, and only if they changed), and asks for
+    nothing. A content-sized stage keeps its client size, so GTK sends no request and no configure follows; a window
+    that started from the cached extents under a WM that writes all zero first (rule 7) sees no change at all. Both
+    kept the client's origin and `View` 0,0, read at the map with zero extents, until an unrelated move or resize. With
+    a move (rule 6) the configure reports the position.
 
 Item 1 is rule 4, item 2 rules 2 and 3, item 3 rule 3, and item 4 rules 1 and 5, undecorated windows included
 (US-017's note d). Rule 6's end at the first floating frame, the first half of rule 7 and the property notifications
-of rule 8 came from the review. The Linux build (`glassgtk3` with `-Werror -Wall -Wextra`) gives 0 warnings.
+of rule 8 came from the review, rules 9 and 10 from the pull request's review. The Linux build (`glassgtk3` with
+`-Werror -Wall -Wextra`) gives 0 warnings.
+
+Accepted with rule 9: while GDK says maximized or full screen, each extents report of a mapped window reads
+`_NET_WM_STATE` once more. A second maximized frame (a theme change while maximized) whose report glass handles only
+after the WM cleared the state, before the WM wrote the floating frame, can be taken as the floating extents until that
+write corrects them; and an extents-first WM whose only maximized-frame report comes before the map defers nothing, so
+a stage shown maximized under it keeps the oversized restore. No WM read for this story does either (openbox and Weston
+write the state first).
 
 ### How it was measured
 - **Probe** (throwaway, not in the repository, in the style of US-017's): glass windows made in a `GtkGlassChild`
@@ -387,7 +413,7 @@ every other WM.
 
 ### Tests
 In `modules/javafx.graphics`; Linux only, and skipped without `DISPLAY` and `-DPRIVATE_DISPLAY=true` like every GTK
-display class. Two new classes, 24 tests: `GtkTitledStateBoundsTest` (11) and `GtkWindowPlacementTest` (13). Each
+display class. Two new classes, 27 tests: `GtkTitledStateBoundsTest` (12) and `GtkWindowPlacementTest` (15). Each
 scenario runs in a child JVM of its own, since glass caches a `TITLED` window's extents per process. A test of the
 wrong kind for the display skips per method (its first child tells whether a WM runs), so the gate script's list of
 classes that run no test under openbox is unchanged. Expected values are those of a 1920x1080 screen. A tiling WM is
@@ -400,11 +426,12 @@ measured.
 - **Scripted WM** (`GtkScriptedWindowManager`, new in the shims): a reparenting WM of the smallest kind, on its own X
   connection to an Xvfb with no WM, driven step by step by the scenario. It selects SubstructureRedirect on the root,
   publishes `_NET_SUPPORTING_WM_CHECK` and `_NET_SUPPORTED`, answers `_NET_REQUEST_FRAME_EXTENTS` (1,1,20,5 for
-  `TITLED`), applies and records each ConfigureRequest, frames a window at 0,0 on its MapRequest and holds it there
-  until glass has handled the configure, then places the frame, maps it and sends no synthetic ConfigureNotify: the
-  case that only the read at the map can learn. (openbox sends one before the map when it places a window elsewhere;
-  glass keeps the asked position until the map then too.)
-- `GtkTitledStateBoundsTest`, items 1-3, each case with the stand-in and under openbox where it can:
+  `TITLED`, or all zero until the scenario writes the frame's, Mutter's order), applies and records each
+  ConfigureRequest, frames a window at 0,0 on its MapRequest and holds it there until glass has handled the configure,
+  then places the frame, maps it and sends no synthetic ConfigureNotify: the case that only the read at the map can
+  learn. (openbox sends one before the map when it places a window elsewhere; glass keeps the asked position until the
+  map then too.)
+- `GtkTitledStateBoundsTest`, items 1-3 and rule 9, each case with the stand-in and under openbox where it can:
   - **full screen** (`aFullScreenWindowIsTheScreen…`, 2): extents 0,0,0,0, `Window` = client = 0,0 1920x1080, `View`
     0,0;
   - **leaving full screen** (`aWindowLeavingFullScreenIsItsFrameFromBefore…`, 2): client, `Window` and `View` as
@@ -418,8 +445,13 @@ measured.
   - **all zero** (`anAllZeroReportWhileFloatingIsTheFrame`, `anAllZeroReportWhileFloatingIsNotCached`): after
     38,38,59,38 and then 0,0,0,0 while floating, the window keeps 400x300 with its client filling it, and
     `setSize(500, 400)` gives a 500x400 client and `Window`; a second window starts from the cached 38,38,59,38, not
-    from the zeros.
-- `GtkWindowPlacementTest`, item 4 and rules 1 and 5-8, all without a WM:
+    from the zeros;
+  - **shown maximized, extents first**
+    (`aWindowShownMaximizedIsRestoredToTheSizeAskedForWhenTheExtentsComeFirstWithoutAWindowManager`, rule 9): the
+    first window of its process, 400x300 at 200,200, shown maximized; the stand-in maximizes it in Weston's order,
+    then restores it writing 38,38,59,38 before it clears `_NET_WM_STATE`: client 200,200 324x203, `Window` 200,200
+    400x300, and `setSize(500, 400)` gives a 424x303 client.
+- `GtkWindowPlacementTest`, item 4 and rules 1, 5-8 and 10, all without a WM:
   - **extents change** (`anExtentsChangeKeepsTheWindowWhereXHasIt`): the test moves the client to 50,60 and glass
     reads it; then, in one FX task, the extents change to 1,1,20,5 and the test moves the client to 300,250: client
     300,250 398x275, `Window` 300,250 400x300;
@@ -444,12 +476,18 @@ measured.
     while disabled;
   - **zero first**, Mutter's order (0,0,0,0 in the FX task that shows the window, then 38,38,59,38): **cache miss**
     (`aCentredWindowWhoseFirstReportIsAllZeroIsCentredWithTheExtentsThatFollow`) is centred at 742,247; **cache hit**
-    (`aCentredWindowFromTheCachedExtentsWhoseFirstReportIsAllZeroKeepsThePlaceAndSizeAskedFor`) keeps 780,280 360x240.
+    (`aCentredWindowFromTheCachedExtentsWhoseFirstReportIsAllZeroKeepsThePlaceAndSizeAskedFor`) keeps 780,280 360x240;
+  - **extents after the map** (rule 10), with the scripted WM in Mutter's order (all zero at the request and the map,
+    then 1,1,20,5 written while the WM services nothing): a 360x240 content at 200,200 without gravity, **cache miss**
+    (`aContentSizedWindowIsReportedAtItsFrameWhenItsExtentsComeAfterItsMap`) and **cache hit**
+    (`aContentSizedWindowFromTheCachedExtentsIsReportedAtItsFrameWhenItsExtentsComeAfterItsMap`, after a first window
+    framed at once and closed), is reported at the X frame, `Window` 200,200 362x265, with `View` 1,20, and glass sends
+    no ConfigureRequest after the extents.
 - Helpers: `GtkBoundsSteps` (new, not a test class: a window shown as Quantum shows a stage, steps of an action and a
   settled reading with glass's call trace, one child per scenario); `GtkGlassShim` gains `setNetWmState`, `moveWindow`
   and `moveResizeWindow`; `GtkFrameExtentsStandIn` gains `Effect.EXTENTS`; `GtkGlassChild.startToolkit()` is `main`'s
   toolkit start, taken out for a scenario that starts the scripted WM first. No pom change.
-- Run time in the gate: 43 s without a WM (28 s and 15 s), 8 s under openbox, where most tests skip.
+- Run time in the gate: 54 s without a WM (35 s and 19 s), 8 s under openbox, where most tests skip.
 
 **Before the fix** (master's library with the new tests): 17 of 24 fail, 14 of 20 without a WM and 3 of 4 under
 openbox, with the story's numbers: full screen 0,0 1996x1177 and 1922x1105; maximized client 388x267 and a 400x300
@@ -458,7 +496,10 @@ client; extents change 50,60; one axis 150,200 and 150,120 (glass's own drift of
 `Window` 0,0; centred, moved and centred and disabled 699,491. The seven that pass on master pin what master already
 did: leaving full screen (2), the zeros not cached, centred after the map (master corrects from the read-back
 position, which is the asked one while nothing moved the window), disabled at map (master has no gate) and zero
-first (2; master ignores every all-zero report). A mutant shows that each of them can fail.
+first (2; master ignores every all-zero report). A mutant shows that each of them can fail. The three tests of rules
+9 and 10 were run on the libraries just before those rules: the shown-maximized and the cache-miss test failed in 2
+of 2 runs on the story's first fix (client 400x300, `Window` 476x397; `Window` 201,220, `View` 0,0), the cache-hit
+test in 2 of 2 on the fix with only the cache-miss half of rule 10 (the same `Window` and `View`).
 
 **Mutant proof.** Mutants m1-m16 each revert one piece of the fix: m1-m5 and m8-m16 were written on the native side,
 m4 in two halves (m4a, m4b); m6 and m7 on the test side, for tests no other mutant reached. Each is a patch applied
@@ -486,11 +527,19 @@ the final tree. The patches are not committed.
 | m14 | rule 7: a pre-frame all-zero report stored, the gravity ended only by a non-zero one | zero first, cache hit (client 818,312 284x143) |
 | m15 | rule 8: a disabled window's property notifications dropped | centred and disabled (779,271) |
 | m16 | rule 7: a pre-frame all-zero report ignored but ending the gravity | zero first, cache miss (780,280) |
+| m17 | rule 9: the held-back floating extents never taken at the state change | shown maximized, extents first (client 400x300, `Window` 476x397) |
+| m18 | rule 10: no report after an extents change that asks for no move | extents after the map, cache miss (`Window` 201,220, `View` 0,0) |
+| m19 | rule 10: no report at the first floating extents of a frame that change nothing | extents after the map, cache hit (`Window` 201,220, `View` 0,0) |
+| m20 | rule 1, added rather than reverted: the position just read back sent to the WM after an extents change | extents after the map, cache miss (a ConfigureRequest for 200,200; every reported value right) |
+
+m17-m20 came from the pull request's review; each failed only its test (m19 and m20 in 3 of 3 runs on the final
+tree). The mutants of the scenarios that review refactored (m1, m2, m3, m4b, m7, m9, m10) were rerun on the final tree
+and failed exactly their tests again, m2, m3 and m7 ported to rule 9's branch.
 
 `anAllZeroReportWhileFloatingIsTheFrame` has no mutant of its own; it fails on master.
 
-**Stability.** On the final tree, five runs in a row each: 20 passed and 4 skipped without a WM, 4 passed and 20
-skipped under openbox, in all five (load average 1.3-2.0). The reviewer ran both classes of the first version under
+**Stability.** On the final tree, five runs in a row each: 23 passed and 4 skipped without a WM, 4 passed and 23
+skipped under openbox, in all five (load average 1.3-2.2). The reviewer ran both classes of the first version under
 8 busy loops (load average 6.6-13.1): 2 of 2 passed without a WM and under openbox. The waits are event-driven (a
 reading counts once two in a row agree); there is no bare sleep.
 
@@ -501,20 +550,22 @@ Files: `glass_window.cpp`, `glass_window.h`, `GlassApplication.cpp`; in `src/shi
 ### Gates
 | gate | before the fix | after the fix |
 | --- | --- | --- |
-| every `test/com/sun/glass/ui/gtk/*Test` on a private Xvfb with no WM (`.github/scripts/run-gtk-display-tests.sh`, `-DPRIVATE_DISPLAY=true -DUSE_ROBOT=true`) | 36 classes, 228 tests, 0 failures, 0 skipped | 38 classes, 252 tests (+11 and +13), 0 failures, 4 skipped (the new openbox tests) |
-| the same under openbox | 36 classes, 201 tests, 0 failures, 3 skipped, 5 classes `Tests run: 0` | 38 classes, 225 tests, 0 failures, 23 skipped (the same 3 and the 20 new no-WM tests), the same 5 `Tests run: 0` |
+| every `test/com/sun/glass/ui/gtk/*Test` on a private Xvfb with no WM (`.github/scripts/run-gtk-display-tests.sh`, `-DPRIVATE_DISPLAY=true -DUSE_ROBOT=true`) | 36 classes, 228 tests, 0 failures, 0 skipped | 38 classes, 255 tests (+12 and +15), 0 failures, 4 skipped (the new openbox tests) |
+| the same under openbox | 36 classes, 201 tests, 0 failures, 3 skipped, 5 classes `Tests run: 0` | 38 classes, 228 tests, 0 failures, 26 skipped (the same 3 and the 23 new no-WM tests), the same 5 `Tests run: 0` |
 | headless (`DISPLAY` unset) | 36 classes, 43 tests | the same 43; the 2 new classes `Tests run: 0` with the other display classes |
 | `GtkWindowNativeTest`, `GtkFrameExtentsNativeTest`, `GtkUndecoratedStageBoundsTest` | 6/6, 14/14, 2/2 in both runs | the same |
 | the trace goldens (`GtkEventTraceTest`, `GtkWindowStateTraceTest`, `GtkUpcallExceptionTest`, `GtkDnD*`) | pass | pass; no golden changed or regenerated |
-| JDK-8329821 under i3: `ContextMenu.show(anchor, Side.BOTTOM, 0, 0)` on a decorated stage | 8/8 checks, 2 runs | 8/8, 2 runs, every reading identical (the menu 108x80 at 302,242 in X and in JavaFX) |
-| JDK-8348095 under i3: the same in a full-screen stage | 9/9, 2 runs; stage 0,0 **1924x1100** | 9/9, 2 runs, every menu reading identical; stage 0,0 1920x1080 |
+| JDK-8329821 under i3: `ContextMenu.show(anchor, Side.BOTTOM, 0, 0)` on a decorated stage | 8/8 checks, 2 runs | 8/8, 2 runs, every reading identical (the menu 108x80 at 302,242 in X and in JavaFX), also with rules 9 and 10 |
+| JDK-8348095 under i3: the same in a full-screen stage | 9/9, 2 runs; stage 0,0 **1924x1100** | 9/9, 2 runs, every menu reading identical; stage 0,0 1920x1080; also with rules 9 and 10 |
 
 - In both runs each of the 36 old classes has the tests, failures, errors and skips it had before.
-- The gate took 934 s before and 720 s after. No run left an `hs_err` or `.dumpstream` file, and the runs left the
-  natives unchanged. The reviewer ran the gate without a WM again on the final tree: 252 run, 0 failures, 4 skipped.
+- The gate took 934 s before and 743 s after. No run left an `hs_err` or `.dumpstream` file, and the runs left the
+  natives unchanged. The reviewer ran the gate without a WM again on the tree before rules 9 and 10: 252 run, 0
+  failures, 4 skipped. With rules 9 and 10 the 36 old classes and the headless row are unchanged again, and each run
+  has exactly the three new tests more.
 - The i3 scenario is US-017's, rebuilt from its surviving class file: a decorated 800x600 stage, a `ContextMenu` shown
   2.5 s after `show()` and read 1.5 s later, checked against `xwininfo` and `xprop`; a freshly started Xvfb and i3 per
-  run.
+  run. Run again on the final tree, each of the four runs read every value it read before rules 9 and 10.
 
 ### Review
 Three rounds by an independent reviewer (`ffm-reviewer`), each with its own WSL clone, build and runs. Each finding of

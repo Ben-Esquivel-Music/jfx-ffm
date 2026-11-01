@@ -57,6 +57,9 @@ import static test.com.sun.glass.ui.gtk.GtkFrameExtentsStandIn.rect;
  * {@code _NET_WM_STATE}, as Weston and openbox do, or before it; and the extents of that frame are neither stored
  * for the window's requests nor cached for the next window, so a restore that brings the floating frame's extents
  * back is no change, and the window stays where and as large as the window manager restores it.</li>
+ * <li>A window shown maximized before it had extents of a floating frame gets them at its restore: glass sizes the
+ * restored window, and the window's later requests, with them, also when the window manager writes them before it
+ * clears {@code _NET_WM_STATE}, so that the window is the size it asked for and not that size plus the frame.</li>
  * <li>An all-zero report while the window floats is a window manager that dropped the frame: the window is its client
  * from then on, for its requests too, but the next window does not start from it.</li>
  * </ul>
@@ -220,6 +223,40 @@ public class GtkTitledStateBoundsTest {
         aRestoredWindowIsItsFrameFromBefore(run);
     }
 
+    /**
+     * The first {@code TITLED} window of its process, so without extents of a floating frame, shown maximized, then
+     * restored with the stand-in writing the floating frame's extents before it clears the state, so that glass
+     * handles them while GDK still says maximized, then given a size: the restored window is the size it asked for,
+     * its client that size less the floating frame's extents, and the size it is given later is the window's too.
+     */
+    @Test
+    public void aWindowShownMaximizedIsRestoredToTheSizeAskedForWhenTheExtentsComeFirstWithoutAWindowManager() {
+        GtkGlassChildJvm.Run run = GtkBoundsSteps.run(getClass(), "shownMaximizedExtentsFirstStandInScenario", false,
+                false);
+        Reading shown = GtkBoundsSteps.reading(run, "shown");
+        int[] at = parseRect(shown.client());
+        assertEquals("_NET_FRAME_EXTENTS none, client " + rect(X, Y, WIDTH, HEIGHT),
+                "_NET_FRAME_EXTENTS " + shown.values().get("extents") + ", client " + shown.client(),
+                shown.describe("the window started without extents, none cached, so its client is the whole window"
+                        + " size it asked for"));
+        Reading restored = GtkBoundsSteps.reading(run, "restored");
+        Reading sized = GtkBoundsSteps.reading(run, "sized");
+        int[] e = GtkFrameExtentsStandIn.STAND_IN;
+        int width = GtkFrameExtentsNativeTest.SIZE_WIDTH;
+        int height = GtkFrameExtentsNativeTest.SIZE_HEIGHT;
+        assertEquals("restored: client " + rect(at[0], at[1], WIDTH - e[0] - e[1], HEIGHT - e[2] - e[3]) + ", Window "
+                        + rect(at[0], at[1], WIDTH, HEIGHT) + ", maximized false; setSize: client "
+                        + rect(at[0], at[1], width - e[0] - e[1], height - e[2] - e[3]) + ", Window "
+                        + rect(at[0], at[1], width, height),
+                "restored: client " + restored.client() + ", Window " + restored.glass() + ", maximized "
+                        + restored.maximized() + "; setSize: client " + sized.client() + ", Window " + sized.glass(),
+                restored.describe("the restore sizes the " + WIDTH + "x" + HEIGHT + " window with the floating"
+                        + " frame's extents " + e[0] + "," + e[1] + "," + e[2] + "," + e[3] + ", which came before the"
+                        + " state, and Window.setSize(" + width + ", " + height + ") after it uses them too; while"
+                        + " maximized: " + GtkBoundsSteps.reading(run, "maximized").describe("-") + "; after setSize: "
+                        + sized.describe("-")));
+    }
+
     private static void aRestoredWindowIsItsFrameFromBefore(GtkGlassChildJvm.Run run) {
         Reading normal = GtkBoundsSteps.reading(run, "normal");
         Reading restored = GtkBoundsSteps.reading(run, "restored");
@@ -378,13 +415,16 @@ public class GtkTitledStateBoundsTest {
         if (!GtkBoundsSteps.requireWindowManager(out, false)) {
             return;
         }
-        maximize(out, xid -> {
-            GtkGlassShim.setNetWmState(xid, "_NET_WM_STATE_MAXIMIZED_VERT", "_NET_WM_STATE_MAXIMIZED_HORZ");
-            GtkGlassShim.moveResizeWindow(xid, MAXIMIZED_CLIENT[0], MAXIMIZED_CLIENT[1], MAXIMIZED_CLIENT[2],
-                    MAXIMIZED_CLIENT[3]);
-            GtkGlassShim.setNetFrameExtents(xid, MAXIMIZED_EXTENTS[0], MAXIMIZED_EXTENTS[1], MAXIMIZED_EXTENTS[2],
-                    MAXIMIZED_EXTENTS[3]);
-        }, GtkTitledStateBoundsTest::westonRestore);
+        maximize(out, GtkTitledStateBoundsTest::westonMaximize, GtkTitledStateBoundsTest::westonRestore);
+    }
+
+    /** Weston's maximize: the state, the client sized to the work area, the maximized frame's extents. */
+    private static void westonMaximize(long xid) {
+        GtkGlassShim.setNetWmState(xid, "_NET_WM_STATE_MAXIMIZED_VERT", "_NET_WM_STATE_MAXIMIZED_HORZ");
+        GtkGlassShim.moveResizeWindow(xid, MAXIMIZED_CLIENT[0], MAXIMIZED_CLIENT[1], MAXIMIZED_CLIENT[2],
+                MAXIMIZED_CLIENT[3]);
+        GtkGlassShim.setNetFrameExtents(xid, MAXIMIZED_EXTENTS[0], MAXIMIZED_EXTENTS[1], MAXIMIZED_EXTENTS[2],
+                MAXIMIZED_EXTENTS[3]);
     }
 
     /** Weston's restore: the state removed, the client back where and as large as it was, the floating extents. */
@@ -410,6 +450,43 @@ public class GtkTitledStateBoundsTest {
             GtkGlassShim.moveResizeWindow(xid, MAXIMIZED_CLIENT[0], MAXIMIZED_CLIENT[1], MAXIMIZED_CLIENT[2],
                     MAXIMIZED_CLIENT[3]);
         }, GtkTitledStateBoundsTest::westonRestore);
+    }
+
+    /**
+     * The first {@code TITLED} window of the process, without extents yet, shown maximized - {@code maximize(true)}
+     * right after {@code setVisible(true)}, in the same task, as {@code Stage} does for a stage maximized before it is
+     * shown ({@code shown}); the stand-in maximizes it in Weston's order ({@code maximized}); {@code maximize(false)}
+     * with the stand-in writing the floating frame's extents first, then clearing the state and putting the client
+     * back where and as large as it was shown ({@code restored}); then {@code setSize} ({@code sized}); no window
+     * manager.
+     */
+    static void shownMaximizedExtentsFirstStandInScenario(Map<String, String> out) throws Exception {
+        if (!GtkBoundsSteps.requireWindowManager(out, false)) {
+            return;
+        }
+        GtkEventTrace t = new GtkEventTrace();
+        GtkTraceWindow window = GtkBoundsSteps.show(t, "w1", "v1", GtkBoundsSteps.TITLED, w ->
+                w.setBounds(X, Y, true, true, WIDTH, HEIGHT, -1, -1, 0, 0), w -> w.maximize(true));
+        try {
+            long xid = GtkGlassChild.onFx(window::getNativeWindow);
+            t.settle();
+            GtkBoundsSteps.step(t, out, "shown", window, Effect.NONE, () -> {
+            });
+            int[] client = parseRect(out.get("shown.client"));
+            GtkBoundsSteps.step(t, out, "maximized", window, Effect.CLIENT, () -> westonMaximize(xid));
+            GtkBoundsSteps.step(t, out, "restored", window, Effect.CLIENT, () -> {
+                window.maximize(false);
+                int[] e = GtkFrameExtentsStandIn.STAND_IN;
+                GtkGlassShim.setNetFrameExtents(xid, e[0], e[1], e[2], e[3]);
+                GtkGlassShim.setNetWmState(xid);
+                GtkGlassShim.moveResizeWindow(xid, client[0], client[1], client[2], client[3]);
+            });
+            GtkBoundsSteps.step(t, out, "sized", window, Effect.CLIENT, () ->
+                    window.setSize(GtkFrameExtentsNativeTest.SIZE_WIDTH, GtkFrameExtentsNativeTest.SIZE_HEIGHT));
+        } finally {
+            GtkBoundsSteps.close(List.of(window));
+            t.settle();
+        }
     }
 
     /** {@code maximize(true)} and {@code maximize(false)} under the window manager. */

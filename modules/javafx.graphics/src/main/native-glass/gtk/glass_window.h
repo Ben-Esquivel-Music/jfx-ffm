@@ -327,6 +327,15 @@ class WindowContextTop: public WindowContextBase {
     // honoured only up to and including that report.
     bool floating_frame_seen;
 
+    // Whether the extents in force are those of the WM's maximized or full-screen frame: reported once the window is
+    // mapped, while _NET_WM_STATE said maximized or full screen.
+    bool nonfloating_frame_in_force;
+
+    // Whether the extents in force are the floating frame's, held back: a WM wrote them in place of its maximized or
+    // full-screen frame's before it cleared _NET_WM_STATE, while GDK still said maximized or full screen.
+    // process_state takes them once GDK's state says floating.
+    bool floating_extents_deferred;
+
     static WindowFrameExtents normal_extents;
     static WindowFrameExtents utility_extents;
 
@@ -388,6 +397,7 @@ private:
     void request_frame_extents();
     void update_frame_extents();
     void report_frame_in_force();
+    void report_frame_position();
     void set_cached_extents(WindowFrameExtents ex);
     WindowFrameExtents get_cached_extents();
     bool get_frame_extents_property(int *, int *, int *, int *);

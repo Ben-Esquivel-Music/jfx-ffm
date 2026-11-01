@@ -80,6 +80,13 @@ import static test.com.sun.glass.ui.gtk.GtkFrameExtentsStandIn.rect;
  * before them describe no frame (Mutter answers {@code _NET_REQUEST_FRAME_EXTENTS} with them and writes its frame's
  * later): a window that starts without extents is centred with the ones that follow, and one that starts from the
  * cached extents keeps the place and the size it asked for.</li>
+ * <li>A window whose frame's extents come only after glass has read its position at the map - a window manager that
+ * frames and maps it while it writes all-zero extents, as Mutter answers {@code _NET_REQUEST_FRAME_EXTENTS}, and
+ * writes its frame's later - is reported at the origin of the frame they describe, with its {@code View} at their
+ * left and top, as soon as they come, and glass asks the window manager for nothing to get there: a window sized by
+ * its content and shown without gravity then asks for neither a move nor another client size, so no configure
+ * follows that would bring the position. So is a window that starts from the cached extents, for which the extents
+ * that come are no change.</li>
  * </ul>
  * Each scenario runs in a child of its own: glass caches a {@code TITLED} window's extents per process.
  */
@@ -133,6 +140,10 @@ public class GtkWindowPlacementTest {
 
     /** Where the test moves the second centred window behind glass's back. */
     static final int[] DRAGGED = {700, 500};
+
+    /** The content size of the window sized by its content, shown where it asked to be without gravity. */
+    static final int CONTENT_WIDTH = 360;
+    static final int CONTENT_HEIGHT = 240;
 
     @BeforeAll
     static void requireDisplay() {
@@ -278,6 +289,88 @@ public class GtkWindowPlacementTest {
                 + GtkBoundsSteps.value(run, name + ".mapRequest") + "; requests: "
                 + GtkBoundsSteps.value(run, name + ".requests") + "; after the map: Window "
                 + GtkBoundsSteps.value(run, name + ".placed.glass"));
+    }
+
+    // ---------------------------------------------------------------------------------------------
+    // Extents of a frame after the map
+    // ---------------------------------------------------------------------------------------------
+
+    /**
+     * The first {@code TITLED} window of its process, shown where it asked to be without gravity and sized by its
+     * content, which the window manager frames and maps while it writes all-zero extents, so that glass reads its
+     * position at the map with no frame, and whose frame's extents come only after that, with nothing moved or
+     * resized: reported at the origin of the frame those extents describe around the client, with its {@code View}
+     * at their left and top, without a configure and without asking the window manager for anything.
+     */
+    @Test
+    public void aContentSizedWindowIsReportedAtItsFrameWhenItsExtentsComeAfterItsMap() {
+        GtkGlassChildJvm.Run run = GtkBoundsSteps.run(getClass(), "delayedExtentsScenario", false, true);
+        Reading zero = GtkBoundsSteps.reading(run, "zero");
+        int[] client = parseRect(zero.client());
+        int[] mapped = parseRect(zero.glass());
+        assertEquals("_NET_FRAME_EXTENTS 0,0,0,0, Window at " + client[0] + "," + client[1] + ", View 0,0",
+                "_NET_FRAME_EXTENTS " + zero.values().get("extents") + ", Window at " + mapped[0] + "," + mapped[1]
+                        + ", View " + zero.view(),
+                zero.describe("glass read the position at the map under all-zero extents, which make the client the"
+                        + " frame; MapRequest: " + GtkBoundsSteps.value(run, "mapRequest")));
+        reportedAtItsFrame(run, "was shown at " + X + "," + Y + " with a content of " + CONTENT_WIDTH + "x"
+                + CONTENT_HEIGHT + " and no gravity");
+    }
+
+    /**
+     * A second {@code TITLED} window, which starts from the extents cached by the first, sized by its content and
+     * shown where it asked to be without gravity, which the window manager frames and maps while it writes all-zero
+     * extents, so that glass reads its position at the map with no frame, and whose frame's extents, the cached ones,
+     * come only after that, with nothing moved or resized: reported at the origin of the frame those extents describe
+     * around the client, with its {@code View} at their left and top, without a configure and without asking the
+     * window manager for anything, although they are no change to the extents glass has.
+     */
+    @Test
+    public void aContentSizedWindowFromTheCachedExtentsIsReportedAtItsFrameWhenItsExtentsComeAfterItsMap() {
+        GtkGlassChildJvm.Run run = GtkBoundsSteps.run(getClass(), "delayedExtentsFromTheCacheScenario", false, true);
+        Reading seed = GtkBoundsSteps.reading(run, "seed");
+        int[] e = SCRIPTED_EXTENTS;
+        String seedFrame = seed.clientPlusExtents();
+        assertEquals("_NET_FRAME_EXTENTS " + e[0] + "," + e[1] + "," + e[2] + "," + e[3] + ", X frame " + seedFrame
+                        + ", Window " + seedFrame + ", View " + e[0] + "," + e[2],
+                "_NET_FRAME_EXTENTS " + seed.values().get("extents") + ", X frame " + seed.frame() + ", Window "
+                        + seed.glass() + ", View " + seed.view(),
+                seed.describe("the first window of the process, framed with its extents at once, is reported at its"
+                        + " frame, so glass took them as its frame's and cached them for the window after it;"
+                        + " MapRequest: " + GtkBoundsSteps.value(run, "seed.mapRequest")));
+        Reading zero = GtkBoundsSteps.reading(run, "zero");
+        int[] client = parseRect(zero.client());
+        String mapped = rect(client[0], client[1], client[2] + e[0] + e[1], client[3] + e[2] + e[3]);
+        assertEquals("_NET_FRAME_EXTENTS 0,0,0,0, Window " + mapped + ", View 0,0",
+                "_NET_FRAME_EXTENTS " + zero.values().get("extents") + ", Window " + zero.glass() + ", View "
+                        + zero.view(),
+                zero.describe("the second window starts from the cached extents, so its Window is the client grown"
+                        + " by them, and glass read the position at the map under all-zero extents, which make the"
+                        + " client the frame; MapRequest: " + GtkBoundsSteps.value(run, "mapRequest")));
+        reportedAtItsFrame(run, "was shown at " + X + "," + Y + " with a content of " + CONTENT_WIDTH + "x"
+                + CONTENT_HEIGHT + " and no gravity, and started from the cached extents, which are the ones that"
+                + " came");
+    }
+
+    /**
+     * Asserts the reading {@code framed} of {@code run}, taken once the extents of the window's frame came after its
+     * map with nothing moved or resized: the window is reported at the origin of the frame they describe around the
+     * client, with its {@code View} at their left and top, and glass asked the window manager for nothing after them
+     * ({@code framed.requests}). {@code shown} says how the window was shown.
+     */
+    private static void reportedAtItsFrame(GtkGlassChildJvm.Run run, String shown) {
+        Reading framed = GtkBoundsSteps.reading(run, "framed");
+        int[] e = framed.extents();
+        String frame = framed.clientPlusExtents();
+        assertEquals("X frame " + frame + ", Window " + frame + ", View " + e[0] + "," + e[2]
+                        + ", ConfigureRequests none",
+                "X frame " + framed.frame() + ", Window " + framed.glass() + ", View " + framed.view()
+                        + ", ConfigureRequests " + GtkBoundsSteps.value(run, "framed.requests"),
+                framed.describe("the extents " + e[0] + "," + e[1] + "," + e[2] + "," + e[3] + " came after the map,"
+                        + " and nothing moved or resized the window: the Window is the frame they describe around the"
+                        + " client, " + frame + ", with its View at their left and top, without a configure, and"
+                        + " glass sends the window manager nothing for it, least of all a position it read back from"
+                        + " X; the window " + shown));
     }
 
     // ---------------------------------------------------------------------------------------------
@@ -673,18 +766,10 @@ public class GtkWindowPlacementTest {
      * {@code env.windowManager}, and skips where there is one.
      */
     static void scriptedWindowManagerScenario(Map<String, String> out) throws Exception {
-        String running = GtkScriptedWindowManager.runningWindowManager();
-        out.put("env.windowManager", running == null ? GtkBoundsSteps.NO_WINDOW_MANAGER
-                : "the window manager of _NET_SUPPORTING_WM_CHECK " + running);
-        if (running != null) {
-            out.put(GtkBoundsSteps.SKIPPED, "this display runs a window manager");
-            return;
-        }
-        try (GtkScriptedWindowManager wm = GtkScriptedWindowManager.start(WINDOW_MANAGER)) {
-            GtkGlassChild.startToolkit();
-            out.put("scripted.windowManager", GtkGlassChild.onFx(GtkGlassShim::windowManagerName));
-            out.put("gdk.frameFromExtents", Boolean.toString(GtkGlassChild.onFx(() ->
-                    GtkGlassShim.supportsNetWmHint("_NET_FRAME_EXTENTS"))));
+        try (GtkScriptedWindowManager wm = startScriptedWindowManager(out)) {
+            if (wm == null) {
+                return;
+            }
             GtkEventTrace t = new GtkEventTrace();
             int[] e = SCRIPTED_EXTENTS;
             placeByScript(t, out, wm, "first", GtkBoundsSteps.TITLED, e, new int[] {X, Y, WIDTH, HEIGHT, -1, -1},
@@ -731,19 +816,8 @@ public class GtkWindowPlacementTest {
         GtkTraceWindow window = shown.get(60, TimeUnit.SECONDS);
         try {
             long xid = GtkGlassChild.onFx(window::getNativeWindow);
-            out.put(name + ".mapRequest", client == xid ? "the window's" : "0x" + Long.toHexString(client)
-                    + " for the window 0x" + Long.toHexString(xid));
-            Runnable roundTrip = () -> {
-                try {
-                    GtkGlassChild.onFx(() -> {
-                        GtkGlassShim.syncGdkDisplay();
-                        return null;
-                    });
-                    GtkGlassChild.onFx(() -> null);
-                } catch (Exception failure) {
-                    throw new IllegalStateException(failure);
-                }
-            };
+            out.put(name + ".mapRequest", mapRequest(client, xid));
+            Runnable roundTrip = GtkWindowPlacementTest::roundTrip;
             wm.serviceUntilQuiet(roundTrip);
             out.put(name + ".unplaced", GtkGlassChild.onFx(() -> "Window " + rect(window.getX(), window.getY(),
                     window.getWidth(), window.getHeight()) + ", View " + window.getView().getX() + ","
@@ -756,21 +830,173 @@ public class GtkWindowPlacementTest {
             wm.serviceUntilQuiet(roundTrip);
             GtkBoundsSteps.step(t, out, name + ".placed", window, Effect.NONE, () -> {
             });
-            List<String> requests = new ArrayList<>();
-            for (GtkScriptedWindowManager.Request request : wm.requests().subList(requestsBefore,
-                    wm.requests().size())) {
-                requests.add(request.toString());
-            }
-            out.put(name + ".requests", String.join("; ", requests));
+            out.put(name + ".requests", requestsSince(wm, requestsBefore));
         } finally {
-            GtkBoundsSteps.close(List.of(window));
-            wm.serviceUntilQuiet(() -> {
-                try {
-                    t.settle();
-                } catch (Exception failure) {
-                    throw new IllegalStateException(failure);
-                }
-            });
+            closeUnder(wm, t, window);
         }
+    }
+
+    /**
+     * The first {@code TITLED} window of the process, its frame's extents written only after its map
+     * ({@link #showWithDelayedExtents}). Starts its own toolkit, and skips where the display runs a window manager.
+     */
+    static void delayedExtentsScenario(Map<String, String> out) throws Exception {
+        try (GtkScriptedWindowManager wm = startScriptedWindowManager(out)) {
+            if (wm == null) {
+                return;
+            }
+            showWithDelayedExtents(wm, new GtkEventTrace(), out);
+        }
+    }
+
+    /**
+     * A first {@code TITLED} window, sized by its content and shown where it asked to be without gravity, which the
+     * scripted window manager frames for {@link #SCRIPTED_EXTENTS}, writing them at once, and places where it asked
+     * to be ({@code seed}, its {@code MapRequest} under {@code seed.mapRequest}); once it is closed, a second one,
+     * which starts from the extents cached since, its frame's extents written only after its map
+     * ({@link #showWithDelayedExtents}). Starts its own toolkit, and skips where the display runs a window manager.
+     */
+    static void delayedExtentsFromTheCacheScenario(Map<String, String> out) throws Exception {
+        try (GtkScriptedWindowManager wm = startScriptedWindowManager(out)) {
+            if (wm == null) {
+                return;
+            }
+            int[] e = SCRIPTED_EXTENTS;
+            wm.frameNext(e[0], e[1], e[2], e[3], X, Y);
+            GtkEventTrace t = new GtkEventTrace();
+            GtkTraceWindow seed = showContentSized(t, "seed", "seed.view");
+            try {
+                placeWhereAsked(wm, out, "seed.mapRequest", seed);
+                GtkBoundsSteps.step(t, out, "seed", seed, Effect.NONE, () -> {
+                });
+            } finally {
+                closeUnder(wm, t, seed);
+            }
+            showWithDelayedExtents(wm, t, out);
+        }
+    }
+
+    /**
+     * Shows a {@code TITLED} window sized by its content where it asked to be without gravity, under the scripted
+     * window manager, which frames it for {@link #SCRIPTED_EXTENTS} but writes all-zero extents until it is mapped,
+     * as Mutter does, and places the frame where the window asked to be ({@code zero}, the {@code MapRequest} under
+     * {@code mapRequest}); then, with the window manager handling nothing and nothing moved or resized, writes the
+     * frame's extents, as the window manager does later ({@code framed}), records under {@code framed.requests} what
+     * glass asked the window manager for after them, and closes the window.
+     */
+    private static void showWithDelayedExtents(GtkScriptedWindowManager wm, GtkEventTrace t, Map<String, String> out)
+            throws Exception {
+        int[] e = SCRIPTED_EXTENTS;
+        wm.frameNextWithZeroExtents(e[0], e[1], e[2], e[3], X, Y);
+        GtkTraceWindow window = showContentSized(t, "w1", "v1");
+        try {
+            long xid = placeWhereAsked(wm, out, "mapRequest", window);
+            GtkBoundsSteps.step(t, out, "zero", window, Effect.NONE, () -> {
+            });
+            int requestsBefore = wm.requests().size();
+            GtkBoundsSteps.step(t, out, "framed", window, Effect.EXTENTS, () ->
+                    GtkGlassShim.setNetFrameExtents(xid, e[0], e[1], e[2], e[3]));
+            wm.serviceUntilQuiet(GtkWindowPlacementTest::roundTrip);
+            String requests = requestsSince(wm, requestsBefore);
+            out.put("framed.requests", requests.isEmpty() ? "none" : requests);
+        } finally {
+            closeUnder(wm, t, window);
+        }
+    }
+
+    /** A {@code TITLED} window sized by its content, shown at {@link #X}, {@link #Y} without gravity. */
+    private static GtkTraceWindow showContentSized(GtkEventTrace t, String name, String viewName) throws Exception {
+        return GtkBoundsSteps.show(t, name, viewName, GtkBoundsSteps.TITLED, w ->
+                w.setBounds(X, Y, true, true, -1, -1, CONTENT_WIDTH, CONTENT_HEIGHT, 0, 0));
+    }
+
+    /**
+     * Waits for the {@code MapRequest} the scripted window manager handles after {@code window} was shown, records
+     * whose it was under {@code key}, lets glass and the window manager handle what follows, places the frame where
+     * the window asked to be and maps it, and lets them handle that; answers the window's X id.
+     */
+    private static long placeWhereAsked(GtkScriptedWindowManager wm, Map<String, String> out, String key,
+                                        GtkTraceWindow window) throws Exception {
+        long xid = GtkGlassChild.onFx(window::getNativeWindow);
+        long client = wm.awaitMapRequest(MAP_REQUEST_MILLIS);
+        out.put(key, mapRequest(client, xid));
+        wm.serviceUntilQuiet(GtkWindowPlacementTest::roundTrip);
+        if (client == xid) {
+            wm.place(client);
+        }
+        wm.serviceUntilQuiet(GtkWindowPlacementTest::roundTrip);
+        return xid;
+    }
+
+    /**
+     * The scripted window manager, started before the toolkit so that GDK knows it from the start, and then the
+     * toolkit; {@code null} where the display runs a window manager of its own, which is recorded under
+     * {@code env.windowManager} and {@link GtkBoundsSteps#SKIPPED}. Records what GDK sees under
+     * {@code scripted.windowManager} and {@code gdk.frameFromExtents}.
+     */
+    private static GtkScriptedWindowManager startScriptedWindowManager(Map<String, String> out) throws Exception {
+        String running = GtkScriptedWindowManager.runningWindowManager();
+        out.put("env.windowManager", running == null ? GtkBoundsSteps.NO_WINDOW_MANAGER
+                : "the window manager of _NET_SUPPORTING_WM_CHECK " + running);
+        if (running != null) {
+            out.put(GtkBoundsSteps.SKIPPED, "this display runs a window manager");
+            return null;
+        }
+        GtkScriptedWindowManager wm = GtkScriptedWindowManager.start(WINDOW_MANAGER);
+        try {
+            GtkGlassChild.startToolkit();
+            out.put("scripted.windowManager", GtkGlassChild.onFx(GtkGlassShim::windowManagerName));
+            out.put("gdk.frameFromExtents", Boolean.toString(GtkGlassChild.onFx(() ->
+                    GtkGlassShim.supportsNetWmHint("_NET_FRAME_EXTENTS"))));
+            return wm;
+        } catch (Exception | Error failure) {
+            wm.close();
+            throw failure;
+        }
+    }
+
+    /** Whose {@code MapRequest} the scripted window manager handled: {@code the window's}, or which window's. */
+    private static String mapRequest(long client, long xid) {
+        return client == xid ? "the window's" : "0x" + Long.toHexString(client) + " for the window 0x"
+                + Long.toHexString(xid);
+    }
+
+    /**
+     * Lets GDK send what it has to the X server and glass handle every event so far, so that the scripted window
+     * manager sees what that made glass ask for.
+     */
+    private static void roundTrip() {
+        try {
+            GtkGlassChild.onFx(() -> {
+                GtkGlassShim.syncGdkDisplay();
+                return null;
+            });
+            GtkGlassChild.onFx(() -> null);
+        } catch (Exception failure) {
+            throw new IllegalStateException(failure);
+        }
+    }
+
+    /** The {@code ConfigureRequest}s the scripted window manager received from the {@code from}th on, joined. */
+    private static String requestsSince(GtkScriptedWindowManager wm, int from) {
+        List<String> requests = new ArrayList<>();
+        List<GtkScriptedWindowManager.Request> all = wm.requests();
+        for (GtkScriptedWindowManager.Request request : all.subList(from, all.size())) {
+            requests.add(request.toString());
+        }
+        return String.join("; ", requests);
+    }
+
+    /** Closes {@code window} and lets glass and the scripted window manager handle what that brings. */
+    private static void closeUnder(GtkScriptedWindowManager wm, GtkEventTrace t, GtkTraceWindow window)
+            throws Exception {
+        GtkBoundsSteps.close(List.of(window));
+        wm.serviceUntilQuiet(() -> {
+            try {
+                t.settle();
+            } catch (Exception failure) {
+                throw new IllegalStateException(failure);
+            }
+        });
     }
 }
