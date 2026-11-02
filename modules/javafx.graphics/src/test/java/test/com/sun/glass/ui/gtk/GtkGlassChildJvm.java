@@ -34,10 +34,12 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Comparator;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.TreeMap;
 import java.util.concurrent.TimeUnit;
+import java.util.regex.Pattern;
 import java.util.stream.Stream;
 import test.com.sun.javafx.test.ParityGate;
 
@@ -122,6 +124,9 @@ final class GtkGlassChildJvm {
 
     private GtkGlassChildJvm() {
     }
+
+    /** How many children of each scenario this JVM has started, which names their work directories. */
+    private static final Map<String, Integer> LAUNCHES = new HashMap<>();
 
     /** The system property that says {@code DISPLAY} names a private X server the tests may show on and change. */
     static final String PRIVATE_DISPLAY_PROPERTY = "PRIVATE_DISPLAY";
@@ -236,7 +241,12 @@ final class GtkGlassChildJvm {
 
     /**
      * Runs {@code scenarioClass#method} in {@link GtkGlassChild}, with or without the parent's {@code DISPLAY}.
-     * Output, stdout, stderr and fatal error logs go to {@code target/gtk-glass-child/<class>.<method>/}.
+     * Output, stdout, stderr and fatal error logs go to {@code target/gtk-glass-child/<class>.<method>/} for the first
+     * child of the scenario that this JVM starts, and to {@code <class>.<method>.2/}, {@code .3/} ... for the ones
+     * after it, so that each child keeps what it left: a failed one that a later test of the scenario launches again
+     * ({@link GtkBoundsSteps#run} keeps only a child that passed), the probe that
+     * {@link GtkTraceGolden#requireNoWindowManager} launches for every class, each run of {@code -Dgtk.trace.repeat}.
+     * The first one also deletes the {@code <class>.<method>.<n>/} directories that an earlier build left.
      */
     static Run launch(Class<?> scenarioClass, String method, List<String> jvmOptions, long timeoutSeconds,
                       boolean keepDisplay) {
@@ -254,8 +264,7 @@ final class GtkGlassChildJvm {
                          boolean keepDisplay, Map<String, String> environment) {
         String scenario = scenarioClass.getSimpleName() + "." + method;
         try {
-            Path work = Path.of("target", "gtk-glass-child", scenario).toAbsolutePath();
-            deleteTree(work);
+            Path work = workDirectory(scenario);
             Path errors = work.resolve("hs_err");
             Files.createDirectories(errors);
             Path output = work.resolve("values.txt");
@@ -351,6 +360,31 @@ final class GtkGlassChildJvm {
             return String.join("\n", all.subList(Math.max(0, all.size() - lines), all.size()));
         } catch (IOException | UncheckedIOException e) {
             return "(unreadable: " + e + ")";
+        }
+    }
+
+    /**
+     * The work directory of the next child of {@code scenario} ({@link #launch}), deleted if it exists: the first
+     * child of the scenario in this JVM gets {@code <scenario>}, and first deletes every {@code <scenario>.<n>} an
+     * earlier build left; the ones after it get {@code <scenario>.2}, {@code .3} ...
+     */
+    private static Path workDirectory(String scenario) throws IOException {
+        Path children = Path.of("target", "gtk-glass-child").toAbsolutePath();
+        synchronized (LAUNCHES) {
+            int launch = LAUNCHES.merge(scenario, 1, Integer::sum);
+            if (launch == 1 && Files.isDirectory(children)) {
+                String later = Pattern.quote(scenario) + "\\.[0-9]+";
+                List<Path> stale;
+                try (Stream<Path> entries = Files.list(children)) {
+                    stale = entries.filter(entry -> entry.getFileName().toString().matches(later)).toList();
+                }
+                for (Path entry : stale) {
+                    deleteTree(entry);
+                }
+            }
+            Path work = children.resolve(launch == 1 ? scenario : scenario + "." + launch);
+            deleteTree(work);
+            return work;
         }
     }
 

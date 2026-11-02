@@ -31,8 +31,9 @@ import java.util.Map;
 import java.util.concurrent.Callable;
 
 /**
- * The frame extents that {@link GtkFrameExtentsNativeTest} and {@link GtkUndecoratedStageBoundsTest} measure glass
- * under, and the readings they take. It is not a test class.
+ * The frame extents that {@link GtkFrameExtentsNativeTest}, {@link GtkUndecoratedStageBoundsTest},
+ * {@link GtkTitledStateBoundsTest} and {@link GtkWindowPlacementTest} measure glass under, and the readings they take,
+ * the last two through {@link GtkBoundsSteps}. It is not a test class.
  * <p>
  * Weston, the window manager of WSLg, publishes {@code _NET_FRAME_EXTENTS} of 38, 38, 59, 38 (left, right, top,
  * bottom) for every window it frames, an undecorated one included. openbox, and i3 in its default layout, publish
@@ -78,7 +79,9 @@ final class GtkFrameExtentsStandIn {
         /** The client's root position or size, the {@code client} of a reading. */
         CLIENT("client"),
         /** The size limits of {@code WM_NORMAL_HINTS}, the {@code hints} of a reading. */
-        HINTS("hints");
+        HINTS("hints"),
+        /** The window's {@code _NET_FRAME_EXTENTS}, the {@code extents} of a reading. */
+        EXTENTS("extents");
 
         /** The key of the reading the action changes. */
         final String key;
