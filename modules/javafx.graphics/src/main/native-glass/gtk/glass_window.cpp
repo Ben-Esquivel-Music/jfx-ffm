@@ -1013,7 +1013,9 @@ void WindowContextTop::report_frame_in_force() {
     }
 }
 
-// Reports the window's position and its view's offset in it as X has them now, and asks the WM for nothing.
+// Reports the window's position and its view's offset in it as X has them now, and the screen at that position, as
+// process_map and process_configure do: a new frame origin can be on another monitor with no configure to follow
+// (update_frame_extents). It asks the WM for nothing.
 void WindowContextTop::report_frame_position() {
     // The position only once the WM has placed the window (process_map)
     if (mapped) {
@@ -1026,6 +1028,7 @@ void WindowContextTop::report_frame_position() {
             geometry.view_x = view_x;
             geometry.view_y = view_y;
             notify_window_move();
+            notify_screen_change();
         }
     }
 }

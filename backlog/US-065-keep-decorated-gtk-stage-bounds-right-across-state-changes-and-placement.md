@@ -166,7 +166,7 @@ D2 is kept: a `TITLED` stage is the WM's frame as `_NET_FRAME_EXTENTS` describes
 limits are still the sizes asked less the floating frame's extents (`GtkWindowNativeTest` pins them).
 
 ### The fix
-`glass_window.cpp`, `glass_window.h` and `GlassApplication.cpp` in `native-glass/gtk`, +381/-54 lines; no Java change
+`glass_window.cpp`, `glass_window.h` and `GlassApplication.cpp` in `native-glass/gtk`, +384/-54 lines; no Java change
 outside the tests, and no ABI change (`process_map` is internal). `WindowContextTop` keeps two sets of extents:
 `frame_extents`, the extents in force, and `geometry.extents`, the floating frame's, which size requests,
 `WM_NORMAL_HINTS` and the per-process cache use. The fix follows ten rules:
@@ -228,11 +228,13 @@ outside the tests, and no ABI change (`process_map` is internal). `WindowContext
    large (client 400x300, `Window` 476x397, for a 400x300 window) and kept zero extents for later requests and hints.
 10. **Extents that move nothing still move the reported frame.** After a window's first floating extents of a frame,
     or a floating change of them, that asks for no move, `update_frame_extents` reports the frame's position and the
-    View's offset as X has them now (`report_frame_position`: once mapped, and only if they changed), and asks for
-    nothing. A content-sized stage keeps its client size, so GTK sends no request and no configure follows; a window
-    that started from the cached extents under a WM that writes all zero first (rule 7) sees no change at all. Both
-    kept the client's origin and `View` 0,0, read at the map with zero extents, until an unrelated move or resize. With
-    a move (rule 6) the configure reports the position.
+    View's offset as X has them now, and the monitor at that position as `process_map` and `process_configure` do
+    (`report_frame_position`: once mapped, and only if they changed; `notify_screen_change`), and asks for nothing. A
+    content-sized stage keeps its client size, so GTK sends no request and no configure follows; a window that started
+    from the cached extents under a WM that writes all zero first (rule 7) sees no change at all. Both kept the
+    client's origin and `View` 0,0, read at the map with zero extents, until an unrelated move or resize, and a window
+    whose frame starts on another monitor than its client kept the client's monitor as its `Screen` until then. With a
+    move (rule 6) the configure reports the position.
 
 Item 1 is rule 4, item 2 rules 2 and 3, item 3 rule 3, and item 4 rules 1 and 5, undecorated windows included
 (US-017's note d). Rule 6's end at the first floating frame, the first half of rule 7 and the property notifications
@@ -413,7 +415,7 @@ every other WM.
 
 ### Tests
 In `modules/javafx.graphics`; Linux only, and skipped without `DISPLAY` and `-DPRIVATE_DISPLAY=true` like every GTK
-display class. Two new classes, 27 tests: `GtkTitledStateBoundsTest` (12) and `GtkWindowPlacementTest` (15). Each
+display class. Two new classes, 28 tests: `GtkTitledStateBoundsTest` (12) and `GtkWindowPlacementTest` (16). Each
 scenario runs in a child JVM of its own, since glass caches a `TITLED` window's extents per process. A test of the
 wrong kind for the display skips per method (its first child tells whether a WM runs), so the gate script's list of
 classes that run no test under openbox is unchanged. Expected values are those of a 1920x1080 screen. A tiling WM is
@@ -482,12 +484,25 @@ measured.
     (`aContentSizedWindowIsReportedAtItsFrameWhenItsExtentsComeAfterItsMap`) and **cache hit**
     (`aContentSizedWindowFromTheCachedExtentsIsReportedAtItsFrameWhenItsExtentsComeAfterItsMap`, after a first window
     framed at once and closed), is reported at the X frame, `Window` 200,200 362x265, with `View` 1,20, and glass sends
-    no ConfigureRequest after the extents.
+    no ConfigureRequest after the extents;
+  - **extents after the map, two monitors** (rule 10's monitor,
+    `aContentSizedWindowIsOnTheMonitorOfItsFrameWhenItsExtentsComeAfterItsMap`): the cache-miss scenario on the screen
+    split into two 960x1080 monitors side by side (`GtkSplitScreen`), the window at 959,200, so that its client starts
+    at 960,220 on the right monitor and the frame of 1,1,20,5 on the left one: at the map, under all-zero extents,
+    `Window` 960,220 on the right monitor (`Screen` `monitor 0 960,0 960x1080`); once the extents come, `Window`
+    959,200 362x265 on the left one (`monitor 1 0,0 960x1080`). Where the screen cannot be split or GDK does not see
+    exactly the two halves it skips and says why.
 - Helpers: `GtkBoundsSteps` (new, not a test class: a window shown as Quantum shows a stage, steps of an action and a
   settled reading with glass's call trace, one child per scenario); `GtkGlassShim` gains `setNetWmState`, `moveWindow`
   and `moveResizeWindow`; `GtkFrameExtentsStandIn` gains `Effect.EXTENTS`; `GtkGlassChild.startToolkit()` is `main`'s
-  toolkit start, taken out for a scenario that starts the scripted WM first. No pom change.
-- Run time in the gate: 54 s without a WM (35 s and 19 s), 8 s under openbox, where most tests skip.
+  toolkit start, taken out for a scenario that starts the scripted WM first. `GtkSplitScreen` (new in the shims)
+  splits Xvfb's one RandR monitor into two RandR 1.5 monitors of a client before the toolkit starts. Only one of them
+  can take Xvfb's one output, and GDK 3.24.40 and later see the other only because their `init_randr15` reads
+  `outputs[0]` of a monitor without one, which in libXrandr's single allocation is the next monitor's output, and
+  matches each RandR monitor to its GDK monitor by name (earlier 3.24 releases match by output, see one monitor, and
+  the scenario skips): an implementation detail of both libraries, which the scenario checks and skips on. No pom
+  change.
+- Run time in the gate: 57 s without a WM (38 s and 19 s), 8 s under openbox, where most tests skip.
 
 **Before the fix** (master's library with the new tests): 17 of 24 fail, 14 of 20 without a WM and 3 of 4 under
 openbox, with the story's numbers: full screen 0,0 1996x1177 and 1922x1105; maximized client 388x267 and a 400x300
@@ -499,7 +514,9 @@ position, which is the asked one while nothing moved the window), disabled at ma
 first (2; master ignores every all-zero report). A mutant shows that each of them can fail. The three tests of rules
 9 and 10 were run on the libraries just before those rules: the shown-maximized and the cache-miss test failed in 2
 of 2 runs on the story's first fix (client 400x300, `Window` 476x397; `Window` 201,220, `View` 0,0), the cache-hit
-test in 2 of 2 on the fix with only the cache-miss half of rule 10 (the same `Window` and `View`).
+test in 2 of 2 on the fix with only the cache-miss half of rule 10 (the same `Window` and `View`). The two-monitor
+test of rule 10 failed in 20 of 20 runs on the library of 692cd3a432, before rule 10 reported the monitor: `Window`
+at its frame, 959,200 362x265, but `Screen` still the right monitor (`monitor 0 960,0 960x1080`).
 
 **Mutant proof.** Mutants m1-m16 each revert one piece of the fix: m1-m5 and m8-m16 were written on the native side,
 m4 in two halves (m4a, m4b); m6 and m7 on the test side, for tests no other mutant reached. Each is a patch applied
@@ -531,27 +548,30 @@ the final tree. The patches are not committed.
 | m18 | rule 10: no report after an extents change that asks for no move | extents after the map, cache miss (`Window` 201,220, `View` 0,0) |
 | m19 | rule 10: no report at the first floating extents of a frame that change nothing | extents after the map, cache hit (`Window` 201,220, `View` 0,0) |
 | m20 | rule 1, added rather than reverted: the position just read back sent to the WM after an extents change | extents after the map, cache miss (a ConfigureRequest for 200,200; every reported value right) |
+| m21 | rule 10: no monitor check after the reported move (`notify_screen_change` taken out of `report_frame_position`) | extents after the map, two monitors (`Screen` the right monitor, `monitor 0 960,0 960x1080`) |
 
-m17-m20 came from the pull request's review; each failed only its test (m19 and m20 in 3 of 3 runs on the final
-tree). The mutants of the scenarios that review refactored (m1, m2, m3, m4b, m7, m9, m10) were rerun on the final tree
-and failed exactly their tests again, m2, m3 and m7 ported to rule 9's branch.
+m17-m21 came from the pull request's review; each failed only its test (m19 and m20 in 3 of 3 runs on the final
+tree, m21 in 20 of 20). m21's library is byte-identical to that of 692cd3a432, on which every other test passes in
+the gate. The mutants of the scenarios that review refactored (m1, m2, m3, m4b, m7, m9, m10) were rerun on the final
+tree and failed exactly their tests again, m2, m3 and m7 ported to rule 9's branch.
 
 `anAllZeroReportWhileFloatingIsTheFrame` has no mutant of its own; it fails on master.
 
 **Stability.** On the final tree, five runs in a row each: 23 passed and 4 skipped without a WM, 4 passed and 23
 skipped under openbox, in all five (load average 1.3-2.2). The reviewer ran both classes of the first version under
-8 busy loops (load average 6.6-13.1): 2 of 2 passed without a WM and under openbox. The waits are event-driven (a
-reading counts once two in a row agree); there is no bare sleep.
+8 busy loops (load average 6.6-13.1): 2 of 2 passed without a WM and under openbox. The two-monitor test passed in
+20 of 20 runs in a row with rule 10's monitor (load average 1.9-3.0), and the screen was split in every one. The
+waits are event-driven (a reading counts once two in a row agree); there is no bare sleep.
 
-Files: `glass_window.cpp`, `glass_window.h`, `GlassApplication.cpp`; in `src/shims`, `GtkGlassShim` (changed) and
-`GtkScriptedWindowManager` (new); in `src/test`, `GtkFrameExtentsStandIn` and `GtkGlassChild` (changed),
-`GtkBoundsSteps`, `GtkTitledStateBoundsTest` and `GtkWindowPlacementTest` (new).
+Files: `glass_window.cpp`, `glass_window.h`, `GlassApplication.cpp`; in `src/shims`, `GtkGlassShim` (changed),
+`GtkScriptedWindowManager` and `GtkSplitScreen` (new); in `src/test`, `GtkFrameExtentsStandIn` and `GtkGlassChild`
+(changed), `GtkBoundsSteps`, `GtkTitledStateBoundsTest` and `GtkWindowPlacementTest` (new).
 
 ### Gates
 | gate | before the fix | after the fix |
 | --- | --- | --- |
-| every `test/com/sun/glass/ui/gtk/*Test` on a private Xvfb with no WM (`.github/scripts/run-gtk-display-tests.sh`, `-DPRIVATE_DISPLAY=true -DUSE_ROBOT=true`) | 36 classes, 228 tests, 0 failures, 0 skipped | 38 classes, 255 tests (+12 and +15), 0 failures, 4 skipped (the new openbox tests) |
-| the same under openbox | 36 classes, 201 tests, 0 failures, 3 skipped, 5 classes `Tests run: 0` | 38 classes, 228 tests, 0 failures, 26 skipped (the same 3 and the 23 new no-WM tests), the same 5 `Tests run: 0` |
+| every `test/com/sun/glass/ui/gtk/*Test` on a private Xvfb with no WM (`.github/scripts/run-gtk-display-tests.sh`, `-DPRIVATE_DISPLAY=true -DUSE_ROBOT=true`) | 36 classes, 228 tests, 0 failures, 0 skipped | 38 classes, 256 tests (+12 and +16), 0 failures, 4 skipped (the new openbox tests) |
+| the same under openbox | 36 classes, 201 tests, 0 failures, 3 skipped, 5 classes `Tests run: 0` | 38 classes, 229 tests, 0 failures, 27 skipped (the same 3 and the 24 new no-WM tests), the same 5 `Tests run: 0` |
 | headless (`DISPLAY` unset) | 36 classes, 43 tests | the same 43; the 2 new classes `Tests run: 0` with the other display classes |
 | `GtkWindowNativeTest`, `GtkFrameExtentsNativeTest`, `GtkUndecoratedStageBoundsTest` | 6/6, 14/14, 2/2 in both runs | the same |
 | the trace goldens (`GtkEventTraceTest`, `GtkWindowStateTraceTest`, `GtkUpcallExceptionTest`, `GtkDnD*`) | pass | pass; no golden changed or regenerated |
@@ -563,6 +583,9 @@ Files: `glass_window.cpp`, `glass_window.h`, `GlassApplication.cpp`; in `src/shi
   natives unchanged. The reviewer ran the gate without a WM again on the tree before rules 9 and 10: 252 run, 0
   failures, 4 skipped. With rules 9 and 10 the 36 old classes and the headless row are unchanged again, and each run
   has exactly the three new tests more.
+- With rule 10's monitor, each run has exactly the two-monitor test more: against the gate of 692cd3a432's tree and
+  library, 37 of 38 classes are identical in both runs, and `GtkWindowPlacementTest` has 16 tests for 15 (under
+  openbox 16 skipped for 15). No `hs_err` or `.dumpstream`; the natives unchanged.
 - The i3 scenario is US-017's, rebuilt from its surviving class file: a decorated 800x600 stage, a `ContextMenu` shown
   2.5 s after `show()` and read 1.5 s later, checked against `xwininfo` and `xprop`; a freshly started Xvfb and i3 per
   run. Run again on the final tree, each of the four runs read every value it read before rules 9 and 10.
@@ -605,3 +628,17 @@ round 1 was checked by an adversarial verification before it was fixed; rounds 2
     failed, and so did 3 of the 4 tests of its scenario, each failed child's files kept.
   - Gates: no WM 38 classes, 255 tests, 0 failures; openbox 38, 228, 0. Each class as on bfd94a69b0. The run without
     a WM makes 3 X server generations fewer (58, against 61 on bfd94a69b0).
+- **Review 5730277553** (the pull request at 692cd3a432), its one finding (Medium). `report_frame_position`
+  reported the frame's new position but not the monitor at it, so a content-sized window whose client starts on one
+  monitor and whose frame, once its extents came after the map, starts on the next kept the client's monitor as its
+  `Screen` until an unrelated configure.
+  - The fix: `report_frame_position` calls `notify_screen_change()` after `notify_window_move()`, as `process_map`
+    and `process_configure` do (rule 10).
+  - The test: `aContentSizedWindowIsOnTheMonitorOfItsFrameWhenItsExtentsComeAfterItsMap`, on the screen split into
+    two monitors (`GtkSplitScreen`). It failed in 20 of 20 runs on 692cd3a432's library and passed in 20 of 20 with
+    the fix. m21 (the call taken out; its library is byte-identical to 692cd3a432's) failed it in 20 of 20.
+  - Gates: no WM 38 classes, 256 tests, 0 failures, 4 skipped; openbox 38, 229, 0, 27 skipped. Each class as on
+    692cd3a432 but `GtkWindowPlacementTest`, one test more.
+  - Not yet run on CI. CI's Xvfb has RandR and its GTK is 3.24.41, whose `init_randr15` reads the monitors as 3.24.52
+    does and, like every release from 3.24.40, matches them to GDK's by name, so the test is expected to run there
+    without a WM; where GDK does not see the two monitors, it skips and says why.

@@ -25,8 +25,10 @@
 
 package test.com.sun.glass.ui.gtk;
 
+import com.sun.glass.ui.Screen;
 import com.sun.glass.ui.gtk.GtkGlassShim;
 import com.sun.glass.ui.gtk.GtkScriptedWindowManager;
+import com.sun.glass.ui.gtk.GtkSplitScreen;
 import com.sun.glass.ui.gtk.GtkTraceWindow;
 import java.util.ArrayList;
 import java.util.List;
@@ -44,6 +46,7 @@ import test.com.sun.glass.ui.gtk.GtkBoundsSteps.Reading;
 import test.com.sun.glass.ui.gtk.GtkFrameExtentsStandIn.Effect;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assumptions.assumeTrue;
 import static test.com.sun.glass.ui.gtk.GtkFrameExtentsStandIn.parseRect;
 import static test.com.sun.glass.ui.gtk.GtkFrameExtentsStandIn.rect;
 
@@ -86,7 +89,9 @@ import static test.com.sun.glass.ui.gtk.GtkFrameExtentsStandIn.rect;
  * left and top, as soon as they come, and glass asks the window manager for nothing to get there: a window sized by
  * its content and shown without gravity then asks for neither a move nor another client size, so no configure
  * follows that would bring the position. So is a window that starts from the cached extents, for which the extents
- * that come are no change.</li>
+ * that come are no change. Its {@code Screen} is then the monitor that holds the origin of that frame, as after a map
+ * or a configure: on a screen of two monitors side by side ({@link GtkSplitScreen}), a window whose client starts on
+ * the first column of the right one is on the left one once the extents of its frame come.</li>
  * </ul>
  * Each scenario runs in a child of its own: glass caches a {@code TITLED} window's extents per process.
  */
@@ -144,6 +149,9 @@ public class GtkWindowPlacementTest {
     /** The content size of the window sized by its content, shown where it asked to be without gravity. */
     static final int CONTENT_WIDTH = 360;
     static final int CONTENT_HEIGHT = 240;
+
+    /** Why a scenario on two monitors did not run: the screen could not be split, or GDK sees other monitors. */
+    static final String SPLIT_SKIPPED = "split.skipped";
 
     @BeforeAll
     static void requireDisplay() {
@@ -350,6 +358,52 @@ public class GtkWindowPlacementTest {
         reportedAtItsFrame(run, "was shown at " + X + "," + Y + " with a content of " + CONTENT_WIDTH + "x"
                 + CONTENT_HEIGHT + " and no gravity, and started from the cached extents, which are the ones that"
                 + " came");
+    }
+
+    /**
+     * The first {@code TITLED} window of its process on a screen of two monitors side by side, sized by its content
+     * and shown without gravity where its client starts on the first column of the right monitor, which the window
+     * manager frames and maps while it writes all-zero extents, so that glass reads its position at the map on that
+     * monitor, and whose frame's extents come only after that, with nothing moved or resized, so that the frame they
+     * describe starts on the last column of the left monitor: the window's {@code Screen} is the left monitor as soon
+     * as the window is reported at that frame, although no configure follows.
+     */
+    @Test
+    public void aContentSizedWindowIsOnTheMonitorOfItsFrameWhenItsExtentsComeAfterItsMap() {
+        GtkGlassChildJvm.Run run = GtkBoundsSteps.run(getClass(), "delayedExtentsAtAMonitorEdgeScenario", false,
+                true);
+        String skipped = run.values().get(SPLIT_SKIPPED);
+        assumeTrue(skipped == null, () -> "the scenario needs two monitors side by side, made by splitting the"
+                + " screen's one RandR monitor (GtkSplitScreen), and " + skipped);
+        int[] e = SCRIPTED_EXTENTS;
+        int edge = Integer.parseInt(GtkBoundsSteps.value(run, "split.edge"));
+        String left = GtkBoundsSteps.value(run, "split.left");
+        String right = GtkBoundsSteps.value(run, "split.right");
+        String seen = "; GDK's monitors: " + GtkBoundsSteps.value(run, "split.gdk") + "; MapRequest: "
+                + GtkBoundsSteps.value(run, "mapRequest");
+        Reading zero = GtkBoundsSteps.reading(run, "zero");
+        int[] client = parseRect(zero.client());
+        int[] mapped = parseRect(zero.glass());
+        String clientOrigin = edge + "," + (Y + e[2]);
+        assertEquals("_NET_FRAME_EXTENTS 0,0,0,0, client at " + clientOrigin + ", Window at " + clientOrigin
+                        + ", Screen " + right,
+                "_NET_FRAME_EXTENTS " + zero.values().get("extents") + ", client at " + client[0] + "," + client[1]
+                        + ", Window at " + mapped[0] + "," + mapped[1] + ", Screen "
+                        + GtkBoundsSteps.value(run, "zero.screen"),
+                zero.describe("the window manager framed the window for the extents " + e[0] + "," + e[1] + ","
+                        + e[2] + "," + e[3] + " where it asked to be, " + (edge - e[0]) + "," + Y + ", so its client"
+                        + " starts on the first column of the right monitor, and glass read the position at the map"
+                        + " under all-zero extents, which make the client the frame: the window is on the right"
+                        + " monitor" + seen));
+        Reading framed = GtkBoundsSteps.reading(run, "framed");
+        String frame = rect(edge - e[0], Y, CONTENT_WIDTH + e[0] + e[1], CONTENT_HEIGHT + e[2] + e[3]);
+        assertEquals("X frame " + frame + ", Window " + frame + ", Screen " + left,
+                "X frame " + framed.frame() + ", Window " + framed.glass() + ", Screen "
+                        + GtkBoundsSteps.value(run, "framed.screen"),
+                framed.describe("the extents came after the map and nothing moved or resized the window, so no"
+                        + " configure follows; the window is reported at the frame they describe, whose origin is on"
+                        + " the last column of the left monitor, and glass reports that monitor as the window's Screen"
+                        + " with the position, as it does at a map or a configure" + seen));
     }
 
     /**
@@ -864,7 +918,7 @@ public class GtkWindowPlacementTest {
             int[] e = SCRIPTED_EXTENTS;
             wm.frameNext(e[0], e[1], e[2], e[3], X, Y);
             GtkEventTrace t = new GtkEventTrace();
-            GtkTraceWindow seed = showContentSized(t, "seed", "seed.view");
+            GtkTraceWindow seed = showContentSized(t, "seed", "seed.view", X);
             try {
                 placeWhereAsked(wm, out, "seed.mapRequest", seed);
                 GtkBoundsSteps.step(t, out, "seed", seed, Effect.NONE, () -> {
@@ -877,25 +931,119 @@ public class GtkWindowPlacementTest {
     }
 
     /**
-     * Shows a {@code TITLED} window sized by its content where it asked to be without gravity, under the scripted
+     * {@link #delayedExtentsScenario} on a screen split into two monitors side by side ({@link GtkSplitScreen})
+     * before the toolkit starts, with the window shown where its client starts on the first column of the right one
+     * ({@code split.edge}): records the window's {@code Screen} after each step under {@code <step>.screen}
+     * ({@link #describe}). Starts its own toolkit, and skips where the display runs a window manager; where the screen
+     * cannot be split or GDK does not see exactly the two halves ({@link #seesTheHalves}), records why under
+     * {@link #SPLIT_SKIPPED} and shows nothing.
+     * <p>
+     * The split is made on a connection of its own while the scripted window manager's is open, and deleted while
+     * that one still is, so that it is never the X server's last client.
+     */
+    static void delayedExtentsAtAMonitorEdgeScenario(Map<String, String> out) throws Exception {
+        try (GtkScriptedWindowManager wm = scriptedWindowManager(out)) {
+            if (wm == null) {
+                return;
+            }
+            GtkSplitScreen.Split split = GtkSplitScreen.splitIntoHalves();
+            if (split.refused() != null) {
+                out.put(SPLIT_SKIPPED, "the screen was not split: " + split.refused());
+                return;
+            }
+            try (GtkSplitScreen halves = split.screen()) {
+                out.put("split.server", halves.monitors());
+                startToolkitUnderIt(out);
+                if (!seesTheHalves(out, halves)) {
+                    return;
+                }
+                showWithDelayedExtents(wm, new GtkEventTrace(), out, halves.right()[0] - SCRIPTED_EXTENTS[0],
+                        (step, window) -> out.put(step + ".screen",
+                                GtkGlassChild.onFx(() -> describe(window.getScreen()))));
+            }
+        }
+    }
+
+    /**
+     * Records the monitors GDK sees under {@code split.gdk}, and the GDK monitors of the left and the right half of
+     * {@code halves} under {@code split.left} and {@code split.right} ({@link #describe}'s form), with the first
+     * column of the right one under {@code split.edge}; answers whether GDK sees exactly the two halves, and where it
+     * does not, records what it sees instead under {@link #SPLIT_SKIPPED}.
+     */
+    private static boolean seesTheHalves(Map<String, String> out, GtkSplitScreen halves) throws Exception {
+        List<String> monitors = GtkGlassChild.onFx(() -> {
+            List<String> seen = new ArrayList<>();
+            for (int i = 0; i < GtkGlassShim.gdkMonitorCount(); i++) {
+                int[] g = GtkGlassShim.gdkMonitorGeometry(i);
+                seen.add(rect(g[0], g[1], g[2], g[3]));
+            }
+            return seen;
+        });
+        out.put("split.gdk", String.join("; ", monitors));
+        int[] l = halves.left();
+        int[] r = halves.right();
+        String leftHalf = rect(l[0], l[1], l[2], l[3]);
+        String rightHalf = rect(r[0], r[1], r[2], r[3]);
+        if (monitors.size() != 2 || !monitors.contains(leftHalf) || !monitors.contains(rightHalf)) {
+            out.put(SPLIT_SKIPPED, "GDK sees the monitors [" + String.join("; ", monitors) + "], not the halves "
+                    + leftHalf + " and " + rightHalf + " the X server lists (" + halves.monitors() + ")");
+            return false;
+        }
+        out.put("split.left", monitor(monitors.indexOf(leftHalf), leftHalf));
+        out.put("split.right", monitor(monitors.indexOf(rightHalf), rightHalf));
+        out.put("split.edge", Integer.toString(r[0]));
+        return true;
+    }
+
+    /**
+     * {@code monitor <n> x,y wxh}: the GDK monitor a glass {@code Screen} is of - its {@code getNativeScreen}, the
+     * monitor glass passes to {@code notify_move_to_another_screen} - and its platform bounds; FX thread.
+     */
+    private static String describe(Screen screen) {
+        return monitor(screen.getNativeScreen(), rect(screen.getPlatformX(), screen.getPlatformY(),
+                screen.getPlatformWidth(), screen.getPlatformHeight()));
+    }
+
+    private static String monitor(long index, String bounds) {
+        return "monitor " + index + " " + bounds;
+    }
+
+    /** What a scenario records of {@code window} once its step {@code step} has settled. */
+    @FunctionalInterface
+    private interface AfterStep {
+        void record(String step, GtkTraceWindow window) throws Exception;
+    }
+
+    /** {@link #showWithDelayedExtents(GtkScriptedWindowManager, GtkEventTrace, Map, int, AfterStep)} at {@link #X}. */
+    private static void showWithDelayedExtents(GtkScriptedWindowManager wm, GtkEventTrace t, Map<String, String> out)
+            throws Exception {
+        showWithDelayedExtents(wm, t, out, X, (step, window) -> {
+        });
+    }
+
+    /**
+     * Shows a {@code TITLED} window sized by its content at {@code x}, {@link #Y} without gravity, under the scripted
      * window manager, which frames it for {@link #SCRIPTED_EXTENTS} but writes all-zero extents until it is mapped,
      * as Mutter does, and places the frame where the window asked to be ({@code zero}, the {@code MapRequest} under
      * {@code mapRequest}); then, with the window manager handling nothing and nothing moved or resized, writes the
      * frame's extents, as the window manager does later ({@code framed}), records under {@code framed.requests} what
-     * glass asked the window manager for after them, and closes the window.
+     * glass asked the window manager for after them, and closes the window. {@code afterStep} records what else the
+     * scenario reads after each of the two steps.
      */
-    private static void showWithDelayedExtents(GtkScriptedWindowManager wm, GtkEventTrace t, Map<String, String> out)
-            throws Exception {
+    private static void showWithDelayedExtents(GtkScriptedWindowManager wm, GtkEventTrace t, Map<String, String> out,
+                                               int x, AfterStep afterStep) throws Exception {
         int[] e = SCRIPTED_EXTENTS;
-        wm.frameNextWithZeroExtents(e[0], e[1], e[2], e[3], X, Y);
-        GtkTraceWindow window = showContentSized(t, "w1", "v1");
+        wm.frameNextWithZeroExtents(e[0], e[1], e[2], e[3], x, Y);
+        GtkTraceWindow window = showContentSized(t, "w1", "v1", x);
         try {
             long xid = placeWhereAsked(wm, out, "mapRequest", window);
             GtkBoundsSteps.step(t, out, "zero", window, Effect.NONE, () -> {
             });
+            afterStep.record("zero", window);
             int requestsBefore = wm.requests().size();
             GtkBoundsSteps.step(t, out, "framed", window, Effect.EXTENTS, () ->
                     GtkGlassShim.setNetFrameExtents(xid, e[0], e[1], e[2], e[3]));
+            afterStep.record("framed", window);
             wm.serviceUntilQuiet(GtkWindowPlacementTest::roundTrip);
             String requests = requestsSince(wm, requestsBefore);
             out.put("framed.requests", requests.isEmpty() ? "none" : requests);
@@ -904,10 +1052,11 @@ public class GtkWindowPlacementTest {
         }
     }
 
-    /** A {@code TITLED} window sized by its content, shown at {@link #X}, {@link #Y} without gravity. */
-    private static GtkTraceWindow showContentSized(GtkEventTrace t, String name, String viewName) throws Exception {
+    /** A {@code TITLED} window sized by its content, shown at {@code x}, {@link #Y} without gravity. */
+    private static GtkTraceWindow showContentSized(GtkEventTrace t, String name, String viewName, int x)
+            throws Exception {
         return GtkBoundsSteps.show(t, name, viewName, GtkBoundsSteps.TITLED, w ->
-                w.setBounds(X, Y, true, true, -1, -1, CONTENT_WIDTH, CONTENT_HEIGHT, 0, 0));
+                w.setBounds(x, Y, true, true, -1, -1, CONTENT_WIDTH, CONTENT_HEIGHT, 0, 0));
     }
 
     /**
@@ -929,17 +1078,33 @@ public class GtkWindowPlacementTest {
     }
 
     /**
-     * The scripted window manager, started before the toolkit so that GDK knows it from the start, and then the
-     * toolkit; {@code null} where the display runs a window manager of its own, which is recorded under
-     * {@code env.windowManager} and {@link GtkBoundsSteps#SKIPPED}. Records what GDK sees under
-     * {@code scripted.windowManager} and {@code gdk.frameFromExtents}.
+     * The scripted window manager ({@link #scriptedWindowManager}), and then the toolkit
+     * ({@link #startToolkitUnderIt}); {@code null} where the display runs a window manager of its own.
+     */
+    private static GtkScriptedWindowManager startScriptedWindowManager(Map<String, String> out) throws Exception {
+        GtkScriptedWindowManager wm = scriptedWindowManager(out);
+        if (wm != null) {
+            try {
+                startToolkitUnderIt(out);
+            } catch (Exception | Error failure) {
+                wm.close();
+                throw failure;
+            }
+        }
+        return wm;
+    }
+
+    /**
+     * The scripted window manager, started before the toolkit so that GDK knows it from the start; {@code null} where
+     * the display runs a window manager of its own, which is recorded under {@code env.windowManager} and
+     * {@link GtkBoundsSteps#SKIPPED}.
      * <p>
      * The check for a window manager and the start of the scripted one are one call on one X connection
      * ({@link GtkScriptedWindowManager#startUnlessOneRuns}): without a window manager, a check on a connection closed
      * before the scripted window manager's is opened leaves Xvfb with no client, and an Xvfb that resets on its last
      * client's close can kill a connection made in the same wake-up.
      */
-    private static GtkScriptedWindowManager startScriptedWindowManager(Map<String, String> out) throws Exception {
+    private static GtkScriptedWindowManager scriptedWindowManager(Map<String, String> out) {
         GtkScriptedWindowManager.Startup startup = GtkScriptedWindowManager.startUnlessOneRuns(WINDOW_MANAGER);
         String running = startup.running();
         out.put("env.windowManager", running == null ? GtkBoundsSteps.NO_WINDOW_MANAGER
@@ -948,17 +1113,18 @@ public class GtkWindowPlacementTest {
             out.put(GtkBoundsSteps.SKIPPED, "this display runs a window manager");
             return null;
         }
-        GtkScriptedWindowManager wm = startup.started();
-        try {
-            GtkGlassChild.startToolkit();
-            out.put("scripted.windowManager", GtkGlassChild.onFx(GtkGlassShim::windowManagerName));
-            out.put("gdk.frameFromExtents", Boolean.toString(GtkGlassChild.onFx(() ->
-                    GtkGlassShim.supportsNetWmHint("_NET_FRAME_EXTENTS"))));
-            return wm;
-        } catch (Exception | Error failure) {
-            wm.close();
-            throw failure;
-        }
+        return startup.started();
+    }
+
+    /**
+     * Starts the toolkit, once the scripted window manager runs, and records what GDK sees under
+     * {@code scripted.windowManager} and {@code gdk.frameFromExtents}.
+     */
+    private static void startToolkitUnderIt(Map<String, String> out) throws Exception {
+        GtkGlassChild.startToolkit();
+        out.put("scripted.windowManager", GtkGlassChild.onFx(GtkGlassShim::windowManagerName));
+        out.put("gdk.frameFromExtents", Boolean.toString(GtkGlassChild.onFx(() ->
+                GtkGlassShim.supportsNetWmHint("_NET_FRAME_EXTENTS"))));
     }
 
     /** Whose {@code MapRequest} the scripted window manager handled: {@code the window's}, or which window's. */
