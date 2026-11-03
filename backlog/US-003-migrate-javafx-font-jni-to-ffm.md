@@ -2,7 +2,7 @@
 
 | Field | Value |
 | --- | --- |
-| **Status** | 🟢 **Complete** (all three platforms; macOS 2026-10-24). Windows half done; Linux half done 2026-09-15 (landed in PR #12); macOS half done 2026-10-24 (landed in PR #38, `4745af9f89`) |
+| **Status** | ✅ **Done (2026-10-24, 4745af9f89, PR #38)** — all three platforms: Windows half done; Linux half done 2026-09-15 (landed in PR #12); macOS half done 2026-10-24, owner checks and CI passed |
 | **Parent epic** | Fully remove JNI from `javafx.graphics` (replaced by a functioning FFM API) |
 | **Branch of record** | `ffm/graphics` |
 | **Repository** | `Ben-Esquivel-Music/jfx-ffm` |
@@ -237,12 +237,14 @@ Precedent to follow: `com.sun.prism.es2.ES2Native` on `ffm/graphics` — same
 
 ## Definition of Done
 
-- All 10 acceptance criteria met.
-- `ffm-reviewer` sign-off recorded.
+- ~~All 10 acceptance criteria met.~~ Done: AC 8, the last one open, was met by the owner's
+  look (see the AC map in "macOS half (2026-10-24)").
+- ~~`ffm-reviewer` sign-off recorded.~~ Done: AC 9 in the same AC map.
 - ~~US-003b raised for the macOS/Linux remainder~~ No longer needed: both halves were done under
   this story (Linux in PR #12, macOS in "macOS half (2026-10-24)").
-- Changes left in the working tree / a review branch — **no commits, merges or PRs without
-  explicit approval from the repository owner.**
+- ~~Changes left in the working tree / a review branch — **no commits, merges or PRs without
+  explicit approval from the repository owner.**~~ Done: the owner merged the macOS half as
+  4745af9f89 (PR #38) on 2026-10-24.
 
 ---
 
@@ -285,19 +287,29 @@ re-capture the macOS goldens; a re-capture needs the C of 28b02ef511 with the na
 - Startup: the first frame comes 62 ms later (median 524 against 462 ms); 39 ms of that is
   the eager `CTNative.link()` in `PrismFontFactory`'s static initialiser.
 
+**Owner checks and CI**
+- AC 8 by eye: the owner looked at the JNI and FFM screenshots; passed.
+- Robot tests: run by the owner; passed.
+- CI on the pushed branch: green on all five `submit.yml` jobs. On `macos_x64_build`, 0 skipped
+  and 0 failures in `MacFontAbiTest` (15 tests), `CFNativeTest` (12), `CGNativeTest` (11),
+  `CTNativeTest` (10), `MacFontOSTest` (9) and `MacFontStressTest` (2). On both Linux jobs,
+  0 skipped and 0 failures in `LinuxFontStressTest`, `LinuxFreetypeNewFaceFailureTest`,
+  `LinuxFontConfigNativeTest` and `LinuxFontAbiTest`.
+
 **AC map** (the acceptance criteria above are worded for Windows)
 - AC 1-5: natives 68 to 0; `native-font/` and the `mac.cmake` `font` target are deleted; none
   of the four remaining dylibs (`libglass`, `libjavafx_iio`, `libprism_es2`, `libprism_mtl`)
   exports a `Java_com_sun_javafx_font_*` symbol.
 - AC 6-7: clean package, 26,163 tests, 0 failures.
-- AC 8: owner check (0 differing pixels in the 12 JNI against FFM comparisons).
+- AC 8: met by the owner's look at the JNI and FFM screenshots; 0 differing pixels in the 12
+  comparisons.
 - AC 9: `ffm-reviewer` sign-off, approved with nits on 2026-10-24.
 - AC 10: no Windows or Linux production or build file changed; the one behavioural
   `PrismFontFactory` change (`NativeLibLoader.loadLibrary("javafx_font")` becomes
   `CTNative.link()`) is inside its `isMacOSX` branch; the rest is an import swap and a comment.
   Test code is the exception: the Linux golden tests moved onto the shared golden harness, and
-  `JpegNatives` and `ES2Natives` no longer list `javafx_font`. The owner's CI run covers both: PR #38's run
-  40149053730 passed in all five jobs.
+  `JpegNatives` and `ES2Natives` no longer list `javafx_font`. CI on PR #38's branch covered
+  both and was green in all five jobs (run 40149053730).
 
 
 **Follow-up:** US-067 fixes the kept crashes and leaks.
