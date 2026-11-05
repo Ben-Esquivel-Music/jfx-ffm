@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2011, 2024, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2011, 2026, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -23,135 +23,11 @@
  * questions.
  */
 
-#import <jni.h>
 #import <pthread.h>
 #import <QuartzCore/CVDisplayLink.h>
 
 extern pthread_key_t GlassThreadDataKey;
 
 extern CVDisplayLinkRef GlassDisplayLink;
-
-extern JavaVM *jVM;
-extern JNIEnv *jEnv;
-
-extern jclass jApplicationClass;
-extern jclass jWindowClass;
-extern jclass jViewClass;
-
-extern jclass jScreenClass;
-extern jclass jMenuBarDelegateClass;
-extern jclass jIntegerClass;
-extern jclass jLongClass;
-extern jclass jMapClass;
-extern jclass jBooleanClass;
-
-extern jmethodID jRunnableRun;
-
-extern jmethodID jWindowNotifyMove;
-extern jmethodID jWindowNotifyResize;
-extern jmethodID jWindowNotifyClose;
-extern jmethodID jWindowNotifyMoveToAnotherScreen;
-extern jmethodID jWindowNotifyScaleChanged;
-extern jmethodID jWindowNotifyFocus;
-extern jmethodID jWindowNotifyFocusUngrab;
-extern jmethodID jWindowNotifyFocusDisabled;
-extern jmethodID jWindowNotifyDestroy;
-extern jmethodID jWindowNotifyDelegatePtr;
-
-extern jmethodID jViewNotifyEvent;
-extern jmethodID jViewNotifyRepaint;
-extern jmethodID jViewNotifyResize;
-extern jmethodID jViewNotifyKeyAndReturnConsumed;
-extern jmethodID jViewNotifyMouse;
-extern jmethodID jViewNotifyMenu;
-extern jmethodID jViewNotifyInputMethod;
-extern jmethodID jViewNotifyInputMethodMac;
-extern jmethodID jViewNotifyInputMethodCandidatePosRequest;
-extern jmethodID jViewNotifyDragEnter;
-extern jmethodID jViewNotifyDragOver;
-extern jmethodID jViewNotifyDragLeave;
-extern jmethodID jViewNotifyDragDrop;
-extern jmethodID jViewNotifyDragEnd;
-extern jmethodID jViewGetAccessible;
-
-extern jmethodID jScreenNotifySettingsChanged;
-
-extern jmethodID jMapGetMethod;
-extern jmethodID jBooleanValueMethod;
-extern jmethodID jIntegerInitMethod;
-extern jmethodID jIntegerValueMethod;
-extern jmethodID jLongValueMethod;
-
-extern jmethodID jSizeInit;
-
-extern jmethodID jPixelsAttachData;
-
-extern jclass jObjectClass;
-extern jclass jCollectionsClass;
-extern jclass jColorClass;
-extern jclass jHashMapClass;
-extern jfieldID jBooleanTRUE;
-extern jfieldID jBooleanFALSE;
-extern jmethodID jColorRgbMethod;
-extern jmethodID jHashMapInitMethod;
-extern jmethodID jMapPutMethod;
-extern jmethodID jObjectEqualsMethod;
-extern jmethodID jCollectionsUnmodifiableMapMethod;
-
-typedef struct _tagJavaIDs {
-    struct {
-        jmethodID init;
-        jmethodID enter;
-        jmethodID leave;
-    } EventLoop;
-    struct {
-        jmethodID add;
-    } List;
-    struct {
-        jmethodID init;
-    } ArrayList;
-    struct {
-        jmethodID init;
-    } MacFileNSURL;
-    struct {
-        jmethodID isFileNSURLEnabled;
-    } MacCommonDialogs;
-    struct {
-        jmethodID init;
-    } File;
-    struct {
-        jmethodID createPixels;
-        jmethodID getScaleFactor;
-        jmethodID reportException;
-        jmethodID enterNestedEventLoop;
-        jmethodID leaveNestedEventLoop;
-    } Application;
-    struct {
-        jmethodID notifyApplicationDidTerminate;
-        jmethodID notifyPreferencesChanged;
-    } MacApplication;
-    struct {
-        jmethodID rotateGesturePerformed;
-        jmethodID scrollGesturePerformed;
-        jmethodID swipeGesturePerformed;
-        jmethodID magnifyGesturePerformed;
-        jmethodID gestureFinished;
-        jmethodID notifyBeginTouchEvent;
-        jmethodID notifyNextTouchEvent;
-        jmethodID notifyEndTouchEvent;
-    } GestureSupport;
-    struct {
-        jmethodID getDescription;
-        jmethodID extensionsToArray;
-    } ExtensionFilter;
-    struct {
-        jmethodID init;
-    } FileChooserResult;
-} JavaIDs;
-extern JavaIDs javaIDs;
-
-void initJavaIDsList(JNIEnv* env);
-void initJavaIDsArrayList(JNIEnv* env);
-void initJavaIDsFile(JNIEnv* env);
 
 

@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2021, 2025, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2021, 2026, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -25,7 +25,7 @@
 
 #import "MetalPipelineManager.h"
 #import "MetalRTTexture.h"
-#include "com_sun_prism_mtl_MTLContext.h"
+#import "prism_mtl_api.h"
 
 // ---------------------------- Debug helper for Developers -------------------------
 //
@@ -274,27 +274,27 @@ NSString *GPUTraceFilename = @"file:///tmp/fx_metal.gputrace";
     MTLBlendFactor dstFactor;
 
     switch(compositeMode) {
-        case com_sun_prism_mtl_MTLContext_MTL_COMPMODE_CLEAR:
+        case MTL_COMPMODE_CLEAR:
             srcFactor = MTLBlendFactorZero;
             dstFactor = MTLBlendFactorZero;
             break;
 
-        case com_sun_prism_mtl_MTLContext_MTL_COMPMODE_SRC:
+        case MTL_COMPMODE_SRC:
             srcFactor = MTLBlendFactorOne;
             dstFactor = MTLBlendFactorZero;
             break;
 
-        case com_sun_prism_mtl_MTLContext_MTL_COMPMODE_SRCOVER:
+        case MTL_COMPMODE_SRCOVER:
             srcFactor = MTLBlendFactorOne;
             dstFactor = MTLBlendFactorOneMinusSourceAlpha;
             break;
 
-        case com_sun_prism_mtl_MTLContext_MTL_COMPMODE_DSTOUT:
+        case MTL_COMPMODE_DSTOUT:
             srcFactor = MTLBlendFactorZero;
             dstFactor = MTLBlendFactorOneMinusSourceAlpha;
             break;
 
-        case com_sun_prism_mtl_MTLContext_MTL_COMPMODE_ADD:
+        case MTL_COMPMODE_ADD:
             srcFactor = MTLBlendFactorOne;
             dstFactor = MTLBlendFactorOne;
             break;

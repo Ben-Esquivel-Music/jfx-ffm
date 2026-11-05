@@ -2,7 +2,7 @@
 
 | Field | Value |
 | --- | --- |
-| **Status** | 🔀 **Split by OS** (2026-10-27) into [US-001a](US-001a-migrate-glass-gtk-jni-to-ffm-on-linux.md) (Linux, `glass/gtk`: done on 2026-10-27, landed as `e3b8b21e6d`, PR #40) and [US-001b](US-001b-migrate-glass-mac-and-prism-mtl-jni-to-ffm-on-macos.md) (macOS, `glass/mac` + `prism_mtl`: not started). This story is done when both are |
+| **Status** | 🔀 **Split by OS** (2026-10-27) into [US-001a](US-001a-migrate-glass-gtk-jni-to-ffm-on-linux.md) (Linux, `glass/gtk`: done on 2026-10-27, landed as `e3b8b21e6d`, PR #40) and [US-001b](US-001b-migrate-glass-mac-and-prism-mtl-jni-to-ffm-on-macos.md) (macOS, `glass/mac` + `prism_mtl`: implemented on 2026-11-05, uncommitted; AC 6's `tests/system` comparison, AC 8's VoiceOver check and the Definition of Ready's robot baseline are owner-run and pending). This story is done when both are |
 | **Parent epic** | Fully remove JNI from `javafx.graphics` (replaced by a functioning FFM API) |
 | **Branch of record** | `ffm/graphics` |
 | **Repository** | `Ben-Esquivel-Music/jfx-ffm` |
@@ -18,10 +18,10 @@ The three libraries share no code, no build target and no host, so the work and 
 operating system. The criteria and sub-tasks below were moved into the substories unchanged in substance; this
 story keeps the original rationale and measurements for the record.
 
-| Substory | OS | Libraries | State on 2026-10-27 |
+| Substory | OS | Libraries | State on 2026-11-05 |
 | --- | --- | --- | --- |
 | [US-001a](US-001a-migrate-glass-gtk-jni-to-ffm-on-linux.md) | Linux | `glass/gtk` | ✅ Done (2026-10-27), landed as `e3b8b21e6d`, PR #40; `linux_x64_build` and `linux_aarch64_build` green, GTK display step included (run 40584664686). JNI removed in PR #12 (`26ce75d02f`): 0 Java `native` declarations, 0 `JNIEXPORT`. The `glassgtk3` target builds without `HEADERS_DIR` and the JDK headers (AC 9), and AC 5, AC 6 and AC 10 are recorded |
-| [US-001b](US-001b-migrate-glass-mac-and-prism-mtl-jni-to-ffm-on-macos.md) | macOS | `glass/mac`, `prism_mtl` | 🔶 Not started: 155 + 60 Java `native` declarations, 128 upcall sites. Next: the JNI baseline on the macOS host, then `prism_mtl` |
+| [US-001b](US-001b-migrate-glass-mac-and-prism-mtl-jni-to-ffm-on-macos.md) | macOS | `glass/mac`, `prism_mtl` | 🔷 Implemented (2026-11-05), uncommitted: `libglass.dylib` and `libprism_mtl.dylib` export no `Java_` function and no `JNI_OnLoad`, their C ABIs are 193 `gmac_*` and 53 `mtl_*` exports, and no class of `com.sun.glass.ui.mac` or `com.sun.prism.mtl` declares a `native` method. On the macOS host the final module run (0 failures, 0 errors) equals the "Before" run on `1a6788cc4d` plus 21 new classes (that run's one failure, from its clone's path, passes), and `MTL*` matches the Metal goldens of `1a6788cc4d` under `-Djfx.parity.require=true` ([gate](US-001b-macos-gate.md)); `ffm-reviewer` signed off both libraries. Owner-run and pending: AC 6's `tests/system` comparison, AC 8's VoiceOver check and the Definition of Ready's robot baseline |
 
 Windows has no part in this story: its libraries were delivered by the parent epic.
 
@@ -29,16 +29,16 @@ Windows has no part in this story: its libraries were delivered by the parent ep
 
 | # | Criterion | Linux (US-001a) | macOS (US-001b) |
 | --- | --- | --- | --- |
-| 1 | No JNI in the native sources | ✅ Met | Open |
-| 2 | No Java `native` declarations | ✅ Met | Open |
-| 3 | A plain C ABI | ✅ Met | Open |
-| 4 | Upcalls through callback tables | ✅ Met | Open |
-| 5 | Thread confinement preserved | ✅ Met | Open |
-| 6 | Behaviour equal to the JNI baseline | ✅ Met on Linux x64; CI green on x64 and aarch64 and equal per class to `26ed4ba2f2` apart from US-001a's two new classes (run 40584664686; no `tests/system`) | Open |
-| 7 | Metal pixel parity | Not applicable | Open |
-| 8 | Accessibility against a real screen reader | Not applicable (GTK Glass has no accessibility bridge) | Open (VoiceOver) |
-| 9 | No JDK headers, `HEADERS_DIR` or `javac -h` for the targets | ✅ Met | Open |
-| 10 | `ffm-reviewer` sign-off | ✅ Signed off | Open |
+| 1 | No JNI in the native sources | ✅ Met | ✅ Met |
+| 2 | No Java `native` declarations | ✅ Met | ✅ Met |
+| 3 | A plain C ABI | ✅ Met | ✅ Met |
+| 4 | Upcalls through callback tables | ✅ Met | ✅ Met |
+| 5 | Thread confinement preserved | ✅ Met | ✅ Met by construction and review; the live check is the owner's AC 6 run (pending) |
+| 6 | Behaviour equal to the JNI baseline | ✅ Met on Linux x64; CI green on x64 and aarch64 and equal per class to `26ed4ba2f2` apart from US-001a's two new classes (run 40584664686; no `tests/system`) | 🔶 Module tests met on macOS arm64 (2026-11-05): the final run equals the "Before" run on `1a6788cc4d` plus 21 new classes, the "Before" run's one failure (from its clone's path) passes, and no test was deleted or disabled ([gate](US-001b-macos-gate.md)). `tests/system` and robot, before and after: owner-run, pending |
+| 7 | Metal pixel parity | Not applicable | ✅ Met for everything a golden covers: `MTLGoldenRenderTest` and `MTLShaderTableGoldenTest` match the `1a6788cc4d` goldens under `-Djfx.parity.require=true`. The swap chain has no golden; the robot `painttest`, `scenegraph` and `test3d` cover it: owner-run, pending |
+| 8 | Accessibility against a real screen reader | Not applicable (GTK Glass has no accessibility bridge) | 🔶 Owner-run, pending (VoiceOver, before and after) |
+| 9 | No JDK headers, `HEADERS_DIR` or `javac -h` for the targets | ✅ Met | ✅ Met |
+| 10 | `ffm-reviewer` sign-off | ✅ Signed off | ✅ Signed off for both libraries (Glass mac's final review on 2026-11-05) |
 
 The sub-tasks moved too: A (`prism_mtl`) and C (`glass/mac`) are US-001b's workstreams A and B; B (`glass/gtk`)
 was done in PR #12, and its Wayland/X11 item is answered in US-001a's notes; D (close-out) is AC 9 of each

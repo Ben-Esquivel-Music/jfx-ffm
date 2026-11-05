@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2011, 2025, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2011, 2026, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -22,8 +22,6 @@
  * or visit www.oracle.com if you need additional information or have any
  * questions.
  */
-
-#import <jni.h>
 
 #import "GlassHostView.h"
 #import "GlassDraggingSource.h"
@@ -65,10 +63,11 @@ typedef enum GestureMaskType {
     NSInteger               lastTrackingNumber;
 
 @public
-    jobject                 jView;
+    // Java's id of the view, which the GmacViewCallbacks and GmacGestureCallbacks slots take.
+    int64_t                 viewId;
 }
 
-- (id)initWithView:(NSView*)view withJview:(jobject)jview;
+- (id)initWithView:(NSView*)view viewId:(int64_t)identifier;
 
 - (void)viewDidMoveToWindow;
 - (void)setFrameSize:(NSSize)newSize;
@@ -91,7 +90,7 @@ typedef enum GestureMaskType {
 - (void)doMagnifyWithEvent:(NSEvent *)theEvent;
 - (void)doScrollWheel:(NSEvent *)theEvent;
 
-- (NSDragOperation)sendJavaDndEvent:(id <NSDraggingInfo>)info type:(jint)type;
+- (NSDragOperation)sendJavaDndEvent:(id <NSDraggingInfo>)info type:(int32_t)type;
 
 - (void)startDrag:(NSDragOperation)operation withItems:(NSArray<NSDraggingItem*>*)items;
 
@@ -107,8 +106,6 @@ typedef enum GestureMaskType {
 - (NSRect)getInputMethodCandidatePosRequest:(int)pos;
 
 - (void)setFrameOrigin:(NSPoint)newOrigin;
-
-- (jobject)jView;
 
 - (GlassAccessible*)getAccessible;
 

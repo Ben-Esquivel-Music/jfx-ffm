@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2013, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2013, 2026, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -24,82 +24,73 @@
  */
 
 #import "common.h"
-#import "GlassHelper.h"
-#import "com_sun_glass_ui_mac_MacSystemClipboard_FormatEncoder.h"
 #import "GlassMacros.h"
+#import "glass_mac_api.h"
+#import "glass_mac_internal.h"
 
-/*
- * Class:     com_sun_glass_ui_mac_MacSystemClipboard_FormatEncoder
- * Method:    _convertMIMEtoUTI
- * Signature: (Ljava/lang/String;)Ljava/lang/String;
- */
-JNIEXPORT jstring JNICALL Java_com_sun_glass_ui_mac_MacSystemClipboard_00024FormatEncoder__1convertMIMEtoUTI
-(JNIEnv *env, jclass clazz, jstring mime)
+// The UTType calls of the former FormatEncoder natives, which Java now makes; the test hooks keep them as its oracle.
+static NSString *UTIForMIME(NSString *mime)
 {
-    jstring result = nil;
-
-    GLASS_POOL_ENTER;
-    {
-        CFStringRef cfMIME = (CFStringRef)[GlassHelper nsStringWithJavaString:mime withEnv:env];
-        NSString* nsUTI = (NSString *)UTTypeCreatePreferredIdentifierForTag(kUTTagClassMIMEType,
-                                                                            cfMIME,
-                                                                            (CFStringRef)@"public.mime-type");
-        [nsUTI autorelease];
-        result = (*env) -> NewStringUTF(env, [nsUTI UTF8String]);
-    }
-    GLASS_POOL_EXIT;
-    GLASS_CHECK_EXCEPTION(env);
-
-    return result;
+    CFStringRef cfMIME = (CFStringRef)mime;
+    NSString* nsUTI = (NSString *)UTTypeCreatePreferredIdentifierForTag(kUTTagClassMIMEType,
+                                                                        cfMIME,
+                                                                        (CFStringRef)@"public.mime-type");
+    [nsUTI autorelease];
+    return nsUTI;
 }
 
-/*
- * Class:     com_sun_glass_ui_mac_MacSystemClipboard_FormatEncoder
- * Method:    _convertUTItoMIME
- * Signature: (Ljava/lang/String;)Ljava/lang/String;
- */
-JNIEXPORT jstring JNICALL Java_com_sun_glass_ui_mac_MacSystemClipboard_00024FormatEncoder__1convertUTItoMIME
-(JNIEnv *env, jclass clazz, jstring uti)
+static NSString *MIMEForUTI(NSString *uti)
 {
-    jstring result = nil;
-
-    GLASS_POOL_ENTER;
-    {
-        CFStringRef cfUTI = (CFStringRef)[GlassHelper nsStringWithJavaString:uti withEnv:env];
-        NSString* nsMIME = [(NSString*)UTTypeCopyPreferredTagWithClass(cfUTI,
-                                                                       kUTTagClassMIMEType) autorelease];
-        result = (*env) -> NewStringUTF(env, [nsMIME UTF8String]);
-    }
-    GLASS_POOL_EXIT;
-    GLASS_CHECK_EXCEPTION(env);
-
-    return result;
+    CFStringRef cfUTI = (CFStringRef)uti;
+    NSString* nsMIME = [(NSString*)UTTypeCopyPreferredTagWithClass(cfUTI,
+                                                                   kUTTagClassMIMEType) autorelease];
+    return nsMIME;
 }
 
-/*
- * Class:     com_sun_glass_ui_mac_MacSystemClipboard
- * Method:    _convertFileReferencePath
- * Signature: (Ljava/lang/String;)Ljava/lang/String;
- */
-JNIEXPORT jstring JNICALL Java_com_sun_glass_ui_mac_MacSystemClipboard__1convertFileReferencePath
-(JNIEnv *env, jclass clazz, jstring jPath)
+int32_t gmac_test_clipboard_mime_to_uti(const uint16_t *mime, int32_t length, char **out_utf8, int32_t *out_length)
 {
-    jstring result = nil;
+    int32_t status;
 
     GLASS_POOL_ENTER;
     {
-        NSString* path = [GlassHelper nsStringWithJavaString:jPath withEnv:env];
-        NSURL *url = [NSURL URLWithString:path];
+        status = GlassCopyUtf8([UTIForMIME(GlassNSStringOrEmpty(mime, length)) UTF8String], out_utf8, out_length);
+    }
+    GLASS_POOL_EXIT;
+
+    return status;
+}
+
+int32_t gmac_test_clipboard_uti_to_mime(const uint16_t *uti, int32_t length, char **out_utf8, int32_t *out_length)
+{
+    int32_t status;
+
+    GLASS_POOL_ENTER;
+    {
+        status = GlassCopyUtf8([MIMEForUTI(GlassNSStringOrEmpty(uti, length)) UTF8String], out_utf8, out_length);
+    }
+    GLASS_POOL_EXIT;
+
+    return status;
+}
+
+int32_t gmac_clipboard_file_reference_path(const uint16_t *path, int32_t length, char **out_utf8,
+                                           int32_t *out_length)
+{
+    int32_t status;
+
+    GLASS_POOL_ENTER;
+    {
+        NSString* string = GlassNSStringOrEmpty(path, length);
+        NSURL *url = [NSURL URLWithString:string];
         if (url != nil) {
             url = [url filePathURL];
             if (url != nil) {
-                path = [url path];
+                string = [url path];
             }
         }
-        result = (*env) -> NewStringUTF(env, [path UTF8String]);
+        status = GlassCopyUtf8([string UTF8String], out_utf8, out_length);
     }
     GLASS_POOL_EXIT;
-    GLASS_CHECK_EXCEPTION(env);
 
-    return result;
+    return status;
 }

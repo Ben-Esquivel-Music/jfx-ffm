@@ -23,9 +23,11 @@
 
 # macOS-specific portion of the javafx.graphics native build. Replicates the
 # compiler/linker flags previously defined by the retired Gradle native build
-# (buildSrc/mac.gradle). Included from CMakeLists.txt; shared input variables
-# (JDK_HOME, GENSRC_DIR, HEADERS_DIR, BIN_DIR, INCLUDE_ES2, GRAPHICS_SRC) are
-# defined there.
+# (buildSrc/mac.gradle). Included from CMakeLists.txt, which defines the
+# shared input variables; of those, this file reads GENSRC_DIR, BIN_DIR,
+# INCLUDE_ES2 and GRAPHICS_SRC. No macOS target reads JDK_HOME or
+# HEADERS_DIR: CMakeLists.txt still accepts JDK_HOME and requires HEADERS_DIR
+# because they are shared configure inputs that win.cmake uses.
 #
 # Notes on Gradle parity:
 #   - Gradle compiled with clang and linked everything with clang++ (plus
@@ -146,19 +148,25 @@ function(add_jfx_library name)
         LIBRARY_OUTPUT_DIRECTORY_DEBUG "${BIN_DIR}")
 
     target_compile_options(${name} PRIVATE ${JFX_COMPILE_OPTIONS})
-    target_include_directories(${name} PRIVATE
-        "${JDK_HOME}/include" "${JDK_HOME}/include/darwin"
-        "${HEADERS_DIR}"
-        ${JFX_SOURCE_DIRS} ${JFX_INCLUDE_DIRS})
+    target_include_directories(${name} PRIVATE ${JFX_SOURCE_DIRS} ${JFX_INCLUDE_DIRS})
     target_link_libraries(${name} PRIVATE ${JFX_LINK_LIBS})
 endfunction()
 
 # ---------------------------------------------------------------------------
 # libglass.dylib
+#
+# The glass sources declare no JNI function and include no jni.h, so this
+# target, like every other target of this file, has neither HEADERS_DIR nor
+# the JDK include directories on its include path. Their imports of javac -h
+# constant headers of com.sun.glass.* resolve in native-glass/mac/constants:
+# JNI-free headers of the same names, with javac's macro names and literals,
+# which test.com.sun.glass.ui.mac.MacConstantsHeaderTest checks against the
+# Java classes.
 # ---------------------------------------------------------------------------
 add_jfx_library(glass
     OUTPUT_NAME glass
     SOURCE_DIRS "${GRAPHICS_SRC}/native-glass/mac" "${GRAPHICS_SRC}/native-glass/mac/a11y"
+    INCLUDE_DIRS "${GRAPHICS_SRC}/native-glass/mac/constants"
     COMPILE_OPTIONS ${JFX_CC_OPTIONS}
         -DGL_SILENCE_DEPRECATION
         -DMACOS_MIN_VERSION_MAJOR=${MACOS_MIN_VERSION_MAJOR}

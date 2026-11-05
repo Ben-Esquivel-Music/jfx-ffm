@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2011, 2025, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2011, 2026, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -27,7 +27,6 @@
 #import "com_sun_glass_events_DndEvent.h"
 #import "com_sun_glass_events_KeyEvent.h"
 #import "com_sun_glass_events_MouseEvent.h"
-#import "com_sun_glass_ui_View_Capability.h"
 #import "com_sun_glass_ui_mac_MacGestureSupport.h"
 #import "GlassKey.h"
 #import "GlassMacros.h"
@@ -79,76 +78,34 @@
 
 @implementation GlassView3D
 
-- (id)initWithFrame:(NSRect)frame withJview:(jobject)jView withJproperties:(jobject)jproperties
+- (id)initWithFrame:(NSRect)frame viewId:(int64_t)viewId caps:(const GmacViewCaps *)caps
 {
-    LOG("GlassView3D initWithFrame:withJview:withJproperties");
+    LOG("GlassView3D initWithFrame:viewId:caps");
 
-    GET_MAIN_JENV;
-    long mtlCommandQueuePtr = 0l;
-    if (jproperties != NULL)
-    {
-        jobject mtlCommandQueueKey = (*env)->NewStringUTF(env, "mtlCommandQueue");
-        jobject mtlCommandQueueValue = (*env)->CallObjectMethod(env, jproperties, jMapGetMethod, mtlCommandQueueKey);
-        // NSLog(@"---- mtlCommandQueueKey = %p", mtlCommandQueueKey);
-        // NSLog(@"---- mtlCommandQueueValue = %p", mtlCommandQueueValue);
-        GLASS_CHECK_EXCEPTION(env);
-        if (mtlCommandQueueValue != NULL)
-        {
-            jlong jmtlQueuePtr = (*env)->CallLongMethod(env, mtlCommandQueueValue, jLongValueMethod);
-            GLASS_CHECK_EXCEPTION(env);
-            if (jmtlQueuePtr != 0)
-            {
-                // NSLog(@"--- GLASS metal command queue ptr = %ld", jmtlQueuePtr);
-
-                // This enables sharing of MTLCommandQueue between PRISM and GLASS, if needed.
-                // Note : Currently, PRISM and GLASS create their own dedicated MTLCommandQueue
-                mtlCommandQueuePtr = jmtlQueuePtr;
-            }
-        }
-    }
+    long mtlCommandQueuePtr = (long)(intptr_t)caps->mtl_command_queue;
 
     // TODO : We again fetch isHiDPIAware in GlassViewCGL
     // Try to merge it
-    self->isHiDPIAware = NO;
-    BOOL mtlForSW = NO;
-    if (jproperties != NULL)
-    {
-        jobject kHiDPIAwareKey = (*env)->NewObject(env, jIntegerClass, jIntegerInitMethod, com_sun_glass_ui_View_Capability_kHiDPIAwareKeyValue);
-        GLASS_CHECK_EXCEPTION(env);
-        jobject kHiDPIAwareValue = (*env)->CallObjectMethod(env, jproperties, jMapGetMethod, kHiDPIAwareKey);
-        GLASS_CHECK_EXCEPTION(env);
-        if (kHiDPIAwareValue != NULL)
-        {
-            self->isHiDPIAware = (*env)->CallBooleanMethod(env, kHiDPIAwareValue, jBooleanValueMethod) ? YES : NO;
-            GLASS_CHECK_EXCEPTION(env);
-        }
-        jobject mtlForSWKey = (*env)->NewStringUTF(env, "useMTLInGlassForSW");
-        jobject mtlForSWValue = (*env)->CallObjectMethod(env, jproperties, jMapGetMethod, mtlForSWKey);
-        GLASS_CHECK_EXCEPTION(env);
-        if (mtlForSWValue != NULL)
-        {
-            mtlForSW = (*env)->CallBooleanMethod(env, mtlForSWValue, jBooleanValueMethod) ? YES : NO;
-            GLASS_CHECK_EXCEPTION(env);
-        }
-    }
+    self->isHiDPIAware = caps->hidpi_aware != 0 ? YES : NO;
+    BOOL mtlForSW = caps->mtl_for_sw != 0 ? YES : NO;
 
     self = [super initWithFrame:frame];
     if (self != nil) {
         if (mtlCommandQueuePtr != 0l || mtlForSW) {
             LOG("GlassView3D initWithFrame using MTLView");
             GlassViewMTL* mtlSubView;
-            subView = mtlSubView = [[GlassViewMTL alloc] initWithFrame:frame withJview:jView withJproperties:jproperties useMTLForSW:mtlForSW];
+            subView = mtlSubView = [[GlassViewMTL alloc] initWithFrame:frame caps:caps useMTLForSW:mtlForSW];
             self->layer = [mtlSubView getLayer];
             self->isHiDPIAware = YES;
         } else {
             LOG("GlassView3D initWithFrame using CGLView");
             GlassViewCGL* cglSubView;
-            subView = cglSubView = [[GlassViewCGL alloc] initWithFrame:frame withJview:jView withJproperties:jproperties useMTLForSW:mtlForSW];
+            subView = cglSubView = [[GlassViewCGL alloc] initWithFrame:frame caps:caps useMTLForSW:mtlForSW];
             self->layer = [cglSubView getLayer];
         }
         [subView setAutoresizingMask:(NSViewWidthSizable|NSViewHeightSizable)];
         [self addSubview:subView];
-        self->_delegate = [[GlassViewDelegate alloc] initWithView:self withJview:jView];
+        self->_delegate = [[GlassViewDelegate alloc] initWithView:self viewId:viewId];
         self->_trackingArea = [[NSTrackingArea alloc] initWithRect:frame
                                                            options:(NSTrackingMouseMoved | NSTrackingActiveAlways | NSTrackingInVisibleRect)
                                                              owner:self userInfo:nil];
@@ -163,7 +120,6 @@
         sendKeyEvent = NO;
         insertTextChar = 0;
     }
-    //self->_delegate = [[GlassViewDelegate alloc] initWithView:view withJview:jView];
     return self;
 }
 
@@ -532,7 +488,8 @@
     [self->layer end];
 }
 
-- (void)pushPixels:(void*)pixels withWidth:(unsigned int)width withHeight:(unsigned int)height withScaleX:(float)scalex withScaleY:(float)scaley withEnv:(JNIEnv *)env
+- (void)pushPixels:(void*)pixels withWidth:(unsigned int)width withHeight:(unsigned int)height
+        withScaleX:(float)scalex withScaleY:(float)scaley
 {
     [self->layer pushPixels:pixels withWidth:width withHeight:height withScaleX:scalex withScaleY:scaley ofView:self];
 }

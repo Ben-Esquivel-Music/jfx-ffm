@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2011, 2022, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2011, 2026, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -34,12 +34,8 @@ import com.sun.glass.ui.Pixels;
  */
 final class MacPixels extends Pixels {
 
-    private native static int _initIDs(); // returns the native format
-    static {
-        nativeFormat = _initIDs();
-    }
-
-    private static final int nativeFormat;
+    /** What {@code gmac_image_create} reads: CoreGraphics' 32-bit little-endian, alpha-first premultiplied pixels. */
+    private static final int nativeFormat = Pixels.Format.BYTE_BGRA_PRE;
 
     static int getNativeFormat_impl() {
         return nativeFormat;
@@ -80,8 +76,15 @@ final class MacPixels extends Pixels {
         }
     }
 
-    @Override native protected void _attachInt(long ptr, int w, int h, IntBuffer ints, int[] array, int offset);
-    @Override native protected void _attachByte(long ptr, int w, int h, ByteBuffer bytes, byte[] array, int offset);
+    @Override
+    protected void _attachInt(long ptr, int w, int h, IntBuffer ints, int[] array, int offset) {
+        MacCursorCalls.attachInt(ptr, w, h, ints, array, offset);
+    }
+
+    @Override
+    protected void _attachByte(long ptr, int w, int h, ByteBuffer bytes, byte[] array, int offset) {
+        MacCursorCalls.attachByte(ptr, w, h, bytes, array, offset);
+    }
 
     @Override
     public String toString() {

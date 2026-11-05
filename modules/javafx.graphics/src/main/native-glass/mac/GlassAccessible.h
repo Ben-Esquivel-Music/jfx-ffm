@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2013, 2014, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2013, 2026, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -24,66 +24,32 @@
  */
 
 #import <Cocoa/Cocoa.h>
-#import <jni.h>
+
+#import "glass_mac_internal.h"
 
 @interface GlassAccessible : NSObject {
 @private
-    jobject jAccessible;
+    int64_t peerId;
 }
-- (id)initWithEnv:(JNIEnv*)env accessible:(jobject)jAccessible;
-- (jobject)getJAccessible;
+- (id)initWithPeerId:(int64_t)peerId;
+- (int64_t)getPeerId;
 @end
 
-/* The following blocks are used by jArrayToNSArray() to convert java types
- * within a java array to a native type to be stored in the resulting NSArray.
+/*
+ * The dials of the GmacAccessibleCallbacks slots that GlassAccessible and AccessibleBase share, on the main thread
+ * with Java attached. Each answers what its JNI site answered once the call returned. With no table installed, which
+ * no peer sees because MacAccessible installs it before it creates one, the sites answer as while Java is detached.
  */
-typedef id (^jMapper)(void*, CFIndex);
-jMapper jLongToID;
-jMapper jIntToNSNumber;
-jMapper jVariantToID;
+GLASS_INTERNAL id GlassDialAttributeValue(const GmacAccessibleCallbacks *callbacks, int64_t peerId,
+                                          NSString *attribute);
+GLASS_INTERNAL id GlassDialAttributeValueForParameter(const GmacAccessibleCallbacks *callbacks, int64_t peerId,
+                                                      NSString *attribute, id parameter);
+GLASS_INTERNAL BOOL GlassDialIsAttributeSettable(const GmacAccessibleCallbacks *callbacks, int64_t peerId,
+                                                 NSString *attribute);
+GLASS_INTERNAL void GlassDialSetValue(const GmacAccessibleCallbacks *callbacks, int64_t peerId, id value,
+                                      NSString *attribute);
+GLASS_INTERNAL int32_t GlassDialPerformAction(const GmacAccessibleCallbacks *callbacks, int64_t peerId,
+                                              NSString *action);
 
-id variantToID(JNIEnv *env, jobject variant);
-NSString* jStringToNSString(JNIEnv *env, jstring string);
-NSArray* jArrayToNSArray(JNIEnv *env, jarray srcArray, jMapper);
-
-/* Accessible class IDs for classes, methods, and fields (this could be in GlassStatics.h) */
-
-jclass jAccessibleClass;
-
-jmethodID jAccessibilityAttributeNames;
-jmethodID jAccessibilityAttributeValue;
-jmethodID jAccessibilityActionNames;
-jmethodID jAccessibilityIsIgnored;
-jmethodID jAccessibilityFocusedUIElement;
-jmethodID jAccessibilityHitTest;
-jmethodID jAccessibilityPerformAction;
-jmethodID jAccessibilityParameterizedAttributeNames;
-jmethodID jAccessibilityAttributeValueForParameter;
-jmethodID jAccessibilityIsAttributeSettable;
-jmethodID jAccessibilityActionDescription;
-jmethodID jAccessibilityIndexOfChild;
-jmethodID jAccessibilitySetValue;
-jmethodID jAccessibilityArrayAttributeCount;
-jmethodID jAccessibilityArrayAttributeValues;
-
-jclass jVariantClass;
-
-jmethodID jVariantInit;
-jfieldID jVariantType;
-jfieldID jVariantLongArray;
-jfieldID jVariantIntArray;
-jfieldID jVariantStringArray;
-jfieldID jVariantInt1;
-jfieldID jVariantInt2;
-jfieldID jVariantLong1;
-jfieldID jVariantFloat1;
-jfieldID jVariantFloat2;
-jfieldID jVariantFloat3;
-jfieldID jVariantFloat4;
-jfieldID jVariantDouble1;
-jfieldID jVariantString;
-jfieldID jVariantVariantArray;
-jfieldID jVariantLocation;
-jfieldID jVariantLength;
-jfieldID jVariantKey;
-
+/* From dealloc, on whichever thread released the peer last. */
+GLASS_INTERNAL void GlassDialPeerReleased(const GmacAccessibleCallbacks *callbacks, int64_t peerId);

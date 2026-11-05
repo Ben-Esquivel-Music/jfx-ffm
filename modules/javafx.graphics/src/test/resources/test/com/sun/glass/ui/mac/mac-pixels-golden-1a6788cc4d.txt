@@ -1,0 +1,81 @@
+# MacPixels attach golden: what the JNI natives _attachInt and _attachByte (GlassPixels.m: the checks
+# of 1a6788cc4d, attachCommon calling gmac_image_create) did with each call of
+# MacPixelsNativeTest.corpus(), in a child JVM, off the main thread, with the main thread detached
+# from Java, after MacApplication's JNI _initIDs. Compared exactly.
+# Keys: machine.* gate the comparison; capture.* and info.* are recorded, never compared;
+# corpus.* and case.<int|byte>.<name> are compared. A case line: slot=untouched|null|image, the
+# readback of gmac_test_inspect_and_release_image (answer:9 values;bytes), and the reports.
+machine.os.arch=aarch64
+machine.os.name=Mac OS X
+machine.os.version=27.0.1
+capture.commit=1a6788cc4dd6bad11f9e0ea835c162aa30eb3fad
+capture.jniLibrary.sha256=4f8d21a6baab5f9b670cd63475c109b46aab86e9e88f7881a6488215d36408bd
+capture.nativeSource.GlassPixels.m.sha256=68df60e5dea6c277f77405422f0159b1cdc868450654d4bc573d49e6b5da54b4
+capture.pixelsAttachNative=true
+info.java.vm=OpenJDK 64-Bit Server VM 27.0.1.0.2+1-2
+case.byte.array1x1=slot=image;readback=4:1,1,1,1,8,32,4,8194,1;bytes=26bd54eb;reports=1:java.lang.RuntimeException: Main Java thread is detached.
+case.byte.array3x2=slot=image;readback=24:3,2,3,2,8,32,12,8194,1;bytes=26bd54eb8219b047de750ca33ad168ff962dc45bf28920b7;reports=1:java.lang.RuntimeException: Main Java thread is detached.
+case.byte.array3x2Offset=slot=image;readback=24:3,2,3,2,8,32,12,8194,1;bytes=eb8219b047de750ca33ad168ff962dc45bf28920b74ee57c;reports=1:java.lang.RuntimeException: Main Java thread is detached.
+case.byte.array3x2OneShort=slot=untouched;reports=0
+case.byte.array5x3Larger=slot=image;readback=60:5,3,5,3,8,32,20,8194,1;bytes=54eb8219b047de750ca33ad168ff962dc45bf28920b74ee57c13aa41d86f069d34cb62f99027be55ec831ab148df760da43bd26900972ec55cf38a21;reports=1:java.lang.RuntimeException: Main Java thread is detached.
+case.byte.arrayAndDirect=slot=image;readback=24:3,2,3,2,8,32,12,8194,1;bytes=bd54eb8219b047de750ca33ad168ff962dc45bf28920b74e;reports=1:java.lang.RuntimeException: Main Java thread is detached.
+case.byte.direct3x2=slot=image;readback=24:3,2,3,2,8,32,12,8194,1;bytes=45dc730aa138cf66fd942bc259f0871eb54ce37a11a83fd6;reports=1:java.lang.RuntimeException: Main Java thread is detached.
+case.byte.direct3x2OneShort=slot=untouched;reports=0
+case.byte.direct3x2PositionLimit=slot=image;readback=24:3,2,3,2,8,32,12,8194,1;bytes=0aa138cf66fd942bc259f0871eb54ce37a11a83fd66d049b;reports=1:java.lang.RuntimeException: Main Java thread is detached.
+case.byte.directReadOnly=slot=image;readback=8:2,1,2,1,8,32,8,8194,1;bytes=831ab148df760da4;reports=1:java.lang.RuntimeException: Main Java thread is detached.
+case.byte.directSlice=slot=image;readback=16:2,2,2,2,8,32,8,8194,1;bytes=fb9229c057ee851cb34ae1780fa63dd4;reports=1:java.lang.RuntimeException: Main Java thread is detached.
+case.byte.heapBufferNoArray=slot=untouched;reports=0
+case.byte.heightNegative=slot=untouched;reports=0
+case.byte.heightZero=slot=untouched;reports=0
+case.byte.noSource=slot=untouched;reports=0
+case.byte.nullAddress=slot=null;reports=1:java.lang.RuntimeException: Main Java thread is detached.
+case.byte.nullAddressOneShort=slot=untouched;reports=0
+case.byte.offsetGuardFails=slot=untouched;reports=0
+case.byte.offsetLargest=slot=null;reports=1:java.lang.RuntimeException: Main Java thread is detached.
+case.byte.offsetLargestOneShort=slot=untouched;reports=0
+case.byte.offsetMax=slot=untouched;reports=0
+case.byte.offsetNegative=slot=untouched;reports=0
+case.byte.offsetNegativeNoSource=slot=untouched;reports=0
+case.byte.offsetPastQuarterMax=slot=null;reports=1:java.lang.RuntimeException: Main Java thread is detached.
+case.byte.overflowGuardFails=slot=untouched;reports=0
+case.byte.overflowGuardPasses=slot=null;reports=1:java.lang.RuntimeException: Main Java thread is detached.
+case.byte.overflowGuardPassesOneShort=slot=untouched;reports=0
+case.byte.ptrZero=slot=untouched;reports=0
+case.byte.ptrZeroNoSource=slot=untouched;reports=0
+case.byte.widthNegative=slot=untouched;reports=0
+case.byte.widthZero=slot=untouched;reports=0
+case.int.array1x1=slot=image;readback=4:1,1,1,1,8,32,4,8194,1;bytes=c204ef6f;reports=1:java.lang.RuntimeException: Main Java thread is detached.
+case.int.array3x2=slot=image;readback=24:3,2,3,2,8,32,12,8194,1;bytes=c204ef6f7b7e260e34f85daced71954aa6ebcce85f650487;reports=1:java.lang.RuntimeException: Main Java thread is detached.
+case.int.array3x2Offset=slot=image;readback=24:3,2,3,2,8,32,12,8194,1;bytes=5f65048718df3b25d15873c38ad2aa61434ce2fffcc5199e;reports=1:java.lang.RuntimeException: Main Java thread is detached.
+case.int.array3x2OneShort=slot=untouched;reports=0
+case.int.array5x3Larger=slot=image;readback=60:5,3,5,3,8,32,20,8194,1;bytes=34f85daced71954aa6ebcce85f65048718df3b25d15873c38ad2aa61434ce2fffcc5199eb53f513c6eb988da2733c078e0acf71699262fb552a06653;reports=1:java.lang.RuntimeException: Main Java thread is detached.
+case.int.arrayAndDirect=slot=image;readback=24:3,2,3,2,8,32,12,8194,1;bytes=7b7e260e34f85daced71954aa6ebcce85f65048718df3b25;reports=1:java.lang.RuntimeException: Main Java thread is detached.
+case.int.direct3x2=slot=image;readback=24:3,2,3,2,8,32,12,8194,1;bytes=cb8fa6418409dedf3d83157ef6fc4c1caf7684ba68f0bb58;reports=1:java.lang.RuntimeException: Main Java thread is detached.
+case.int.direct3x2OneShort=slot=untouched;reports=0
+case.int.direct3x2PositionLimit=slot=image;readback=24:3,2,3,2,8,32,12,8194,1;bytes=f6fc4c1caf7684ba68f0bb58216af3f6dae32a95935d6233;reports=1:java.lang.RuntimeException: Main Java thread is detached.
+case.int.directBigEndian=slot=image;readback=16:2,2,2,2,8,32,8,8194,1;bytes=b6cd30e65504aa9ff33c245891739e11;reports=1:java.lang.RuntimeException: Main Java thread is detached.
+case.int.directReadOnly=slot=image;readback=8:2,1,2,1,8,32,8,8194,1;bytes=dda515e5961f4d83;reports=1:java.lang.RuntimeException: Main Java thread is detached.
+case.int.directSlice=slot=image;readback=16:2,2,2,2,8,32,8,8194,1;bytes=8d9495b1460ecd4fff8704eeb8013c8c;reports=1:java.lang.RuntimeException: Main Java thread is detached.
+case.int.heapBufferNoArray=slot=untouched;reports=0
+case.int.heightNegative=slot=untouched;reports=0
+case.int.heightZero=slot=untouched;reports=0
+case.int.largestAccepted=slot=null;reports=1:java.lang.RuntimeException: Main Java thread is detached.
+case.int.largestAcceptedOneShort=slot=untouched;reports=0
+case.int.noSource=slot=untouched;reports=0
+case.int.nullAddress=slot=null;reports=1:java.lang.RuntimeException: Main Java thread is detached.
+case.int.nullAddressOneShort=slot=untouched;reports=0
+case.int.offsetAboveQuarterMax=slot=untouched;reports=0
+case.int.offsetLargest=slot=null;reports=1:java.lang.RuntimeException: Main Java thread is detached.
+case.int.offsetMax=slot=untouched;reports=0
+case.int.offsetNegative=slot=untouched;reports=0
+case.int.offsetNegativeNoSource=slot=untouched;reports=0
+case.int.offsetQuarterMax=slot=untouched;reports=0
+case.int.overflowGuardFails=slot=untouched;reports=0
+case.int.overflowGuardPasses=slot=null;reports=1:java.lang.RuntimeException: Main Java thread is detached.
+case.int.overflowGuardPassesOneShort=slot=untouched;reports=0
+case.int.ptrZero=slot=untouched;reports=0
+case.int.ptrZeroNoSource=slot=untouched;reports=0
+case.int.widthNegative=slot=untouched;reports=0
+case.int.widthPastLargest=slot=untouched;reports=0
+case.int.widthZero=slot=untouched;reports=0
+corpus.mainThreadDetached=true

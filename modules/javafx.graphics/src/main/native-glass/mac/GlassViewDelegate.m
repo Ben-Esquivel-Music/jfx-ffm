@@ -39,6 +39,7 @@
 #import "GlassApplication.h"
 #import "GlassHelper.h"
 #import "GlassPasteboard.h"
+#import "glass_mac_internal.h"
 
 #pragma clang diagnostic ignored "-Wdeprecated-declarations"
 
@@ -78,7 +79,7 @@ static NSUInteger s_modifierFlags = 0;
 @end
 
 
-static jboolean isInertialScroll(NSEvent *theEvent)
+static uint8_t isInertialScroll(NSEvent *theEvent)
 {
     enum
     {
@@ -114,11 +115,11 @@ static jboolean isInertialScroll(NSEvent *theEvent)
             return ([theEvent _scrollPhase] != 0);
     }
 
-    return JNI_FALSE;
+    return 0;
 }
 
 
-static jint getSwipeDirFromEvent(NSEvent *theEvent)
+static int32_t getSwipeDirFromEvent(NSEvent *theEvent)
 {
     if ([theEvent deltaX] < 0) {
         return com_sun_glass_events_SwipeGesture_DIR_RIGHT;
@@ -135,18 +136,93 @@ static jint getSwipeDirFromEvent(NSEvent *theEvent)
     return 0;
 }
 
+// Main thread. The notify_key dials made so far, so that an event can tell whether another event dialled the slot
+// between two of its own dials.
+static uint64_t keySlotDials = 0;
+
+int32_t GlassDialKeySlot(GlassKeySend *send, int32_t type, int32_t key_code, int32_t *out_consumed)
+{
+    int32_t consumed = 0;
+    int32_t status = GMAC_ERR_NO_DATA;
+    if (send->callbacks->notify_key != NULL)
+    {
+        int32_t sameChars = (send->last_dial != 0 && send->last_dial == keySlotDials) ? 1 : 0;
+        send->last_dial = ++keySlotDials;
+        status = send->callbacks->notify_key(send->view_id, type, key_code, send->chars, send->char_count,
+                                             send->modifiers, sameChars, &consumed);
+    }
+    if (out_consumed != NULL)
+    {
+        *out_consumed = consumed;
+    }
+    return status;
+}
+
+static void dialModifierKeySlot(GlassKeySend *send, NSUInteger changedFlags, NSUInteger currentFlags, NSUInteger mask,
+                                int32_t vkCode)
+{
+    if (changedFlags & mask)
+    {
+        GlassDialKeySlot(send, (currentFlags & mask) ? com_sun_glass_events_KeyEvent_PRESS
+                                                     : com_sun_glass_events_KeyEvent_RELEASE, vkCode, NULL);
+    }
+}
+
+// The UTF-16 units of text as the JNI passed them, including its latent over-read: the attributed branch copies
+// length units from data that may hold fewer, and the uninitialized rest goes to Java.
+int32_t GlassDialInputMethod(const GmacViewCallbacks *callbacks, int64_t view_id, id text, int attr, int length,
+                             int cursor, NSRange selection)
+{
+    if (callbacks->notify_input_method == NULL)
+    {
+        return GMAC_ERR_NO_DATA;
+    }
+    int32_t status = INT32_MIN;
+    if ([text isKindOfClass:[NSAttributedString class]]) {
+        if (length <= 0 || length > SIZE_MAX / sizeof(uint16_t)) {
+            return INT32_MIN;
+        }
+
+        NSData *data = [[text string] dataUsingEncoding:NSUTF16LittleEndianStringEncoding];
+        uint16_t *dataBytes = (uint16_t *)malloc(sizeof(uint16_t) * (size_t)length);
+        if (dataBytes != NULL) {
+            [data getBytes:dataBytes length:length * 2];
+            status = callbacks->notify_input_method(view_id, dataBytes, length, attr, length, cursor,
+                                                    (int32_t)selection.location, (int32_t)selection.length);
+            free(dataBytes);
+        }
+    } else {
+        NSData *data = [text dataUsingEncoding:NSUTF16LittleEndianStringEncoding];
+        status = callbacks->notify_input_method(view_id, (const uint16_t *)[data bytes], (int32_t)(data.length / 2),
+                                                attr, length, cursor, (int32_t)selection.location,
+                                                (int32_t)selection.length);
+    }
+    return status;
+}
+
+static int32_t dialDragSlot(int32_t (*slot)(int64_t, int32_t, int32_t, int32_t, int32_t, int32_t, int32_t *),
+                            int64_t viewId, int32_t x, int32_t y, int32_t xAbs, int32_t yAbs, int32_t recommendedAction)
+{
+    int32_t action = com_sun_glass_ui_Clipboard_ACTION_NONE;
+    if (slot != NULL && GlassIsMainJavaAttached())
+    {
+        slot(viewId, x, y, xAbs, yAbs, recommendedAction, &action);
+    }
+    return action;
+}
+
 
 @implementation GlassViewDelegate
 
-- (id)initWithView:(NSView*)view withJview:(jobject)jview
+- (id)initWithView:(NSView*)view viewId:(int64_t)identifier
 {
     self = [super init];
     if (self != nil)
     {
-        GET_MAIN_JENV;
+        GLASS_WARN_IF_MAIN_JAVA_DETACHED;
 
         self->nsView = view;
-        self->jView = (*env)->NewGlobalRef(env, jview);
+        self->viewId = identifier;
         self->mouseIsOver = NO;
         self->mouseDownMask = 0;
 
@@ -192,20 +268,15 @@ static jint getSwipeDirFromEvent(NSEvent *theEvent)
     [self->nativeFullScreenModeWindow release];
     self->nativeFullScreenModeWindow = nil;
 
-    GET_MAIN_JENV_NOWARN;
+    assert(pthread_main_np() == 1);
 
-    if (env != NULL)
+    const GmacViewCallbacks *callbacks = GlassViewCallbacks();
+    if (callbacks != NULL && callbacks->notify_dispose != NULL && GlassIsMainJavaAttached())
     {
-        (*env)->DeleteGlobalRef(env, self->jView);
+        callbacks->notify_dispose(self->viewId);
     }
-    self->jView = NULL;
 
     [super dealloc];
-}
-
-- (jobject)jView
-{
-    return self->jView;
 }
 
 - (void)viewDidMoveToWindow
@@ -213,7 +284,8 @@ static jint getSwipeDirFromEvent(NSEvent *theEvent)
     //        NSLog(@"viewDidMoveToWindow");
     //        NSLog(@"        self: %@", self);
     //        NSLog(@"        [self superview]: %@", [self superview]);
-    GET_MAIN_JENV;
+    GLASS_WARN_IF_MAIN_JAVA_DETACHED;
+    const GmacViewCallbacks *callbacks = GlassViewCallbacks();
     if ([self->nsView window] != nil)
     {
         if (self->parentHost == nil)
@@ -226,7 +298,10 @@ static jint getSwipeDirFromEvent(NSEvent *theEvent)
         }
 
         [[self->nsView window] setAcceptsMouseMovedEvents:YES];
-        (*env)->CallVoidMethod(env, self->jView, jViewNotifyEvent, com_sun_glass_events_ViewEvent_ADD);
+        if (callbacks != NULL)
+        {
+            [self _notifyView:com_sun_glass_events_ViewEvent_ADD callbacks:callbacks];
+        }
     }
     else
     {
@@ -235,9 +310,27 @@ static jint getSwipeDirFromEvent(NSEvent *theEvent)
             [self->parentWindow release];
             self->parentWindow = nil;
         }
-        (*env)->CallVoidMethod(env, self->jView, jViewNotifyEvent, com_sun_glass_events_ViewEvent_REMOVE);
+        if (callbacks != NULL)
+        {
+            [self _notifyView:com_sun_glass_events_ViewEvent_REMOVE callbacks:callbacks];
+        }
     }
-    GLASS_CHECK_EXCEPTION(env);
+}
+
+- (void)_notifyView:(int32_t)type callbacks:(const GmacViewCallbacks *)callbacks
+{
+    if (callbacks->notify_view != NULL && GlassIsMainJavaAttached())
+    {
+        callbacks->notify_view(self->viewId, type);
+    }
+}
+
+- (void)_notifyResizeWidth:(int32_t)width height:(int32_t)height callbacks:(const GmacViewCallbacks *)callbacks
+{
+    if (callbacks->notify_resize != NULL && GlassIsMainJavaAttached())
+    {
+        callbacks->notify_resize(self->viewId, width, height);
+    }
 }
 
 - (void)setFrameOrigin:(NSPoint)newOrigin
@@ -251,9 +344,12 @@ static jint getSwipeDirFromEvent(NSEvent *theEvent)
 
     //NSLog(@"GlassViewDelegate setFrameSize: %dx%d", (int)newSize.width, (int)newSize.height);
     // TODO: listen for resize view's notifications
-    GET_MAIN_JENV;
-    (*env)->CallVoidMethod(env, self->jView, jViewNotifyResize, (int)newSize.width, (int)newSize.height);
-    GLASS_CHECK_EXCEPTION(env);
+    GLASS_WARN_IF_MAIN_JAVA_DETACHED;
+    const GmacViewCallbacks *callbacks = GlassViewCallbacks();
+    if (callbacks != NULL)
+    {
+        [self _notifyResizeWidth:(int)newSize.width height:(int)newSize.height callbacks:callbacks];
+    }
 
     if (self->trackingRect) {
         [self->nsView removeTrackingRect:self->trackingRect];
@@ -267,9 +363,12 @@ static jint getSwipeDirFromEvent(NSEvent *theEvent)
 
     //NSLog(@"GlassViewDelegate setFrame: %d,%d %dx%d", (int)frameRect.origin.x, (int)frameRect.origin.y, (int)frameRect.size.width, (int)frameRect.size.height);
     // TODO: listen for resize view's notifications
-    GET_MAIN_JENV;
-    (*env)->CallVoidMethod(env, self->jView, jViewNotifyResize, (int)frameRect.size.width, (int)frameRect.size.height);
-    GLASS_CHECK_EXCEPTION(env);
+    GLASS_WARN_IF_MAIN_JAVA_DETACHED;
+    const GmacViewCallbacks *callbacks = GlassViewCallbacks();
+    if (callbacks != NULL)
+    {
+        [self _notifyResizeWidth:(int)frameRect.size.width height:(int)frameRect.size.height callbacks:callbacks];
+    }
 
     if (self->trackingRect) {
         [self->nsView removeTrackingRect:self->trackingRect];
@@ -289,13 +388,16 @@ static jint getSwipeDirFromEvent(NSEvent *theEvent)
 {
     //NSLog(@"BEGIN View:drawRect %@: ", self);
     //NSLog(@"        [self frame]: %f,%f %fx%f", [self->nsView frame].origin.x, [self->nsView frame].origin.y, [self->nsView frame].size.width, [self->nsView frame].size.height);
-    GET_MAIN_JENV;
-    jint x = (jint)[self->nsView frame].origin.x;
-    jint y = (jint)[self->nsView frame].origin.y;
-    jint w = (jint)[self->nsView frame].size.width;
-    jint h = (jint)[self->nsView frame].size.height;
-    (*env)->CallVoidMethod(env, self->jView, jViewNotifyRepaint, x, y, w, h);
-    GLASS_CHECK_EXCEPTION(env);
+    GLASS_WARN_IF_MAIN_JAVA_DETACHED;
+    int32_t x = (int32_t)[self->nsView frame].origin.x;
+    int32_t y = (int32_t)[self->nsView frame].origin.y;
+    int32_t w = (int32_t)[self->nsView frame].size.width;
+    int32_t h = (int32_t)[self->nsView frame].size.height;
+    const GmacViewCallbacks *callbacks = GlassViewCallbacks();
+    if (callbacks != NULL && callbacks->notify_repaint != NULL && GlassIsMainJavaAttached())
+    {
+        callbacks->notify_repaint(self->viewId, x, y, w, h);
+    }
     //NSLog(@"END drawRect");
 }
 
@@ -312,11 +414,14 @@ static jint getSwipeDirFromEvent(NSEvent *theEvent)
     NSPoint viewPoint = [nsView convertPoint:[theEvent locationInWindow] fromView:nil]; // convert from window coordinates to view coordinates
     CGPoint basePoint = CGEventGetLocation([theEvent CGEvent]);
 
-    GET_MAIN_JENV;
-    jboolean isKeyboardTrigger = JNI_FALSE;
-    (*env)->CallVoidMethod(env, self->jView, jViewNotifyMenu,
-                            (jint)viewPoint.x, (jint)viewPoint.y, (jint)basePoint.x, (jint)basePoint.y, isKeyboardTrigger);
-    GLASS_CHECK_EXCEPTION(env);
+    GLASS_WARN_IF_MAIN_JAVA_DETACHED;
+    uint8_t isKeyboardTrigger = 0;
+    const GmacViewCallbacks *callbacks = GlassViewCallbacks();
+    if (callbacks != NULL && callbacks->notify_menu != NULL && GlassIsMainJavaAttached())
+    {
+        callbacks->notify_menu(self->viewId, (int32_t)viewPoint.x, (int32_t)viewPoint.y, (int32_t)basePoint.x,
+                               (int32_t)basePoint.y, isKeyboardTrigger);
+    }
 }
 
 - (void)sendJavaMouseEvent:(NSEvent *)theEvent
@@ -454,21 +559,21 @@ static jint getSwipeDirFromEvent(NSEvent *theEvent)
         //    NSLog(@"Event location: in window %@, in view %@, in base coordinates %d,%d",
         //          NSStringFromPoint([theEvent locationInWindow]),
         //          NSStringFromPoint(viewPoint),
-        //          (jint)basePoint.x, (jint)basePoint.y);
+        //          (int32_t)basePoint.x, (int32_t)basePoint.y);
 
-    jdouble rotationX = 0.0;
-    jdouble rotationY = 0.0;
+    double rotationX = 0.0;
+    double rotationY = 0.0;
     if (type == com_sun_glass_events_MouseEvent_WHEEL)
     {
         if ([theEvent hasPreciseScrollingDeltas])
         {
-            rotationX = (jdouble)[theEvent scrollingDeltaX] * 0.1;
-            rotationY = (jdouble)[theEvent scrollingDeltaY] * 0.1;
+            rotationX = (double)[theEvent scrollingDeltaX] * 0.1;
+            rotationY = (double)[theEvent scrollingDeltaY] * 0.1;
         }
         else
         {
-            rotationX = (jdouble)[theEvent deltaX];
-            rotationY = (jdouble)[theEvent deltaY];
+            rotationX = (double)[theEvent deltaX];
+            rotationY = (double)[theEvent deltaY];
         }
 
         //XXX: check for equality for doubles???
@@ -517,7 +622,7 @@ static jint getSwipeDirFromEvent(NSEvent *theEvent)
             [self sendJavaMouseEvent:eeEvent];
         }
 
-        jint modifiers = GetJavaKeyModifiers(theEvent);
+        int32_t modifiers = GetJavaKeyModifiers(theEvent);
         if (type != com_sun_glass_events_MouseEvent_ENTER &&
             type != com_sun_glass_events_MouseEvent_EXIT) {
             modifiers |= GetJavaMouseModifiers([NSEvent pressedMouseButtons]);
@@ -544,17 +649,17 @@ static jint getSwipeDirFromEvent(NSEvent *theEvent)
             }
         }
 
-        jboolean isSynthesized = JNI_FALSE;
+        uint8_t isSynthesized = 0;
 
-        jboolean isPopupTrigger = JNI_FALSE;
+        uint8_t isPopupTrigger = 0;
         if (type == com_sun_glass_events_MouseEvent_DOWN) {
             if (button == com_sun_glass_events_MouseEvent_BUTTON_RIGHT) {
-                isPopupTrigger = JNI_TRUE;
+                isPopupTrigger = 1;
             }
             if (button == com_sun_glass_events_MouseEvent_BUTTON_LEFT &&
                 (modifiers & com_sun_glass_events_KeyEvent_MODIFIER_CONTROL))
             {
-                isPopupTrigger = JNI_TRUE;
+                isPopupTrigger = 1;
             }
         }
 
@@ -599,14 +704,14 @@ static jint getSwipeDirFromEvent(NSEvent *theEvent)
                 break;
         }
 
-        GET_MAIN_JENV;
+        GLASS_WARN_IF_MAIN_JAVA_DETACHED;
         if (type == com_sun_glass_events_MouseEvent_WHEEL) {
             // Detect mouse wheel event sender.
             // Can be inertia from scroll gesture,
             // scroll gesture or mouse wheel itself
             //
             // JDK-8126339, JDK-8115029
-            jint sender = com_sun_glass_ui_mac_MacGestureSupport_SCROLL_SRC_WHEEL;
+            int32_t sender = com_sun_glass_ui_mac_MacGestureSupport_SCROLL_SRC_WHEEL;
             if (isInertialScroll(theEvent))
             {
                 sender = com_sun_glass_ui_mac_MacGestureSupport_SCROLL_SRC_INERTIA;
@@ -616,23 +721,24 @@ static jint getSwipeDirFromEvent(NSEvent *theEvent)
                 sender = com_sun_glass_ui_mac_MacGestureSupport_SCROLL_SRC_GESTURE;
             }
 
-            const jclass jGestureSupportClass = [GlassHelper ClassForName:"com.sun.glass.ui.mac.MacGestureSupport"
-                                                                  withEnv:env];
-            if (jGestureSupportClass)
+            const GmacGestureCallbacks *gestures = GlassGestureCallbacks();
+            if (gestures != NULL && gestures->scroll_gesture_performed != NULL && GlassIsMainJavaAttached())
             {
-                (*env)->CallStaticVoidMethod(env, jGestureSupportClass,
-                                             javaIDs.GestureSupport.scrollGesturePerformed,
-                                             self->jView, modifiers, sender,
-                                             (jint)viewPoint.x, (jint)viewPoint.y,
-                                             (jint)basePoint.x, (jint)basePoint.y,
-                                             rotationX, rotationY);
+                // The JNI passed the doubles through varargs to float parameters, which narrowed them.
+                gestures->scroll_gesture_performed(self->viewId, modifiers, sender,
+                                                   (int32_t)viewPoint.x, (int32_t)viewPoint.y,
+                                                   (int32_t)basePoint.x, (int32_t)basePoint.y,
+                                                   (float)rotationX, (float)rotationY);
             }
         } else {
-            (*env)->CallVoidMethod(env, self->jView, jViewNotifyMouse, type, button,
-                    (jint)viewPoint.x, (jint)viewPoint.y, (jint)basePoint.x, (jint)basePoint.y,
-                    modifiers, isPopupTrigger, isSynthesized);
+            const GmacViewCallbacks *callbacks = GlassViewCallbacks();
+            if (callbacks != NULL && callbacks->notify_mouse != NULL && GlassIsMainJavaAttached())
+            {
+                callbacks->notify_mouse(self->viewId, type, button, (int32_t)viewPoint.x, (int32_t)viewPoint.y,
+                                        (int32_t)basePoint.x, (int32_t)basePoint.y, modifiers, isPopupTrigger,
+                                        isSynthesized);
+            }
         }
-        GLASS_CHECK_EXCEPTION(env);
 
         if (isPopupTrigger) {
             [self sendJavaMenuEvent:theEvent];
@@ -659,103 +765,104 @@ static jint getSwipeDirFromEvent(NSEvent *theEvent)
     }
 }
 
-// JDK-8112726: zero out the keycode for TYPED events
-#define SEND_KEY_EVENT(type) \
-    jboolean thisEventWasConsumed = (*env)->CallBooleanMethod(env, self->jView, jViewNotifyKeyAndReturnConsumed, (type), \
-            (type) == com_sun_glass_events_KeyEvent_TYPED ? 0 : jKeyCode, \
-            jKeyChars, jModifiers); \
-    GLASS_CHECK_EXCEPTION(env);
-
 - (BOOL)sendJavaKeyEvent:(NSEvent *)theEvent isDown:(BOOL)isDown character:(unichar)textChar
 {
-    GET_MAIN_JENV;
+    GLASS_WARN_IF_MAIN_JAVA_DETACHED;
 
-    jint jKeyCode = GetJavaKeyCode(theEvent);
-    jint jModifiers = GetJavaModifiers(theEvent);
-    jcharArray jKeyChars;
+    int32_t jKeyCode = GetJavaKeyCode(theEvent);
+    int32_t jModifiers = GetJavaModifiers(theEvent);
+    const GmacViewCallbacks *callbacks = GlassViewCallbacks();
+    if (callbacks == NULL)
+    {
+        return NO;
+    }
+    return [self _dialKeyEvent:theEvent isDown:isDown character:textChar keyCode:jKeyCode modifiers:jModifiers
+                     callbacks:callbacks];
+}
+
+- (BOOL)_dialKeyEvent:(NSEvent *)theEvent isDown:(BOOL)isDown character:(unichar)textChar keyCode:(int32_t)keyCode
+            modifiers:(int32_t)modifiers callbacks:(const GmacViewCallbacks *)callbacks
+{
+    // The JNI's 16-unit key-chars buffer, so that its latent overflow stays what it was.
+    uint16_t keyChars[16];
+    int32_t charCount;
     if (textChar != 0) {
-        jchar jc[1] = { textChar };
-        jKeyChars = (*env)->NewCharArray(env, 1);
-        if (jKeyChars == NULL) {
-            return YES;
-        }
-        (*env)->SetCharArrayRegion(env, jKeyChars, 0, 1, jc);
+        keyChars[0] = textChar;
+        charCount = 1;
     } else {
-        jKeyChars = GetJavaKeyChars(env, theEvent);
+        charCount = MAX(GetJavaKeyCharsUtf16(theEvent, keyChars), 0);
+    }
+    if (!GlassIsMainJavaAttached())
+    {
+        return NO;
     }
 
+    GlassKeySend send = {callbacks, self->viewId, keyChars, charCount, modifiers, 0};
     // This routine returns YES if the PRESS event was consumed. This is
     // used to ensure that performKeyEquivalent doesn't allow an event
     // to be processed by both JavaFX and the system menus.
-    jboolean wasConsumed = false;
+    int32_t wasConsumed = 0;
     if (!isDown)
     {
-        SEND_KEY_EVENT(com_sun_glass_events_KeyEvent_RELEASE);
+        GlassDialKeySlot(&send, com_sun_glass_events_KeyEvent_RELEASE, keyCode, NULL);
     }
     else
     {
         // We only return YES if the PRESSED event was consumed. The TextInput
         // control consumes any TYPED event that looks like a shortcut.
-        SEND_KEY_EVENT(com_sun_glass_events_KeyEvent_PRESS);
-        wasConsumed = thisEventWasConsumed;
+        GlassDialKeySlot(&send, com_sun_glass_events_KeyEvent_PRESS, keyCode, &wasConsumed);
 
         // TYPED events should only be sent for printable characters. Thus we avoid
         // sending them for navigation keys. Perhaps this logic could be enhanced.
-        if (jKeyCode < com_sun_glass_events_KeyEvent_VK_PAGE_UP ||
-            jKeyCode > com_sun_glass_events_KeyEvent_VK_DOWN)
+        // JDK-8112726: zero out the keycode for TYPED events
+        if (keyCode < com_sun_glass_events_KeyEvent_VK_PAGE_UP ||
+            keyCode > com_sun_glass_events_KeyEvent_VK_DOWN)
         {
-            SEND_KEY_EVENT(com_sun_glass_events_KeyEvent_TYPED);
+            GlassDialKeySlot(&send, com_sun_glass_events_KeyEvent_TYPED, 0, NULL);
         }
 
         // Mac doesn't send keyUp for Cmd+<> key combinations (including Shift+Cmd+<>, etc.)
         // So we synthesize the event
-        if (jModifiers & com_sun_glass_events_KeyEvent_MODIFIER_COMMAND)
+        if (modifiers & com_sun_glass_events_KeyEvent_MODIFIER_COMMAND)
         {
-            SEND_KEY_EVENT(com_sun_glass_events_KeyEvent_RELEASE);
+            GlassDialKeySlot(&send, com_sun_glass_events_KeyEvent_RELEASE, keyCode, NULL);
         }
     }
 
-    (*env)->DeleteLocalRef(env, jKeyChars);
-    GLASS_CHECK_EXCEPTION(env);
-
-    return wasConsumed ? YES : NO;
+    return wasConsumed != 0 ? YES : NO;
 }
-
-#define SEND_MODIFIER_KEY_EVENT_WITH_TYPE(type, vkCode) \
-        (*env)->CallBooleanMethod(env, self->jView, jViewNotifyKeyAndReturnConsumed, \
-                (type), \
-                (vkCode), \
-                jKeyChars, jModifiers);
-
-#define SEND_MODIFIER_KEY_EVENT(mask, vkCode) \
-    if (changedFlags & (mask)) { \
-        SEND_MODIFIER_KEY_EVENT_WITH_TYPE(currentFlags & (mask) ? com_sun_glass_events_KeyEvent_PRESS : com_sun_glass_events_KeyEvent_RELEASE, vkCode); \
-        GLASS_CHECK_EXCEPTION(env); \
-    }
 
 - (void)sendJavaModifierKeyEvent:(NSEvent *)theEvent
 {
     NSUInteger currentFlags = [theEvent modifierFlags] & NSDeviceIndependentModifierFlagsMask;
     NSUInteger changedFlags = currentFlags ^ s_modifierFlags;
 
-    jint jModifiers = GetJavaModifiers(theEvent);
+    int32_t jModifiers = GetJavaModifiers(theEvent);
 
-    GET_MAIN_JENV;
-    jcharArray jKeyChars = (*env)->NewCharArray(env, 0);
+    GLASS_WARN_IF_MAIN_JAVA_DETACHED;
+    const GmacViewCallbacks *callbacks = GlassViewCallbacks();
+    if (callbacks != NULL && GlassIsMainJavaAttached())
+    {
+        uint16_t noChars = 0;
+        GlassKeySend send = {callbacks, self->viewId, &noChars, 0, jModifiers, 0};
 
-    SEND_MODIFIER_KEY_EVENT(NSShiftKeyMask,       com_sun_glass_events_KeyEvent_VK_SHIFT);
-    SEND_MODIFIER_KEY_EVENT(NSControlKeyMask,     com_sun_glass_events_KeyEvent_VK_CONTROL);
-    SEND_MODIFIER_KEY_EVENT(NSAlternateKeyMask,   com_sun_glass_events_KeyEvent_VK_ALT);
-    SEND_MODIFIER_KEY_EVENT(NSCommandKeyMask,     com_sun_glass_events_KeyEvent_VK_COMMAND);
+        dialModifierKeySlot(&send, changedFlags, currentFlags, NSShiftKeyMask,
+                            com_sun_glass_events_KeyEvent_VK_SHIFT);
+        dialModifierKeySlot(&send, changedFlags, currentFlags, NSControlKeyMask,
+                            com_sun_glass_events_KeyEvent_VK_CONTROL);
+        dialModifierKeySlot(&send, changedFlags, currentFlags, NSAlternateKeyMask,
+                            com_sun_glass_events_KeyEvent_VK_ALT);
+        dialModifierKeySlot(&send, changedFlags, currentFlags, NSCommandKeyMask,
+                            com_sun_glass_events_KeyEvent_VK_COMMAND);
 
-    // For CapsLock both PRESS and RELEASE should be synthesized each time
-    if (changedFlags & NSAlphaShiftKeyMask) {
-        SEND_MODIFIER_KEY_EVENT_WITH_TYPE(com_sun_glass_events_KeyEvent_PRESS, com_sun_glass_events_KeyEvent_VK_CAPS_LOCK);
-        SEND_MODIFIER_KEY_EVENT_WITH_TYPE(com_sun_glass_events_KeyEvent_RELEASE, com_sun_glass_events_KeyEvent_VK_CAPS_LOCK);
+        // For CapsLock both PRESS and RELEASE should be synthesized each time
+        if (changedFlags & NSAlphaShiftKeyMask) {
+            GlassDialKeySlot(&send, com_sun_glass_events_KeyEvent_PRESS,
+                             com_sun_glass_events_KeyEvent_VK_CAPS_LOCK, NULL);
+            GlassDialKeySlot(&send, com_sun_glass_events_KeyEvent_RELEASE,
+                             com_sun_glass_events_KeyEvent_VK_CAPS_LOCK, NULL);
+        }
     }
-
-    (*env)->DeleteLocalRef(env, jKeyChars);
-    GLASS_CHECK_EXCEPTION(env);
 
     s_modifierFlags = currentFlags;
 }
@@ -765,42 +872,50 @@ static jint getSwipeDirFromEvent(NSEvent *theEvent)
     NSPoint viewPoint = [nsView convertPoint:[theEvent locationInWindow] fromView:nil]; // convert from window coordinates to view coordinates
     CGPoint basePoint = CGEventGetLocation([theEvent CGEvent]);
 
-    jint modifiers = GetJavaModifiers(theEvent);
+    int32_t modifiers = GetJavaModifiers(theEvent);
 
-    GET_MAIN_JENV;
-    const jclass jGestureSupportClass = [GlassHelper ClassForName:"com.sun.glass.ui.mac.MacGestureSupport"
-                                                          withEnv:env];
-    if (jGestureSupportClass)
+    GLASS_WARN_IF_MAIN_JAVA_DETACHED;
+    const GmacGestureCallbacks *gestures = GlassGestureCallbacks();
+    if (gestures != NULL && GlassIsMainJavaAttached())
     {
-        switch (type)
-        {
-            case com_sun_glass_ui_mac_MacGestureSupport_GESTURE_ROTATE:
-                (*env)->CallStaticVoidMethod(env, jGestureSupportClass,
-                                             javaIDs.GestureSupport.rotateGesturePerformed,
-                                             self->jView, modifiers,
-                                             (jint)viewPoint.x, (jint)viewPoint.y,
-                                             (jint)basePoint.x, (jint)basePoint.y,
-                                             (jfloat)[theEvent rotation]);
-                break;
-            case com_sun_glass_ui_mac_MacGestureSupport_GESTURE_SWIPE:
-                (*env)->CallStaticVoidMethod(env, jGestureSupportClass,
-                                             javaIDs.GestureSupport.swipeGesturePerformed,
-                                             self->jView, modifiers,
-                                             getSwipeDirFromEvent(theEvent),
-                                             (jint)viewPoint.x, (jint)viewPoint.y,
-                                             (jint)basePoint.x, (jint)basePoint.y);
-                break;
-            case com_sun_glass_ui_mac_MacGestureSupport_GESTURE_MAGNIFY:
-                (*env)->CallStaticVoidMethod(env, jGestureSupportClass,
-                                             javaIDs.GestureSupport.magnifyGesturePerformed,
-                                             self->jView, modifiers,
-                                             (jint)viewPoint.x, (jint)viewPoint.y,
-                                             (jint)basePoint.x, (jint)basePoint.y,
-                                             (jfloat)[theEvent magnification]);
-                break;
-        }
+        [self _dialGesture:type event:theEvent viewPoint:viewPoint basePoint:basePoint modifiers:modifiers
+                 callbacks:gestures];
     }
-    GLASS_CHECK_EXCEPTION(env);
+}
+
+- (void)_dialGesture:(int)type event:(NSEvent *)theEvent viewPoint:(NSPoint)viewPoint basePoint:(CGPoint)basePoint
+           modifiers:(int32_t)modifiers callbacks:(const GmacGestureCallbacks *)gestures
+{
+    switch (type)
+    {
+        case com_sun_glass_ui_mac_MacGestureSupport_GESTURE_ROTATE:
+            if (gestures->rotate_gesture_performed != NULL)
+            {
+                gestures->rotate_gesture_performed(self->viewId, modifiers,
+                                                   (int32_t)viewPoint.x, (int32_t)viewPoint.y,
+                                                   (int32_t)basePoint.x, (int32_t)basePoint.y,
+                                                   (float)[theEvent rotation]);
+            }
+            break;
+        case com_sun_glass_ui_mac_MacGestureSupport_GESTURE_SWIPE:
+            if (gestures->swipe_gesture_performed != NULL)
+            {
+                gestures->swipe_gesture_performed(self->viewId, modifiers,
+                                                  getSwipeDirFromEvent(theEvent),
+                                                  (int32_t)viewPoint.x, (int32_t)viewPoint.y,
+                                                  (int32_t)basePoint.x, (int32_t)basePoint.y);
+            }
+            break;
+        case com_sun_glass_ui_mac_MacGestureSupport_GESTURE_MAGNIFY:
+            if (gestures->magnify_gesture_performed != NULL)
+            {
+                gestures->magnify_gesture_performed(self->viewId, modifiers,
+                                                    (int32_t)viewPoint.x, (int32_t)viewPoint.y,
+                                                    (int32_t)basePoint.x, (int32_t)basePoint.y,
+                                                    (float)[theEvent magnification]);
+            }
+            break;
+    }
 }
 
 - (void)sendJavaGestureBeginEvent:(NSEvent *)theEvent
@@ -815,21 +930,15 @@ static jint getSwipeDirFromEvent(NSEvent *theEvent)
     NSPoint viewPoint = [nsView convertPoint:[theEvent locationInWindow] fromView:nil]; // convert from window coordinates to view coordinates
     CGPoint basePoint = CGEventGetLocation([theEvent CGEvent]);
 
-    jint modifiers = GetJavaModifiers(theEvent);
+    int32_t modifiers = GetJavaModifiers(theEvent);
 
-    GET_MAIN_JENV;
-    const jclass jGestureSupportClass = [GlassHelper ClassForName:"com.sun.glass.ui.mac.MacGestureSupport"
-                                                          withEnv:env];
-    if (jGestureSupportClass)
+    GLASS_WARN_IF_MAIN_JAVA_DETACHED;
+    const GmacGestureCallbacks *gestures = GlassGestureCallbacks();
+    if (gestures != NULL && gestures->gesture_finished != NULL && GlassIsMainJavaAttached())
     {
-        (*env)->CallStaticVoidMethod(env, jGestureSupportClass,
-                                     javaIDs.GestureSupport.gestureFinished,
-                                     self->jView, modifiers,
-                                     (jint)viewPoint.x, (jint)viewPoint.y,
-                                     (jint)basePoint.x, (jint)basePoint.y);
-
+        gestures->gesture_finished(self->viewId, modifiers, (int32_t)viewPoint.x, (int32_t)viewPoint.y,
+                                   (int32_t)basePoint.x, (int32_t)basePoint.y);
     }
-    GLASS_CHECK_EXCEPTION(env);
 }
 
 /*
@@ -898,9 +1007,9 @@ static jint getSwipeDirFromEvent(NSEvent *theEvent)
     [self maybeEndGestureWithEvent:theEvent withMask:GESTURE_MASK_SCROLL];
 }
 
-- (NSDragOperation)sendJavaDndEvent:(id <NSDraggingInfo>)info type:(jint)type
+- (NSDragOperation)sendJavaDndEvent:(id <NSDraggingInfo>)info type:(int32_t)type
 {
-    GET_MAIN_JENV;
+    GLASS_WARN_IF_MAIN_JAVA_DETACHED;
 
     NSPoint draggingLocation = [nsView convertPoint:[info draggingLocation] fromView:nil];
     int x = (int)draggingLocation.x;
@@ -912,7 +1021,7 @@ static jint getSwipeDirFromEvent(NSEvent *theEvent)
 
     int mask;
     NSDragOperation operation = [info draggingSourceOperationMask];
-    jint recommendedAction = com_sun_glass_ui_Clipboard_ACTION_NONE;
+    int32_t recommendedAction = com_sun_glass_ui_Clipboard_ACTION_NONE;
 
     if (info.draggingSource != nil) {
         [GlassDragSource setSupportedActions:[GlassDragSource mapNsOperationToJavaMaskInternal:operation]];
@@ -923,24 +1032,34 @@ static jint getSwipeDirFromEvent(NSEvent *theEvent)
         recommendedAction = [GlassDragSource getRecommendedActionForMaskExternal:operation];
     }
 
+    const GmacViewCallbacks *callbacks = GlassViewCallbacks();
     switch (type)
     {
         case com_sun_glass_events_DndEvent_ENTER:
             DNDLOG("com_sun_glass_events_DndEvent_ENTER");
             copyToDragPasteboardIfNeeded(info);
-            mask = (*env)->CallIntMethod(env, self->jView, jViewNotifyDragEnter, x, y, xAbs, yAbs, recommendedAction);
+            mask = callbacks != NULL
+                ? dialDragSlot(callbacks->notify_drag_enter, self->viewId, x, y, xAbs, yAbs, recommendedAction)
+                : com_sun_glass_ui_Clipboard_ACTION_NONE;
             break;
         case com_sun_glass_events_DndEvent_UPDATE:
             DNDLOG("com_sun_glass_events_DndEvent_UPDATE");
-            mask = (*env)->CallIntMethod(env, self->jView, jViewNotifyDragOver, x, y, xAbs, yAbs, recommendedAction);
+            mask = callbacks != NULL
+                ? dialDragSlot(callbacks->notify_drag_over, self->viewId, x, y, xAbs, yAbs, recommendedAction)
+                : com_sun_glass_ui_Clipboard_ACTION_NONE;
             break;
         case com_sun_glass_events_DndEvent_PERFORM:
             DNDLOG("com_sun_glass_events_DndEvent_PERFORM");
-            mask = (*env)->CallIntMethod(env, self->jView, jViewNotifyDragDrop, x, y, xAbs, yAbs, recommendedAction);
+            mask = callbacks != NULL
+                ? dialDragSlot(callbacks->notify_drag_drop, self->viewId, x, y, xAbs, yAbs, recommendedAction)
+                : com_sun_glass_ui_Clipboard_ACTION_NONE;
             break;
         case com_sun_glass_events_DndEvent_EXIT:
             DNDLOG("com_sun_glass_events_DndEvent_EXIT");
-            (*env)->CallVoidMethod(env, self->jView, jViewNotifyDragLeave);
+            if (callbacks != NULL && callbacks->notify_drag_leave != NULL && GlassIsMainJavaAttached())
+            {
+                callbacks->notify_drag_leave(self->viewId);
+            }
             mask = com_sun_glass_ui_Clipboard_ACTION_NONE;
             break;
         default:
@@ -948,8 +1067,6 @@ static jint getSwipeDirFromEvent(NSEvent *theEvent)
             break;
     }
     [GlassDragSource setMask:mask];
-
-    GLASS_CHECK_EXCEPTION(env);
 
     return [GlassDragSource mapJavaMaskToNsOperation:[GlassDragSource getMask]];
 }
@@ -1112,7 +1229,7 @@ static jint getSwipeDirFromEvent(NSEvent *theEvent)
 
     // At the end of dragging we're handed a single definitive
     // drag operation (no Generic or Any).
-    jint mask = com_sun_glass_ui_Clipboard_ACTION_NONE;
+    int32_t mask = com_sun_glass_ui_Clipboard_ACTION_NONE;
     if (operation == NSDragOperationNone) {
         mask = com_sun_glass_ui_Clipboard_ACTION_NONE;
     } else if (operation == NSDragOperationCopy) {
@@ -1125,9 +1242,12 @@ static jint getSwipeDirFromEvent(NSEvent *theEvent)
         DNDLOG("Invalid drag operation");
     }
 
-    GET_MAIN_JENV;
-    (*env)->CallVoidMethod(env, self->jView, jViewNotifyDragEnd, mask);
-    GLASS_CHECK_EXCEPTION(env);
+    GLASS_WARN_IF_MAIN_JAVA_DETACHED;
+    const GmacViewCallbacks *callbacks = GlassViewCallbacks();
+    if (callbacks != NULL && callbacks->notify_drag_end != NULL && GlassIsMainJavaAttached())
+    {
+        callbacks->notify_drag_end(self->viewId, mask);
+    }
 
     // JDK-8095312: OS X won't send mouseUp after DnD is complete, so we synthesize them
     if (self->mouseDownMask & 1 << 0) [self synthesizeMouseUp:NSLeftMouseUp];
@@ -1145,47 +1265,18 @@ static jint getSwipeDirFromEvent(NSEvent *theEvent)
     [[nsView window] performWindowDragWithEvent:[NSApp currentEvent]];
 }
 
-static jstring convertNSStringToJString(id aString, int length)
-{
-    GET_MAIN_JENV;
-
-    jstring jStr = NULL;
-    if ([aString isKindOfClass:[NSAttributedString class]]) {
-        if (length <= 0 || length > SIZE_MAX / sizeof(jchar)) {
-            return NULL;
-        }
-
-        NSData *data = [[aString string] dataUsingEncoding:NSUTF16LittleEndianStringEncoding];
-        jchar *dataBytes = (jchar *)malloc(sizeof(jchar) * (size_t)length);
-        if (dataBytes != NULL) {
-            [data getBytes:dataBytes length:length * 2];
-            jStr = (*env)->NewString(env, dataBytes, length);
-            free(dataBytes);
-        }
-    } else {
-        NSData *data = [aString dataUsingEncoding:NSUTF16LittleEndianStringEncoding];
-        jStr = (*env)->NewString(env, (jchar *)[data bytes], data.length/2);
-    }
-
-    GLASS_CHECK_EXCEPTION(env);
-
-    return jStr;
-}
-
 - (void)notifyInputMethod:(id) aString attr:(int)attr length:(int)length cursor:(int)cursor
             selectedRange:(NSRange)selectionRange
 {
     if ([NSThread isMainThread] == YES)
     {
-        GET_MAIN_JENV;
+        GLASS_WARN_IF_MAIN_JAVA_DETACHED;
 
-        jstring jStr = convertNSStringToJString(aString, length);
-        if (jStr != NULL) {
-            (*env)->CallVoidMethod(env, self->jView, jViewNotifyInputMethodMac, jStr, attr,
-                                   length, cursor, selectionRange.location,
-                                   selectionRange.length);
+        const GmacViewCallbacks *callbacks = GlassViewCallbacks();
+        if (callbacks != NULL && GlassIsMainJavaAttached())
+        {
+            GlassDialInputMethod(callbacks, self->viewId, aString, attr, length, cursor, selectionRange);
         }
-        GLASS_CHECK_EXCEPTION(env);
     }
 }
 
@@ -1199,24 +1290,21 @@ static jstring convertNSStringToJString(id aString, int length)
         // IndexOutOfBoundsException
         // In this case we return an empty rectangle so suggestion window is shown at the
         // bottom left corner of the main screen.
-        GET_MAIN_JENV;
-        jdoubleArray theArray =
-            (jdoubleArray) (*env)->CallObjectMethod(env,
-                                                    self->jView,
-                                                    jViewNotifyInputMethodCandidatePosRequest,
-                                                    pos);
-        GLASS_CHECK_EXCEPTION(env);
-        if (theArray != NULL) {
-            jint n = (*env)->GetArrayLength(env, theArray);
-            if (n == 2) {
-                jboolean isCopy;
-                jdouble *elems = (*env)->GetDoubleArrayElements(env, theArray, &isCopy);
-                retVal = NSMakeRect((CGFloat)elems[0], (CGFloat)elems[1], 0, 0);
-                (*env)->ReleaseDoubleArrayElements(env, theArray, elems, 0);
-                (*env)->DeleteLocalRef(env, theArray);
+        GLASS_WARN_IF_MAIN_JAVA_DETACHED;
+        const GmacViewCallbacks *callbacks = GlassViewCallbacks();
+        if (callbacks != NULL)
+        {
+            double xy[2] = {0.0, 0.0};
+            int32_t valid = 0;
+            if (callbacks->notify_input_method_candidate_pos_request != NULL && GlassIsMainJavaAttached())
+            {
+                callbacks->notify_input_method_candidate_pos_request(self->viewId, pos, xy, &valid);
+            }
+            if (valid != 0)
+            {
+                retVal = NSMakeRect((CGFloat)xy[0], (CGFloat)xy[1], 0, 0);
             }
         }
-        GLASS_CHECK_EXCEPTION(env);
     }
     return retVal;
 }
@@ -1234,10 +1322,14 @@ static jstring convertNSStringToJString(id aString, int length)
         }
     }
 
-    GET_MAIN_JENV;
-    (*env)->CallVoidMethod(env, self->jView, jViewNotifyEvent,
-            entered ? com_sun_glass_events_ViewEvent_FULLSCREEN_ENTER : com_sun_glass_events_ViewEvent_FULLSCREEN_EXIT);
-    GLASS_CHECK_EXCEPTION(env);
+    GLASS_WARN_IF_MAIN_JAVA_DETACHED;
+    const GmacViewCallbacks *callbacks = GlassViewCallbacks();
+    if (callbacks != NULL)
+    {
+        [self _notifyView:entered ? com_sun_glass_events_ViewEvent_FULLSCREEN_ENTER
+                                  : com_sun_glass_events_ViewEvent_FULLSCREEN_EXIT
+                callbacks:callbacks];
+    }
 }
 
 - (void)setResizableForFullscreen:(BOOL)resizable
@@ -1297,10 +1389,14 @@ static jstring convertNSStringToJString(id aString, int length)
 
 - (GlassAccessible*)getAccessible
 {
-    GET_MAIN_JENV;
-    jlong accessible = (*env)->CallLongMethod(env, self->jView, jViewGetAccessible);
-    GLASS_CHECK_EXCEPTION(env);
-    return (GlassAccessible*)jlong_to_ptr(accessible);
+    GLASS_WARN_IF_MAIN_JAVA_DETACHED;
+    const GmacViewCallbacks *callbacks = GlassViewCallbacks();
+    void *accessible = NULL;
+    if (callbacks != NULL && callbacks->get_accessible != NULL && GlassIsMainJavaAttached())
+    {
+        callbacks->get_accessible(self->viewId, &accessible);
+    }
+    return (GlassAccessible*)accessible;
 }
 
 @end

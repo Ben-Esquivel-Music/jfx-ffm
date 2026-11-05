@@ -24,19 +24,18 @@
  */
 
 #import <Cocoa/Cocoa.h>
-#import <jni.h>
 
 #define INCREMENT @"AXIncrement"
 #define DECREMENT @"AXDecrement"
 
 @interface AccessibleBase : NSAccessibilityElement {
 @private
-jobject jAccessible;
+int64_t peerId;
 id parent;
 id jRole;
 }
-- (id)initWithEnv:(JNIEnv*)env accessible:(jobject)jAccessible;
-- (jobject)getJAccessible;
+- (id)initWithPeerId:(int64_t)peerId;
+- (int64_t)getPeerId;
 - (NSString *)getJavaRole;
 - (id)requestNodeAttribute:(NSString *)attribute;
 - (id)requestNodeAttribute:(NSString *)attribute forParameter:(id)parameter;
@@ -49,5 +48,3 @@ id jRole;
 - (BOOL)performAccessibleAction:(NSString*)actionId;
 + (void) initializeRolesMap;
 @end
-
-jmethodID jAccessibilityAttributeNames;

@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2011, 2018, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2011, 2026, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -38,105 +38,92 @@ import com.sun.glass.ui.Pixels;
  */
 final class MacRobot extends GlassRobot {
 
-    // TODO: get rid of native Robot object
-    private long ptr;
+    private MacRobotCalls.RobotState robot;
 
-    private native long _init();
     @Override
     public void create() {
         Application.checkEventThread();
-        ptr = _init();
+        robot = MacRobotCalls.createRobot();
     }
 
-    native private void _destroy(long ptr);
+    /**
+     * Keeps the robot: the JNI released its {@code GlassRobot} object but kept the pointer, so later calls still
+     * reached it (latent bug 4).
+     */
     @Override
     public void destroy() {
         Application.checkEventThread();
-        if (ptr == 0) {
-            return;
-        }
-        _destroy(ptr);
     }
 
-    native protected void _keyPress(int code);
     @Override
     public void keyPress(KeyCode code) {
         Application.checkEventThread();
-        _keyPress(code.getCode());
+        MacRobotCalls.keyPress(code.getCode());
     }
 
-    native protected void _keyRelease(int code);
     @Override
     public void keyRelease(KeyCode code) {
         Application.checkEventThread();
-        _keyRelease(code.getCode());
+        MacRobotCalls.keyRelease(code.getCode());
     }
 
-    native private void _mouseMove(long ptr, float x, float y);
     @Override
     public void mouseMove(double x, double y) {
         Application.checkEventThread();
-        if (ptr == 0) {
+        if (robot == null) {
             return;
         }
-        _mouseMove(ptr, (float) x, (float) y);
+        MacRobotCalls.mouseMove(robot, (float) x, (float) y);
     }
 
-    native private void _mousePress(long ptr, int buttons);
     @Override
     public void mousePress(MouseButton... buttons) {
         Application.checkEventThread();
-        if (ptr == 0) {
+        if (robot == null) {
             return;
         }
-        _mousePress(ptr, GlassRobot.convertToRobotMouseButton(buttons));
+        MacRobotCalls.mousePress(robot, GlassRobot.convertToRobotMouseButton(buttons));
     }
 
-    native private void _mouseRelease(long ptr, int buttons);
     @Override
     public void mouseRelease(MouseButton... buttons) {
         Application.checkEventThread();
-        if (ptr == 0) {
+        if (robot == null) {
             return;
         }
-        _mouseRelease(ptr, GlassRobot.convertToRobotMouseButton(buttons));
+        MacRobotCalls.mouseRelease(robot, GlassRobot.convertToRobotMouseButton(buttons));
     }
 
-    native protected void _mouseWheel(int wheelAmt);
     @Override
     public void mouseWheel(int wheelAmt) {
         Application.checkEventThread();
-        _mouseWheel(wheelAmt);
+        MacRobotCalls.mouseWheel(wheelAmt);
     }
 
-    native private float _getMouseX(long ptr);
     @Override
     public double getMouseX() {
         Application.checkEventThread();
-        if (ptr == 0) {
+        if (robot == null) {
             return 0;
         }
-        return _getMouseX(ptr);
+        return MacRobotCalls.mouseX();
     }
 
-    native private float _getMouseY(long ptr);
     @Override
     public double getMouseY() {
         Application.checkEventThread();
-        if (ptr == 0) {
+        if (robot == null) {
             return 0;
         }
-        return _getMouseY(ptr);
+        return MacRobotCalls.mouseY();
     }
 
-    native protected int _getPixelColor(double x, double y);
     @Override
     public Color getPixelColor(double x, double y) {
         Application.checkEventThread();
-        return GlassRobot.convertFromIntArgb(_getPixelColor(x, y));
+        return GlassRobot.convertFromIntArgb(MacRobotCalls.pixelColor(x, y));
     }
 
-    native protected Pixels _getScreenCapture(int x, int y, int width, int height, boolean scaleToFit);
     @Override
     public WritableImage getScreenCapture(WritableImage image, double x, double y, double width,
                                           double height, boolean scaleToFit) {
@@ -155,8 +142,7 @@ final class MacRobot extends GlassRobot {
         }
 
         Pixels pixels;
-        pixels = _getScreenCapture((int) x, (int) y, iWidth, iHeight, scaleToFit);
+        pixels = MacRobotCalls.screenCapture((int) x, (int) y, iWidth, iHeight, scaleToFit);
         return convertFromPixels(image, pixels);
     }
 }
-

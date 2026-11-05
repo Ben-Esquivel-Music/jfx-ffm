@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2011, 2018, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2011, 2026, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -25,7 +25,6 @@
 
 #import <Cocoa/Cocoa.h>
 #import <ApplicationServices/ApplicationServices.h>
-#import <jni.h>
 
 #import <pthread.h>
 
@@ -38,8 +37,10 @@
     BOOL        _paused;
 
     int64_t     _period;
-    JNIEnv*     _env;
-    jobject     _runnable;
+
+    // The timer ticks through GmacTimerCallbacks.tick(_timerId) once _timerIdReady is set (release, then acquire).
+    int64_t     _timerId;
+    int32_t     _timerIdReady;
 }
 
 @end

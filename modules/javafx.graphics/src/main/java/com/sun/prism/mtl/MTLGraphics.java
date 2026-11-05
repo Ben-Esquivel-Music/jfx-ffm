@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2021, 2025, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2021, 2026, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -51,7 +51,7 @@ class MTLGraphics extends BaseShaderGraphics {
 
         context.validateClearOp(this);
         getRenderTarget().setOpaque(color.isOpaque());
-        nClear(context.getContextHandle(), r, g, b, a, isDepthBuffer());
+        MTLNative.contextClear(context.getContextHandle(), r, g, b, a, isDepthBuffer());
     }
 
     @Override
@@ -59,7 +59,4 @@ class MTLGraphics extends BaseShaderGraphics {
         context.flushVertexBuffer();
         context.commitCurrentCommandBuffer();
     }
-
-    // Native methods
-    private static native void nClear(long pContext, float red, float green, float blue, float alpha, boolean clearDepth);
 }

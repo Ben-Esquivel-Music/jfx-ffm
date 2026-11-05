@@ -30,6 +30,8 @@
 #import "GlassMacros.h"
 #import "GlassPasteboard.h"
 #import "GlassDragSource.h"
+#import "glass_mac_api.h"
+#import "glass_mac_internal.h"
 
 #pragma clang diagnostic ignored "-Wdeprecated-declarations"
 
@@ -142,68 +144,172 @@ static inline void DumpPasteboard(NSPasteboard *pasteboard)
     NSLog(@"\n");
 }
 
-static inline jbyteArray ByteArrayFromPixels(JNIEnv *env, void *data, size_t width, size_t height)
+#pragma mark --- C ABI
+
+// The UTI the natives made of a String: nil for an empty one, as they made none when GetStringLength was 0.
+static NSString *utiOrNil(const uint16_t *chars, int32_t length)
 {
-    jbyteArray javaArray = NULL;
-
-    if ((data != NULL) && (width > 0) && (height > 0) &&
-        (width <= ((INT_MAX / 4) - 2) / height))
+    NSString *utf = nil;
+    if (length > 0)
     {
-        jsize length = 4*(jsize)(width*height);
+        utf = [NSString stringWithCharacters:(const UniChar *)chars length:(NSUInteger)length];
+    }
+    return utf;
+}
 
-        javaArray = (*env)->NewByteArray(env, length + 4*(1+1)); // pixels + (width+height)
-        GLASS_CHECK_EXCEPTION(env);
-
-        if (javaArray != NULL)
+// A malloc'd copy of the length bytes at bytes and a NUL, so that an empty block is not NULL; NULL when it cannot be
+// allocated.
+static uint8_t *copyBlock(const void *bytes, size_t length)
+{
+    uint8_t *block = malloc(length + 1);
+    if (block != NULL)
+    {
+        if (length > 0)
         {
-            jbyte *w = (jbyte*)&width;
-            (*env)->SetByteArrayRegion(env, javaArray, 0, 1, (jbyte *)&w[3]);
-            GLASS_CHECK_EXCEPTION(env);
-            (*env)->SetByteArrayRegion(env, javaArray, 1, 1, (jbyte *)&w[2]);
-            GLASS_CHECK_EXCEPTION(env);
-            (*env)->SetByteArrayRegion(env, javaArray, 2, 1, (jbyte *)&w[1]);
-            GLASS_CHECK_EXCEPTION(env);
-            (*env)->SetByteArrayRegion(env, javaArray, 3, 1, (jbyte *)&w[0]);
-            GLASS_CHECK_EXCEPTION(env);
+            memcpy(block, bytes, length);
+        }
+        block[length] = 0;
+    }
+    return block;
+}
 
-            jbyte *h = (jbyte*)&height;
-            (*env)->SetByteArrayRegion(env, javaArray, 4, 1, (jbyte *)&h[3]);
-            GLASS_CHECK_EXCEPTION(env);
-            (*env)->SetByteArrayRegion(env, javaArray, 5, 1, (jbyte *)&h[2]);
-            GLASS_CHECK_EXCEPTION(env);
-            (*env)->SetByteArrayRegion(env, javaArray, 6, 1, (jbyte *)&h[1]);
-            GLASS_CHECK_EXCEPTION(env);
-            (*env)->SetByteArrayRegion(env, javaArray, 7, 1, (jbyte *)&h[0]);
-            GLASS_CHECK_EXCEPTION(env);
+// The bytes the JNI's createUTF gave new String(byte[], "UTF-8"). A length that is negative as a jsize made its
+// NewByteArray throw and its SetByteArrayRegion then crash; it answers NULL.
+static uint8_t *copyCreateUtfBytes(NSString *string, int32_t *out_length)
+{
+    int32_t length = (int32_t)[string lengthOfBytesUsingEncoding:NSUTF8StringEncoding];
+    if (length < 0)
+    {
+        return NULL;
+    }
+    *out_length = length;
+    return copyBlock([string UTF8String], (size_t)length);
+}
 
-            (*env)->SetByteArrayRegion(env, javaArray, 8, length, (jbyte *)data);
-            GLASS_CHECK_EXCEPTION(env);
+static int32_t copyUtisBlock(NSArray *typeLists, uint8_t **out_block, int32_t *out_length)
+{
+    NSMutableData *data = [NSMutableData data];
+    int32_t itemCount = (int32_t)[typeLists count];
+    [data appendBytes:&itemCount length:sizeof(itemCount)];
+    for (NSArray *types in typeLists)
+    {
+        int32_t typeCount = (int32_t)[types count];
+        [data appendBytes:&typeCount length:sizeof(typeCount)];
+        for (NSString *type in types)
+        {
+            int32_t length = (int32_t)[type lengthOfBytesUsingEncoding:NSUTF8StringEncoding];
+            if (length < 0)
+            {
+                return GMAC_ERR_NO_DATA;
+            }
+            [data appendBytes:&length length:sizeof(length)];
+            if (length > 0)
+            {
+                [data appendBytes:[type UTF8String] length:(NSUInteger)length];
+            }
+        }
+    }
+    uint8_t *block = copyBlock([data bytes], [data length]);
+    if (block == NULL)
+    {
+        return GMAC_ERR_NO_DATA;
+    }
+    *out_block = block;
+    *out_length = (int32_t)[data length];
+    return GMAC_OK;
+}
+
+static BOOL rawImageFitsPixels(size_t width, size_t height)
+{
+    return width > 0 && height > 0 && width <= (INT_MAX / 4) / height;
+}
+
+static BOOL rawImageFitsBlock(size_t width, size_t height)
+{
+    return (width > 0) && (height > 0) && (width <= ((INT_MAX / 4) - 2) / height);
+}
+
+// The byte[] of ByteArrayFromPixels: bytes 3 to 0 of the size_t width and height, which is their big-endian low word
+// on a little-endian host only (latent bug), then the pixels.
+static int32_t copyRawImageBlock(void *data, size_t width, size_t height, uint8_t **out_block, int32_t *out_length)
+{
+    if ((data == NULL) || !rawImageFitsBlock(width, height))
+    {
+        return GMAC_ERR_NO_DATA;
+    }
+    int32_t length = 4*(int32_t)(width*height);
+    uint8_t *block = malloc((size_t)length + 4*(1+1) + 1); // pixels + (width+height) + NUL
+    if (block == NULL)
+    {
+        return GMAC_ERR_NO_DATA;
+    }
+
+    uint8_t *w = (uint8_t *)&width;
+    block[0] = w[3];
+    block[1] = w[2];
+    block[2] = w[1];
+    block[3] = w[0];
+
+    uint8_t *h = (uint8_t *)&height;
+    block[4] = h[3];
+    block[5] = h[2];
+    block[6] = h[1];
+    block[7] = h[0];
+
+    memcpy(block + 8, data, (size_t)length);
+    block[8 + length] = 0;
+
+    *out_block = block;
+    *out_length = length + 8;
+    return GMAC_OK;
+}
+
+static int32_t copyRawImageOfImage(NSImage *image, uint8_t **out_block, int32_t *out_length)
+{
+    int32_t status = GMAC_ERR_NO_DATA;
+
+    if (image != nil && image.size.width > 0 && image.size.height > 0)
+    {
+        CGImageRef cgImage = [image CGImageForProposedRect:NULL context:nil hints:nil];
+
+        size_t width = CGImageGetWidth(cgImage);
+        size_t height = CGImageGetHeight(cgImage);
+        uint32_t *pixels = NULL;
+        if (rawImageFitsPixels(width, height))
+        {
+            pixels = malloc(4 * width * height);
+        }
+
+        if (pixels != NULL)
+        {
+            CGColorSpaceRef space = CGColorSpaceCreateWithName(kCGColorSpaceSRGB);
+            CGContextRef ctx = CGBitmapContextCreate(pixels, width, height, 8, 4*width, space,
+                                                     kCGImageAlphaPremultipliedFirst|kCGBitmapByteOrder32Little);
+            CGContextSetBlendMode(ctx, kCGBlendModeCopy);
+            CGContextDrawImage(ctx, CGRectMake(0, 0, width, height), cgImage);
+            CGContextFlush(ctx);
+
+            status = copyRawImageBlock(pixels, width, height, out_block, out_length);
+
+            CGColorSpaceRelease(space);
+            free(pixels);
         }
     }
 
-    return javaArray;
+    return status;
 }
 
-static inline jbyteArray ByteArrayFromNSData(JNIEnv *env, NSData *data)
+// An image Java made for a UTI that takes none, where the JNI made none: released unused.
+static void releaseUnusedImage(const GmacPasteboardRep *rep)
 {
-    jbyteArray javaArray = NULL;
-
-    if (data != nil)
+    if (rep->kind == GMAC_PASTEBOARD_REP_IMAGE && rep->data != NULL)
     {
-        javaArray = (*env)->NewByteArray(env, (jsize)[data length]);
-        GLASS_CHECK_EXCEPTION(env);
-
-        if (javaArray != NULL)
-        {
-            (*env)->SetByteArrayRegion(env, javaArray, 0, (jsize)[data length], (jbyte *)[data bytes]);
-            GLASS_CHECK_EXCEPTION(env);
-        }
+        [(NSImage *)rep->data release];
     }
-
-    return javaArray;
 }
 
-static inline void SetNSPasteboardItemValueForUtf(JNIEnv *env, NSPasteboardItem *item, jobject jValue, NSString *utf)
+// item is an NSPasteboardItem, or what a test hook records its setters with.
+static void SetItemValueForUtf(id item, const GmacPasteboardRep *rep, NSString *utf)
 {
     BOOL isString = NO;
     if ([utf isEqualToString:NSPasteboardTypeString] == YES)
@@ -249,173 +355,102 @@ static inline void SetNSPasteboardItemValueForUtf(JNIEnv *env, NSPasteboardItem 
 
     if (isString == YES)
     {
-        NSString *string = nil;
+        if (rep->kind == GMAC_PASTEBOARD_REP_STRING)
         {
-            const jchar *chars = (*env)->GetStringChars(env, jValue, NULL);
             // 'string' must never be nil
-            string = [NSString stringWithCharacters:(UniChar *)chars length:(NSUInteger)(*env)->GetStringLength(env, jValue)];
-            (*env)->ReleaseStringChars(env, jValue, chars);
-        }
+            NSString *string = [NSString stringWithCharacters:(const UniChar *)rep->data
+                                                       length:(NSUInteger)rep->data_length];
 
-        //NSLog(@"                SetValue(string): %@, ForUtf: %@", string, utf);
-        if (validate(string)) {
-            [item setString:string forType:utf];
+            //NSLog(@"                SetValue(string): %@, ForUtf: %@", string, utf);
+            if (validate(string)) {
+                [item setString:string forType:utf];
+            }
         }
+        releaseUnusedImage(rep);
     }
     else
     {
         if ([utf isEqualToString:RAW_IMAGE_MIME] == YES || [utf isEqualToString:DRAG_IMAGE_MIME])
         {
-            NSImage *image = NULL;
-            (*env)->CallVoidMethod(env, jValue, jPixelsAttachData, ptr_to_jlong(&image));
+            NSImage *image = rep->kind == GMAC_PASTEBOARD_REP_IMAGE ? (NSImage *)rep->data : NULL;
             if (image != NULL)
             {
                 NSData *data = [image TIFFRepresentation];
-                [item setData:data forType: [utf isEqualToString:RAW_IMAGE_MIME] ? NSPasteboardTypeTIFF : DRAG_IMAGE_MIME];
+                [item setData:data
+                      forType:[utf isEqualToString:RAW_IMAGE_MIME] ? NSPasteboardTypeTIFF : DRAG_IMAGE_MIME];
                 //NSLog(@"                setData: %p, ForUtf: %@", data, utf);
                 [image release];
             }
         }
         else if ([utf isEqualToString:DRAG_IMAGE_OFFSET] == YES)
         {
-            NSPoint offset = NSZeroPoint;
-            jbyte *array =  (*env)->GetByteArrayElements(env, jValue, 0);
-            if (array != nil) {
-                if (sizeof(array) == sizeof(jint) * 2) {
-                    jint x = CFSwapInt32BigToHost(((jint *)array)[0]);
-                    jint y = CFSwapInt32BigToHost(((jint *)array)[1]);
+            if (rep->kind == GMAC_PASTEBOARD_REP_BYTES)
+            {
+                NSPoint offset = NSZeroPoint;
+                const uint8_t *array = rep->data;
+                if (array != NULL) {
+                    // The JNI compared sizeof(array), a pointer's size, so it always read 8 bytes (latent bug).
+                    int32_t bigEndian[2];
+                    memcpy(bigEndian, array, sizeof(bigEndian));
+                    int32_t x = CFSwapInt32BigToHost(bigEndian[0]);
+                    int32_t y = CFSwapInt32BigToHost(bigEndian[1]);
                     offset = NSMakePoint((float)x, (float)y);
                 }
-                (*env)->ReleaseByteArrayElements(env, jValue, array, 0);
-            }
 
-            [item setString:NSStringFromPoint(offset) forType:DRAG_IMAGE_OFFSET];
+                [item setString:NSStringFromPoint(offset) forType:DRAG_IMAGE_OFFSET];
+            }
+            releaseUnusedImage(rep);
         }
         else
         {
-            NSData *data = nil;
+            if (rep->kind == GMAC_PASTEBOARD_REP_BYTES)
             {
-                jbyte *bytes = (*env)->GetByteArrayElements(env, jValue, NULL);
                 // 'data' must never be nil
-                data = [NSData dataWithBytes:bytes length:(NSUInteger)(*env)->GetArrayLength(env, jValue)];
-                (*env)->ReleaseByteArrayElements(env, jValue, bytes, 0);
+                NSData *data = [NSData dataWithBytes:rep->data length:(NSUInteger)rep->data_length];
+                [item setData:data forType:utf];
+                //NSLog(@"                SetValue(data): %p, ForUtf: %@", data, utf);
             }
-            [item setData:data forType:utf];
-            //NSLog(@"                SetValue(data): %p, ForUtf: %@", data, utf);
+            releaseUnusedImage(rep);
         }
     }
-    GLASS_CHECK_EXCEPTION(env);
 }
 
-static inline NSPasteboardItem *NSPasteboardItemFromArray(JNIEnv *env, jobjectArray jArray)
+static void FillItemFromReps(id item, const GmacPasteboardRep *reps, int32_t repsCount)
 {
-    NSPasteboardItem *item = [[[NSPasteboardItem alloc] init] autorelease];
+    //NSLog(@"        FillItemFromReps repsCount: %d", repsCount);
+    for (int i=0; i<repsCount; i++)
     {
-        jsize repsCount = (*env)->GetArrayLength(env, jArray);
-        //NSLog(@"        NSPasteboardItemFromArray repsCount: %d", repsCount);
-        if (repsCount > 0)
+        const GmacPasteboardRep *rep = &reps[i];
+        if (rep->kind != GMAC_PASTEBOARD_REP_BAD)
         {
-            for (int i=0; i<repsCount; i++)
-            {
-                jobjectArray jRepresentation = (*env)->GetObjectArrayElement(env, jArray, i);
-                if ((*env)->GetArrayLength(env, jRepresentation) == 2)
-                {
-                    jstring jUtf = (*env)->GetObjectArrayElement(env, jRepresentation, com_sun_glass_ui_mac_MacPasteboard_UtfIndex);
-                    jobject jObject = (*env)->GetObjectArrayElement(env, jRepresentation, com_sun_glass_ui_mac_MacPasteboard_ObjectIndex);
-
-                    NSString *utf = nil;
-                    {
-                        const jchar *chars = (*env)->GetStringChars(env, jUtf, NULL);
-                        jsize length = (*env)->GetStringLength(env, jUtf);
-                        if (length > 0)
-                        {
-                            utf = [NSString stringWithCharacters:(UniChar *)chars length:(NSUInteger)length];
-                        }
-                        (*env)->ReleaseStringChars(env, jUtf, chars);
-                    }
-                    // Setting pasteboard can throw exception. It shouldn't
-                    // happen if we validate the data, but in case it does,
-                    // we will catch the exception and log a warning
-                    @try {
-                        SetNSPasteboardItemValueForUtf(env, item, jObject, utf);
-                    } @catch (NSException *exception) {
-                        NSLog(@"WARNING: %@: %@ ",exception.name, exception.reason);
-                    }
-                }
-                else
-                {
-                    NSLog(@"Glass error: NSPasteboardItemFromArray found bad item with %d entries", (int)(*env)->GetArrayLength(env, jRepresentation));
-                }
+            NSString *utf = utiOrNil(rep->uti, rep->uti_length);
+            // Setting pasteboard can throw exception. It shouldn't
+            // happen if we validate the data, but in case it does,
+            // we will catch the exception and log a warning
+            @try {
+                SetItemValueForUtf(item, rep, utf);
+            } @catch (NSException *exception) {
+                NSLog(@"WARNING: %@: %@ ",exception.name, exception.reason);
             }
         }
+        else
+        {
+            NSLog(@"Glass error: NSPasteboardItemFromArray found bad item with %d entries", (int)rep->data_length);
+        }
     }
-    return item;
 }
 
-static inline jobject createUTF(JNIEnv *env, NSString *data) {
-    jclass jcls = (*env)->FindClass(env, "java/lang/String");
-    GLASS_CHECK_EXCEPTION(env);
-    jmethodID String_init_ID = (*env)->
-                    GetMethodID(env, jcls, "<init>", "([BLjava/lang/String;)V");
-    GLASS_CHECK_EXCEPTION(env);
-    NSUInteger len = [data lengthOfBytesUsingEncoding:NSUTF8StringEncoding];
-    jbyteArray ba = (*env)->NewByteArray(env, len);
-    GLASS_CHECK_EXCEPTION(env);
-    (*env)->SetByteArrayRegion(env, ba, 0, len, (jbyte *)[data UTF8String]);
-    jstring charset = (*env)->NewStringUTF(env, "UTF-8");
-    GLASS_CHECK_EXCEPTION(env);
-    jobject jdata = (*env)->NewObject(env, jcls, String_init_ID, ba, charset);
-    GLASS_CHECK_EXCEPTION(env);
-    (*env)->DeleteLocalRef(env, charset);
-    (*env)->DeleteLocalRef(env, jcls);
-    return jdata;
-}
-
-/*
- * Class:     com_sun_glass_ui_mac_MacPasteboard
- * Method:    _initIDs
- * Signature: ()V
- */
-JNIEXPORT void JNICALL Java_com_sun_glass_ui_mac_MacPasteboard__1initIDs
-(JNIEnv *env, jclass jPasteboard)
+void *gmac_pasteboard_create_system(int32_t type)
 {
-    LOG("Java_com_sun_glass_ui_mac_MacPasteboard__1initIDs");
+    LOG("gmac_pasteboard_create_system: %d", type);
 
-//    NSLog(@"NSPasteboardTypeString: %@", NSPasteboardTypeString);
-//    NSLog(@"NSPasteboardTypePDF: %@", NSPasteboardTypePDF);
-//    NSLog(@"NSPasteboardTypeTIFF: %@", NSPasteboardTypeTIFF);
-//    NSLog(@"NSPasteboardTypePNG: %@", NSPasteboardTypePNG);
-//    NSLog(@"NSPasteboardTypeRTF: %@", NSPasteboardTypeRTF);
-//    NSLog(@"NSPasteboardTypeRTFD: %@", NSPasteboardTypeRTFD);
-//    NSLog(@"NSPasteboardTypeHTML: %@", NSPasteboardTypeHTML);
-//    NSLog(@"NSPasteboardTypeTabularText: %@", NSPasteboardTypeTabularText);
-//    NSLog(@"NSPasteboardTypeFont: %@", NSPasteboardTypeFont);
-//    NSLog(@"NSPasteboardTypeColor: %@", NSPasteboardTypeColor);
-//    NSLog(@"NSPasteboardTypeSound: %@", NSPasteboardTypeSound);
-//    NSLog(@"NSPasteboardTypeMultipleTextSelection: %@", NSPasteboardTypeMultipleTextSelection);
-//    NSLog(@"NSPasteboardTypeFindPanelSearchOptions: %@", NSPasteboardTypeFindPanelSearchOptions);
-//    NSLog(@"kUTTypeURL: %@", (NSString*)kUTTypeURL);
-//    NSLog(@"kUTTypeFileURL: %@", (NSString*)kUTTypeFileURL);
-}
+    void *ptr = NULL;
 
-/*
- * Class:     com_sun_glass_ui_mac_MacPasteboard
- * Method:    _createSystemPasteboard
- * Signature: (I)J
- */
-JNIEXPORT jlong JNICALL Java_com_sun_glass_ui_mac_MacPasteboard__1createSystemPasteboard
-(JNIEnv *env, jobject jPasteboard, jint jType)
-{
-    LOG("Java_com_sun_glass_ui_mac_MacPasteboard__1createSystemPasteboard: %d", jType);
-
-    jlong ptr = 0L;
-
-    GLASS_ASSERT_MAIN_JAVA_THREAD(env);
     GLASS_POOL_ENTER;
     {
         NSPasteboard *pasteboard = nil;
 
-        switch (jType)
+        switch (type)
         {
             case com_sun_glass_ui_mac_MacPasteboard_General:
                 pasteboard = [NSPasteboard pasteboardWithName:NSGeneralPboard];
@@ -425,153 +460,94 @@ JNIEXPORT jlong JNICALL Java_com_sun_glass_ui_mac_MacPasteboard__1createSystemPa
                 break;
         }
 
-        ptr = ptr_to_jlong(pasteboard);
+        ptr = pasteboard;
     }
     GLASS_POOL_EXIT;
-    GLASS_CHECK_EXCEPTION(env);
 
     return ptr;
 }
 
-/*
- * Class:     com_sun_glass_ui_mac_MacPasteboard
- * Method:    _createUserPasteboard
- * Signature: (Ljava/lang/String;)J
- */
-JNIEXPORT jlong JNICALL Java_com_sun_glass_ui_mac_MacPasteboard__1createUserPasteboard
-(JNIEnv *env, jobject jPasteboard, jstring jName)
+void *gmac_pasteboard_create_user(const uint16_t *name, int32_t length)
 {
-    LOG("Java_com_sun_glass_ui_mac_MacPasteboard__1createUserPasteboard");
+    LOG("gmac_pasteboard_create_user");
 
-    jlong ptr = 0L;
+    void *ptr = NULL;
 
-    GLASS_ASSERT_MAIN_JAVA_THREAD(env);
     GLASS_POOL_ENTER;
     {
-        NSString *name = nil;
-        {
-            const jchar *chars = (*env)->GetStringChars(env, jName, NULL);
-            jsize length = (*env)->GetStringLength(env, jName);
-            if (length > 0)
-            {
-                name = [NSString stringWithCharacters:(UniChar *)chars length:(NSUInteger)length];
-            }
-            (*env)->ReleaseStringChars(env, jName, chars);
-        }
-        NSPasteboard *pasteboard = [[NSPasteboard pasteboardWithName:name] retain];
-        ptr = ptr_to_jlong(pasteboard);
+        NSPasteboard *pasteboard = [[NSPasteboard pasteboardWithName:utiOrNil(name, length)] retain];
+        ptr = pasteboard;
     }
     GLASS_POOL_EXIT;
-    GLASS_CHECK_EXCEPTION(env);
 
     return ptr;
 }
 
-/*
- * Class:     com_sun_glass_ui_mac_MacPasteboard
- * Method:    _getName
- * Signature: (J)Ljava/lang/String;
- */
-JNIEXPORT jstring JNICALL Java_com_sun_glass_ui_mac_MacPasteboard__1getName
-(JNIEnv *env, jobject jPasteboard, jlong jPtr)
+int32_t gmac_pasteboard_get_name(void *ptr, char **out_utf8, int32_t *out_length)
 {
-    LOG("Java_com_sun_glass_ui_mac_MacPasteboard__1getName");
+    LOG("gmac_pasteboard_get_name");
 
-    jstring name = NULL;
+    int32_t status;
 
-    GLASS_ASSERT_MAIN_JAVA_THREAD(env);
     GLASS_POOL_ENTER;
     {
-        NSPasteboard *pasteboard = (NSPasteboard*)jlong_to_ptr(jPtr);
+        NSPasteboard *pasteboard = (NSPasteboard*)ptr;
         NSString *string = [pasteboard name];
-        name = (*env)->NewStringUTF(env, [string UTF8String]);
+        status = GlassCopyUtf8([string UTF8String], out_utf8, out_length);
     }
     GLASS_POOL_EXIT;
-    GLASS_CHECK_EXCEPTION(env);
 
-    return name;
+    return status;
 }
 
-/*
- * Class:     com_sun_glass_ui_mac_MacPasteboard
- * Method:    _getUTFs
- * Signature: (J)[[Ljava/lang/String;
- */
-JNIEXPORT jobjectArray JNICALL Java_com_sun_glass_ui_mac_MacPasteboard__1getUTFs
-(JNIEnv *env, jobject jPasteboard, jlong jPtr)
+int32_t gmac_pasteboard_get_utis(void *ptr, uint8_t **out_block, int32_t *out_length)
 {
-    LOG("Java_com_sun_glass_ui_mac_MacPasteboard__1getUTFs");
+    LOG("gmac_pasteboard_get_utis");
 
-    jobjectArray utfs = NULL;
+    int32_t status = GMAC_ERR_NO_DATA;
+    *out_block = NULL;
+    *out_length = 0;
 
-    GLASS_ASSERT_MAIN_JAVA_THREAD(env);
     GLASS_POOL_ENTER;
     {
-        NSPasteboard *pasteboard = (NSPasteboard*)jlong_to_ptr(jPtr);
+        NSPasteboard *pasteboard = (NSPasteboard*)ptr;
         //DumpPasteboard(pasteboard);
 
         NSArray *items = [pasteboard pasteboardItems];
         if ([items count] > 0)
         {
-            jclass jcls = (*env)->FindClass(env, "[Ljava/lang/String;");
-            GLASS_CHECK_EXCEPTION(env);
-            utfs = (*env)->NewObjectArray(env, (jsize)[items count], jcls, NULL);
-            GLASS_CHECK_EXCEPTION(env);
+            NSMutableArray *typeLists = [NSMutableArray arrayWithCapacity:[items count]];
             for (NSUInteger i=0; i<[items count]; i++)
             {
                 NSPasteboardItem *item = [items objectAtIndex:i];
 
                 NSArray *types = [item types];
-                if ([types count] > 0)
-                {
-                    jcls = (*env)->FindClass(env, "java/lang/String");
-                    GLASS_CHECK_EXCEPTION(env);
-                    jobjectArray array = (*env)->NewObjectArray(env, (jsize)[types count], jcls, NULL);
-                    GLASS_CHECK_EXCEPTION(env);
-                    for (NSUInteger j=0; j<[types count]; j++)
-                    {
-                        NSString *type = [types objectAtIndex:j];
-                        //id property = [item stringForType:type];
-                        //if (property != nil) // allow null as the platform itself does
-                        {
-                            (*env)->SetObjectArrayElement(env,
-                                         array, (jsize)j, createUTF(env, type));
-                            GLASS_CHECK_EXCEPTION(env);
-                        }
-                    }
-                    (*env)->SetObjectArrayElement(env, utfs, (jsize)i, array);
-                    GLASS_CHECK_EXCEPTION(env);
-                }
+                [typeLists addObject:(types != nil ? types : [NSArray array])];
             }
+            status = copyUtisBlock(typeLists, out_block, out_length);
         }
     }
     GLASS_POOL_EXIT;
-    GLASS_CHECK_EXCEPTION(env);
 
-    return utfs;
+    return status;
 }
 
-/*
- * Class:     com_sun_glass_ui_mac_MacPasteboard
- * Method:    _getItemAsRawImage
- * Signature: (JI)[B
- */
-JNIEXPORT jbyteArray JNICALL Java_com_sun_glass_ui_mac_MacPasteboard__1getItemAsRawImage
-(JNIEnv *env, jobject jPasteboard, jlong jPtr, jint jIndex)
+int32_t gmac_pasteboard_get_item_as_raw_image(void *ptr, int32_t index, uint8_t **out_block, int32_t *out_length)
 {
-    LOG("Java_com_sun_glass_ui_mac_MacPasteboard__1getItemAsRawImage");
+    LOG("gmac_pasteboard_get_item_as_raw_image");
 
-    jbyteArray bytes = NULL;
+    int32_t status = GMAC_ERR_NO_DATA;
+    *out_block = NULL;
+    *out_length = 0;
 
-    GLASS_ASSERT_MAIN_JAVA_THREAD(env);
     GLASS_POOL_ENTER;
     {
-        if (jIndex >= 0)
+        if (index >= 0)
         {
-            NSPasteboard *pasteboard = (NSPasteboard*)jlong_to_ptr(jPtr);
+            NSPasteboard *pasteboard = (NSPasteboard*)ptr;
             NSArray *items = [pasteboard pasteboardItems];
 
-            NSPasteboardItem *item = [items objectAtIndex:(NSUInteger)jIndex];
+            NSPasteboardItem *item = [items objectAtIndex:(NSUInteger)index];
             if (item != nil)
             {
                 // since this is a convenience method we'll try to do our best to return an image for this item
@@ -622,165 +598,125 @@ JNIEXPORT jbyteArray JNICALL Java_com_sun_glass_ui_mac_MacPasteboard__1getItemAs
                 }
 #endif
 
-                if (image != nil && image.size.width > 0 && image.size.height > 0)
-                {
-                    CGImageRef cgImage = [image CGImageForProposedRect:NULL context:nil hints:nil];
-
-                    size_t width = CGImageGetWidth(cgImage);
-                    size_t height = CGImageGetHeight(cgImage);
-                    uint32_t *pixels = NULL;
-                    if (width > 0 && height > 0 &&
-                        width <= (INT_MAX / 4) / height)
-                    {
-                        pixels = malloc(4 * width * height);
-                    }
-
-                    if (pixels != NULL)
-                    {
-                        CGColorSpaceRef space = CGColorSpaceCreateWithName(kCGColorSpaceSRGB);
-                        CGContextRef ctx = CGBitmapContextCreate(pixels, width, height, 8, 4*width, space, kCGImageAlphaPremultipliedFirst|kCGBitmapByteOrder32Little);
-                        CGContextSetBlendMode(ctx, kCGBlendModeCopy);
-                        CGContextDrawImage(ctx, CGRectMake(0, 0, width, height), cgImage);
-                        CGContextFlush(ctx);
-
-                        bytes = ByteArrayFromPixels(env, pixels, width, height);
-
-                        CGColorSpaceRelease(space);
-                        free(pixels);
-                    }
-                }
+                status = copyRawImageOfImage(image, out_block, out_length);
             }
         }
     }
     GLASS_POOL_EXIT;
-    GLASS_CHECK_EXCEPTION(env);
 
-    return bytes;
+    return status;
 }
 
-/*
- * Class:     com_sun_glass_ui_mac_MacPasteboard
- * Method:    _getItemStringForUTF
- * Signature: (JILjava/lang/String;)Ljava/lang/String;
- */
-JNIEXPORT jstring JNICALL Java_com_sun_glass_ui_mac_MacPasteboard__1getItemStringForUTF
-(JNIEnv *env, jobject jPasteboard, jlong jPtr, jint jIndex, jstring jUtf)
+int32_t gmac_pasteboard_get_item_string(void *ptr, int32_t index, const uint16_t *uti, int32_t uti_length,
+                                        char **out_utf8, int32_t *out_length)
 {
-    LOG("Java_com_sun_glass_ui_mac_MacPasteboard__1getItemStringForUTF");
+    LOG("gmac_pasteboard_get_item_string");
 
-    jstring string = NULL;
+    int32_t status = GMAC_ERR_NO_DATA;
+    *out_utf8 = NULL;
+    *out_length = 0;
 
-    GLASS_ASSERT_MAIN_JAVA_THREAD(env);
     GLASS_POOL_ENTER;
     {
-        if (jIndex >= 0)
+        if (index >= 0)
         {
-            NSString *utf = nil;
-            {
-                const jchar *chars = (*env)->GetStringChars(env, jUtf, NULL);
-                jsize length = (*env)->GetStringLength(env, jUtf);
-                if (length > 0)
-                {
-                    utf = [NSString stringWithCharacters:(UniChar *)chars length:(NSUInteger)length];
-                }
-                (*env)->ReleaseStringChars(env, jUtf, chars);
-            }
+            NSString *utf = utiOrNil(uti, uti_length);
             if (utf != nil)
             {
-                NSPasteboard *pasteboard = (NSPasteboard*)jlong_to_ptr(jPtr);
+                NSPasteboard *pasteboard = (NSPasteboard*)ptr;
                 NSArray *items = [pasteboard pasteboardItems];
-                NSPasteboardItem *item = [items objectAtIndex:(NSUInteger)jIndex];
+                NSPasteboardItem *item = [items objectAtIndex:(NSUInteger)index];
                 if (item != nil)
                 {
                     NSString *str = [item stringForType:utf];
                     if (str != nil)
                     {
-                        string = createUTF(env, str);
+                        int32_t length = 0;
+                        uint8_t *bytes = copyCreateUtfBytes(str, &length);
+                        if (bytes != NULL)
+                        {
+                            *out_utf8 = (char *)bytes;
+                            *out_length = length;
+                            status = GMAC_OK;
+                        }
                     }
                 }
             }
         }
     }
     GLASS_POOL_EXIT;
-    GLASS_CHECK_EXCEPTION(env);
 
-    return string;
+    return status;
 }
 
-/*
- * Class:     com_sun_glass_ui_mac_MacPasteboard
- * Method:    _getItemBytesForUTF
- * Signature: (JILjava/lang/String;)[B
- */
-JNIEXPORT jbyteArray JNICALL Java_com_sun_glass_ui_mac_MacPasteboard__1getItemBytesForUTF
-(JNIEnv *env, jobject jPasteboard, jlong jPtr, jint jIndex, jstring jUtf)
+int32_t gmac_pasteboard_get_item_bytes(void *ptr, int32_t index, const uint16_t *uti, int32_t uti_length,
+                                       uint8_t **out_bytes, int32_t *out_length)
 {
-    LOG("Java_com_sun_glass_ui_mac_MacPasteboard__1getItemBytesForUTF");
+    LOG("gmac_pasteboard_get_item_bytes");
 
-    jbyteArray bytes = NULL;
+    int32_t status = GMAC_ERR_NO_DATA;
+    *out_bytes = NULL;
+    *out_length = 0;
 
-    GLASS_ASSERT_MAIN_JAVA_THREAD(env);
     GLASS_POOL_ENTER;
     {
-        if (jIndex >= 0)
+        if (index >= 0)
         {
-            NSString *utf = nil;
-            {
-                const jchar *chars = (*env)->GetStringChars(env, jUtf, NULL);
-                jsize length = (*env)->GetStringLength(env, jUtf);
-                if (length > 0)
-                {
-                    utf = [NSString stringWithCharacters:(UniChar *)chars length:(NSUInteger)length];
-                }
-                (*env)->ReleaseStringChars(env, jUtf, chars);
-            }
+            NSString *utf = utiOrNil(uti, uti_length);
             if (utf != nil)
             {
-                NSPasteboard *pasteboard = (NSPasteboard*)jlong_to_ptr(jPtr);
+                NSPasteboard *pasteboard = (NSPasteboard*)ptr;
                 NSArray *items = [pasteboard pasteboardItems];
-                NSPasteboardItem *item = [items objectAtIndex:(NSUInteger)jIndex];
+                NSPasteboardItem *item = [items objectAtIndex:(NSUInteger)index];
 
                 NSData *data = [item dataForType:utf];
-                bytes = ByteArrayFromNSData(env, data);
+                if (data != nil)
+                {
+                    int32_t length = (int32_t)[data length];
+                    if (length < 0)
+                    {
+                        *out_length = length;
+                    }
+                    else
+                    {
+                        *out_bytes = copyBlock([data bytes], (size_t)length);
+                        if (*out_bytes != NULL)
+                        {
+                            *out_length = length;
+                            status = GMAC_OK;
+                        }
+                    }
+                }
             }
         }
     }
     GLASS_POOL_EXIT;
-    GLASS_CHECK_EXCEPTION(env);
 
-    return bytes;
+    return status;
 }
 
-/*
- * Class:     com_sun_glass_ui_mac_MacPasteboard
- * Method:    _putItemsFromArray
- * Signature: (J[Ljava/lang/Object;I)J
- */
-JNIEXPORT jlong JNICALL Java_com_sun_glass_ui_mac_MacPasteboard__1putItemsFromArray
-(JNIEnv *env, jobject jPasteboard, jlong jPtr, jobjectArray jObjects, jint supportedActions)
+int64_t gmac_pasteboard_put_items(void *ptr, const GmacPasteboardItem *items, int32_t item_count,
+                                  int32_t supported_actions)
 {
-    LOG("Java_com_sun_glass_ui_mac_MacPasteboard__1putItemsFromArray");
+    LOG("gmac_pasteboard_put_items");
 
-    jlong seed = 0L;
+    int64_t seed = 0;
 
-    GLASS_ASSERT_MAIN_JAVA_THREAD(env);
     GLASS_POOL_ENTER;
     {
-        NSPasteboard *pasteboard = (NSPasteboard*)jlong_to_ptr(jPtr);
+        NSPasteboard *pasteboard = (NSPasteboard*)ptr;
         seed = [pasteboard clearContents];
 
-        jsize itemCount = (*env)->GetArrayLength(env, jObjects);
-        LOG(@"Java_com_sun_glass_ui_mac_MacPasteboard__1putItems itemCount: %d", itemCount);
-        if (itemCount > 0)
+        LOG("gmac_pasteboard_put_items itemCount: %d", item_count);
+        if (item_count > 0)
         {
-            NSMutableArray *objects = [NSMutableArray arrayWithCapacity:(NSUInteger)itemCount];
-            for (int i=0; i<itemCount; i++)
+            NSMutableArray *objects = [NSMutableArray arrayWithCapacity:(NSUInteger)item_count];
+            for (int i=0; i<item_count; i++)
             {
-                jobject array = (*env)->GetObjectArrayElement(env, jObjects, i);
-                GLASS_CHECK_EXCEPTION(env);
-                if (array != NULL)
+                if (items[i].rep_count != GMAC_PASTEBOARD_ITEM_NULL)
                 {
-                    NSPasteboardItem *item = NSPasteboardItemFromArray(env, array);
+                    NSPasteboardItem *item = [[[NSPasteboardItem alloc] init] autorelease];
+                    FillItemFromReps(item, items[i].reps, items[i].rep_count);
                     [objects addObject:item];
                 }
             }
@@ -792,7 +728,8 @@ JNIEXPORT jlong JNICALL Java_com_sun_glass_ui_mac_MacPasteboard__1putItemsFromAr
             {
                 // DnD requires separate NSDragging* calls to work since macOS 10.7
                 // convert NSPasteboardItem-s array to NSDraggingItem-s
-                NSMutableArray<NSDraggingItem*> *dItems = [NSMutableArray<NSDraggingItem*> arrayWithCapacity:itemCount];
+                NSMutableArray<NSDraggingItem*> *dItems =
+                        [NSMutableArray<NSDraggingItem*> arrayWithCapacity:(NSUInteger)item_count];
                 for (NSPasteboardItem* i in objects)
                 {
                     [dItems addObject:[[NSDraggingItem alloc] initWithPasteboardWriter:i]];
@@ -800,7 +737,7 @@ JNIEXPORT jlong JNICALL Java_com_sun_glass_ui_mac_MacPasteboard__1putItemsFromAr
 
                 // New DnD API (macOS 10.7+) requires us to skip writing data to Pasteboard.
                 // It handles managing the pasteboard separately on its own.
-                [GlassDragSource flushWithMask:supportedActions withItems:dItems];
+                [GlassDragSource flushWithMask:supported_actions withItems:dItems];
 
                 for (NSDraggingItem* i in dItems)
                 {
@@ -816,95 +753,63 @@ JNIEXPORT jlong JNICALL Java_com_sun_glass_ui_mac_MacPasteboard__1putItemsFromAr
         }
     }
     GLASS_POOL_EXIT;
-    GLASS_CHECK_EXCEPTION(env);
 
     return seed;
 }
 
-/*
- * Class:     com_sun_glass_ui_mac_MacPasteboard
- * Method:    _clear
- * Signature: (J)J
- */
-JNIEXPORT jlong JNICALL Java_com_sun_glass_ui_mac_MacPasteboard__1clear
-(JNIEnv *env, jobject jPasteboard, jlong jPtr)
+int64_t gmac_pasteboard_clear(void *ptr)
 {
-    LOG("Java_com_sun_glass_ui_mac_MacPasteboard__1clear");
+    LOG("gmac_pasteboard_clear");
 
-    jlong seed = 0L;
+    int64_t seed = 0;
 
-    GLASS_ASSERT_MAIN_JAVA_THREAD(env);
     GLASS_POOL_ENTER;
     {
-        NSPasteboard *pasteboard = (NSPasteboard*)jlong_to_ptr(jPtr);
+        NSPasteboard *pasteboard = (NSPasteboard*)ptr;
         seed = [pasteboard clearContents];
     }
     GLASS_POOL_EXIT;
-    GLASS_CHECK_EXCEPTION(env);
 
     return seed;
 }
 
-/*
- * Class:     com_sun_glass_ui_mac_MacPasteboard
- * Method:    _getSeed
- * Signature: (J)J
- */
-JNIEXPORT jlong JNICALL Java_com_sun_glass_ui_mac_MacPasteboard__1getSeed
-(JNIEnv *env, jobject jPasteboard, jlong jPtr)
+int64_t gmac_pasteboard_get_seed(void *ptr)
 {
-    LOG("Java_com_sun_glass_ui_mac_MacPasteboard__1getSeed");
+    LOG("gmac_pasteboard_get_seed");
 
-    jlong seed = 0L;
+    int64_t seed = 0;
 
-    GLASS_ASSERT_MAIN_JAVA_THREAD(env);
     GLASS_POOL_ENTER;
     {
-        NSPasteboard *pasteboard = (NSPasteboard*)jlong_to_ptr(jPtr);
+        NSPasteboard *pasteboard = (NSPasteboard*)ptr;
         seed = [pasteboard changeCount];
     }
     GLASS_POOL_EXIT;
-    GLASS_CHECK_EXCEPTION(env);
 
     return seed;
 }
 
-/*
- * Class:     com_sun_glass_ui_mac_MacPasteboard
- * Method:    _release
- * Signature: (J)V
- */
-JNIEXPORT void JNICALL Java_com_sun_glass_ui_mac_MacPasteboard__1release
-(JNIEnv *env, jobject jPasteboard, jlong jPtr)
+void gmac_pasteboard_release(void *ptr)
 {
-    LOG("Java_com_sun_glass_ui_mac_MacPasteboard__1release");
+    LOG("gmac_pasteboard_release");
 
-    GLASS_ASSERT_MAIN_JAVA_THREAD(env);
     GLASS_POOL_ENTER;
     {
-        NSPasteboard *pasteboard = (NSPasteboard*)jlong_to_ptr(jPtr);
+        NSPasteboard *pasteboard = (NSPasteboard*)ptr;
         [pasteboard releaseGlobally];
     }
     GLASS_POOL_EXIT;
-    GLASS_CHECK_EXCEPTION(env);
 }
 
-/*
- * Class:     com_sun_glass_ui_mac_MacPasteboard
- * Method:    _getAllowedOperation
- * Signature: (J)I
- */
-JNIEXPORT jint JNICALL Java_com_sun_glass_ui_mac_MacPasteboard__1getAllowedOperation
-(JNIEnv *env, jobject jPasteboard, jlong jPtr)
+int32_t gmac_pasteboard_get_allowed_operation(void *ptr)
 {
-    LOG("Java_com_sun_glass_ui_mac_MacPasteboard__1getAllowedOperation");
+    LOG("gmac_pasteboard_get_allowed_operation");
 
-    jint mask = 0;
+    int32_t mask = 0;
 
-    GLASS_ASSERT_MAIN_JAVA_THREAD(env);
     GLASS_POOL_ENTER;
     {
-        NSPasteboard *pasteboard = (NSPasteboard*)jlong_to_ptr(jPtr);
+        NSPasteboard *pasteboard = (NSPasteboard*)ptr;
         if (pasteboard == [NSPasteboard pasteboardWithName:NSDragPboard])
         {
             // retrieve the mask for DnD
@@ -917,7 +822,137 @@ JNIEXPORT jint JNICALL Java_com_sun_glass_ui_mac_MacPasteboard__1getAllowedOpera
         }
     }
     GLASS_POOL_EXIT;
-    GLASS_CHECK_EXCEPTION(env);
 
     return mask;
+}
+
+#pragma mark --- shim-only test hooks
+
+GLASS_INTERNAL @interface GlassPasteboardItemRecorder : NSObject
+{
+@public
+    NSMutableString *record;
+}
+- (BOOL)setString:(NSString *)string forType:(NSPasteboardType)type;
+- (BOOL)setData:(NSData *)data forType:(NSPasteboardType)type;
+@end
+
+static void recordUnits(NSMutableString *record, NSString *string)
+{
+    if (string == nil)
+    {
+        [record appendString:@" nil"];
+        return;
+    }
+    [record appendFormat:@" %lu:", (unsigned long)[string length]];
+    for (NSUInteger i = 0; i < [string length]; i++)
+    {
+        [record appendFormat:@"%04x", (unsigned)[string characterAtIndex:i]];
+    }
+}
+
+@implementation GlassPasteboardItemRecorder
+
+- (BOOL)setString:(NSString *)string forType:(NSPasteboardType)type
+{
+    [record appendString:@"string"];
+    recordUnits(record, type);
+    recordUnits(record, string);
+    [record appendString:@"\n"];
+    return YES;
+}
+
+- (BOOL)setData:(NSData *)data forType:(NSPasteboardType)type
+{
+    [record appendString:@"data"];
+    recordUnits(record, type);
+    [record appendFormat:@" %lu:", (unsigned long)[data length]];
+    const uint8_t *bytes = [data bytes];
+    for (NSUInteger i = 0; i < MIN([data length], (NSUInteger)64); i++)
+    {
+        [record appendFormat:@"%02x", (unsigned)bytes[i]];
+    }
+    [record appendString:@"\n"];
+    return YES;
+}
+
+@end
+
+int32_t gmac_test_pasteboard_utis_block(const uint16_t *units, const int32_t *lengths, const int32_t *type_counts,
+                                        int32_t item_count, uint8_t **out_block, int32_t *out_length)
+{
+    int32_t status = GMAC_ERR_NO_DATA;
+    *out_block = NULL;
+    *out_length = 0;
+
+    GLASS_POOL_ENTER;
+    {
+        if (item_count > 0)
+        {
+            NSMutableArray *typeLists = [NSMutableArray arrayWithCapacity:(NSUInteger)item_count];
+            int32_t type = 0;
+            for (int32_t i = 0; i < item_count; i++)
+            {
+                NSMutableArray *types = [NSMutableArray array];
+                for (int32_t j = 0; j < type_counts[i]; j++, type++)
+                {
+                    [types addObject:[NSString stringWithCharacters:units length:(NSUInteger)lengths[type]]];
+                    units += lengths[type];
+                }
+                [typeLists addObject:types];
+            }
+            status = copyUtisBlock(typeLists, out_block, out_length);
+        }
+    }
+    GLASS_POOL_EXIT;
+
+    return status;
+}
+
+int32_t gmac_test_pasteboard_raw_image(const uint8_t *data, int32_t length, uint8_t **out_block,
+                                       int32_t *out_length)
+{
+    int32_t status;
+    *out_block = NULL;
+    *out_length = 0;
+
+    GLASS_POOL_ENTER;
+    {
+        NSData *imageData = [NSData dataWithBytes:data length:(NSUInteger)length];
+        NSImage *image = [[[NSImage alloc] initWithData:imageData] autorelease];
+        status = copyRawImageOfImage(image, out_block, out_length);
+    }
+    GLASS_POOL_EXIT;
+
+    return status;
+}
+
+int32_t gmac_test_pasteboard_raw_image_bounds(uint64_t width, uint64_t height)
+{
+    return (rawImageFitsPixels((size_t)width, (size_t)height) ? 1 : 0)
+        | (rawImageFitsBlock((size_t)width, (size_t)height) ? 2 : 0);
+}
+
+int32_t gmac_test_pasteboard_describe_items(const GmacPasteboardItem *items, int32_t item_count, char **out_utf8,
+                                            int32_t *out_length)
+{
+    int32_t status;
+
+    GLASS_POOL_ENTER;
+    {
+        GlassPasteboardItemRecorder *recorder = [[[GlassPasteboardItemRecorder alloc] init] autorelease];
+        recorder->record = [NSMutableString string];
+        for (int32_t i = 0; i < item_count; i++)
+        {
+            if (items[i].rep_count != GMAC_PASTEBOARD_ITEM_NULL)
+            {
+                [recorder->record appendString:@"item\n"];
+                FillItemFromReps(recorder, items[i].reps, items[i].rep_count);
+            }
+        }
+        status = GlassCopyUtf8([recorder->record UTF8String], out_utf8, out_length);
+    }
+    GLASS_POOL_EXIT;
+
+    return status;
 }

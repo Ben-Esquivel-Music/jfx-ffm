@@ -24,7 +24,6 @@
  */
 
 #import "common.h"
-#import "com_sun_glass_ui_mac_MacApplication.h"
 #import "com_sun_glass_events_KeyEvent.h"
 
 #import "GlassMacros.h"
@@ -35,6 +34,8 @@
 #import "GlassScreen.h"
 #import "GlassWindow.h"
 #import "PlatformSupport.h"
+#import "glass_mac_api.h"
+#import "glass_mac_internal.h"
 
 #import "ProcessInfo.h"
 #import <Security/SecRequirement.h>
@@ -49,10 +50,7 @@
     #define LOG(MSG, ...) GLASS_LOG(MSG, ## __VA_ARGS__);
 #endif
 
-//#define VERBOSE_LOAD
-
 static BOOL shouldKeepRunningNestedLoop = YES;
-static jobject nestedLoopReturnValue = NULL;
 static BOOL isFullScreenExitingLoop = NO;
 static NSMutableDictionary * keyCodeForCharMap = nil;
 static BOOL isEmbedded = NO;
@@ -69,7 +67,7 @@ static NSString* JavaRunLoopMode = @"AWTRunLoopMode";
 
 // List of allowable runLoop modes that Java runnables can run in.
 // This is used when calling performSelectorOnMainThread from
-// the JNI _invokeAndWait and _submitForLaterInvocation methods.
+// gmac_app_invoke_and_wait and gmac_app_invoke_later.
 // We include JavaRunLoopMode in the list of allowable run modes in case
 // we are running on the AWT event thread. This will allow JavaFX
 // runnables to be scheduled when AWT is running doAWTRunLoopImpl
@@ -82,27 +80,14 @@ static NSArray<NSString*> *runLoopModes = nil;
 // embedded mode.
 static NSString* awtEmbeddedEvent = @"AWTEmbeddedEvent";
 
-#ifdef STATIC_BUILD
-jint JNICALL JNI_OnLoad_glass(JavaVM *vm, void *reserved)
-#else
-jint JNICALL JNI_OnLoad(JavaVM *vm, void *reserved)
-#endif
-{
-    pthread_key_create(&GlassThreadDataKey, NULL);
-
-    memset(&javaIDs, 0, sizeof(javaIDs));
-    MAIN_JVM = vm;
-    return JNI_VERSION_1_4;
-}
-
 #pragma mark --- GlassRunnable
 
 @interface GlassRunnable : NSObject
 {
-    jobject jRunnable;
+    int64_t runnableId;
 }
 
-- (id)initWithRunnable:(jobject)runnable;
+- (id)initWithRunnableId:(int64_t)identifier;
 - (void)maybeRun;
 - (void)run;
 
@@ -112,9 +97,9 @@ static NSMutableArray<GlassRunnable*> *deferredRunnables = nil;
 
 @implementation GlassRunnable
 
-- (id)initWithRunnable:(jobject)runnable
+- (id)initWithRunnableId:(int64_t)identifier
 {
-    self->jRunnable = runnable;
+    self->runnableId = identifier;
     return self;
 }
 
@@ -123,16 +108,11 @@ static NSMutableArray<GlassRunnable*> *deferredRunnables = nil;
     NSAutoreleasePool *pool = [[NSAutoreleasePool alloc] init];
     {
         assert(pthread_main_np() == 1);
-        JNIEnv *env = jEnv;
-        if (env != NULL && self->jRunnable != NULL)
+        const GmacAppCallbacks *callbacks = GlassAppCallbacks();
+        if (GlassIsMainJavaAttached() && callbacks != NULL && callbacks->run_runnable != NULL)
         {
-            (*env)->CallVoidMethod(env, self->jRunnable, jRunnableRun);
-            GLASS_CHECK_EXCEPTION(env);
-
-            (*env)->DeleteGlobalRef(env, self->jRunnable);
+            callbacks->run_runnable(self->runnableId);
         }
-
-        self->jRunnable = NULL;
 
         [self release];
     }
@@ -165,30 +145,59 @@ static NSMutableArray<GlassRunnable*> *deferredRunnables = nil;
 @implementation NSApplicationFX
 @end
 
+static void dialAppSlot(int32_t (*slot)(void))
+{
+    if (slot != NULL)
+    {
+        slot();
+    }
+}
+
+// NULL while Java is detached from the main thread, after [NSApp run] returned: then no slot runs.
+static const GmacAppCallbacks *attachedAppCallbacks(void)
+{
+    return GlassIsMainJavaAttached() ? GlassAppCallbacks() : NULL;
+}
+
+// NO where the JNI's NewObjectArray of the String[] failed.
+static BOOL dialOpenFiles(const GmacAppCallbacks *callbacks, NSArray *filenames, NSUInteger count)
+{
+    if (callbacks->notify_open_files == NULL)
+    {
+        return YES;
+    }
+    const char **names = calloc(count > 0 ? count : 1, sizeof(char *));
+    int32_t *lengths = calloc(count > 0 ? count : 1, sizeof(int32_t));
+    BOOL built = names != NULL && lengths != NULL;
+    if (built)
+    {
+        for (NSUInteger i = 0; i < count; i++)
+        {
+            NSString *file = [filenames objectAtIndex:i];
+            names[i] = file != nil ? [file UTF8String] : NULL;
+            lengths[i] = names[i] != NULL ? (int32_t)strlen(names[i]) : 0;
+        }
+        built = callbacks->notify_open_files(names, lengths, (int32_t)count) != GMAC_UPCALL_THREW;
+    }
+    free(names);
+    free(lengths);
+    return built;
+}
+
 #pragma mark --- GlassApplication
 
 @implementation GlassApplication {
     PlatformSupport* platformSupport;
 }
 
-- (id)initWithEnv:(JNIEnv*)env application:(jobject)application launchable:(jobject)launchable taskbarApplication:(jboolean)isTaskbarApplication classLoader:(jobject)classLoader
+- (id)initWithTaskbarApplication:(BOOL)isTaskbarApplication launchable:(BOOL)launchable
 {
     self = [super init];
     if (self != nil)
     {
         self->started = NO;
-        self->jTaskBarApp = isTaskbarApplication;
-
-        self->jApplication = (*env)->NewGlobalRef(env, application);
-        if (launchable != NULL)
-        {
-            self->jLaunchable = (*env)->NewGlobalRef(env, launchable);
-        }
-
-        if (classLoader != NULL)
-        {
-            [GlassHelper SetGlassClassLoader:classLoader withEnv:env];
-        }
+        self->taskbarApplication = isTaskbarApplication;
+        self->hasLaunchable = launchable;
     }
     return self;
 }
@@ -209,85 +218,67 @@ static NSMutableArray<GlassRunnable*> *deferredRunnables = nil;
     LOG("GlassApplicationDidChangeScreenParameters");
 
     assert(pthread_main_np() == 1);
-    JNIEnv *env = jEnv;
-    if (env != NULL)
+    if (GlassIsMainJavaAttached())
     {
-        GlassScreenDidChangeScreenParameters(env);
+        GlassScreenDidChangeScreenParameters();
     }
+}
+
+- (void)observeScreenParameterChanges
+{
+    [[NSNotificationCenter defaultCenter] addObserver:self
+                                             selector:@selector(GlassApplicationDidChangeScreenParameters)
+                                                 name:NSApplicationDidChangeScreenParametersNotification
+                                               object:nil];
 }
 
 - (void)applicationWillFinishLaunching:(NSNotification *)aNotification
 {
     LOG("GlassApplication:applicationWillFinishLaunching");
 
-    GET_MAIN_JENV;
+    GLASS_WARN_IF_MAIN_JAVA_DETACHED;
     NSAutoreleasePool *pool = [[NSAutoreleasePool alloc] init];
     {
         // unblock main thread. Glass is started at this point.
-        self->platformSupport = [[PlatformSupport alloc] initWithEnv:env application:jApplication];
+        self->platformSupport = [[PlatformSupport alloc] init];
         self->started = YES;
 
-        if (self->jLaunchable != NULL)
+        const GmacAppCallbacks *callbacks = attachedAppCallbacks();
+        if (callbacks != NULL)
         {
-            jclass runnableClass = [GlassHelper ClassForName:"java.lang.Runnable" withEnv:jEnv];
-            if ((*env)->ExceptionCheck(env) == JNI_TRUE)
+            if (self->hasLaunchable)
             {
-                (*env)->ExceptionDescribe(env);
-                (*env)->ExceptionClear(env);
-            }
-            if (runnableClass) {
-                jmethodID runMethod = (*env)->GetMethodID(env, runnableClass, "run", "()V");
-                if ((*env)->ExceptionCheck(env) == JNI_TRUE)
+                int32_t status = callbacks->run_launchable != NULL ? callbacks->run_launchable() : GMAC_UPCALL_OK;
+                if (status == GMAC_UPCALL_OK)
                 {
-                    (*env)->ExceptionDescribe(env);
-                    (*env)->ExceptionClear(env);
-                }
-                if (runMethod) {
-                    (*env)->CallVoidMethod(env, self->jLaunchable, runMethod);
-                    if ((*env)->ExceptionCheck(env) == JNI_TRUE)
-                    {
-                        (*env)->ExceptionDescribe(env);
-                        (*env)->ExceptionClear(env);
-                    }
-                    else
-                    {
-                        [[NSNotificationCenter defaultCenter] addObserver:self
-                                                                 selector:@selector(GlassApplicationDidChangeScreenParameters)
-                                                                     name:NSApplicationDidChangeScreenParametersNotification
-                                                                   object:nil];
+                    [self observeScreenParameterChanges];
 
-                        // localMonitor = [NSEvent addLocalMonitorForEventsMatchingMask: NSRightMouseDownMask
-                        //                                                      handler:^(NSEvent *incomingEvent) {
-                        //                                                          NSEvent *result = incomingEvent;
-                        //                                                          NSWindow *targetWindowForEvent = [incomingEvent window];
-                        //                                                          LOG("NSRightMouseDownMask local");
-                        //                                                          return result;
-                        //                                                      }];
-                        //
-                        // globalMonitor = [NSEvent addGlobalMonitorForEventsMatchingMask: NSRightMouseDownMask
-                        //                                                      handler:^(NSEvent *incomingEvent) {
-                        //                                                          NSEvent *result = incomingEvent;
-                        //                                                          NSWindow *targetWindowForEvent = [incomingEvent window];
-                        //                                                          NSWindow *window = [[NSApplication sharedApplication]
-                        //                                                                       windowWithWindowNumber:[incomingEvent windowNumber]];
-                        //                                                          NSWindow *appWindow = [[NSApplication sharedApplication] mainWindow];
-                        //                                                          LOG("NSRightMouseDownMask global: %p num %d win %p appwin %p",
-                        //                                                              targetWindowForEvent, [incomingEvent windowNumber], window,
-                        //                                                              [[NSApplication sharedApplication] mainWindow]);
-                        //                                                     }];
-                    }
-                } else {
-                    NSLog(@"ERROR: Glass could not find run() method\n");
+                    // localMonitor = [NSEvent addLocalMonitorForEventsMatchingMask: NSRightMouseDownMask
+                    //                                                      handler:^(NSEvent *incomingEvent) {
+                    //                                                          NSEvent *result = incomingEvent;
+                    //                                                          NSWindow *targetWindowForEvent = [incomingEvent window];
+                    //                                                          LOG("NSRightMouseDownMask local");
+                    //                                                          return result;
+                    //                                                      }];
+                    //
+                    // globalMonitor = [NSEvent addGlobalMonitorForEventsMatchingMask: NSRightMouseDownMask
+                    //                                                      handler:^(NSEvent *incomingEvent) {
+                    //                                                          NSEvent *result = incomingEvent;
+                    //                                                          NSWindow *targetWindowForEvent = [incomingEvent window];
+                    //                                                          NSWindow *window = [[NSApplication sharedApplication]
+                    //                                                                       windowWithWindowNumber:[incomingEvent windowNumber]];
+                    //                                                          NSWindow *appWindow = [[NSApplication sharedApplication] mainWindow];
+                    //                                                          LOG("NSRightMouseDownMask global: %p num %d win %p appwin %p",
+                    //                                                              targetWindowForEvent, [incomingEvent windowNumber], window,
+                    //                                                              [[NSApplication sharedApplication] mainWindow]);
+                    //                                                     }];
                 }
-            } else {
-                NSLog(@"ERROR: Glass could not find Runnable class\n");
             }
-        }
 
-        (*env)->CallVoidMethod(env, self->jApplication, [GlassHelper ApplicationNotifyWillFinishLaunchingMethod]);
+            dialAppSlot(callbacks->notify_will_finish_launching);
+        }
     }
     [pool drain];
-    GLASS_CHECK_EXCEPTION(env);
 }
 
 - (BOOL)applicationSupportsSecureRestorableState:(NSApplication *)app {
@@ -298,13 +289,16 @@ static NSMutableArray<GlassRunnable*> *deferredRunnables = nil;
 {
     LOG("GlassApplication:applicationDidFinishLaunching");
 
-    GET_MAIN_JENV;
+    GLASS_WARN_IF_MAIN_JAVA_DETACHED;
     NSAutoreleasePool *pool = [[NSAutoreleasePool alloc] init];
     {
-        (*env)->CallVoidMethod(env, self->jApplication, [GlassHelper ApplicationNotifyDidFinishLaunchingMethod]);
+        const GmacAppCallbacks *callbacks = attachedAppCallbacks();
+        if (callbacks != NULL)
+        {
+            dialAppSlot(callbacks->notify_did_finish_launching);
+        }
     }
     [pool drain];
-    GLASS_CHECK_EXCEPTION(env);
 
     if (!NSApp.isActive && requiresActivation) {
         // As of macOS 14, application gets to the foreground,
@@ -320,26 +314,32 @@ static NSMutableArray<GlassRunnable*> *deferredRunnables = nil;
 {
     LOG("GlassApplication:applicationWillBecomeActive");
 
-    GET_MAIN_JENV;
+    GLASS_WARN_IF_MAIN_JAVA_DETACHED;
     NSAutoreleasePool *pool = [[NSAutoreleasePool alloc] init];
     {
-        (*env)->CallVoidMethod(env, self->jApplication, [GlassHelper ApplicationNotifyWillBecomeActiveMethod]);
+        const GmacAppCallbacks *callbacks = attachedAppCallbacks();
+        if (callbacks != NULL)
+        {
+            dialAppSlot(callbacks->notify_will_become_active);
+        }
     }
     [pool drain];
-    GLASS_CHECK_EXCEPTION(env);
 }
 
 - (void)applicationDidBecomeActive:(NSNotification *)aNotification
 {
     LOG("GlassApplication:applicationDidBecomeActive");
 
-    GET_MAIN_JENV;
+    GLASS_WARN_IF_MAIN_JAVA_DETACHED;
     NSAutoreleasePool *pool = [[NSAutoreleasePool alloc] init];
     {
-        (*env)->CallVoidMethod(env, self->jApplication, [GlassHelper ApplicationNotifyDidBecomeActiveMethod]);
+        const GmacAppCallbacks *callbacks = attachedAppCallbacks();
+        if (callbacks != NULL)
+        {
+            dialAppSlot(callbacks->notify_did_become_active);
+        }
     }
     [pool drain];
-    GLASS_CHECK_EXCEPTION(env);
 
     if (triggerReactivation && firstActivation) {
         LOG("-> deactivate (hide)  app");
@@ -353,26 +353,32 @@ static NSMutableArray<GlassRunnable*> *deferredRunnables = nil;
 {
     LOG("GlassApplication:applicationWillResignActive");
 
-    GET_MAIN_JENV;
+    GLASS_WARN_IF_MAIN_JAVA_DETACHED;
     NSAutoreleasePool *pool = [[NSAutoreleasePool alloc] init];
     {
-        (*env)->CallVoidMethod(env, self->jApplication, [GlassHelper ApplicationNotifyWillResignActiveMethod]);
+        const GmacAppCallbacks *callbacks = attachedAppCallbacks();
+        if (callbacks != NULL)
+        {
+            dialAppSlot(callbacks->notify_will_resign_active);
+        }
     }
     [pool drain];
-    GLASS_CHECK_EXCEPTION(env);
 }
 
 - (void)applicationDidResignActive:(NSNotification *)aNotification
 {
     LOG("GlassApplication:applicationDidResignActive");
 
-    GET_MAIN_JENV;
+    GLASS_WARN_IF_MAIN_JAVA_DETACHED;
     NSAutoreleasePool *pool = [[NSAutoreleasePool alloc] init];
     {
-        (*env)->CallVoidMethod(env, self->jApplication, [GlassHelper ApplicationNotifyDidResignActiveMethod]);
+        const GmacAppCallbacks *callbacks = attachedAppCallbacks();
+        if (callbacks != NULL)
+        {
+            dialAppSlot(callbacks->notify_did_resign_active);
+        }
     }
     [pool drain];
-    GLASS_CHECK_EXCEPTION(env);
 
     if (triggerReactivation && shouldReactivate) {
         LOG("-> reactivate  app");
@@ -385,87 +391,86 @@ static NSMutableArray<GlassRunnable*> *deferredRunnables = nil;
 {
     LOG("GlassApplication:applicationWillHide");
 
-    GET_MAIN_JENV;
+    GLASS_WARN_IF_MAIN_JAVA_DETACHED;
     NSAutoreleasePool *pool = [[NSAutoreleasePool alloc] init];
     {
-        (*env)->CallVoidMethod(env, self->jApplication, [GlassHelper ApplicationNotifyWillHideMethod]);
+        const GmacAppCallbacks *callbacks = attachedAppCallbacks();
+        if (callbacks != NULL)
+        {
+            dialAppSlot(callbacks->notify_will_hide);
+        }
     }
     [pool drain];
-    GLASS_CHECK_EXCEPTION(env);
 }
 
 - (void)applicationDidHide:(NSNotification *)aNotification
 {
     LOG("GlassApplication:applicationDidHide");
 
-    GET_MAIN_JENV;
+    GLASS_WARN_IF_MAIN_JAVA_DETACHED;
     NSAutoreleasePool *pool = [[NSAutoreleasePool alloc] init];
     {
-        (*env)->CallVoidMethod(env, self->jApplication, [GlassHelper ApplicationNotifyDidHideMethod]);
+        const GmacAppCallbacks *callbacks = attachedAppCallbacks();
+        if (callbacks != NULL)
+        {
+            dialAppSlot(callbacks->notify_did_hide);
+        }
     }
     [pool drain];
-    GLASS_CHECK_EXCEPTION(env);
 }
 
 - (void)applicationWillUnhide:(NSNotification *)aNotification
 {
     LOG("GlassApplication:applicationWillUnhide");
 
-    GET_MAIN_JENV;
+    GLASS_WARN_IF_MAIN_JAVA_DETACHED;
     NSAutoreleasePool *pool = [[NSAutoreleasePool alloc] init];
     {
-        (*env)->CallVoidMethod(env, self->jApplication, [GlassHelper ApplicationNotifyWillUnhideMethod]);
+        const GmacAppCallbacks *callbacks = attachedAppCallbacks();
+        if (callbacks != NULL)
+        {
+            dialAppSlot(callbacks->notify_will_unhide);
+        }
     }
     [pool drain];
-    GLASS_CHECK_EXCEPTION(env);
 }
 
 - (void)applicationDidUnhide:(NSNotification *)aNotification
 {
     LOG("GlassApplication:applicationDidUnhide");
 
-    GET_MAIN_JENV;
+    GLASS_WARN_IF_MAIN_JAVA_DETACHED;
     NSAutoreleasePool *pool = [[NSAutoreleasePool alloc] init];
     {
-        (*env)->CallVoidMethod(env, self->jApplication, [GlassHelper ApplicationNotifyDidUnhideMethod]);
+        const GmacAppCallbacks *callbacks = attachedAppCallbacks();
+        if (callbacks != NULL)
+        {
+            dialAppSlot(callbacks->notify_did_unhide);
+        }
     }
     [pool drain];
-    GLASS_CHECK_EXCEPTION(env);
 }
 
 - (void)application:(NSApplication *)theApplication openFiles:(NSArray *)filenames
 {
     LOG("GlassApplication:application:openFiles");
 
-    GET_MAIN_JENV;
+    GLASS_WARN_IF_MAIN_JAVA_DETACHED;
     NSApplicationDelegateReply reply = NSApplicationDelegateReplySuccess;
     NSAutoreleasePool *pool = [[NSAutoreleasePool alloc] init];
     {
         NSUInteger count = [filenames count];
-        jclass stringClass = [GlassHelper ClassForName:"java.lang.String" withEnv:env];
-        if (!stringClass) {
-            return;
-        }
-        jobjectArray files = (*env)->NewObjectArray(env, (jsize)count, stringClass, NULL);
-        GLASS_CHECK_EXCEPTION(env);
-        if (files != NULL) {
-            for (NSUInteger i=0; i<count; i++)
+        const GmacAppCallbacks *callbacks = attachedAppCallbacks();
+        if (callbacks != NULL)
+        {
+            if (!dialOpenFiles(callbacks, filenames, count))
             {
-                NSString *file = [filenames objectAtIndex:i];
-                if (file != nil)
-                {
-                    (*env)->SetObjectArrayElement(env, files, (jsize)i, (*env)->NewStringUTF(env, [file UTF8String]));
-                    GLASS_CHECK_EXCEPTION(env);
-                }
+                fprintf(stderr, "NewObjectArray failed in GlassApplication_application\n");
+                reply = NSApplicationDelegateReplyFailure;
             }
-            (*env)->CallVoidMethod(env, self->jApplication, [GlassHelper ApplicationNotifyOpenFilesMethod], files);
-        } else {
-            fprintf(stderr, "NewObjectArray failed in GlassApplication_application\n");
-            reply = NSApplicationDelegateReplyFailure;
         }
     }
     [pool drain];
-    GLASS_CHECK_EXCEPTION(env);
 
     [theApplication replyToOpenOrPrint:reply];
 }
@@ -530,13 +535,16 @@ static NSMutableArray<GlassRunnable*> *deferredRunnables = nil;
 {
     LOG("GlassApplication:applicationShouldTerminate");
 
-    GET_MAIN_JENV;
+    GLASS_WARN_IF_MAIN_JAVA_DETACHED;
     NSAutoreleasePool *pool = [[NSAutoreleasePool alloc] init];
     {
-        (*env)->CallVoidMethod(env, self->jApplication, [GlassHelper ApplicationNotifyWillQuitMethod]);
+        const GmacAppCallbacks *callbacks = attachedAppCallbacks();
+        if (callbacks != NULL)
+        {
+            dialAppSlot(callbacks->notify_will_quit);
+        }
     }
     [pool drain];
-    GLASS_CHECK_EXCEPTION(env);
 
     return NSTerminateCancel;
 }
@@ -559,8 +567,8 @@ static NSMutableArray<GlassRunnable*> *deferredRunnables = nil;
 
     NSAutoreleasePool *pool1 = [[NSAutoreleasePool alloc] init];
 
-    jint error = (*jVM)->AttachCurrentThreadAsDaemon(jVM, (void **)&jEnv, NULL);
-    if (error == 0)
+    // The first upcall, set_event_thread below, attaches the main thread to Java: nothing before it runs Java.
+    GlassSetMainJavaAttached(1);
     {
         NSAutoreleasePool *pool2 = [[NSAutoreleasePool alloc] init];
 
@@ -570,26 +578,12 @@ static NSMutableArray<GlassRunnable*> *deferredRunnables = nil;
         }
 
         GlassApplication *glassApp = (GlassApplication *)selector;
+        const GmacAppCallbacks *callbacks = GlassAppCallbacks();
 
-        // Load MacApplication class using the glass classloader
-        jclass cls = [GlassHelper ClassForName:"com.sun.glass.ui.mac.MacApplication" withEnv:jEnv];
-        if (!cls)
+        if (callbacks != NULL)
         {
-            NSLog(@"ERROR: can't find the MacApplication class");
+            dialAppSlot(callbacks->set_event_thread);
         }
-        else
-        {
-            jmethodID setEventThreadMID = (*jEnv)->GetMethodID(jEnv, cls, "setEventThread", "()V");
-            if (!setEventThreadMID)
-            {
-                NSLog(@"ERROR: can't get MacApplication.setEventThread() method ID");
-            }
-            else
-            {
-                (*jEnv)->CallVoidMethod(jEnv, glassApp->jApplication, setEventThreadMID);
-            }
-        }
-        GLASS_CHECK_EXCEPTION(jEnv);
 
         NSBundle *mainBundle = [NSBundle mainBundle];
         {
@@ -601,13 +595,11 @@ static NSMutableArray<GlassRunnable*> *deferredRunnables = nil;
 
             if (appName) {
                 // make the name available to Java side, before Launchable.fnishLaunching callback
-                jstring jname = (*jEnv)->NewStringUTF(jEnv, [appName UTF8String]);
-                jmethodID setNameMethod = (*jEnv)->GetMethodID(jEnv, cls, "setName", "(Ljava/lang/String;)V");
-                GLASS_CHECK_EXCEPTION(jEnv);
-                if (setNameMethod != NULL) {
-                    (*jEnv)->CallVoidMethod(jEnv, glassApp->jApplication, setNameMethod, jname);
+                if (callbacks != NULL && callbacks->set_name != NULL)
+                {
+                    const char *name = [appName UTF8String];
+                    callbacks->set_name(name, name != NULL ? (int32_t)strlen(name) : 0);
                 }
-                GLASS_CHECK_EXCEPTION(jEnv);
             }
         }
 
@@ -637,7 +629,7 @@ static NSMutableArray<GlassRunnable*> *deferredRunnables = nil;
             if (@available(macOS 10.12, *)) {
                 [NSWindow setAllowsAutomaticWindowTabbing:NO];
             }
-            if (self->jTaskBarApp == JNI_TRUE)
+            if (self->taskbarApplication)
             {
                 triggerReactivation = YES;
 
@@ -726,36 +718,18 @@ static NSMutableArray<GlassRunnable*> *deferredRunnables = nil;
                 [app setDelegate:self];
             }
 
-#if defined(VERBOSE_LOAD)
-            jclass BooleanClass = [GlassHelper ClassForName:"java.lang.Boolean" withEnv:jEnv];
-            if (BooleanClass != 0)
-            {
-                jmethodID getBooleanMethod = (*jEnv)->GetStaticMethodID(jEnv, BooleanClass, "getBoolean", "(Ljava/lang/String;)Z");
-                if (getBooleanMethod != 0)
-                {
-                    jstring flag = (*jEnv)->NewStringUTF(jEnv, "glassload.verbose");
-                    jboolean verbose = (*jEnv)->CallStaticBooleanMethod(jEnv, BooleanClass, getBooleanMethod, flag);
-                    if (verbose == JNI_TRUE)
-                    {
-                        printLoadedLibraries(stderr);
-                        printLoadedFiles(stderr);
-                    }
-                }
-            }
-#endif
-
             // drain the pool before entering runloop
             [pool2 drain];
 
             // enter runloop, this will not return until terminated
             [NSApp run];
 
-            GLASS_CHECK_EXCEPTION(jEnv);
+            if (callbacks != NULL)
+            {
+                dialAppSlot(callbacks->notify_did_terminate);
+            }
 
-            (*jEnv)->CallVoidMethod(jEnv, self->jApplication, javaIDs.MacApplication.notifyApplicationDidTerminate);
-            GLASS_CHECK_EXCEPTION(jEnv);
-
-            jEnv = NULL;
+            GlassSetMainJavaAttached(0);
         }
         else // event loop is not started
         {
@@ -768,14 +742,9 @@ static NSMutableArray<GlassRunnable*> *deferredRunnables = nil;
             } else {
                 [glassApp performSelectorOnMainThread:@selector(applicationWillFinishLaunching:) withObject:NULL waitUntilDone:NO];
             }
-            GLASS_CHECK_EXCEPTION(jEnv);
 
             [pool2 drain];
         }
-    }
-    else // attaching to JVM failed
-    {
-        NSLog(@"ERROR: Glass could not attach to VM, result:%d\n", (int)error);
     }
 
     [pool1 drain];
@@ -788,15 +757,14 @@ static NSMutableArray<GlassRunnable*> *deferredRunnables = nil;
     return self->started;
 }
 
-- (jobject)getPlatformPreferences
+- (GmacPref *)collectPreferenceEntries:(int32_t *)count
 {
-    return platformSupport != nil ? [platformSupport collectPreferences] : nil;
+    *count = 0;
+    return platformSupport != nil ? [platformSupport collectPreferenceEntries:count] : NULL;
 }
 
-+ (jobject)enterNestedEventLoopWithEnv:(JNIEnv*)env
+static void runNestedEventLoop(void)
 {
-    jobject ret = NULL;
-
     NSRunLoop *theRL = [NSRunLoop currentRunLoop];
     NSApplication * app = [NSApplication sharedApplication];
     shouldKeepRunningNestedLoop = YES;
@@ -812,23 +780,7 @@ static NSMutableArray<GlassRunnable*> *deferredRunnables = nil;
         }
     }
 
-    if (nestedLoopReturnValue != NULL) {
-        ret = (*env)->NewLocalRef(env, nestedLoopReturnValue);
-        (*env)->DeleteGlobalRef(env, nestedLoopReturnValue);
-        nestedLoopReturnValue = NULL;
-    }
-
     shouldKeepRunningNestedLoop = YES;
-
-    return ret;
-}
-
-+ (void)leaveNestedEventLoopWithEnv:(JNIEnv*)env retValue:(jobject)retValue
-{
-    if (retValue != NULL) {
-        nestedLoopReturnValue = (*env)->NewGlobalRef(env, retValue);
-    }
-    shouldKeepRunningNestedLoop = NO;
 }
 
 + (void)enterFullScreenExitingLoop
@@ -837,12 +789,10 @@ static NSMutableArray<GlassRunnable*> *deferredRunnables = nil;
         return;
     }
     isFullScreenExitingLoop = YES;
-    GET_MAIN_JENV;
-    (*env)->CallStaticObjectMethod(env, jApplicationClass,
-            javaIDs.Application.enterNestedEventLoop);
-    if ((*env)->ExceptionCheck(env) == JNI_TRUE) {
-        (*env)->ExceptionDescribe(env);
-        (*env)->ExceptionClear(env);
+    GLASS_WARN_IF_MAIN_JAVA_DETACHED;
+    const GmacAppCallbacks *callbacks = attachedAppCallbacks();
+    if (callbacks != NULL) {
+        dialAppSlot(callbacks->enter_nested_event_loop);
     }
     isFullScreenExitingLoop = NO;
     [GlassRunnable rescheduleDeferredRunnables];
@@ -853,9 +803,11 @@ static NSMutableArray<GlassRunnable*> *deferredRunnables = nil;
     if (!isFullScreenExitingLoop) {
         return;
     }
-    GET_MAIN_JENV;
-    (*env)->CallStaticVoidMethod(env, jApplicationClass,
-            javaIDs.Application.leaveNestedEventLoop, (jobject)NULL);
+    GLASS_WARN_IF_MAIN_JAVA_DETACHED;
+    const GmacAppCallbacks *callbacks = attachedAppCallbacks();
+    if (callbacks != NULL) {
+        dialAppSlot(callbacks->leave_nested_event_loop);
+    }
 }
 
 static void inputDidChangeCallback(CFNotificationCenterRef center, void *observer, CFNotificationName name, const void *object, CFDictionaryRef userInfo)
@@ -869,7 +821,7 @@ static void inputDidChangeCallback(CFNotificationCenterRef center, void *observe
 {
     if (!keyCodeForCharMap) {
         keyCodeForCharMap = [[NSMutableDictionary alloc] initWithCapacity:100];
-        // Note: it's never released, just like, say, the jApplication reference...
+        // Note: it is never released.
         // To avoid stale entries when the user switches layout
         CFNotificationCenterRef center = CFNotificationCenterGetDistributedCenter();
         CFNotificationCenterAddObserver(center, NULL, inputDidChangeCallback,
@@ -898,7 +850,7 @@ static void inputDidChangeCallback(CFNotificationCenterRef center, void *observe
     // by typing it directly.
 }
 
-+ (jint)getKeyCodeForChar:(jchar)c;
++ (int32_t)getKeyCodeForChar:(uint16_t)c;
 {
     id v = [keyCodeForCharMap objectForKey:[NSString stringWithCharacters: (UniChar *)&c length:1]];
     if (!v) {
@@ -916,20 +868,25 @@ static void inputDidChangeCallback(CFNotificationCenterRef center, void *observe
     return isEmbedded;
 }
 
+// Inside the implementation, which is what lets a function read the ivars.
+int32_t gmac_test_inspect_and_release_app_delegate(void *app)
+{
+    if (app == NULL)
+    {
+        return -1;
+    }
+    GlassApplication *glass = (GlassApplication *)app;
+    int32_t state = (glass->taskbarApplication ? 1 : 0) | (glass->hasLaunchable ? 2 : 0);
+    [glass release];
+    return state;
+}
+
 @end
 
-#pragma mark --- JNI
+#pragma mark --- C ABI
 
-/*
- * Class:     com_sun_glass_ui_mac_MacApplication
- * Method:    _initIDs
- * Signature: ()V
- */
-JNIEXPORT void JNICALL Java_com_sun_glass_ui_mac_MacApplication__1initIDs
-(JNIEnv *env, jclass jClass, jboolean jDisableSyncRendering)
+int32_t gmac_app_init(int32_t disable_sync_rendering)
 {
-    LOG("Java_com_sun_glass_ui_mac_MacApplication__1initIDs");
-
     // Check minimum OS version
     NSOperatingSystemVersion osVer;
     osVer = [[NSProcessInfo processInfo] operatingSystemVersion];
@@ -951,84 +908,21 @@ JNIEXPORT void JNICALL Java_com_sun_glass_ui_mac_MacApplication__1initIDs
     {
         NSLog(@"ERROR: macOS version is %d.%d, which is below the minimum of %d.%d",
               (int)osVerMajor, (int)osVerMinor, MACOS_MIN_VERSION_MAJOR, MACOS_MIN_VERSION_MINOR);
-        jclass exceptionClass = (*env)->FindClass(env, "java/lang/RuntimeException");
-        if (exceptionClass != 0) {
-            (*env)->ThrowNew(env, exceptionClass, "Unsupported macOS version");
-        }
-        return;
+        return GMAC_ERR_UNSUPPORTED_OS;
     }
 
-    disableSyncRendering = jDisableSyncRendering ? YES : NO;
-
-    jApplicationClass = (*env)->NewGlobalRef(env, jClass);
-
-    javaIDs.Application.createPixels = (*env)->GetStaticMethodID(
-            env, jClass, "createPixels", "(II[IFF)Lcom/sun/glass/ui/Pixels;");
-    if ((*env)->ExceptionCheck(env)) return;
-
-    javaIDs.Application.getScaleFactor = (*env)->GetStaticMethodID(
-            env, jClass, "getScaleFactor", "(IIII)F");
-    if ((*env)->ExceptionCheck(env)) return;
-
-    javaIDs.Application.reportException = (*env)->GetStaticMethodID(
-            env, jClass, "reportException", "(Ljava/lang/Throwable;)V");
-    if ((*env)->ExceptionCheck(env)) return;
-
-    javaIDs.Application.enterNestedEventLoop = (*env)->GetStaticMethodID(
-            env, jClass, "enterNestedEventLoop", "()Ljava/lang/Object;");
-    if ((*env)->ExceptionCheck(env)) return;
-
-    javaIDs.Application.leaveNestedEventLoop = (*env)->GetStaticMethodID(
-            env, jClass, "leaveNestedEventLoop", "(Ljava/lang/Object;)V");
-    if ((*env)->ExceptionCheck(env)) return;
-
-    javaIDs.MacApplication.notifyApplicationDidTerminate = (*env)->GetMethodID(
-            env, jClass, "notifyApplicationDidTerminate", "()V");
-    if ((*env)->ExceptionCheck(env)) return;
-
-    javaIDs.MacApplication.notifyPreferencesChanged = (*env)->GetMethodID(
-            env, jClass, "notifyPreferencesChanged", "(Ljava/util/Map;)V");
-    if ((*env)->ExceptionCheck(env)) return;
-
-    if (jRunnableRun == NULL)
-    {
-        jclass jcls = (*env)->FindClass(env, "java/lang/Runnable");
-        if ((*env)->ExceptionCheck(env)) return;
-        jRunnableRun = (*env)->GetMethodID(env, jcls, "run", "()V");
-        if ((*env)->ExceptionCheck(env)) return;
-    }
-
-    [PlatformSupport initIDs:env];
+    disableSyncRendering = disable_sync_rendering ? YES : NO;
+    return GMAC_OK;
 }
 
-/*
- * Class:     com_sun_glass_ui_mac_MacApplication
- * Method:    _initDelegate
- * Signature: (Ljava/lang/ClassLoader;Ljava/lang/Runnable;Z)J
- */
-JNIEXPORT jlong JNICALL Java_com_sun_glass_ui_mac_MacApplication__1initDelegate
-(JNIEnv *env, jobject japplication, jobject classLoader,
- jobject jlaunchable, jboolean isTaskbarApplication)
+void *gmac_app_create_delegate(int32_t taskbar_application, int32_t has_launchable)
 {
-    LOG("Java_com_sun_glass_ui_mac_MacApplication__1initDelegate");
-
-    return (jlong)[[GlassApplication alloc] initWithEnv:env
-                                            application:japplication
-                                            launchable:jlaunchable
-                                            taskbarApplication:isTaskbarApplication
-                                            classLoader:classLoader];
+    return [[GlassApplication alloc] initWithTaskbarApplication:taskbar_application == 1
+                                                     launchable:has_launchable != 0];
 }
 
-/*
- * Class:     com_sun_glass_ui_mac_MacApplication
- * Method:    _runLoop
- * Signature: (J)V
- */
-JNIEXPORT void JNICALL Java_com_sun_glass_ui_mac_MacApplication__1runLoop
-(JNIEnv *env, jobject japplication, jlong appDelegate)
+void gmac_app_run_loop(void *app)
 {
-    LOG("Java_com_sun_glass_ui_mac_MacApplication__1runLoop");
-
     NSAutoreleasePool *glasspool = [[NSAutoreleasePool alloc] init];
     {
         if ([NSThread isMainThread] == YES)
@@ -1043,7 +937,7 @@ JNIEXPORT void JNICALL Java_com_sun_glass_ui_mac_MacApplication__1runLoop
             }
         }
 
-        GlassApplication* glass = (GlassApplication*)appDelegate;
+        GlassApplication* glass = (GlassApplication*)app;
         if ([NSThread isMainThread] == YES) {
             [glass runLoop: glass];
         } else {
@@ -1060,21 +954,12 @@ JNIEXPORT void JNICALL Java_com_sun_glass_ui_mac_MacApplication__1runLoop
         // at this point Java main thread is allowed to proceed, but Cocoa's UI thread entered its runloop, so the VM will not quit
     }
     [glasspool drain]; glasspool=nil;
-    GLASS_CHECK_EXCEPTION(env);
 }
 
-/*
- * Class:     com_sun_glass_ui_mac_MacApplication
- * Method:    _finishTerminating
- * Signature: (J)V
- */
-JNIEXPORT void JNICALL Java_com_sun_glass_ui_mac_MacApplication__1finishTerminating
-(JNIEnv *env, jobject japplication, jlong appDelegate)
+void gmac_app_finish_terminating(void *app)
 {
-    LOG("Java_com_sun_glass_ui_mac_MacApplication__1finishTerminating");
-
-    if (appDelegate) {
-        [(GlassApplication*)appDelegate release];
+    if (app) {
+        [(GlassApplication*)app release];
     }
 
     if (isEmbedded) {
@@ -1101,96 +986,63 @@ JNIEXPORT void JNICALL Java_com_sun_glass_ui_mac_MacApplication__1finishTerminat
         [NSApp postEvent: event atStart: NO];
     }
     [glasspool drain]; glasspool=nil;
-    GLASS_CHECK_EXCEPTION(env);
 }
 
-/*
- * Class:     com_sun_glass_ui_mac_MacApplication
- * Method:    _enterNestedEventLoopImpl
- * Signature: ()Ljava/lang/Object;
- */
-JNIEXPORT jobject JNICALL Java_com_sun_glass_ui_mac_MacApplication__1enterNestedEventLoopImpl
-(JNIEnv *env, jobject japplication)
+void gmac_app_enter_nested_loop(void)
 {
-    LOG("Java_com_sun_glass_ui_mac_MacApplication__1enterNestedEventLoopImpl");
-
-    jobject ret;
-
     NSAutoreleasePool *glasspool = [[NSAutoreleasePool alloc] init];
     {
-        ret = [GlassApplication enterNestedEventLoopWithEnv:env];
+        runNestedEventLoop();
     }
     [glasspool drain]; glasspool=nil;
-    GLASS_CHECK_EXCEPTION(env);
-
-    return ret;
 }
 
-/*
- * Class:     com_sun_glass_ui_mac_MacApplication
- * Method:    _leaveNestedEventLoopImpl
- * Signature: (Ljava/lang/Object;)V
- */
-JNIEXPORT void JNICALL Java_com_sun_glass_ui_mac_MacApplication__1leaveNestedEventLoopImpl
-(JNIEnv *env, jobject japplication, jobject retValue)
+void gmac_app_leave_nested_loop(void)
 {
-    LOG("Java_com_sun_glass_ui_mac_MacApplication__1leaveNestedEventLoopImpl");
-
     NSAutoreleasePool *glasspool = [[NSAutoreleasePool alloc] init];
     {
-        [GlassApplication leaveNestedEventLoopWithEnv:env retValue:retValue];
+        shouldKeepRunningNestedLoop = NO;
     }
     [glasspool drain]; glasspool=nil;
-    GLASS_CHECK_EXCEPTION(env);
 }
 
-/*
- * Class:     com_sun_glass_ui_Application
- * Method:    _submitForLaterInvocation
- * Signature: (Ljava/lang/Runnable;)V
- */
-JNIEXPORT void JNICALL Java_com_sun_glass_ui_mac_MacApplication__1submitForLaterInvocation
-(JNIEnv *env, jobject japplication, jobject jRunnable)
+static void postRunnable(GlassRunnable *runnable)
 {
-    //LOG("Java_com_sun_glass_ui_mac_MacApplication_submitForLaterInvocation");
+    [runnable performSelectorOnMainThread:@selector(maybeRun) withObject:nil waitUntilDone:NO modes:runLoopModes];
+}
 
-    GLASS_ASSERT_MAIN_JAVA_THREAD(env);
-    if (jEnv != NULL)
+static void runRunnableAndWait(GlassRunnable *runnable)
+{
+    [runnable performSelectorOnMainThread:@selector(run) withObject:nil waitUntilDone:YES modes:runLoopModes];
+}
+
+static int32_t droppedRunnableStatus(void)
+{
+    return pthread_main_np() == 0 ? GMAC_ERR_DETACHED_OFF_MAIN : GMAC_ERR_NOT_ATTACHED;
+}
+
+int32_t gmac_app_invoke_later(int64_t runnable_id)
+{
+    if (!GlassIsMainJavaAttached())
     {
-        GlassRunnable *runnable = [[GlassRunnable alloc] initWithRunnable:(*env)->NewGlobalRef(env, jRunnable)];
-        [runnable performSelectorOnMainThread:@selector(maybeRun) withObject:nil waitUntilDone:NO modes:runLoopModes];
+        return droppedRunnableStatus();
     }
+    postRunnable([[GlassRunnable alloc] initWithRunnableId:runnable_id]);
+    return GMAC_OK;
 }
 
-/*
- * Class:     com_sun_glass_ui_Application
- * Method:    _invokeAndWait
- * Signature: (Ljava/lang/Runnable;)V
- */
-JNIEXPORT void JNICALL Java_com_sun_glass_ui_mac_MacApplication__1invokeAndWait
-(JNIEnv *env, jobject japplication, jobject jRunnable)
+int32_t gmac_app_invoke_and_wait(int64_t runnable_id)
 {
-    LOG("Java_com_sun_glass_ui_mac_MacApplication__1invokeAndWait");
-
-    GLASS_ASSERT_MAIN_JAVA_THREAD(env);
-    if (jEnv != NULL)
+    if (!GlassIsMainJavaAttached())
     {
-        GlassRunnable *runnable = [[GlassRunnable alloc] initWithRunnable:(*env)->NewGlobalRef(env, jRunnable)];
-        [runnable performSelectorOnMainThread:@selector(run) withObject:nil waitUntilDone:YES modes:runLoopModes];
+        return droppedRunnableStatus();
     }
+    runRunnableAndWait([[GlassRunnable alloc] initWithRunnableId:runnable_id]);
+    return GMAC_OK;
 }
 
-/*
- * Class:     com_sun_glass_ui_mac_MacApplication
- * Method:    staticScreen_getVideoRefreshPeriod
- * Signature: ()D
- */
-JNIEXPORT jdouble JNICALL
-Java_com_sun_glass_ui_mac_MacApplication_staticScreen_1getVideoRefreshPeriod
-(JNIEnv *env, jobject jApplication)
+double gmac_screen_video_refresh_period(void)
 {
-    LOG("Java_com_sun_glass_ui_mac_MacApplication__1getVideoRefreshPeriod");
-
     if (GlassDisplayLink != NULL)
     {
         double outRefresh = CVDisplayLinkGetActualOutputVideoRefreshPeriod(GlassDisplayLink);
@@ -1203,149 +1055,72 @@ Java_com_sun_glass_ui_mac_MacApplication_staticScreen_1getVideoRefreshPeriod
     }
 }
 
-/*
- * Class:     com_sun_glass_ui_mac_MacApplication
- * Method:    staticScreen_getScreens
- * Signature: ()[Lcom/sun/glass/ui/Screen;
- */
-JNIEXPORT jobjectArray JNICALL Java_com_sun_glass_ui_mac_MacApplication_staticScreen_1getScreens
-(JNIEnv *env, jobject jApplication)
+int32_t gmac_app_is_trigger_reactivation(void)
 {
-    LOG("Java_com_sun_glass_ui_mac_MacApplication__1getScreens");
-
-    jobjectArray screenArray = nil;
-
-    GLASS_POOL_ENTER;
-    {
-        screenArray = createJavaScreens(env);
-    }
-    GLASS_POOL_EXIT;
-    GLASS_CHECK_EXCEPTION(env);
-
-    return screenArray;
+    return triggerReactivation ? 1 : 0;
 }
 
-/*
- * Class:     com_sun_glass_ui_mac_MacApplication
- * Method:    _isTriggerReactivation
- * Signature: ()Z;
- */
-JNIEXPORT jboolean JNICALL Java_com_sun_glass_ui_mac_MacApplication__1isTriggerReactivation
-(JNIEnv *env, jobject japplication)
-{
-    LOG("Java_com_sun_glass_ui_mac_MacApplication__1isTriggerReactivation");
-    return triggerReactivation;
-}
-
-/*
- * Class:     com_sun_glass_ui_mac_MacApplication
- * Method:    _hide
- * Signature: ()V;
- */
-JNIEXPORT void JNICALL Java_com_sun_glass_ui_mac_MacApplication__1hide
-(JNIEnv *env, jobject japplication)
+void gmac_app_hide(void)
 {
     [NSApp hide:NSApp];
 }
 
-/*
- * Class:     com_sun_glass_ui_mac_MacApplication
- * Method:    _hideOtherApplications
- * Signature: ()V;
- */
-JNIEXPORT void JNICALL Java_com_sun_glass_ui_mac_MacApplication__1hideOtherApplications
-(JNIEnv *env, jobject japplication)
+void gmac_app_hide_other_applications(void)
 {
     [NSApp hideOtherApplications:NSApp];
 }
 
-/*
- * Class:     com_sun_glass_ui_mac_MacApplication
- * Method:    _unhideAllApplications
- * Signature: ()V;
- */
-JNIEXPORT void JNICALL Java_com_sun_glass_ui_mac_MacApplication__1unhideAllApplications
-(JNIEnv *env, jobject japplication)
+void gmac_app_unhide_all_applications(void)
 {
     [NSApp unhideAllApplications:NSApp];
 }
 
-/*
- * Class:     com_sun_glass_ui_mac_MacApplication
- * Method:    _getDataDirectory
- * Signature: ()Ljava/lang/String;
- */
-JNIEXPORT jstring JNICALL Java_com_sun_glass_ui_mac_MacApplication__1getDataDirectory
-(JNIEnv * env, jobject japplication)
+int32_t gmac_app_data_directory(char **out_utf8, int32_t *out_length)
 {
-    jstring string = nil;
+    int32_t status = GMAC_ERR_NO_DATA;
+    *out_utf8 = NULL;
+    *out_length = 0;
 
-    GLASS_ASSERT_MAIN_JAVA_THREAD(env);
     GLASS_POOL_ENTER;
     {
     NSArray *paths = NSSearchPathForDirectoriesInDomains(NSApplicationSupportDirectory, NSUserDomainMask, YES);
     if (paths && [paths count] > 0) {
-        string = (*env)->NewStringUTF(jEnv, [[paths lastObject] UTF8String]);
+        status = GlassCopyUtf8([[paths lastObject] UTF8String], out_utf8, out_length);
     }
     }
     GLASS_POOL_EXIT;
-    GLASS_CHECK_EXCEPTION(env);
 
-    return string;
+    return status;
 }
 
-/*
- * Class:     com_sun_glass_ui_mac_MacApplication
- * Method:    _getMacKey
- * Signature: (I)I
- */
-JNIEXPORT jint JNICALL Java_com_sun_glass_ui_mac_MacApplication__1getMacKey
-(JNIEnv *env, jclass jClass, jint code)
+int32_t gmac_key_java_to_mac(int32_t java_key_code)
 {
     unsigned short macCode = 0;
-    GetMacKey(code, &macCode);
+    GetMacKey(java_key_code, &macCode);
     return (macCode & 0xFFFF);
 }
 
-/*
- * Class:     com_sun_glass_ui_mac_MacApplication
- * Method:    _getApplicationClassName
- * Signature: ()Ljava/lang/String;
- */
-JNIEXPORT jobject JNICALL Java_com_sun_glass_ui_mac_MacApplication__1getApplicationClassName
-(JNIEnv *env, jobject self)
+int32_t gmac_app_class_name(char **out_utf8, int32_t *out_length)
 {
     NSString* className = NSStringFromClass([[NSApplicationFX sharedApplication] class]);
-    return (*env)->NewStringUTF(env, [className UTF8String]);
+    return GlassCopyUtf8([className UTF8String], out_utf8, out_length);
 }
 
-/*
- * Class:     com_sun_glass_ui_mac_MacApplication
- * Method:    _getPlatformPreferences
- * Signature: (J)Ljava/util/Map;
- */
-JNIEXPORT jobject JNICALL Java_com_sun_glass_ui_mac_MacApplication__1getPlatformPreferences
-(JNIEnv *env, jobject self, jlong appDelegate)
+int32_t gmac_app_collect_preferences(void *app, GmacPref **out_entries, int32_t *out_count)
 {
-    return appDelegate
-        ? [(GlassApplication*)appDelegate getPlatformPreferences]
-        : nil;
+    *out_count = 0;
+    *out_entries = app != NULL ? [(GlassApplication *)app collectPreferenceEntries:out_count] : NULL;
+    return *out_entries != NULL ? GMAC_OK : GMAC_ERR_NO_DATA;
 }
 
-/*
- * Class:       com_sun_glass_ui_mac_MacApplication
- * Method:      _openURI
- * Signature:   (java/lang/String;)I;
- */
-JNIEXPORT jint JNICALL Java_com_sun_glass_ui_mac_MacApplication__1openURI
-(JNIEnv *env, jclass jClass, jstring uri)
+int32_t gmac_app_open_uri(const uint16_t *uri, int32_t length, int32_t *out_completed)
 {
     __block OSStatus status = noErr;
+    *out_completed = 0;
 
-    GLASS_ASSERT_MAIN_JAVA_THREAD(env);
     GLASS_POOL_ENTER;
 
-    NSURL *url = [NSURL URLWithString:jStringToNSString(env, uri)];
+    NSURL *url = [NSURL URLWithString:GlassNSStringOrNil(uri, length)];
 
     NSURL *httpsURL = [NSURL URLWithString:@"https://"];
     NSWorkspace *workspace = [NSWorkspace sharedWorkspace];
@@ -1378,7 +1153,7 @@ JNIEXPORT jint JNICALL Java_com_sun_glass_ui_mac_MacApplication__1openURI
     dispatch_release(semaphore);
 
     GLASS_POOL_EXIT;
-    GLASS_CHECK_EXCEPTION(env);
+    *out_completed = 1;
 
     return status;
 }

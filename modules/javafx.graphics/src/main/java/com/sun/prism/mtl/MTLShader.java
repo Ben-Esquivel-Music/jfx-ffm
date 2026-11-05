@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2021, 2025, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2021, 2026, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -50,13 +50,13 @@ class MTLShader implements Shader {
         this.fragmentFunctionName = fragmentFunctionName;
         this.context = context;
 
-        nMetalShaderRef = nCreateMetalShader(context.getContextHandle(), fragmentFunctionName);
+        nMetalShaderRef = MTLNative.shaderCreate(context.getContextHandle(), fragmentFunctionName);
         if (nMetalShaderRef != 0) {
             shaderMap.put(fragmentFunctionName, this);
         } else {
             throw new InternalError("Failed to create the Shader : " + fragmentFunctionName);
         }
-        uniformNameIdMap = nGetUniformNameIdMap(nMetalShaderRef);
+        uniformNameIdMap = MTLNative.shaderUniformNameIdMap(nMetalShaderRef);
     }
 
     public static Shader createShader(MTLContext ctx, String fragFuncName, Map<String, Integer> samplers,
@@ -86,7 +86,7 @@ class MTLShader implements Shader {
     @Override
     public void enable() {
         currentEnabledShader = this;
-        nEnable(nMetalShaderRef);
+        MTLNative.shaderEnable(nMetalShaderRef);
     }
 
     @Override
@@ -95,7 +95,7 @@ class MTLShader implements Shader {
         // So this is a no-op. We can call disable on lastShader in
         // BaseShaderContext.checkState() but that will be a common change for
         // all pipelines.
-        nDisable(nMetalShaderRef);
+        MTLNative.shaderDisable(nMetalShaderRef);
     }
 
     @Override
@@ -109,14 +109,14 @@ class MTLShader implements Shader {
 
         currentEnabledShader.textureIdRefMap.put(texUnit, new WeakReference<>(tex));
         MTLTexture<?> mtlTex = (MTLTexture<?>)tex;
-        nSetTexture(currentEnabledShader.nMetalShaderRef, texUnit,
+        MTLNative.shaderSetTexture(currentEnabledShader.nMetalShaderRef, texUnit,
                 currentEnabledShader.uniformNameIdMap.get(currentEnabledShader.samplers.get(texUnit)),
                 mtlTex.getNativeHandle(), isLinear, wrapMode);
     }
 
     @Override
     public void setConstant(String name, int i0) {
-        nSetInt(nMetalShaderRef, uniformNameIdMap.get(name), i0);
+        MTLNative.shaderSetInt(nMetalShaderRef, uniformNameIdMap.get(name), i0);
     }
 
     @Override
@@ -141,35 +141,35 @@ class MTLShader implements Shader {
 
     @Override
     public void setConstant(String name, float f0) {
-        nSetFloat1(nMetalShaderRef, uniformNameIdMap.get(name), f0);
+        MTLNative.shaderSetFloat1(nMetalShaderRef, uniformNameIdMap.get(name), f0);
     }
 
     @Override
     public void setConstant(String name, float f0, float f1) {
-        nSetFloat2(nMetalShaderRef, uniformNameIdMap.get(name), f0, f1);
+        MTLNative.shaderSetFloat2(nMetalShaderRef, uniformNameIdMap.get(name), f0, f1);
     }
 
     @Override
     public void setConstant(String name, float f0, float f1, float f2) {
-        nSetFloat3(nMetalShaderRef, uniformNameIdMap.get(name), f0, f1, f2);
+        MTLNative.shaderSetFloat3(nMetalShaderRef, uniformNameIdMap.get(name), f0, f1, f2);
     }
 
     @Override
     public void setConstant(String name, float f0, float f1, float f2, float f3) {
-        nSetFloat4(nMetalShaderRef, uniformNameIdMap.get(name), f0, f1, f2, f3);
+        MTLNative.shaderSetFloat4(nMetalShaderRef, uniformNameIdMap.get(name), f0, f1, f2, f3);
     }
 
     @Override
     public void setConstants(String name, FloatBuffer buf, int off, int count) {
         boolean direct = buf.isDirect();
         if (direct) {
-            nSetConstantsBuf(nMetalShaderRef, uniformNameIdMap.get(name),
+            MTLNative.shaderSetConstantsBuf(nMetalShaderRef, uniformNameIdMap.get(name),
                                 buf, buf.position() * 4, count * 4);
         } else {
             count = 4 * count;
             float[] values = new float[count];
             buf.get(off, values, 0, count);
-            nSetConstants(nMetalShaderRef, uniformNameIdMap.get(name), values, count);
+            MTLNative.shaderSetConstants(nMetalShaderRef, uniformNameIdMap.get(name), values, count);
         }
     }
 
@@ -184,29 +184,4 @@ class MTLShader implements Shader {
             samplers.clear();
         }
     }
-
-    // Native methods
-
-    private static native long nCreateMetalShader(long context, String fragFuncName);
-    private static native Map<String, Integer>  nGetUniformNameIdMap(long nMetalShader);
-    private static native void nEnable(long nMetalShader);
-    private static native void nDisable(long nMetalShader);
-
-    private static native void nSetTexture(long nMetalShader, int texID, int uniformID,
-                                           long texPtr, boolean isLinear, int wrapMode);
-
-    private static native void nSetInt(long nMetalShader, int uniformID, int i0);
-
-    private static native void nSetFloat1(long nMetalShader, int uniformID, float f0);
-    private static native void nSetFloat2(long nMetalShader, int uniformID,
-                                            float f0, float f1);
-    private static native void nSetFloat3(long nMetalShader, int uniformID,
-                                            float f0, float f1, float f2);
-    private static native void nSetFloat4(long nMetalShader, int uniformID,
-                                            float f0, float f1, float f2, float f3);
-
-    private static native void nSetConstants(long nMetalShader, int uniformID,
-                                            float[] values, int size);
-    private static native void nSetConstantsBuf(long nMetalShader, int uniformID,
-                                    Object values, int valuesByteOffset, int size);
 }

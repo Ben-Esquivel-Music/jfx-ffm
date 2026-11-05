@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2010, 2024, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2010, 2026, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -32,23 +32,20 @@ class MacMenuBarDelegate implements MenuBarDelegate {
     // NSMenu *
     long ptr;
 
-    private native long _createMenuBar();
     @Override public boolean createMenuBar() {
-        ptr = _createMenuBar();
+        ptr = MacMenuCalls.createMenuBar();
         return ptr != 0;
     }
 
-    private native void _insert(long menubarPtr, long menuPtr, int pos);
     @Override public boolean insert(MenuDelegate menu, int pos) {
         MacMenuDelegate macMenu = (MacMenuDelegate)menu;
-        _insert(ptr, macMenu.ptr, pos);
+        MacMenuCalls.menubarInsert(ptr, macMenu.ptr, pos);
         return true;
     }
 
-    private native void _remove(long menubarPtr, long menuPtr, int pos);
     @Override public boolean remove(MenuDelegate menu, int pos) {
         MacMenuDelegate macMenu = (MacMenuDelegate)menu;
-        _remove(ptr, macMenu.ptr, pos);
+        MacMenuCalls.menubarRemove(ptr, macMenu.ptr, pos);
         macMenu.ptr = 0;
         return true;
     }

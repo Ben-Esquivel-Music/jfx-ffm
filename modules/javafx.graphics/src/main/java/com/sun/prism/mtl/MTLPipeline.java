@@ -26,7 +26,6 @@
 package com.sun.prism.mtl;
 
 import com.sun.glass.ui.Screen;
-import com.sun.glass.utils.NativeLibLoader;
 import com.sun.prism.GraphicsPipeline;
 import com.sun.prism.ResourceFactory;
 import com.sun.prism.impl.PrismSettings;
@@ -40,15 +39,13 @@ public class MTLPipeline extends GraphicsPipeline {
     private static MTLPipeline theInstance;
     private static MTLResourceFactory mtlResourceFactory;
 
-    private static native boolean nSupportsMTL();
-
     static {
-        String libName = "prism_mtl";
-
         if (PrismSettings.verbose) {
-            System.err.println("Loading native metal library, named: " + libName);
+            System.err.println("Loading native metal library, named: " + MTLNative.LIBRARY_NAME);
         }
-        NativeLibLoader.loadLibrary(libName);
+        // Initializing MTLNative loads and binds prism_mtl and records a failure instead of throwing; this throws
+        // that UnsatisfiedLinkError, so a library that did not load or bind fails this initializer.
+        MTLNative.loadLibrary();
         if (PrismSettings.verbose) {
             System.err.println("Succeeded: Loading native metal library.");
         }
@@ -63,7 +60,7 @@ public class MTLPipeline extends GraphicsPipeline {
 
     @Override
     public boolean init() {
-        if (!MTLPipeline.nSupportsMTL()) {
+        if (!MTLNative.supportsMetal()) {
             return false;
         }
         Map<String, Long> devDetails = new HashMap<>();

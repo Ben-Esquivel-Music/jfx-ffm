@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2023, 2025, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2023, 2026, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -25,81 +25,83 @@
 
 #import "PlatformSupport.h"
 #import "GlassMacros.h"
+#import "glass_mac_internal.h"
 #import <Network/Network.h>
 
-#define INIT_CLASS(CLS, NAME)\
-    if (CLS == nil) {\
-        jclass cls = (*env)->FindClass(env, NAME);\
-        if ((*env)->ExceptionCheck(env)) {\
-            GLASS_CHECK_EXCEPTION(env);\
-            return;\
-        }\
-        CLS = (*env)->NewGlobalRef(env, cls);\
+// 44 colours, the colour array, the control tint, the scroller style and four booleans.
+#define PREFERENCE_CAPACITY 51
+
+// Until packPreferences, a COLOR_ARRAY entry's value is its own malloc'd array.
+typedef struct {
+    GmacPref entries[PREFERENCE_CAPACITY];
+    int32_t count;
+} PreferenceList;
+
+static GmacPref *nextEntry(PreferenceList *preferences, const char *key, int32_t kind) {
+    if (preferences->count >= PREFERENCE_CAPACITY) {
+        return NULL;
+    }
+    GmacPref *entry = &preferences->entries[preferences->count++];
+    entry->key = key;
+    entry->kind = kind;
+    return entry;
+}
+
+static GmacColor toGmacColor(NSColor *color) {
+    NSColor* c = [color colorUsingColorSpace:[NSColorSpace sRGBColorSpace]];
+    GmacColor result = {
+        .r = (int)([c redComponent] * 255.0f),
+        .g = (int)([c greenComponent] * 255.0f),
+        .b = (int)([c blueComponent] * 255.0f),
+        .reserved = 0,
+        .a = (double)[c alphaComponent]
+    };
+    return result;
+}
+
+// One block: the entries, then the colours of every COLOR_ARRAY entry.
+static GmacPref *packPreferences(PreferenceList *preferences, int32_t *count) {
+    size_t colorCount = 0;
+    for (int32_t i = 0; i < preferences->count; ++i) {
+        if (preferences->entries[i].kind == GMAC_PREF_COLOR_ARRAY) {
+            colorCount += (size_t)preferences->entries[i].count;
+        }
     }
 
-#define INIT_METHOD(CLS, METHOD, NAME, SIG)\
-    if (METHOD == nil) {\
-        METHOD = (*env)->GetMethodID(env, CLS, NAME, SIG);\
-        if ((*env)->ExceptionCheck(env)) {\
-            GLASS_CHECK_EXCEPTION(env);\
-            return;\
-        }\
+    size_t entryBytes = (size_t)preferences->count * sizeof(GmacPref);
+    GmacPref *block = malloc(entryBytes + colorCount * sizeof(GmacColor));
+    if (block != NULL) {
+        memcpy(block, preferences->entries, entryBytes);
+        GmacColor *colors = (GmacColor *)((char *)block + entryBytes);
+        for (int32_t i = 0; i < preferences->count; ++i) {
+            if (block[i].kind == GMAC_PREF_COLOR_ARRAY && block[i].count > 0) {
+                memcpy(colors, block[i].value, (size_t)block[i].count * sizeof(GmacColor));
+                block[i].value = colors;
+                colors += block[i].count;
+            }
+        }
+        *count = preferences->count;
     }
 
-#define INIT_STATIC_METHOD(CLS, METHOD, NAME, SIG)\
-    if (METHOD == nil) {\
-        METHOD = (*env)->GetStaticMethodID(env, CLS, NAME, SIG);\
-        if ((*env)->ExceptionCheck(env)) {\
-            GLASS_CHECK_EXCEPTION(env);\
-            return;\
-        }\
+    for (int32_t i = 0; i < preferences->count; ++i) {
+        if (preferences->entries[i].kind == GMAC_PREF_COLOR_ARRAY) {
+            free((void *)preferences->entries[i].value);
+        }
     }
-
-#define INIT_STATIC_FIELD(CLS, FIELD, NAME, SIG)\
-    if (FIELD == nil) {\
-        FIELD = (*env)->GetStaticFieldID(env, CLS, NAME, SIG);\
-        if ((*env)->ExceptionCheck(env)) {\
-            GLASS_CHECK_EXCEPTION(env);\
-            return;\
-        }\
-    }
+    return block;
+}
 
 @implementation PlatformSupport {
     nw_path_monitor_t pathMonitor;
-    jobject currentPreferences;
     bool currentPathConstrained;
     bool currentPathExpensive;
 }
 
-+ (void)initIDs:(JNIEnv*)env {
-    INIT_CLASS(jMapClass, "java/util/Map");
-    INIT_METHOD(jMapClass, jMapPutMethod, "put", "(Ljava/lang/Object;Ljava/lang/Object;)Ljava/lang/Object;");
-
-    INIT_CLASS(jHashMapClass, "java/util/HashMap");
-    INIT_METHOD(jHashMapClass, jHashMapInitMethod, "<init>", "()V");
-
-    INIT_CLASS(jBooleanClass, "java/lang/Boolean");
-    INIT_STATIC_FIELD(jBooleanClass, jBooleanTRUE, "TRUE", "Ljava/lang/Boolean;");
-    INIT_STATIC_FIELD(jBooleanClass, jBooleanFALSE, "FALSE", "Ljava/lang/Boolean;");
-
-    INIT_CLASS(jCollectionsClass, "java/util/Collections");
-    INIT_STATIC_METHOD(jCollectionsClass, jCollectionsUnmodifiableMapMethod, "unmodifiableMap", "(Ljava/util/Map;)Ljava/util/Map;");
-
-    INIT_CLASS(jObjectClass, "java/lang/Object");
-    INIT_METHOD(jObjectClass, jObjectEqualsMethod, "equals", "(Ljava/lang/Object;)Z");
-
-    INIT_CLASS(jColorClass, "javafx/scene/paint/Color");
-    INIT_STATIC_METHOD(jColorClass, jColorRgbMethod, "rgb", "(IIID)Ljavafx/scene/paint/Color;");
-}
-
-- (id)initWithEnv:(JNIEnv*)jEnv application:(jobject)jApp {
+- (id)init {
     if (!(self = [super init])) {
         return nil;
     }
 
-    self->env = jEnv;
-    self->application = jApp;
-    self->currentPreferences = nil;
     self->currentPathConstrained = false;
     self->currentPathExpensive = false;
 
@@ -150,12 +152,11 @@
     [self updatePreferences];
 }
 
-- (jobject)collectPreferences {
-    jobject preferences = (*env)->NewObject(env, jHashMapClass, jHashMapInitMethod);
-    GLASS_CHECK_EXCEPTION(env);
-    if (preferences == nil) {
-        return nil;
-    }
+- (GmacPref*)collectPreferenceEntries:(int32_t*)count {
+    *count = 0;
+    PreferenceList list;
+    memset(&list, 0, sizeof(list));
+    PreferenceList* preferences = &list;
 
     // The current appearance is set to the system appearance when the application is started.
     // Since the system appearance can change while the application is running, we need to set
@@ -187,10 +188,10 @@
           key:"macOS.NWPathMonitor.currentPathExpensive"
           value:currentPathExpensive];
 
-    return preferences;
+    return packPreferences(preferences, count);
 }
 
-- (void)queryNSColors:(jobject)preferences {
+- (void)queryNSColors:(PreferenceList*)preferences {
     // Label colors
     [self putColor:preferences key:"macOS.NSColor.labelColor" value:[NSColor labelColor]];
     [self putColor:preferences key:"macOS.NSColor.secondaryLabelColor" value:[NSColor secondaryLabelColor]];
@@ -271,106 +272,64 @@
  * The change notification includes all preferences, not only the changed preferences.
  */
 - (void)updatePreferences {
-    jobject newPreferences = [self collectPreferences];
-    if (newPreferences == nil) {
+    const GmacAppCallbacks *callbacks = GlassAppCallbacks();
+    if (callbacks != NULL && callbacks->notify_preferences_changed != NULL) {
+        int32_t count = 0;
+        GmacPref *entries = [self collectPreferenceEntries:&count];
+        if (entries != NULL) {
+            callbacks->notify_preferences_changed(entries, count);
+            free(entries);
+        }
+    }
+}
+
+- (void)putBoolean:(PreferenceList*)preferences key:(const char*)key value:(bool)value {
+    GmacPref *entry = nextEntry(preferences, key, GMAC_PREF_BOOLEAN);
+    if (entry != NULL) {
+        entry->count = value ? 1 : 0;
+    }
+}
+
+- (void)putString:(PreferenceList*)preferences key:(const char*)key value:(const char*)value {
+    GmacPref *entry = nextEntry(preferences, key, GMAC_PREF_STRING);
+    if (entry != NULL) {
+        entry->count = value != NULL ? (int32_t)strlen(value) : 0;
+        entry->value = value;
+    }
+}
+
+- (void)putColor:(PreferenceList*)preferences key:(const char*)colorName value:(NSColor*)color {
+    GmacColor value = toGmacColor(color);
+    GmacPref *entry = nextEntry(preferences, colorName, GMAC_PREF_COLOR);
+    if (entry != NULL) {
+        entry->color = value;
+    }
+}
+
+- (void)putColors:(PreferenceList*)preferences key:(const char*)colorName value:(NSArray*)colors {
+    int count = [colors count];
+    if (count < 0) {
         return;
     }
 
-    jboolean preferencesChanged = !(*env)->CallBooleanMethod(
-        env, newPreferences, jObjectEqualsMethod, currentPreferences);
-    GLASS_CHECK_EXCEPTION(env);
-
-    if (preferencesChanged) {
-        if (currentPreferences != nil) {
-            (*env)->DeleteGlobalRef(env, currentPreferences);
-        }
-
-        currentPreferences = (*env)->NewGlobalRef(env, newPreferences);
-
-        jobject unmodifiablePreferences = (*env)->CallStaticObjectMethod(
-            env, jCollectionsClass, jCollectionsUnmodifiableMapMethod, newPreferences);
-        GLASS_CHECK_EXCEPTION(env);
-
-        if (unmodifiablePreferences != nil) {
-            (*env)->CallVoidMethod(
-                env, application,
-                javaIDs.MacApplication.notifyPreferencesChanged,
-                unmodifiablePreferences);
-            GLASS_CHECK_EXCEPTION(env);
-
-            (*env)->DeleteLocalRef(env, unmodifiablePreferences);
+    GmacColor *values = NULL;
+    if (count > 0) {
+        values = malloc((size_t)count * sizeof(GmacColor));
+        if (values == NULL) {
+            return;
         }
     }
-
-    (*env)->DeleteLocalRef(env, newPreferences);
-}
-
-- (void)putBoolean:(jobject)preferences key:(const char*)key value:(bool)value {
-    jobject prefKey = (*env)->NewStringUTF(env, key);
-    GLASS_CHECK_NONNULL_EXCEPTION_RETURN(env, prefKey);
-
-    jobject prefValue = (*env)->GetStaticObjectField(env, jBooleanClass, value ? jBooleanTRUE : jBooleanFALSE);
-    GLASS_CHECK_NONNULL_EXCEPTION_RETURN(env, prefValue);
-
-    (*env)->CallObjectMethod(env, preferences, jMapPutMethod, prefKey, prefValue);
-    GLASS_CHECK_EXCEPTION(env);
-}
-
-- (void)putString:(jobject)preferences key:(const char*)key value:(const char*)value {
-    jobject prefKey = (*env)->NewStringUTF(env, key);
-    GLASS_CHECK_NONNULL_EXCEPTION_RETURN(env, prefKey);
-
-    jobject prefValue = nil;
-    if (value != nil) {
-        prefValue = (*env)->NewStringUTF(env, value);
-        GLASS_CHECK_NONNULL_EXCEPTION_RETURN(env, prefValue);
-    }
-
-    (*env)->CallObjectMethod(env, preferences, jMapPutMethod, prefKey, prefValue);
-    GLASS_CHECK_EXCEPTION(env);
-}
-
-- (void)putColor:(jobject)preferences key:(const char*)colorName value:(NSColor*)color {
-    jobject prefKey = (*env)->NewStringUTF(env, colorName);
-    GLASS_CHECK_NONNULL_EXCEPTION_RETURN(env, prefKey);
-
-    NSColor* c = [color colorUsingColorSpace:[NSColorSpace sRGBColorSpace]];
-    jobject prefValue = (*env)->CallStaticObjectMethod(
-        env, jColorClass, jColorRgbMethod,
-        (int)([c redComponent] * 255.0f),
-        (int)([c greenComponent] * 255.0f),
-        (int)([c blueComponent] * 255.0f),
-        (double)[c alphaComponent]);
-    GLASS_CHECK_EXCEPTION_RETURN(env);
-
-    (*env)->CallObjectMethod(env, preferences, jMapPutMethod, prefKey, prefValue);
-    GLASS_CHECK_EXCEPTION(env);
-}
-
-- (void)putColors:(jobject)preferences key:(const char*)colorName value:(NSArray*)colors {
-    jobject prefKey = (*env)->NewStringUTF(env, colorName);
-    GLASS_CHECK_NONNULL_EXCEPTION_RETURN(env, prefKey);
-
-    int count = [colors count];
-    jobjectArray prefValue = (*env)->NewObjectArray(env, count, jColorClass, nil);
-    GLASS_CHECK_NONNULL_EXCEPTION_RETURN(env, prefValue);
-
     for (int i = 0; i < count; ++i) {
-        NSColor* c = [colors[i] colorUsingColorSpace:[NSColorSpace sRGBColorSpace]];
-        jobject fxcolor = (*env)->CallStaticObjectMethod(
-            env, jColorClass, jColorRgbMethod,
-            (int)([c redComponent] * 255.0f),
-            (int)([c greenComponent] * 255.0f),
-            (int)([c blueComponent] * 255.0f),
-            (double)[c alphaComponent]);
-        GLASS_CHECK_EXCEPTION_RETURN(env);
-
-        (*env)->SetObjectArrayElement(env, prefValue, i, fxcolor);
-        GLASS_CHECK_EXCEPTION_RETURN(env);
+        values[i] = toGmacColor(colors[i]);
     }
 
-    (*env)->CallObjectMethod(env, preferences, jMapPutMethod, prefKey, prefValue);
-    GLASS_CHECK_EXCEPTION(env);
+    GmacPref *entry = nextEntry(preferences, colorName, GMAC_PREF_COLOR_ARRAY);
+    if (entry == NULL) {
+        free(values);
+        return;
+    }
+    entry->count = count;
+    entry->value = values;
 }
 
 @end

@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2011, 2024, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2011, 2026, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -24,17 +24,17 @@
  */
 
 #import <Cocoa/Cocoa.h>
-#import <jni.h>
 
 #import "GlassHostView.h"
 #import "GlassViewDelegate.h"
+#import "glass_mac_api.h"
 
 // main GlassView protocol
 // TODO: now that we removed GlassView2D, we should collapse the delegate back into GlassView3D
 // and use Obj-C catgegories to partition the implementation (just like GlassWindow)
 @protocol GlassView <NSObject>
 
-- (id)initWithFrame:(NSRect)frame withJview:(jobject)jview withJproperties:(jobject)jproperties;
+- (id)initWithFrame:(NSRect)frame viewId:(int64_t)viewId caps:(const GmacViewCaps *)caps;
 
 - (void)enterFullscreenWithAnimate:(BOOL)animate withKeepRatio:(BOOL)keepRatio withHideCursor:(BOOL)hideCursor;
 - (void)exitFullscreenWithAnimate:(BOOL)animate;
@@ -42,7 +42,8 @@
 // the graphics specifics APIs
 - (void)begin;
 - (void)end;
-- (void)pushPixels:(void*)pixels withWidth:(GLuint)width withHeight:(GLuint)height withScaleX:(GLfloat)scaleX withScaleY:(GLfloat)scaleY withEnv:(JNIEnv *)env;
+- (void)pushPixels:(void*)pixels withWidth:(GLuint)width withHeight:(GLuint)height withScaleX:(GLfloat)scaleX
+        withScaleY:(GLfloat)scaleY;
 
 - (GlassViewDelegate*)delegate;
 - (void)setInputMethodEnabled:(BOOL)enabled;

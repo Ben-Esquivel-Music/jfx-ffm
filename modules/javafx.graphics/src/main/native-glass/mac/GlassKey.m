@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2011, 2024, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2011, 2026, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -25,11 +25,11 @@
 
 #import "common.h"
 #import "com_sun_glass_events_KeyEvent.h"
-#import "com_sun_glass_ui_mac_MacApplication.h"
 
 #import "GlassApplication.h"
 #import "GlassMacros.h"
 #import "GlassKey.h"
+#import "glass_mac_api.h"
 
 #import <Carbon/Carbon.h>
 
@@ -45,7 +45,7 @@
 struct KeyMapEntry
 {
     unsigned short        keyCode;
-    jint                  jKeyCode;
+    int32_t               jKeyCode;
     BOOL                  sendJavaChars;
 };
 
@@ -210,7 +210,7 @@ static BOOL macKeyCodeIsLayoutSensitive(unsigned int keyCode)
     return NO;
 }
 
-static jint getJavaCodeForASCII(UniChar ascii)
+static int32_t getJavaCodeForASCII(UniChar ascii)
 {
     if (ascii >= L'0' && ascii <= L'9') {
         return ascii;
@@ -292,7 +292,7 @@ static UniCharCount queryKeyboard(TISInputSourceRef keyboard, unsigned short key
     return actualLength;
 }
 
-static BOOL isLetterOrDigit(jint javaKeyCode)
+static BOOL isLetterOrDigit(int32_t javaKeyCode)
 {
     if (javaKeyCode >= '0' && javaKeyCode <= '9') {
         return YES;
@@ -304,9 +304,9 @@ static BOOL isLetterOrDigit(jint javaKeyCode)
 }
 
 // This is only valid for keys in the layout-sensitive area.
-static jint getJavaCodeForMacKeyAndModifiers(TISInputSourceRef keyboard, unsigned short keyCode, UInt32 modifiers)
+static int32_t getJavaCodeForMacKeyAndModifiers(TISInputSourceRef keyboard, unsigned short keyCode, UInt32 modifiers)
 {
-    jint result = com_sun_glass_events_KeyEvent_VK_UNDEFINED;
+    int32_t result = com_sun_glass_events_KeyEvent_VK_UNDEFINED;
     UniChar unicode[8];
     UniCharCount length = queryKeyboard(keyboard, keyCode, modifiers, unicode, 8);
     if (length == 1) {
@@ -316,9 +316,9 @@ static jint getJavaCodeForMacKeyAndModifiers(TISInputSourceRef keyboard, unsigne
 }
 
 // This is only valid for keys in the layout-sensitive area.
-static jint getJavaCodeForMacKey(unsigned short keyCode)
+static int32_t getJavaCodeForMacKey(unsigned short keyCode)
 {
-    jint result = com_sun_glass_events_KeyEvent_VK_UNDEFINED;
+    int32_t result = com_sun_glass_events_KeyEvent_VK_UNDEFINED;
     TISInputSourceRef keyboard = TISCopyCurrentKeyboardLayoutInputSource();
     if (keyboard == NULL) {
         return result;
@@ -339,7 +339,7 @@ static jint getJavaCodeForMacKey(unsigned short keyCode)
     // keyboard in line with Windows; the digits are shifted but are still considered
     // the canonical key codes.
     if (!isLetterOrDigit(result)) {
-        jint trial = getJavaCodeForMacKeyAndModifiers(keyboard, keyCode, cmdKey | shiftKey);
+        int32_t trial = getJavaCodeForMacKeyAndModifiers(keyboard, keyCode, cmdKey | shiftKey);
         if (isLetterOrDigit(trial)) {
             result = trial;
         }
@@ -351,7 +351,7 @@ static jint getJavaCodeForMacKey(unsigned short keyCode)
         // critical letters like Q by using the Option key in conjunction with Cmd.
         // In this API the Cmd flag suppresses the Option flag so we omit Cmd.
         if (!isLetterOrDigit(result)) {
-            jint trial = getJavaCodeForMacKeyAndModifiers(keyboard, keyCode, optionKey);
+            int32_t trial = getJavaCodeForMacKeyAndModifiers(keyboard, keyCode, optionKey);
             if (isLetterOrDigit(trial)) {
                 result = trial;
             }
@@ -362,9 +362,9 @@ static jint getJavaCodeForMacKey(unsigned short keyCode)
     return result;
 }
 
-jint GetJavaKeyModifiers(NSEvent *event)
+int32_t GetJavaKeyModifiers(NSEvent *event)
 {
-    jint jModifiers = 0;
+    int32_t jModifiers = 0;
 
     NSUInteger modifierFlags = ([event modifierFlags] & NSDeviceIndependentModifierFlagsMask);
     if (((modifierFlags & NSShiftKeyMask) != 0) == YES)
@@ -390,9 +390,9 @@ jint GetJavaKeyModifiers(NSEvent *event)
     return jModifiers;
 }
 
-jint GetJavaMouseModifiers(NSUInteger buttons)
+int32_t GetJavaMouseModifiers(NSUInteger buttons)
 {
-    jint jModifiers = 0;
+    int32_t jModifiers = 0;
     if (buttons & (1 << 0)) {
         jModifiers |= com_sun_glass_events_KeyEvent_MODIFIER_BUTTON_PRIMARY;
     }
@@ -411,12 +411,12 @@ jint GetJavaMouseModifiers(NSUInteger buttons)
     return jModifiers;
 }
 
-jint GetJavaModifiers(NSEvent *event)
+int32_t GetJavaModifiers(NSEvent *event)
 {
     return GetJavaKeyModifiers(event) | GetJavaMouseModifiers([NSEvent pressedMouseButtons]);
 }
 
-jint GetJavaKeyCodeFor(unsigned short keyCode)
+int32_t GetJavaKeyCodeFor(unsigned short keyCode)
 {
     if (macKeyCodeIsLayoutSensitive(keyCode))
     {
@@ -434,12 +434,12 @@ jint GetJavaKeyCodeFor(unsigned short keyCode)
     return com_sun_glass_events_KeyEvent_VK_UNDEFINED;
 }
 
-jint GetJavaKeyCode(NSEvent *event)
+int32_t GetJavaKeyCode(NSEvent *event)
 {
     return GetJavaKeyCodeFor([event keyCode]);
 }
 
-jcharArray GetJavaKeyChars(JNIEnv *env, NSEvent *event)
+int32_t GetJavaKeyCharsUtf16(NSEvent *event, uint16_t *out)
 {
     NSString *chars = [event characters];
 
@@ -456,22 +456,14 @@ jcharArray GetJavaKeyChars(JNIEnv *env, NSEvent *event)
     }
     if (needChars == NO)
     {
-        // Return an empty array instead of NULL
-        return (*env)->NewCharArray(env, 0);
+        return -1;
     }
 
-    jchar jc[16];
-    [chars getCharacters:jc range:NSMakeRange(0, [chars length])];
-    jcharArray jChars = (*env)->NewCharArray(env, (jsize)[chars length]);
-    if (jChars == NULL) {
-        return NULL;
-    }
-    (*env)->SetCharArrayRegion(env, jChars, 0, (jsize)[chars length], jc);
-    GLASS_CHECK_EXCEPTION(env);
-    return jChars;
+    [chars getCharacters:out range:NSMakeRange(0, [chars length])];
+    return (int32_t)[chars length];
 }
 
-BOOL GetMacKey(jint javaKeyCode, unsigned short *outMacKeyCode)
+BOOL GetMacKey(int32_t javaKeyCode, unsigned short *outMacKeyCode)
 {
     if (javaKeyCode == com_sun_glass_events_KeyEvent_VK_UNDEFINED) {
         return NO;
@@ -501,7 +493,7 @@ BOOL GetMacKey(jint javaKeyCode, unsigned short *outMacKeyCode)
     {
         if (macKeyCodeIsLayoutSensitive(trialKey))
         {
-            jint trialCode = getJavaCodeForMacKey(trialKey);
+            int32_t trialCode = getJavaCodeForMacKey(trialKey);
             if (trialCode == javaKeyCode)
             {
                 *outMacKeyCode = trialKey;
@@ -513,7 +505,7 @@ BOOL GetMacKey(jint javaKeyCode, unsigned short *outMacKeyCode)
     return NO;
 }
 
-NSString* GetStringForJavaKey(jchar jKeyCode) {
+NSString* GetStringForJavaKey(uint16_t jKeyCode) {
     if (jKeyCode == '\0')
       return @"";
 
@@ -623,38 +615,18 @@ NSString* GetStringForMacKey(unsigned short keyCode, bool shifted)
     return nil;
 }
 
-/*
- * Class:     com_sun_glass_ui_mac_MacApplication
- * Method:    _getKeyCodeForChar
- * Signature: (CI)I
- */
-JNIEXPORT jint JNICALL Java_com_sun_glass_ui_mac_MacApplication__1getKeyCodeForChar
-(JNIEnv * env, jobject jApplication, jchar c, jint hint)
+int32_t gmac_key_code_for_char(uint16_t character)
 {
-    LOG("Java_com_sun_glass_ui_mac_MacApplication__1getKeyCodeForChar");
-
-    return [GlassApplication getKeyCodeForChar:c];
+    return [GlassApplication getKeyCodeForChar:character];
 }
 
-/*
- * Class:     com_sun_glass_ui_mac_MacApplication
- * Method:    _isKeyLocked
- * Signature: (I)I
- */
-JNIEXPORT jint JNICALL Java_com_sun_glass_ui_mac_MacApplication__1isKeyLocked
-  (JNIEnv * env, jobject obj, jint keyCode)
+uint64_t gmac_current_modifier_flags(void)
 {
-    NSUInteger mask = 0;
-    switch (keyCode) {
-        case com_sun_glass_events_KeyEvent_VK_CAPS_LOCK:
-            mask = NSEventModifierFlagCapsLock;
-            break;
+    return [NSEvent modifierFlags];
+}
 
-        // Caps lock is the only locking key supported on macOS
-        default:
-            return com_sun_glass_events_KeyEvent_KEY_LOCK_UNKNOWN;
-    }
-    NSUInteger modifierFlags = [NSEvent modifierFlags];
-    return (modifierFlags & mask) ? com_sun_glass_events_KeyEvent_KEY_LOCK_ON
-                                  : com_sun_glass_events_KeyEvent_KEY_LOCK_OFF;
+int32_t gmac_key_find_mac(int32_t java_key_code)
+{
+    unsigned short macCode;
+    return GetMacKey(java_key_code, &macCode) ? macCode : -1;
 }

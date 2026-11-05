@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2010, 2025, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2010, 2026, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -30,6 +30,9 @@ import com.sun.glass.ui.View;
 import com.sun.glass.ui.Window;
 import com.sun.javafx.tk.HeaderAreaType;
 
+import java.lang.invoke.MethodHandle;
+import java.lang.invoke.MethodHandles;
+import java.lang.invoke.MethodType;
 import java.nio.Buffer;
 import java.nio.ByteBuffer;
 import java.nio.IntBuffer;
@@ -41,21 +44,15 @@ import java.util.TreeSet;
  */
 final class MacView extends View {
 
-    private native static void _initIDs();
     static {
-        _initIDs();
-        multiClickTime = _getMultiClickTime_impl();
-        multiClickMaxX = _getMultiClickMaxX_impl();
-        multiClickMaxY = _getMultiClickMaxY_impl();
+        MacViewCallbacks.install();
+        multiClickTime = MacViewCalls.multiClickTime();
     }
 
     // Constants
     private static final long multiClickTime;
-    private static final int multiClickMaxX, multiClickMaxY;
-
-    private native static long _getMultiClickTime_impl();
-    private native static int _getMultiClickMaxX_impl();
-    private native static int _getMultiClickMaxY_impl();
+    private static final int multiClickMaxX = MacViewCalls.MULTI_CLICK_MAX;
+    private static final int multiClickMaxY = MacViewCalls.MULTI_CLICK_MAX;
 
     static long getMultiClickTime_impl() {
         return multiClickTime;
@@ -69,43 +66,95 @@ final class MacView extends View {
         return multiClickMaxY;
     }
 
-    @Override native protected long _getNativeFrameBuffer(long ptr);
-    @Override native protected long _create(Map caps);
-    @Override native protected int _getX(long ptr);
-    @Override native protected int _getY(long ptr);
-    @Override native protected void _setParent(long ptr, long parentPtr);
-    @Override native protected boolean _close(long ptr);
-    @Override native protected void _scheduleRepaint(long ptr);
-    @Override native protected void _begin(long ptr);
-    @Override native protected void _end(long ptr);
-    @Override native protected boolean _enterFullscreen(long ptr, boolean animate, boolean keepRatio, boolean hideCursor);
-    @Override native protected void _exitFullscreen(long ptr, boolean animate);
-    @Override native protected void _enableInputMethodEvents(long ptr, boolean enable);
-    @Override native protected void _finishInputMethodComposition(long ptr);
+    @Override
+    protected long _getNativeFrameBuffer(long ptr) {
+        return MacViewCalls.getNativeFrameBuffer(ptr);
+    }
+
+    @Override
+    protected long _create(Map caps) {
+        return MacViewCalls.create(new CallbackTarget(this), caps);
+    }
+
+    @Override
+    protected int _getX(long ptr) {
+        return MacViewCalls.getX(ptr);
+    }
+
+    @Override
+    protected int _getY(long ptr) {
+        return MacViewCalls.getY(ptr);
+    }
+
+    @Override
+    protected void _setParent(long ptr, long parentPtr) {
+        MacViewCalls.setParent(ptr);
+    }
+
+    @Override
+    protected boolean _close(long ptr) {
+        return MacViewCalls.close(ptr);
+    }
+
+    @Override
+    protected void _scheduleRepaint(long ptr) {
+        MacViewCalls.scheduleRepaint(ptr);
+    }
+
+    @Override
+    protected void _begin(long ptr) {
+        MacViewCalls.begin(ptr);
+    }
+
+    @Override
+    protected void _end(long ptr) {
+        MacViewCalls.end(ptr);
+    }
+
+    @Override
+    protected boolean _enterFullscreen(long ptr, boolean animate, boolean keepRatio, boolean hideCursor) {
+        return MacViewCalls.enterFullscreen(ptr, animate, keepRatio, hideCursor);
+    }
+
+    @Override
+    protected void _exitFullscreen(long ptr, boolean animate) {
+        MacViewCalls.exitFullscreen(ptr, animate);
+    }
+
+    @Override
+    protected void _enableInputMethodEvents(long ptr, boolean enable) {
+        MacViewCalls.enableInputMethodEvents(ptr, enable);
+    }
+
+    @Override
+    protected void _finishInputMethodComposition(long ptr) {
+        MacViewCalls.finishInputMethodComposition(ptr);
+    }
 
     @Override protected void _uploadPixels(long ptr, Pixels pixels) {
         Buffer data = pixels.getPixels();
         if (data.isDirect() == true) {
-            _uploadPixelsDirect(ptr, data, pixels.getWidth(), pixels.getHeight(), pixels.getScaleX(), pixels.getScaleY());
+            MacViewCalls.uploadPixelsDirect(ptr, data, pixels.getWidth(), pixels.getHeight(), pixels.getScaleX(),
+                                            pixels.getScaleY());
         } else if (data.hasArray() == true) {
             if (pixels.getBytesPerComponent() == 1) {
                 ByteBuffer bytes = (ByteBuffer)data;
-                _uploadPixelsByteArray(ptr, bytes.array(), bytes.arrayOffset(),
-                                       pixels.getWidth(), pixels.getHeight(), pixels.getScaleX(), pixels.getScaleY());
+                MacViewCalls.uploadPixelsBytes(ptr, bytes.array(), bytes.arrayOffset(),
+                                               pixels.getWidth(), pixels.getHeight(), pixels.getScaleX(),
+                                               pixels.getScaleY());
             } else {
                 IntBuffer ints = (IntBuffer)data;
-                _uploadPixelsIntArray(ptr, ints.array(), ints.arrayOffset(),
-                                      pixels.getWidth(), pixels.getHeight(), pixels.getScaleX(), pixels.getScaleY());
+                MacViewCalls.uploadPixelsInts(ptr, ints.array(), ints.arrayOffset(),
+                                              pixels.getWidth(), pixels.getHeight(), pixels.getScaleX(),
+                                              pixels.getScaleY());
             }
         } else {
             // gznote: what are the circumstances under which this can happen?
-            _uploadPixelsDirect(ptr, pixels.asByteBuffer(),
-                                pixels.getWidth(), pixels.getHeight(), pixels.getScaleX(), pixels.getScaleY());
+            MacViewCalls.uploadPixelsDirect(ptr, pixels.asByteBuffer(),
+                                            pixels.getWidth(), pixels.getHeight(), pixels.getScaleX(),
+                                            pixels.getScaleY());
         }
     }
-    private native void _uploadPixelsDirect(long viewPtr, Buffer pixels, int width, int height, float scaleX, float scaleY);
-    private native void _uploadPixelsByteArray(long viewPtr, byte[] pixels, int offset, int width, int height, float scaleX, float scaleY);
-    private native void _uploadPixelsIntArray(long viewPtr, int[] pixels, int offset, int width, int height, float scaleX, float scaleY);
 
     @Override
     protected void notifyResize(int width, int height) {
@@ -134,6 +183,15 @@ final class MacView extends View {
 
     @Override protected long _getNativeView(long ptr) {
         return ptr;
+    }
+
+    /**
+     * {@code View.ptr}, the {@code GlassView3D*} of this view, which {@code GlassWindow.m}'s {@code _setView} read
+     * with {@code GetLongField}; 0 once closed. Package-private for {@code MacWindow}, which is not a {@code View}
+     * subclass and cannot read the protected accessor itself.
+     */
+    long nativeHandle() {
+        return getRawHandle();
     }
 
     protected void notifyInputMethodMac(String str, int attrib, int length,
@@ -200,5 +258,146 @@ final class MacView extends View {
         }
 
         return false;
+    }
+
+    /**
+     * Where the slots of {@code GmacViewCallbacks} and {@code GmacGestureCallbacks} reach this view: the methods the
+     * JNI called on its global reference, through the IDs {@code _initIDs} looked up on {@code MacView}, and the
+     * static methods of {@code MacGestureSupport} it called with the view.
+     */
+    private record CallbackTarget(MacView view) implements MacViewCallbacks.Receiver {
+
+        @Override
+        public void notifyView(int type) {
+            view.notifyView(type);
+        }
+
+        @Override
+        public void notifyResize(int width, int height) {
+            view.notifyResize(width, height);
+        }
+
+        @Override
+        public void notifyRepaint(int x, int y, int width, int height) {
+            view.notifyRepaint(x, y, width, height);
+        }
+
+        @Override
+        public void notifyMenu(int x, int y, int xAbs, int yAbs, boolean isKeyboardTrigger) {
+            view.notifyMenu(x, y, xAbs, yAbs, isKeyboardTrigger);
+        }
+
+        @Override
+        public void notifyMouse(int type, int button, int x, int y, int xAbs, int yAbs, int modifiers,
+                                boolean isPopupTrigger, boolean isSynthesized) {
+            view.notifyMouse(type, button, x, y, xAbs, yAbs, modifiers, isPopupTrigger, isSynthesized);
+        }
+
+        @Override
+        public boolean notifyKeyAndReturnConsumed(int type, int keyCode, char[] keyChars, int modifiers) {
+            return view.notifyKeyAndReturnConsumed(type, keyCode, keyChars, modifiers);
+        }
+
+        @Override
+        public void notifyInputMethodMac(String text, int attr, int length, int cursor, int selStart,
+                                         int selLength) {
+            view.notifyInputMethodMac(text, attr, length, cursor, selStart, selLength);
+        }
+
+        @Override
+        public double[] notifyInputMethodCandidatePosRequest(int pos) {
+            return view.notifyInputMethodCandidatePosRequest(pos);
+        }
+
+        @Override
+        public int notifyDragEnter(int x, int y, int xAbs, int yAbs, int recommendedAction) {
+            return view.notifyDragEnter(x, y, xAbs, yAbs, recommendedAction);
+        }
+
+        @Override
+        public int notifyDragOver(int x, int y, int xAbs, int yAbs, int recommendedAction) {
+            return view.notifyDragOver(x, y, xAbs, yAbs, recommendedAction);
+        }
+
+        @Override
+        public int notifyDragDrop(int x, int y, int xAbs, int yAbs, int recommendedAction) {
+            return view.notifyDragDrop(x, y, xAbs, yAbs, recommendedAction);
+        }
+
+        @Override
+        public void notifyDragLeave() {
+            view.notifyDragLeave();
+        }
+
+        @Override
+        public void notifyDragEnd(int performedAction) {
+            view.notifyDragEnd(performedAction);
+        }
+
+        /** {@code View.getAccessible()}, which is package-private to {@code com.sun.glass.ui}. */
+        @Override
+        public long getAccessible() {
+            return view.getAccessibleForNative();
+        }
+
+        @Override
+        public void rotateGesturePerformed(int modifiers, int x, int y, int xAbs, int yAbs, float rotation)
+                throws Throwable {
+            GestureSupportMethods.ROTATE_GESTURE_PERFORMED.invokeExact((View) view, modifiers, x, y, xAbs, yAbs,
+                    rotation);
+        }
+
+        @Override
+        public void scrollGesturePerformed(int modifiers, int sender, int x, int y, int xAbs, int yAbs, float dx,
+                                           float dy) throws Throwable {
+            GestureSupportMethods.SCROLL_GESTURE_PERFORMED.invokeExact((View) view, modifiers, sender, x, y, xAbs,
+                    yAbs, dx, dy);
+        }
+
+        @Override
+        public void swipeGesturePerformed(int modifiers, int dir, int x, int y, int xAbs, int yAbs)
+                throws Throwable {
+            GestureSupportMethods.SWIPE_GESTURE_PERFORMED.invokeExact((View) view, modifiers, dir, x, y, xAbs, yAbs);
+        }
+
+        @Override
+        public void magnifyGesturePerformed(int modifiers, int x, int y, int xAbs, int yAbs, float scale)
+                throws Throwable {
+            GestureSupportMethods.MAGNIFY_GESTURE_PERFORMED.invokeExact((View) view, modifiers, x, y, xAbs, yAbs,
+                    scale);
+        }
+
+        @Override
+        public void gestureFinished(int modifiers, int x, int y, int xAbs, int yAbs) throws Throwable {
+            GestureSupportMethods.GESTURE_FINISHED.invokeExact((View) view, modifiers, x, y, xAbs, yAbs);
+        }
+    }
+
+    /**
+     * The static methods of {@code MacGestureSupport} the gesture slots reach, found when the first gesture arrives.
+     * {@code findStatic}, like the JNI's {@code GetStaticMethodID}, does not initialize the class: the first
+     * invocation does, as the JNI's {@code Class.forName} on the first gesture event did.
+     */
+    private static final class GestureSupportMethods {
+
+        static final MethodHandle ROTATE_GESTURE_PERFORMED = find("rotateGesturePerformed", int.class, int.class,
+                int.class, int.class, int.class, float.class);
+        static final MethodHandle SCROLL_GESTURE_PERFORMED = find("scrollGesturePerformed", int.class, int.class,
+                int.class, int.class, int.class, int.class, float.class, float.class);
+        static final MethodHandle SWIPE_GESTURE_PERFORMED = find("swipeGesturePerformed", int.class, int.class,
+                int.class, int.class, int.class, int.class);
+        static final MethodHandle MAGNIFY_GESTURE_PERFORMED = find("magnifyGesturePerformed", int.class, int.class,
+                int.class, int.class, int.class, float.class);
+        static final MethodHandle GESTURE_FINISHED = find("gestureFinished", int.class, int.class, int.class,
+                int.class, int.class);
+
+        private static MethodHandle find(String name, Class<?>... parametersAfterView) {
+            MethodType type = MethodType.methodType(void.class, View.class).appendParameterTypes(parametersAfterView);
+            try {
+                return MethodHandles.lookup().findStatic(MacGestureSupport.class, name, type);
+            } catch (ReflectiveOperationException e) {
+                throw new ExceptionInInitializerError(e);
+            }
+        }
     }
 }

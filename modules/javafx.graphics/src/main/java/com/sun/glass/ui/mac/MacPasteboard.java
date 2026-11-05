@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2011, 2013, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2011, 2026, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -27,11 +27,6 @@ package com.sun.glass.ui.mac;
 import java.util.HashMap;
 
 final class MacPasteboard {
-
-    private static native void _initIDs();
-    static {
-        _initIDs();
-    }
 
     final static public int General = 1;
     final static public int DragAndDrop = 2;
@@ -65,17 +60,15 @@ final class MacPasteboard {
     private boolean user;
 
     // creates system platform pasteboard for the given type
-    private native long _createSystemPasteboard(int type);
     public MacPasteboard(int type) {
         this.user = false;
-        this.ptr = _createSystemPasteboard(type);
+        this.ptr = MacPasteboardCalls.createSystem(type);
     }
 
     // creates user platform pasteboard for the given name
-    private native long _createUserPasteboard(String name);
     public MacPasteboard(String name) {
         this.user = true;
-        this.ptr = _createUserPasteboard(name);
+        this.ptr = MacPasteboardCalls.createUser(name);
     }
 
     /** Returns native pasteboard pointer (NSPasteboard*)
@@ -86,41 +79,36 @@ final class MacPasteboard {
     }
 
     // returns name
-    private native String _getName(long ptr);
     public String getName() {
         assertValid();
-        return _getName(this.ptr);
+        return MacPasteboardCalls.name(this.ptr);
     }
 
     // returns an array of String arrays with multiple UTF types for each item on the Pasteboard
     // (allows for non homogenous items)
     // the length of the array is the count of available items
-    private native String[][] _getUTFs(long ptr);
     public String[][] getUTFs() {
         assertValid();
-        return _getUTFs(this.ptr);
+        return MacPasteboardCalls.utis(this.ptr);
     }
 
     // get the item representation for the given index as raw pixels bytes suitable for Pixels
     // the platform will try to find the best representation
-    private native byte[] _getItemAsRawImage(long ptr, int index);
     public byte[] getItemAsRawImage(int index) {
         assertValid();
-        return _getItemAsRawImage(this.ptr, index);
+        return MacPasteboardCalls.rawImage(this.ptr, index);
     }
 
     // get the item representation for the given utf type as String
-    private native String _getItemStringForUTF(long ptr, int index, String utf);
     public String getItemStringForUTF(int index, String utf) {
         assertValid();
-        return _getItemStringForUTF(this.ptr, index, utf);
+        return MacPasteboardCalls.itemString(this.ptr, index, utf);
     }
 
     // get the item representation for the given utf type as byte array
-    private native byte[] _getItemBytesForUTF(long ptr, int index, String utf);
     public byte[] getItemBytesForUTF(int index, String utf) {
         assertValid();
-        return _getItemBytesForUTF(this.ptr, index, utf);
+        return MacPasteboardCalls.itemBytes(this.ptr, index, utf);
     }
 
     // paste the items with their corresponding representations
@@ -138,9 +126,8 @@ final class MacPasteboard {
     //          {UtfString, "text"}
     //      },
     //  }
-    private native long _putItemsFromArray(long ptr, Object[] items, int supportedActions);
     public long putItemsFromArray(Object[] items, int supportedActions) {
-        return _putItemsFromArray(this.ptr, items, supportedActions);
+        return MacPasteboardCalls.putItems(this.ptr, items, supportedActions);
     }
     private Object[] hashMapToArray(HashMap<String, Object> hashmap) {
         Object[] array = null;
@@ -167,31 +154,27 @@ final class MacPasteboard {
 
     // clears pasteboard
     // returns seed
-    private native long _clear(long ptr);
     public long clear() {
         assertValid();
-        return _clear(this.ptr);
+        return MacPasteboardCalls.clear(this.ptr);
     }
 
     // retrieve pasteboard seed
-    private native long _getSeed(long ptr);
     public long getSeed() {
         assertValid();
-        return _getSeed(this.ptr);
+        return MacPasteboardCalls.seed(this.ptr);
     }
 
     // synthesized API
-    private native int _getAllowedOperation(long ptr);
     public int getAllowedOperation() {
         assertValid();
-        return _getAllowedOperation(this.ptr);
+        return MacPasteboardCalls.allowedOperation(this.ptr);
     }
 
-    private native void _release(long ptr);
     public void release() {
         assertValid();
         if ((this.ptr != 0L) && (this.user)) {
-            _release(ptr);
+            MacPasteboardCalls.release(ptr);
         }
         this.ptr = 0L;
     }

@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2011, 2022, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2011, 2026, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -31,10 +31,11 @@ import com.sun.glass.ui.Timer;
  */
 final class MacTimer extends Timer {
 
+    // Quantum creates its timer before it reads Screen.getVideoRefreshPeriod, which is 0 until init made the link.
     static {
-        minPeriod = _getMinPeriod();
-        maxPeriod = _getMaxPeriod();
-        _initIDs();
+        minPeriod = MacTimerCalls.minPeriod();
+        maxPeriod = MacTimerCalls.maxPeriod();
+        MacTimerCalls.init();
     }
 
     private static final int minPeriod, maxPeriod;
@@ -42,9 +43,6 @@ final class MacTimer extends Timer {
     protected MacTimer(Runnable runnable) {
         super(runnable);
     }
-
-    native private static int _getMinPeriod();
-    native private static int _getMaxPeriod();
 
     static int getMinPeriod_impl() {
         return minPeriod;
@@ -54,11 +52,28 @@ final class MacTimer extends Timer {
         return maxPeriod;
     }
 
-    @Override native protected long _start(Runnable runnable);
-    @Override native protected long _start(Runnable runnable, int period);
-    @Override native protected void _stop(long timer);
-    @Override native protected void _pause(long timer);
-    @Override native protected void _resume(long timer);
-    native private static void _initIDs();
-}
+    @Override
+    protected long _start(Runnable runnable) {
+        return MacTimerCalls.startVsync(runnable);
+    }
 
+    @Override
+    protected long _start(Runnable runnable, int period) {
+        return MacTimerCalls.startPeriod(runnable, period);
+    }
+
+    @Override
+    protected void _stop(long timer) {
+        MacTimerCalls.stop(timer);
+    }
+
+    @Override
+    protected void _pause(long timer) {
+        MacTimerCalls.pause(timer);
+    }
+
+    @Override
+    protected void _resume(long timer) {
+        MacTimerCalls.resume(timer);
+    }
+}

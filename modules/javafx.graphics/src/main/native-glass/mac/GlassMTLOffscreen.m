@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2024, 2025, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2024, 2026, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -85,10 +85,10 @@ static NSArray *allModes = nil;
     // no-op in case of MTL
 }
 
-- (jlong)fbo
+- (int64_t)fbo
 {
     // NSLog(@"Glass fbo = %@", [self->_fbo texture]);
-    return ptr_to_jlong((void *)[self->_fbo texture]);
+    return (int64_t)(intptr_t)[self->_fbo texture];
 }
 
 - (void)bindForWidth:(unsigned int)width

@@ -107,6 +107,7 @@ typedef enum VertexInputIndex {
     id<MTLBuffer> pixelBuffer;
 }
 
+- (id) createContext:(dispatch_data_t)shaderLibData;
 - (void) setCompositeMode:(int)mode;
 - (int) getCompositeMode;
 - (MetalPipelineManager*) getPipelineManager;
@@ -164,8 +165,6 @@ typedef enum VertexInputIndex {
         m10:(float)m10 m11:(float)m11 m12:(float)m12 m13:(float)m13
         m20:(float)m20 m21:(float)m21 m22:(float)m22 m23:(float)m23
         m30:(float)m30 m31:(float)m31 m32:(float)m32 m33:(float)m33;
-
-- (void) setWorldTransformIdentityMatrix;
 
 - (MTLRenderPassDescriptor*) getPhongRPD;
 - (simd_float4x4) getMVPMatrix;

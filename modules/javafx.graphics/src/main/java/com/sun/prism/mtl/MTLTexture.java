@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2021, 2025, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2021, 2026, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -95,7 +95,7 @@ class MTLTexture<T extends MTLTextureData> extends BaseTexture<MTLTextureResourc
         if (format == PixelFormat.INT_ARGB_PRE) {
             IntBuffer buf = (IntBuffer) buffer;
             int[] arr = buf.hasArray() ? buf.array() : null;
-            nUpdateInt(getNativeHandle(), buf, arr,
+            MTLNative.textureUpdateInt(context.getScratch(), getNativeHandle(), getPixelFormat(), buf, arr,
                        dstx, dsty, srcx, srcy, srcw, srch, srcscan);
         } else {
             throw new IllegalArgumentException("Unsupported INT PixelFormat: " + format);
@@ -110,7 +110,7 @@ class MTLTexture<T extends MTLTextureData> extends BaseTexture<MTLTextureResourc
         if (format == PixelFormat.FLOAT_XYZW) {
             FloatBuffer buf = (FloatBuffer) buffer;
             float[] arr = buf.hasArray() ? buf.array() : null;
-            nUpdateFloat(getNativeHandle(), buf, arr,
+            MTLNative.textureUpdateFloat(context.getScratch(), getNativeHandle(), getPixelFormat(), buf, arr,
                          dstx, dsty, srcx, srcy, srcw, srch, srcscan);
         } else {
             throw new IllegalArgumentException("Unsupported FLOAT PixelFormat: " + format);
@@ -129,7 +129,7 @@ class MTLTexture<T extends MTLTextureData> extends BaseTexture<MTLTextureResourc
         switch (format) {
             case PixelFormat.BYTE_BGRA_PRE,
                  PixelFormat.BYTE_ALPHA ->
-                nUpdate(getNativeHandle(), buf, arr,
+                MTLNative.textureUpdate(context.getScratch(), getNativeHandle(), getPixelFormat(), buf, arr,
                         dstx, dsty, srcx, srcy, srcw, srch, srcscan);
 
             case PixelFormat.BYTE_RGB -> {
@@ -156,7 +156,7 @@ class MTLTexture<T extends MTLTextureData> extends BaseTexture<MTLTextureResourc
                         arr32Bit[dstIndex++] = (byte)255;
                     }
                 }
-                nUpdate(getNativeHandle(), null, arr32Bit,
+                MTLNative.textureUpdate(context.getScratch(), getNativeHandle(), getPixelFormat(), null, arr32Bit,
                         dstx, dsty, srcx, srcy, srcw, srch, srcw * 4);
             }
 
@@ -185,7 +185,7 @@ class MTLTexture<T extends MTLTextureData> extends BaseTexture<MTLTextureResourc
                         arr32Bit[dstIndex++] = (byte) 255;
                     }
                 }
-                nUpdate(getNativeHandle(), null, arr32Bit,
+                MTLNative.textureUpdate(context.getScratch(), getNativeHandle(), getPixelFormat(), null, arr32Bit,
                         dstx, dsty, srcx, srcy, srcw, srch, srcw * 4);
             }
 
@@ -240,30 +240,11 @@ class MTLTexture<T extends MTLTextureData> extends BaseTexture<MTLTextureResourc
             pixels.get(arr);
         }
 
-        nUpdateYUV422(this.getNativeHandle(),
+        MTLNative.textureUpdateYuv422(this.getNativeHandle(),
                       arr, 0, 0, 0, 0,
                       frame.getEncodedWidth(), frame.getEncodedHeight(),
                       frame.strideForPlane(0));
 
         frame.releaseFrame();
     }
-
-
-    // Native methods
-
-    private static native void nUpdate(long pResource, ByteBuffer buf, byte[] pixels,
-                                       int dstx, int dsty, int srcx, int srcy,
-                                       int w, int h, int stride);
-
-    private static native void nUpdateFloat(long pResource, FloatBuffer buf, float[] pixels,
-                                            int dstx, int dsty, int srcx, int srcy,
-                                            int w, int h, int stride);
-
-    private static native void nUpdateInt(long pResource, IntBuffer buf, int[] pixels,
-                                          int dstx, int dsty, int srcx, int srcy,
-                                          int w, int h, int stride);
-
-    private static native void nUpdateYUV422(long pResource, byte[] pixels,
-                                             int dstx, int dsty, int srcx, int srcy,
-                                             int w, int h, int stride);
 }

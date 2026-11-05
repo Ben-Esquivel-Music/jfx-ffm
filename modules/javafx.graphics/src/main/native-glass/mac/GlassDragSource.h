@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2011, 2024, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2011, 2026, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -24,7 +24,7 @@
  */
 
 #import <Cocoa/Cocoa.h>
-#import <jni.h>
+#include <stdint.h>
 
 @protocol GlassDragSourceDelegate <NSObject>
 
@@ -37,18 +37,18 @@
 
 + (void)setDelegate:(NSObject<GlassDragSourceDelegate>*)delegate;
 + (BOOL)isDelegateSet;
-+ (void)flushWithMask:(jint)mask withItems:(NSArray<NSDraggingItem*>*)items;
++ (void)flushWithMask:(int32_t)mask withItems:(NSArray<NSDraggingItem*>*)items;
 
-+ (NSDragOperation)mapJavaMaskToNsOperation:(jint)mask;
-+ (jint)mapNsOperationToJavaMaskExternal:(NSDragOperation)operation;
-+ (jint)mapNsOperationToJavaMaskInternal:(NSDragOperation)operation;
-+ (jint)getRecommendedActionForMaskExternal:(NSDragOperation)operation;
-+ (jint)getRecommendedActionForMaskInternal:(NSDragOperation)operation;
++ (NSDragOperation)mapJavaMaskToNsOperation:(int32_t)mask;
++ (int32_t)mapNsOperationToJavaMaskExternal:(NSDragOperation)operation;
++ (int32_t)mapNsOperationToJavaMaskInternal:(NSDragOperation)operation;
++ (int32_t)getRecommendedActionForMaskExternal:(NSDragOperation)operation;
++ (int32_t)getRecommendedActionForMaskInternal:(NSDragOperation)operation;
 
-+ (void)setMask:(jint)mask;
-+ (jint)getMask;
++ (void)setMask:(int32_t)mask;
++ (int32_t)getMask;
 
-+ (jint)getSupportedActions;
-+ (void)setSupportedActions:(jint)actions;
++ (int32_t)getSupportedActions;
++ (void)setSupportedActions:(int32_t)actions;
 
 @end

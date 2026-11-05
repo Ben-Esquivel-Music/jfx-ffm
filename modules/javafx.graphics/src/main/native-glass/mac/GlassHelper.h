@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2011, 2013, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2011, 2026, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -28,30 +28,12 @@
 #import <Foundation/Foundation.h>
 #import <Cocoa/Cocoa.h>
 #import <objc/runtime.h>
-#import <jni.h>
 
 @interface GlassHelper : NSObject
 {
 
 }
 
-+ (void)SetGlassClassLoader:(jobject)classLoader withEnv:(JNIEnv*)env;
-+ (jclass)ClassForName:(char*)className withEnv:(JNIEnv*)env;
-+ (jmethodID)ApplicationNotifyWillFinishLaunchingMethod;
-+ (jmethodID)ApplicationNotifyDidFinishLaunchingMethod;
-+ (jmethodID)ApplicationNotifyWillBecomeActiveMethod;
-+ (jmethodID)ApplicationNotifyDidBecomeActiveMethod;
-+ (jmethodID)ApplicationNotifyWillResignActiveMethod;
-+ (jmethodID)ApplicationNotifyDidResignActiveMethod;
-+ (jmethodID)ApplicationNotifyWillHideMethod;
-+ (jmethodID)ApplicationNotifyDidHideMethod;
-+ (jmethodID)ApplicationNotifyWillUnhideMethod;
-+ (jmethodID)ApplicationNotifyDidUnhideMethod;
-+ (jmethodID)ApplicationNotifyOpenFilesMethod;
-+ (jmethodID)ApplicationNotifyWillQuitMethod;
-
 + (BOOL)InvokeSelectorIfAvailable:(SEL)aSelector forClass:(Class)aClass withArgument:(void *)anArgument withReturnValue:(void **)aReturnValue;
-
-+ (NSString*)nsStringWithJavaString:(jstring)javaString withEnv:(JNIEnv*)env;
 
 @end

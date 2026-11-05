@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2021, 2025, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2021, 2026, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -25,6 +25,7 @@
 
 #import "MetalTexture.h"
 #import "MetalPipelineManager.h"
+#import "prism_mtl_api.h"
 
 // ** HELPER METHODS **
 
@@ -290,144 +291,3 @@ static NSMutableDictionary *copyPixelDataToRingBuffer(MetalContext* context, voi
 }
 
 @end // MetalTexture
-
-
-// ** JNI METHODS **
-
-/*
- * Class:     com_sun_prism_mtl_MTLTexture
- * Method:    nUpdate
- * Signature: (JLjava/nio/ByteBuffer;[BIIIIIII)J
- */
-JNIEXPORT jlong JNICALL Java_com_sun_prism_mtl_MTLTexture_nUpdate
-    (JNIEnv *env, jclass jClass, jlong nTexturePtr, jobject buf,
-    jbyteArray pixData, jint dstx, jint dsty, jint srcx, jint srcy,
-    jint width, jint height, jint scanStride)
-{
-    MetalTexture* mtlTex  = (MetalTexture*)jlong_to_ptr(nTexturePtr);
-
-    jint length = pixData?
-        (*env)->GetArrayLength(env, pixData) :
-        (jint)((*env)->GetDirectBufferCapacity(env, buf));
-    length *= sizeof(jbyte);
-
-    jbyte* pixels = (jbyte*)((pixData != NULL) ?
-        (*env)->GetPrimitiveArrayCritical(env, pixData, NULL) :
-        (*env)->GetDirectBufferAddress(env, buf));
-
-    [mtlTex updateTexture:pixels
-                     dstX:dstx
-                     dstY:dsty
-                     srcX:srcx
-                     srcY:srcy
-                    width:width
-                   height:height
-               scanStride:scanStride];
-
-    if (pixData != NULL) {
-        (*env)->ReleasePrimitiveArrayCritical(env, pixData, pixels, 0);
-    }
-
-    // TODO: MTL: add error detection and return appropriate jlong
-    return 0;
-}
-
-/*
- * Class:     com_sun_prism_mtl_MTLTexture
- * Method:    nUpdateFloat
- * Signature: (JLjava/nio/FloatBuffer;[FIIIIIII)J
- */
-JNIEXPORT jlong JNICALL Java_com_sun_prism_mtl_MTLTexture_nUpdateFloat
-    (JNIEnv *env, jclass jClass, jlong nTexturePtr, jobject buf,
-    jfloatArray pixData, jint dstx, jint dsty, jint srcx, jint srcy,
-    jint width, jint height, jint scanStride)
-{
-    MetalTexture* mtlTex  = (MetalTexture*)jlong_to_ptr(nTexturePtr);
-
-    jint length = pixData ?
-        (*env)->GetArrayLength(env, pixData) :
-        (jint)((*env)->GetDirectBufferCapacity(env, buf));
-    length *= sizeof(jfloat);
-
-    jfloat *pixels = (jfloat*)((pixData != NULL) ?
-        (*env)->GetPrimitiveArrayCritical(env, pixData, NULL) :
-        (*env)->GetDirectBufferAddress(env, buf));
-
-    [mtlTex updateTexture:pixels
-                     dstX:dstx
-                     dstY:dsty
-                     srcX:srcx
-                     srcY:srcy
-                    width:width
-                   height:height
-               scanStride:scanStride];
-
-    if (pixData != NULL) {
-        (*env)->ReleasePrimitiveArrayCritical(env, pixData, pixels, 0);
-    }
-    // TODO: MTL: add error detection and return appropriate jlong
-    return 0;
-}
-
-/*
- * Class:     com_sun_prism_mtl_MTLTexture
- * Method:    nUpdateInt
- * Signature: (JLjava/nio/IntBuffer;[IIIIIIII)J
- */
-JNIEXPORT jlong JNICALL Java_com_sun_prism_mtl_MTLTexture_nUpdateInt
-    (JNIEnv *env, jclass jClass, jlong nTexturePtr, jobject buf,
-    jintArray pixData, jint dstx, jint dsty, jint srcx, jint srcy,
-    jint width, jint height, jint scanStride)
-{
-    MetalTexture* mtlTex  = (MetalTexture*)jlong_to_ptr(nTexturePtr);
-
-    jint length = pixData ?
-        (*env)->GetArrayLength(env, pixData) :
-        (jint)((*env)->GetDirectBufferCapacity(env, buf));
-    length *= sizeof(jint);
-
-    jint *pixels = (jint*)((pixData != NULL) ?
-        (*env)->GetPrimitiveArrayCritical(env, pixData, NULL) :
-        (*env)->GetDirectBufferAddress(env, buf));
-
-    [mtlTex updateTexture:pixels
-                     dstX:dstx
-                     dstY:dsty
-                     srcX:srcx
-                     srcY:srcy
-                    width:width
-                   height:height
-               scanStride:scanStride];
-
-    if (pixData != NULL) {
-        (*env)->ReleasePrimitiveArrayCritical(env, pixData, pixels, 0);
-    }// TODO: MTL: add error detection and return appropriate jlong
-    return 0;
-}
-
-/*
- * Class:     com_sun_prism_mtl_MTLTexture
- * Method:    nUpdateInt
- * Signature: (J[BIIIIIII)J
- */
-JNIEXPORT jlong JNICALL Java_com_sun_prism_mtl_MTLTexture_nUpdateYUV422
-    (JNIEnv *env, jclass jClass, jlong nTexturePtr, jbyteArray pixData,
-    jint dstx, jint dsty, jint srcx, jint srcy, jint w, jint h, jint scanStride)
-{
-    MetalTexture* mtlTex  = (MetalTexture*)jlong_to_ptr(nTexturePtr);
-    jbyte* pixels = (*env)->GetByteArrayElements(env, pixData, 0);
-
-    [mtlTex updateTextureYUV422:(char*)pixels
-                           dstX:dstx
-                           dstY:dsty
-                           srcX:srcx
-                           srcY:srcy
-                          width:w
-                         height:h
-                     scanStride:scanStride];
-
-    (*env)->ReleaseByteArrayElements(env, pixData, pixels, 0);
-
-    // TODO: MTL: add error detection and return appropriate jlong
-    return 0;
-}

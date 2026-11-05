@@ -24,7 +24,6 @@
  */
 
 #import <Cocoa/Cocoa.h>
-#import <jni.h>
 
 #import "GlassMenu.h"
 #import "GlassView.h"
@@ -33,7 +32,7 @@
 // normal Glass window delegate
 @interface GlassWindow : NSObject <NSWindowDelegate>
 {
-    jobject             jWindow;
+    int64_t             windowId;
 
 @public
     // A reference to an NSWindow or NSPanel descendant - the native window
@@ -68,7 +67,7 @@
 
     // We track whether an explicit size/location have been assigned to the window
     // in order to differentiate between an explicitly assigned zero bounds, and the
-    // deafult bounds (which are also zeros - see a comment in _createWindowCommon().)
+    // deafult bounds (which are also zeros - see a comment in createWindow().)
     BOOL                isSizeAssigned;
     BOOL                isLocationAssigned;
 

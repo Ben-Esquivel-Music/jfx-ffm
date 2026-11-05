@@ -25,6 +25,8 @@
 
 #import <Cocoa/Cocoa.h>
 
+#import "glass_mac_api.h"
+
 @interface NSApplication (NiblessAdditions)
 
 -(void)setAppleMenu:(NSMenu *)aMenu;
@@ -47,11 +49,10 @@
 @interface GlassApplication : NSObject <NSApplicationDelegate>
 {
     BOOL            started;
+    BOOL            taskbarApplication;
+    BOOL            hasLaunchable;
 
-    jobject         jApplication;
-    jobject         jLaunchable;
-    jboolean        jTaskBarApp;
-    jlong           jshareContextPtr;
+    int64_t         jshareContextPtr;
 
     // local and intra-app event monitoring
     //
@@ -61,16 +62,13 @@
 
 - (void)runLoop:(id)selector;
 - (BOOL)started;
-- (jobject)getPlatformPreferences;
-
-+ (jobject)enterNestedEventLoopWithEnv:(JNIEnv*)env;
-+ (void)leaveNestedEventLoopWithEnv:(JNIEnv*)env retValue:(jobject)retValue;
+- (GmacPref *)collectPreferenceEntries:(int32_t *)count;
 
 + (void)enterFullScreenExitingLoop;
 + (void)leaveFullScreenExitingLoopIfNeeded;
 
 + (void)registerKeyEvent:(NSEvent*)event;
-+ (jint)getKeyCodeForChar:(jchar)c;
++ (int32_t)getKeyCodeForChar:(uint16_t)c;
 
 + (BOOL)syncRenderingDisabled;
 

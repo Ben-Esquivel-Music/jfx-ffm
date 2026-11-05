@@ -220,6 +220,19 @@ usage limit after the substance was on disk.
       while the KVO, track and main-queue paths are fenced (contract §7.1).
     * **The distinction to keep:** on macOS, **symbol-level correctness is now evidenced; behavioural
       correctness is not.**
+  * *Correction, 2026-11-05:* "this machine" in this document is the Windows machine of sections 3
+    and 4. The project has had a macOS host since 2026-10-24, when the macOS half of backlog story
+    US-003 was done on one. `backlog/US-001b-macos-gate.md` records a Mac mini (macOS 27.0.1 arm64,
+    Xcode 27.1, CMake 4.4.4) on which `javafx.graphics` was built and tested on 2026-11-03 and
+    2026-11-05, and on which the owner ran all of `tests/system` on the US-001b tree with
+    `-DFULL_TEST=true -DUSE_ROBOT=true` on 2026-11-05: 1,099 tests, 2 failures, 0 errors,
+    60 skipped, neither failure in a media test. That run's command is not recorded. The one US-073
+    records for two later runs of a single robot class, from a clone at `1a6788cc4d`, has `-am` and
+    no `-DskipNative`; `tests/system` depends on `javafx-media`, whose `native-mac` profile is
+    active on macOS unless `skipNative` is `true`, so the build files put the media CMake build,
+    `jfxmediaAvf` included, in those runs. No record shows that build's output, gives a per-class
+    result of a media test on the Mac (`tests/system`'s macOS-only `AVFVideoDisposeRaceTest`
+    included) or records macOS playback.
 * **Playback — this is now covered, and the review finding is closed rather than qualified.** The
   branch review's MEDIUM-T1 was *"nothing in the fork ever plays media"*, and it was true when
   written. `modules/javafx.media/src/test/java/test/com/sun/media/jfxmediaimpl/MediaPlaybackTest.java`

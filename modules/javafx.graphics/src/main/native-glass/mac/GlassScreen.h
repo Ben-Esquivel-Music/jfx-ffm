@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2011, 2013, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2011, 2026, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -25,7 +25,6 @@
 
 #import <Cocoa/Cocoa.h>
 #import <ApplicationServices/ApplicationServices.h>
-#import <jni.h>
 
 @interface NSScreen (FullscreenAdditions)
 
@@ -34,8 +33,6 @@
 
 @end
 
-void GlassScreenDidChangeScreenParameters(JNIEnv *env);
+void GlassScreenDidChangeScreenParameters(void);
 
 CGFloat GetScreenScaleFactor(NSScreen *screen);
-jobjectArray createJavaScreens(JNIEnv* env);
-jobject createJavaScreen(JNIEnv *env, NSScreen* screen);
