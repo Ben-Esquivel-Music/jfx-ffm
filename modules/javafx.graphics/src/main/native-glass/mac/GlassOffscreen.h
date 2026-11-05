@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2012, 2025, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2012, 2026, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -24,7 +24,7 @@
  */
 
 #import <Cocoa/Cocoa.h>
-#import "common.h"
+#include <stdint.h>
 
 @interface GlassOffscreen : NSObject
 {
@@ -36,7 +36,7 @@
 }
 
 - (void)setBackgroundColor:(NSColor*)color;
-- (jlong)fbo;
+- (int64_t)fbo;
 - (unsigned int)width;
 - (unsigned int)height;
 - (void)bindForWidth:(unsigned int)width

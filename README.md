@@ -59,6 +59,14 @@ module jars and `javafx.properties` under `lib/` plus the javafx.graphics and
 javafx.media native libraries. Legal notices, `src.zip`, jmods, javadoc and
 distribution archives are not produced.
 
+javafx.graphics has no JNI on any platform: no class declares a `native`
+method, and its native libraries export plain C functions that Java calls
+through the Foreign Function & Memory API (`java.lang.foreign`). The
+`javac -h` step of the graphics build stays only because Windows `glass`
+still includes the constant headers it generates; the Linux and macOS
+libraries compile without the JDK include directories and without those
+headers.
+
 # Contribute
 
 Please contact BenEsquivelMusic@gmail.com if you would like to contribute to this project.

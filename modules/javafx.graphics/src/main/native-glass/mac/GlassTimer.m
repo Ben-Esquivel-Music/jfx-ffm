@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2011, 2018, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2011, 2026, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -24,14 +24,13 @@
  */
 
 #import "common.h"
-#import "com_sun_glass_ui_mac_MacTimer.h"
-
-#import "com_sun_glass_ui_Timer.h"
 
 #import "ProcessInfo.h"
 #import "GlassMacros.h"
 #import "GlassHelper.h"
 #import "GlassTimer.h"
+#import "glass_mac_api.h"
+#import "glass_mac_internal.h"
 
 #include <sys/time.h>
 
@@ -44,6 +43,20 @@
 
 #define HIGH_PRIORITY_TIMER         1
 
+static BOOL hasTimerId(GlassTimer *timer)
+{
+    return __atomic_load_n(&timer->_timerIdReady, __ATOMIC_ACQUIRE) != 0;
+}
+
+static void dialTick(GlassTimer *timer)
+{
+    const GmacTimerCallbacks *callbacks = GlassTimerCallbacks();
+    if (callbacks != NULL && callbacks->tick != NULL)
+    {
+        callbacks->tick(timer->_timerId);
+    }
+}
+
 static void *_GlassTimerTask(void *data)
 {
     pthread_setname_np("Glass Timer Thread");
@@ -51,65 +64,46 @@ static void *_GlassTimerTask(void *data)
     GlassTimer *timer = (GlassTimer*)data;
     if (timer != NULL)
     {
-        jint error = (*MAIN_JVM)->AttachCurrentThreadAsDaemon(MAIN_JVM, (void **)&timer->_env, NULL);
-        if (error == 0)
+        timer->_running = YES;
+        while (timer->_running == YES)
         {
-            timer->_running = YES;
-            while (timer->_running == YES)
+            int64_t now = getTimeMicroseconds();
+            if (timer->_paused == NO)
             {
-                int64_t now = getTimeMicroseconds();
-                if (timer->_paused == NO)
+                if (hasTimerId(timer))
                 {
-                    if (timer->_runnable != NULL)
+                    NSAutoreleasePool *pool = [[NSAutoreleasePool alloc] init];
                     {
-                        NSAutoreleasePool *pool = [[NSAutoreleasePool alloc] init];
-                        {
-                            (*timer->_env)->CallVoidMethod(timer->_env, timer->_runnable, jRunnableRun);
-                        }
-                        [pool drain];
-                        GLASS_CHECK_EXCEPTION(timer->_env);
+                        dialTick(timer);
                     }
+                    [pool drain];
                 }
-                int64_t duration = (getTimeMicroseconds() - now);
-                int64_t sleep = (timer->_period - duration);
-                if ((sleep < 0) || (sleep > timer->_period))
-                {
+            }
+            int64_t duration = (getTimeMicroseconds() - now);
+            int64_t sleep = (timer->_period - duration);
+            if ((sleep < 0) || (sleep > timer->_period))
+            {
 #if 1
-                    sched_yield();
+                sched_yield();
 #else
-                    pthread_yield_np();
+                pthread_yield_np();
 #endif
-                }
-                else
-                {
-                    usleep((useconds_t)sleep);
-                }
             }
-
-            if (timer->_runnable != NULL)
+            else
             {
-                (*timer->_env)->DeleteGlobalRef(timer->_env, timer->_runnable);
+                usleep((useconds_t)sleep);
             }
-            timer->_runnable = NULL;
-
-            NSAutoreleasePool *pool = [[NSAutoreleasePool alloc] init];
-            {
-                [timer release];
-            }
-            [pool drain];
-
-            (*MAIN_JVM)->DetachCurrentThread(MAIN_JVM);
         }
-        else
+
+        NSAutoreleasePool *pool = [[NSAutoreleasePool alloc] init];
         {
-            NSLog(@"ERROR: Glass could not attach Timer _thread to VM, result:%d\n", (int)error);
+            [timer release];
         }
+        [pool drain];
     }
 
     return NULL;
 }
-
-JavaVMAttachArgs attachArgs = {JNI_VERSION_1_2, "PulseTimer-CVDisplayLink thread", NULL};
 
 CVReturn CVOutputCallback(CVDisplayLinkRef displayLink,
                           const CVTimeStamp *inNow, const CVTimeStamp *inOutputTime,
@@ -122,33 +116,12 @@ CVReturn CVOutputCallback(CVDisplayLinkRef displayLink,
     {
         GlassTimer *timer = (GlassTimer*)displayLinkContext;
 
-        // CVDisplayLinkStart() starts a new CVDisplayLink thread. This thread
-        // should be attached to JVM. Cocoa changes the thread when a new display
-        // resolution is selected so we need to make sure that we are able to
-        // call into Java. Attaching the same thread multiple times does nothing.
-        // As the thread is attached as a daemon, it will not stop Java from exiting.
-
-        jint ret = (*MAIN_JVM)->AttachCurrentThreadAsDaemon(MAIN_JVM, (void **)&timer->_env, (void*)&attachArgs);
-        if (ret == 0)
+        // The upcall attaches each CVDisplayLink thread once. The tick target names it as the JNI's attach did and,
+        // after a tick that left the timer paused, hands a held exception to the thread's uncaught-exception
+        // handler as the JNI's detach did (GmacTimerCallbacks).
+        if (hasTimerId(timer))
         {
-            if (timer->_runnable != NULL)
-            {
-                (*timer->_env)->CallVoidMethod(timer->_env, timer->_runnable, jRunnableRun);
-            }
-
-            if (timer->_paused == YES)
-            {
-                // _1pause() calls CVDisplayLinkStop() on current CVDisplayLink thread, which
-                // in turn stops the thread. Hence the thread should be detached.
-
-                ret = (*MAIN_JVM)->DetachCurrentThread(MAIN_JVM);
-                if (ret != JNI_OK)
-                {
-                    NSLog(@"ERROR: CVOutputCallback(): Glass could not detach CVDisplayLink _thread to VM, result:%d\n", (int)ret);
-                }
-            }
-        } else {
-            NSLog(@"ERROR: Glass could not attach CVDisplayLink _thread to VM, result:%d\n", (int)ret);
+            dialTick(timer);
         }
     }
 
@@ -159,7 +132,14 @@ CVReturn CVOutputCallback(CVDisplayLinkRef displayLink,
 
 @implementation GlassTimer
 
-- (id)initWithRunnable:(jobject)runnable withEnv:(JNIEnv*)env
+// Where the JNI took its global reference to the Runnable: a tick before this runs nothing (latent bug 6).
+- (void)publishTimerId:(int64_t)timerId
+{
+    self->_timerId = timerId;
+    __atomic_store_n(&self->_timerIdReady, 1, __ATOMIC_RELEASE);
+}
+
+- (id)initWithTimerId:(int64_t)timerId
 {
     self = [super init];
     if (self != nil)
@@ -172,13 +152,13 @@ CVReturn CVOutputCallback(CVDisplayLinkRef displayLink,
         }
         else
         {
-            self->_runnable = (*env)->NewGlobalRef(env, runnable);
+            [self publishTimerId:timerId];
         }
     }
     return self;
 }
 
-- (id)initWithRunnable:(jobject)runnable withEnv:(JNIEnv*)env withPeriod:(jint)period
+- (id)initWithTimerId:(int64_t)timerId withPeriod:(int32_t)period
 {
     self = [super init];
     if (self != nil)
@@ -186,7 +166,6 @@ CVReturn CVOutputCallback(CVDisplayLinkRef displayLink,
         self->_thread = NULL;
         self->_running = NO;
         self->_paused = NO;
-        self->_runnable = NULL;
         self->_period = (1000 * period); // ms --> us
 
         pthread_attr_t attr;
@@ -207,7 +186,7 @@ CVReturn CVOutputCallback(CVDisplayLinkRef displayLink,
             // detach thread, so its resources can be reclaimed as soon as it's finished
             pthread_detach(self->_thread);
 
-            self->_runnable = (*env)->NewGlobalRef(env, runnable);
+            [self publishTimerId:timerId];
         }
         else
         {
@@ -221,67 +200,33 @@ CVReturn CVOutputCallback(CVDisplayLinkRef displayLink,
 
 @end
 
-/*
- * Class:     com_sun_glass_ui_mac_MacTimer
- * Method:    _start
- * Signature: (Ljava/lang/Runnable;I)J
- */
-JNIEXPORT jlong JNICALL
-Java_com_sun_glass_ui_mac_MacTimer__1start__Ljava_lang_Runnable_2I(JNIEnv *env, jobject jThis,
-                                                                   jobject jRunnable, jint jPeriod)
+void *gmac_timer_start_period(int64_t timer_id, int32_t period)
 {
-    LOG("Java_com_sun_glass_ui_mac_MacTimer__1start__Ljava_lang_Runnable_2I");
-
-    jlong jTimerPtr = 0L;
-
-    GLASS_ASSERT_MAIN_JAVA_THREAD(env);
+    GlassTimer *timer = nil;
     GLASS_POOL_ENTER;
     {
-        jTimerPtr = ptr_to_jlong([[GlassTimer alloc] initWithRunnable:jRunnable withEnv:env withPeriod:jPeriod]);
+        timer = [[GlassTimer alloc] initWithTimerId:timer_id withPeriod:period];
     }
     GLASS_POOL_EXIT;
-    GLASS_CHECK_EXCEPTION(env);
-
-    return jTimerPtr;
+    return timer;
 }
 
-/*
- * Class:     com_sun_glass_ui_mac_MacTimer
- * Method:    _start
- * Signature: (Ljava/lang/Runnable;)J
- */
-JNIEXPORT jlong JNICALL Java_com_sun_glass_ui_mac_MacTimer__1start__Ljava_lang_Runnable_2
-(JNIEnv *env, jobject jThis, jobject jRunnable)
+void *gmac_timer_start_vsync(int64_t timer_id)
 {
-    LOG("Java_com_sun_glass_ui_mac_MacTimer__1start__Ljava_lang_Runnable_2");
-
-    jlong jTimerPtr = 0L;
-
-    GLASS_ASSERT_MAIN_JAVA_THREAD(env);
+    GlassTimer *timer = nil;
     GLASS_POOL_ENTER;
     {
-        jTimerPtr = ptr_to_jlong([[GlassTimer alloc] initWithRunnable:jRunnable withEnv:env]);
+        timer = [[GlassTimer alloc] initWithTimerId:timer_id];
     }
     GLASS_POOL_EXIT;
-    GLASS_CHECK_EXCEPTION(env);
-
-    return jTimerPtr;
+    return timer;
 }
 
-/*
- * Class:     com_sun_glass_ui_mac_MacTimer
- * Method:    _stop
- * Signature: (J)V
- */
-JNIEXPORT void JNICALL Java_com_sun_glass_ui_mac_MacTimer__1stop
-(JNIEnv * env, jobject jRunnable, jlong jTimerPtr)
+void gmac_timer_stop(void *timer_ptr)
 {
-    LOG("Java_com_sun_glass_ui_mac_MacTimer__1stop");
-
-    GLASS_ASSERT_MAIN_JAVA_THREAD(env);
     GLASS_POOL_ENTER;
     {
-        GlassTimer *timer = (GlassTimer*)jlong_to_ptr(jTimerPtr);
+        GlassTimer *timer = (GlassTimer*)timer_ptr;
         if (timer->_period == 0)
         {
             // stop the display link
@@ -296,23 +241,13 @@ JNIEXPORT void JNICALL Java_com_sun_glass_ui_mac_MacTimer__1stop
         }
     }
     GLASS_POOL_EXIT;
-    GLASS_CHECK_EXCEPTION(env);
 }
 
-/*
- * Class:     com_sun_glass_ui_mac_MacTimer
- * Method:    _pause
- * Signature: (J)V
- */
-JNIEXPORT void JNICALL Java_com_sun_glass_ui_mac_MacTimer__1pause
-(JNIEnv *env, jclass cls, jlong jTimerPtr)
+void gmac_timer_pause(void *timer_ptr)
 {
-    LOG("Java_com_sun_glass_ui_mac_MacTimer__1pause");
-
-    GLASS_ASSERT_MAIN_JAVA_THREAD(env);
     GLASS_POOL_ENTER;
     {
-        GlassTimer *timer = (GlassTimer*)jlong_to_ptr(jTimerPtr);
+        GlassTimer *timer = (GlassTimer*)timer_ptr;
         if (timer->_period == 0)
         {
             // Stop the CVDisplayLink thread. There is no API to pause the CVDisplayLink
@@ -340,24 +275,13 @@ JNIEXPORT void JNICALL Java_com_sun_glass_ui_mac_MacTimer__1pause
         }
     }
     GLASS_POOL_EXIT;
-    GLASS_CHECK_EXCEPTION(env);
 }
 
-
-/*
- * Class:     com_sun_glass_ui_mac_MacTimer
- * Method:    _resume
- * Signature: (J)V
- */
-JNIEXPORT void JNICALL Java_com_sun_glass_ui_mac_MacTimer__1resume
-(JNIEnv *env, jclass cls, jlong jTimerPtr)
+void gmac_timer_resume(void *timer_ptr)
 {
-    LOG("Java_com_sun_glass_ui_mac_MacTimer__1resume");
-
-    GLASS_ASSERT_MAIN_JAVA_THREAD(env);
     GLASS_POOL_ENTER;
     {
-        GlassTimer *timer = (GlassTimer*)jlong_to_ptr(jTimerPtr);
+        GlassTimer *timer = (GlassTimer*)timer_ptr;
         if (timer->_period == 0)
         {
             // Start the CVDisplayLink thread. There is no API to resume the CVDisplayLink
@@ -381,66 +305,15 @@ JNIEXPORT void JNICALL Java_com_sun_glass_ui_mac_MacTimer__1resume
         }
     }
     GLASS_POOL_EXIT;
-    GLASS_CHECK_EXCEPTION(env);
 }
 
-/*
- * Class:     com_sun_glass_ui_mac_MacTimer
- * Method:    _getMinPeriod
- * Signature: ()I
- */
-JNIEXPORT jint JNICALL Java_com_sun_glass_ui_mac_MacTimer__1getMinPeriod
-(JNIEnv * env, jclass cls)
+int32_t gmac_timer_paused(void *timer_ptr)
 {
-    LOG("Java_com_sun_glass_ui_mac_MacTimer__1getMinPeriod");
-
-    int period = 0;
-
-    GLASS_ASSERT_MAIN_JAVA_THREAD(env);
-    GLASS_POOL_ENTER;
-    {
-        period = 0; // in ms
-    }
-    GLASS_POOL_EXIT;
-    GLASS_CHECK_EXCEPTION(env);
-
-    return period;
+    return ((GlassTimer*)timer_ptr)->_paused == YES ? 1 : 0;
 }
 
-/*
- * Class:     com_sun_glass_ui_mac_MacTimer
- * Method:    _getMaxPeriod
- * Signature: ()I
- */
-JNIEXPORT jint JNICALL Java_com_sun_glass_ui_mac_MacTimer__1getMaxPeriod
-(JNIEnv * env, jclass cls)
+void gmac_timer_init(void)
 {
-    LOG("Java_com_sun_glass_ui_mac_MacTimer__1getMaxPeriod");
-
-    int period = 0;
-
-    GLASS_ASSERT_MAIN_JAVA_THREAD(env);
-    GLASS_POOL_ENTER;
-    {
-        period = 1000000; // in ms (100 sec)
-    }
-    GLASS_POOL_EXIT;
-    GLASS_CHECK_EXCEPTION(env);
-
-    return period;
-}
-
-/*
- * Class:     com_sun_glass_ui_mac_MacTimer
- * Method:    _initIDs
- * Signature: ()V
- */
-JNIEXPORT void JNICALL Java_com_sun_glass_ui_mac_MacTimer__1initIDs
-(JNIEnv *env, jclass jClass)
-{
-
-    initJavaIDsList(env);
-
     if (GlassDisplayLink == NULL)
     {
         CVReturn err = CVDisplayLinkCreateWithActiveCGDisplays(&GlassDisplayLink);
@@ -468,4 +341,3 @@ JNIEXPORT void JNICALL Java_com_sun_glass_ui_mac_MacTimer__1initIDs
         }
     }
 }
-

@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2024, 2025, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2024, 2026, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -23,7 +23,6 @@
  * questions.
  */
 
-#import "com_sun_glass_ui_View_Capability.h"
 #import "GlassMacros.h"
 #import "GlassViewMTL.h"
 
@@ -36,63 +35,16 @@
 
 @implementation GlassViewMTL
 
-- (void)_initialize3dWithJproperties:(jobject)jproperties
-                         useMTLForSW:(BOOL)mtlForSW
+- (void)_initialize3dWithCaps:(const GmacViewCaps *)caps
+                  useMTLForSW:(BOOL)mtlForSW
 {
-    GET_MAIN_JENV;
-    long mtlCommandQueuePtr = 0l;
-    BOOL isVsyncEnabled = YES;
-
-    int depthBits = 0;
-    if (jproperties != NULL)
-    {
-        jobject k3dDepthKey = (*env)->NewObject(env, jIntegerClass, jIntegerInitMethod, com_sun_glass_ui_View_Capability_k3dDepthKeyValue);
-        GLASS_CHECK_EXCEPTION(env);
-        jobject k3dDepthKeyValue = (*env)->CallObjectMethod(env, jproperties, jMapGetMethod, k3dDepthKey);
-        GLASS_CHECK_EXCEPTION(env);
-        if (k3dDepthKeyValue != NULL)
-        {
-            depthBits = (*env)->CallIntMethod(env, k3dDepthKeyValue, jIntegerValueMethod);
-            GLASS_CHECK_EXCEPTION(env);
-        }
-    }
+    long mtlCommandQueuePtr = (long)(intptr_t)caps->mtl_command_queue;
+    BOOL isVsyncEnabled = caps->vsync_enabled != 0 ? YES : NO;
 
     BOOL isSwPipe = NO;
 
-    if (jproperties != NULL)
-    {
-        jobject mtlCommandQueueKey = (*env)->NewStringUTF(env, "mtlCommandQueue");
-        jobject mtlCommandQueueValue = (*env)->CallObjectMethod(env, jproperties, jMapGetMethod, mtlCommandQueueKey);
-        //NSLog(@"---- mtlCommandQueueKey = %p", mtlCommandQueueKey);
-        //NSLog(@"---- mtlCommandQueueValue = %p", mtlCommandQueueValue);
-        GLASS_CHECK_EXCEPTION(env);
-        if (mtlCommandQueueValue != NULL)
-        {
-            jlong jmtlQueuePtr = (*env)->CallLongMethod(env, mtlCommandQueueValue, jLongValueMethod);
-            GLASS_CHECK_EXCEPTION(env);
-            if (jmtlQueuePtr != 0)
-            {
-                //NSLog(@"--- GLASS metal command queue ptr = %ld", jmtlQueuePtr);
-
-                //TODO: MTL: This enables sharing of MTLCommandQueue between PRISM and GLASS, if needed.
-                //Note : Currently, PRISM and GLASS create their own dedicated MTLCommandQueue
-                mtlCommandQueuePtr = jmtlQueuePtr;
-            }
-        }
-
-        jobject isVsyncEnabledKey = (*env)->NewStringUTF(env, "isVsyncEnabled");
-        jobject isVsyncEnabledValue = (*env)->CallObjectMethod(env, jproperties, jMapGetMethod, isVsyncEnabledKey);
-        GLASS_CHECK_EXCEPTION(env);
-        if (isVsyncEnabledValue != NULL)
-        {
-            jlong isVsyncEnabledLongValue = (*env)->CallLongMethod(env, isVsyncEnabledValue, jLongValueMethod);
-            GLASS_CHECK_EXCEPTION(env);
-            isVsyncEnabled = isVsyncEnabledLongValue == 1l ? YES : NO;
-        }
-    }
-
     if (mtlCommandQueuePtr == 0l) {
-        LOG("GlassViewMTL _initialize3dWithJproperties : using software pipeline");
+        LOG("GlassViewMTL _initialize3dWithCaps : using software pipeline");
         isSwPipe = YES;
     }
 
@@ -118,15 +70,15 @@
     return TRUE;
 }
 
-- (id)initWithFrame:(NSRect)frame withJview:(jobject)jView withJproperties:(jobject)jproperties useMTLForSW:(BOOL)mtlForSW
+- (id)initWithFrame:(NSRect)frame caps:(const GmacViewCaps *)caps useMTLForSW:(BOOL)mtlForSW
 {
-    LOG("GlassViewMTL initWithFrame:withJview:withJproperties");
+    LOG("GlassViewMTL initWithFrame:caps:useMTLForSW");
 
     self = [super initWithFrame: frame];
     if (self != nil)
     {
-        [self _initialize3dWithJproperties:jproperties
-                               useMTLForSW:(BOOL)mtlForSW];
+        [self _initialize3dWithCaps:caps
+                        useMTLForSW:(BOOL)mtlForSW];
     }
     return self;
 }

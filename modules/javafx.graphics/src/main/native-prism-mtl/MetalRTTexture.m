@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2021, 2025, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2021, 2026, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -24,7 +24,7 @@
  */
 
 #import "MetalRTTexture.h"
-#import "com_sun_prism_mtl_MTLRTTexture.h"
+#import "prism_mtl_api.h"
 
 @implementation MetalRTTexture
 
@@ -99,7 +99,7 @@
         context = ctx;
         pixelFormat = MTLPixelFormatBGRA8Unorm;
         mipmapped = NO;
-        id <MTLTexture> tex = (__bridge id<MTLTexture>)(jlong_to_ptr(pTex));
+        id <MTLTexture> tex = (__bridge id<MTLTexture>)((void *)pTex);
         texture = tex;
     }
     return self;
@@ -181,88 +181,3 @@
     [super dealloc];
 }
 @end // MetalRTTexture
-
-
-// ** JNI METHODS **
-
-/*
- * Class:     com_sun_prism_mtl_MTLRTTexture
- * Method:    nCreateRT
- * Signature: (JIIIILcom/sun/prism/Texture/WrapMode;Z)J
- */
-JNIEXPORT jlong JNICALL Java_com_sun_prism_mtl_MTLRTTexture_nCreateRT
-    (JNIEnv *env, jclass jClass, jlong ctx, jint pw, jint ph, jint cw,
-    jint ch, jobject wrapMode, jboolean isMsaa)
-{
-    MetalContext* context = (MetalContext*)jlong_to_ptr(ctx);
-    MetalRTTexture* rtt = [[MetalRTTexture alloc] createTexture:context
-                                                ofPhysicalWidth:pw
-                                               ofPhysicalHeight:ph
-                                                 ofContentWidth:cw
-                                                ofContentHeight:ch
-                                                         isMsaa:isMsaa];
-    return ptr_to_jlong(rtt);
-}
-
-/*
- * Class:     com_sun_prism_mtl_MTLRTTexture
- * Method:    nCreateRT2
- * Signature: (JJII)J
- */
-JNIEXPORT jlong JNICALL Java_com_sun_prism_mtl_MTLRTTexture_nCreateRT2
-    (JNIEnv *env, jclass jClass, jlong ctx, jlong pTex, jint pw, jint ph)
-{
-    MetalContext* context = (MetalContext*)jlong_to_ptr(ctx);
-    MetalRTTexture* rtt = [[MetalRTTexture alloc] createTexture:context
-                                                ofPhysicalWidth:pw
-                                               ofPhysicalHeight:ph
-                                                         mtlTex:pTex];
-    return ptr_to_jlong(rtt);
-}
-
-/*
- * Class:     com_sun_prism_mtl_MTLRTTexture
- * Method:    nInitRTT
- * Signature: (J[I)V
- */
-// This method initializes underlying native MTLTexture with passed in pixData
-// This texure replaceRegion is executed on CPU
-JNIEXPORT void JNICALL Java_com_sun_prism_mtl_MTLRTTexture_nInitRTT
-    (JNIEnv *env, jclass class, jlong jTexPtr, jintArray pixData)
-{
-    MetalRTTexture* rtt = (MetalRTTexture*) jlong_to_ptr(jTexPtr);
-    int* arr = (*env)->GetIntArrayElements(env, pixData, NULL);
-
-    [rtt initRTT:arr];
-
-    (*env)->ReleaseIntArrayElements(env, pixData, arr, 0);
-}
-
-/*
- * Class:     com_sun_prism_mtl_MTLRTTexture
- * Method:    nReadPixelsFromRTT
- * Signature: (JLjava/nio/IntBuffer;)V
- */
-JNIEXPORT void JNICALL Java_com_sun_prism_mtl_MTLRTTexture_nReadPixelsFromRTT
-    (JNIEnv *env, jclass class, jlong jTexPtr, jobject pixData)
-{
-    MetalRTTexture* rtt = (MetalRTTexture*) jlong_to_ptr(jTexPtr);
-    int* pDst = (int*) (*env)->GetDirectBufferAddress(env, pixData);
-    [rtt readPixelsFromRTT:pDst];
-}
-
-/*
- * Class:     com_sun_prism_mtl_MTLRTTexture
- * Method:    nReadPixels
- * Signature: (J[I)V
- */
-JNIEXPORT void JNICALL Java_com_sun_prism_mtl_MTLRTTexture_nReadPixels
-    (JNIEnv *env, jclass class, jlong jTexPtr, jintArray pixData)
-{
-    MetalRTTexture* rtt = (MetalRTTexture*) jlong_to_ptr(jTexPtr);
-    int* pDst = (*env)->GetIntArrayElements(env, pixData, nil);
-
-    [rtt readPixels:pDst];
-
-    (*env)->ReleaseIntArrayElements(env, pixData, pDst, 0);
-}

@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2021, 2025, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2021, 2026, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -69,7 +69,7 @@ class MTLRTTexture extends MTLTexture<MTLTextureData>
 
         // pixels array contains all 0s by default
         // Initialize native texture to clear color (0,0,0,0) using pixels
-        nInitRTT(nTexPtr, pixels);
+        MTLNative.rttInit(nTexPtr, pixels);
     }
 
     static MTLRTTexture create(MTLContext context,
@@ -77,10 +77,10 @@ class MTLRTTexture extends MTLTexture<MTLTextureData>
                                int contentWidth, int contentHeight,
                                WrapMode wrapMode, boolean msaa,
                                long size) {
-        long nPtr = nCreateRT(context.getContextHandle(),
+        long nPtr = MTLNative.rttCreate(context.getContextHandle(),
                 physicalWidth, physicalHeight,
                 contentWidth, contentHeight,
-                wrapMode, msaa);
+                msaa);
         MTLTextureData textData = new MTLRTTextureData(context, nPtr, size);
         MTLTextureResource<MTLTextureData> resource = new MTLTextureResource<>(textData, true);
         return new MTLRTTexture(context, resource, wrapMode,
@@ -91,7 +91,7 @@ class MTLRTTexture extends MTLTexture<MTLTextureData>
     }
 
     static MTLRTTexture create(MTLContext context, long pTex, int width, int height, long size) {
-        long nPtr = nCreateRT2(context.getContextHandle(), pTex, width, height);
+        long nPtr = MTLNative.rttWrap(context.getContextHandle(), pTex, width, height);
 
         MTLTextureData textData = new MTLFBOTextureData(context, nPtr, size);
         MTLTextureResource<MTLTextureData> resource = new MTLTextureResource<>(textData, false);
@@ -117,7 +117,7 @@ class MTLRTTexture extends MTLTexture<MTLTextureData>
     public int[] getPixels() {
         // Flush the VB before reading the pixels.
         getContext().flushVertexBuffer();
-        nReadPixels(nTexPtr, pixels);
+        MTLNative.rttReadPixels(nTexPtr, pixels);
         return pixels;
     }
 
@@ -126,7 +126,7 @@ class MTLRTTexture extends MTLTexture<MTLTextureData>
         // The call from Canvas rendering expects IntBuffer, which is implemented here.
         // In future, if needed, need to implement pix as ByteBuffer
         if (pix instanceof IntBuffer pixBuf) {
-            nReadPixelsFromRTT(nTexPtr, pixBuf);
+            MTLNative.rttReadPixelsContiguous(nTexPtr, pixBuf);
             // pix = IntBuffer.wrap(pixels);
             return true;
         }
@@ -162,17 +162,6 @@ class MTLRTTexture extends MTLTexture<MTLTextureData>
     public boolean isMSAA() {
         return MSAA;
     }
-
-    // Native methods
-
-    private static native long nCreateRT(long context, int pw, int ph, int cw, int ch,
-                                         WrapMode wrapMode, boolean msaa);
-    private static native long nCreateRT2(long context, long pTex, int pw, int ph);
-    private static native void nReadPixels(long nativeHandle, int[] pixBuffer);
-    private static native void nReadPixelsFromRTT(long nativeHandle, IntBuffer pixBuffer);
-    private static native long nGetPixelDataPtr(long nativeHandle);
-    private static native void nInitRTT(long pTex, int[] pix);
-
 
     // Unsupported Operation methods
 

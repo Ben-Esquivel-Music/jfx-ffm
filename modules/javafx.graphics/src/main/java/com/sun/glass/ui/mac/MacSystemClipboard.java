@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2010, 2024, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2010, 2026, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -271,7 +271,7 @@ class MacSystemClipboard extends SystemClipboard {
                 for (int i = 0; i < utfs.length; i++) {
                     String file = this.pasteboard.getItemStringForUTF(i, MacPasteboard.UtfFileUrl); // explicitly ask for urls
                     if (file != null) {
-                        list.add(_convertFileReferencePath(file));
+                        list.add(MacClipboardCalls.fileReferencePath(file));
                     }
                 }
                 String[] object = null;
@@ -370,7 +370,7 @@ class MacSystemClipboard extends SystemClipboard {
             if (mtu.containsKey(mime)) {
                 return mtu.get(mime);
             }
-            String encodedUTI = _convertMIMEtoUTI(mime);
+            String encodedUTI = MacClipboardCalls.mimeToUti(mime);
             mtu.put(mime, encodedUTI);
             utm.put(encodedUTI, mime);
             return encodedUTI;
@@ -381,7 +381,7 @@ class MacSystemClipboard extends SystemClipboard {
                 return utm.get(uti);
             }
             if (uti.startsWith(DYNAMIC_UTI_PREFIX)) {
-                String decodedMIME = _convertUTItoMIME(uti);
+                String decodedMIME = MacClipboardCalls.utiToMime(uti);
                 mtu.put(decodedMIME, uti);
                 utm.put(uti, decodedMIME);
                 return decodedMIME;
@@ -389,9 +389,6 @@ class MacSystemClipboard extends SystemClipboard {
             // FX would not handle an unknown mime.
             return null;
         }
-
-        private static native String _convertMIMEtoUTI(String mime);
-        private static native String _convertUTItoMIME(String uti);
     }
 
     private URI createUri(String path, String message) {
@@ -444,8 +441,6 @@ class MacSystemClipboard extends SystemClipboard {
         }
         return  uriList;
     }
-
-    private static native String _convertFileReferencePath(String path);
 
     private byte[] serialize(Object object) {
         if (object instanceof String) {

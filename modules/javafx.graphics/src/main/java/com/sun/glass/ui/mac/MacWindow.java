@@ -40,9 +40,8 @@ import java.nio.ByteBuffer;
  */
 final class MacWindow extends Window {
 
-    private native static void _initIDs();
     static {
-        _initIDs();
+        MacWindowCallbacks.install();
     }
 
     protected MacWindow(Window owner, Screen screen, int styleMask) {
@@ -54,12 +53,41 @@ final class MacWindow extends Window {
         }
     }
 
-    @Override native protected long _createWindow(long ownerPtr, long screenPtr, int mask);
-    @Override native protected boolean _close(long ptr);
-    @Override native protected boolean _setView(long ptr, View view);
-    @Override native protected boolean _setMenubar(long ptr, long menubarPtr);
-    @Override native protected boolean _minimize(long ptr, boolean minimize);
-    @Override native protected boolean _maximize(long ptr, boolean maximize, boolean wasMaximized);
+    @Override
+    protected long _createWindow(long ownerPtr, long screenPtr, int mask) {
+        return MacWindowCalls.create(new CallbackTarget(this), ownerPtr, screenPtr, mask);
+    }
+
+    @Override
+    protected boolean _close(long ptr) {
+        return MacWindowCalls.close(ptr);
+    }
+
+    /**
+     * The {@code GlassView3D*} the JNI read from {@code View.ptr}, read when {@code MacWindowCalls.setView} asks for
+     * it. A {@code View} is a {@code MacView} on this platform ({@code MacApplication.createView}); any other crosses
+     * as no view.
+     */
+    @Override
+    protected boolean _setView(long ptr, View view) {
+        return MacWindowCalls.setView(ptr, () -> view instanceof MacView macView ? macView.nativeHandle() : 0L);
+    }
+
+    @Override
+    protected boolean _setMenubar(long ptr, long menubarPtr) {
+        return MacWindowCalls.setMenubar(ptr, menubarPtr);
+    }
+
+    @Override
+    protected boolean _minimize(long ptr, boolean minimize) {
+        return MacWindowCalls.minimize(ptr, minimize);
+    }
+
+    @Override
+    protected boolean _maximize(long ptr, boolean maximize, boolean wasMaximized) {
+        return MacWindowCalls.maximize(ptr, maximize, wasMaximized);
+    }
+
     // empty - not needed by this implementation
     @Override protected void _updateViewSize(long ptr) {}
     @Override protected void _setBounds(long ptr,
@@ -75,29 +103,66 @@ final class MacWindow extends Window {
         if ( h > 0)  h = Math.round( h / sy);
         if (cw > 0) cw = Math.round(cw / sx);
         if (ch > 0) ch = Math.round(ch / sy);
-        _setBounds2(ptr, x, y, xSet, ySet, w, h, cw, ch, xGravity, yGravity);
+        MacWindowCalls.setBounds(ptr, x, y, xSet, ySet, w, h, cw, ch, xGravity, yGravity);
     }
-    native protected void _setBounds2(long ptr, int x, int y, boolean xSet, boolean ySet, int w, int h, int cw, int ch, float xGravity, float yGravity);
-    @Override native protected boolean _setVisible(long ptr, boolean visible);
-    @Override native protected boolean _setResizable(long ptr, boolean resizable);
 
-    native private boolean _requestFocus(long ptr);
+    @Override
+    protected boolean _setVisible(long ptr, boolean visible) {
+        return MacWindowCalls.setVisible(ptr, visible);
+    }
+
+    @Override
+    protected boolean _setResizable(long ptr, boolean resizable) {
+        return MacWindowCalls.setResizable(ptr, resizable);
+    }
+
     @Override protected boolean _requestFocus(long ptr, int event) {
         //TODO: provide reasonable impl for all possible events
         if (event != WindowEvent.FOCUS_LOST) {
-            return _requestFocus(ptr);
+            return MacWindowCalls.requestFocus(ptr);
         }
         return false;
     }
 
-    @Override native protected void _setFocusable(long ptr, boolean isFocusable);
-    @Override native protected boolean _setTitle(long ptr, String title);
-    @Override native protected void _setLevel(long ptr, int level);
-    @Override native protected void _setAlpha(long ptr, float alpha);
-    @Override native protected boolean _setBackground(long ptr, float r, float g, float b);
-    @Override native protected void _setEnabled(long ptr, boolean enabled);
-    @Override native protected boolean _setMinimumSize(long ptr, int width, int height);
-    @Override native protected boolean _setMaximumSize(long ptr, int width, int height);
+    @Override
+    protected void _setFocusable(long ptr, boolean isFocusable) {
+        MacWindowCalls.setFocusable(ptr, isFocusable);
+    }
+
+    @Override
+    protected boolean _setTitle(long ptr, String title) {
+        return MacWindowCalls.setTitle(ptr, title);
+    }
+
+    @Override
+    protected void _setLevel(long ptr, int level) {
+        MacWindowCalls.setLevel(ptr, level);
+    }
+
+    @Override
+    protected void _setAlpha(long ptr, float alpha) {
+        MacWindowCalls.setAlpha(ptr, alpha);
+    }
+
+    @Override
+    protected boolean _setBackground(long ptr, float r, float g, float b) {
+        return MacWindowCalls.setBackground(ptr, r, g, b);
+    }
+
+    @Override
+    protected void _setEnabled(long ptr, boolean enabled) {
+        MacWindowCalls.setEnabled(ptr, enabled);
+    }
+
+    @Override
+    protected boolean _setMinimumSize(long ptr, int width, int height) {
+        return MacWindowCalls.setMinimumSize(ptr, width, height);
+    }
+
+    @Override
+    protected boolean _setMaximumSize(long ptr, int width, int height) {
+        return MacWindowCalls.setMaximumSize(ptr, width, height);
+    }
 
     private ByteBuffer iconBuffer;
 
@@ -105,27 +170,37 @@ final class MacWindow extends Window {
 
         if (pixels != null) {
             iconBuffer = pixels.asByteBuffer();
-            _setIcon(ptr, iconBuffer, pixels.getWidth(), pixels.getHeight());
+            MacWindowCalls.setIcon(ptr, iconBuffer, pixels.getWidth(), pixels.getHeight());
         } else {
             iconBuffer = null;
-            _setIcon(ptr, null, 0, 0);
+            MacWindowCalls.setIcon(ptr, null, 0, 0);
         }
     }
 
-    private native void _setIcon(long ptr, Object iconBuffer, int width, int height);
-
     @Override
     public void setDarkFrame(boolean value) {
-        _setDarkFrame(getRawHandle(), value);
+        MacWindowCalls.setDarkFrame(getRawHandle(), value);
     }
 
-    private native void _setDarkFrame(long ptr, boolean value);
+    @Override
+    protected void _toFront(long ptr) {
+        MacWindowCalls.toFront(ptr);
+    }
 
-    @Override native protected void _toFront(long ptr);
-    @Override native protected void _toBack(long ptr);
+    @Override
+    protected void _toBack(long ptr) {
+        MacWindowCalls.toBack(ptr);
+    }
 
-    @Override native protected boolean _grabFocus(long ptr);
-    @Override native protected void _ungrabFocus(long ptr);
+    @Override
+    protected boolean _grabFocus(long ptr) {
+        return MacWindowCalls.grabFocus(ptr);
+    }
+
+    @Override
+    protected void _ungrabFocus(long ptr) {
+        MacWindowCalls.ungrabFocus(ptr);
+    }
 
     @Override
     protected void notifyResize(int type, int width, int height) {
@@ -164,32 +239,22 @@ final class MacWindow extends Window {
     }
 
     public void performWindowDrag() {
-        _performWindowDrag(getRawHandle());
+        MacWindowCalls.performDrag(getRawHandle());
     }
 
     public void performTitleBarDoubleClickAction() {
-        _performTitleBarDoubleClickAction(getRawHandle());
+        MacWindowCalls.performTitleBarDoubleClickAction(getRawHandle());
     }
-
-    private native void _performWindowDrag(long ptr);
-
-    private native void _performTitleBarDoubleClickAction(long ptr);
-
-    private native boolean _isRightToLeftLayoutDirection();
-
-    private native void _setWindowButtonStyle(long ptr, int toolbarStyle, boolean buttonsVisible);
-
-    private native void _setWindowButtonAppearance(long ptr, boolean darkAppearance);
 
     private void onHeaderButtonHeightChanged(Number height) {
         double h = height != null ? height.doubleValue() : HeaderBar.USE_DEFAULT_SIZE;
         var toolbarStyle = NSWindowToolbarStyle.ofHeight(h);
-        _setWindowButtonStyle(getRawHandle(), toolbarStyle.style, h != 0);
+        MacWindowCalls.setButtonStyle(getRawHandle(), toolbarStyle.style, h != 0);
         updateHeaderButtonMetrics(toolbarStyle, h);
     }
 
     private void onHeaderButtonDarkStyleChanged(Boolean dark) {
-        _setWindowButtonAppearance(getRawHandle(), dark == Boolean.TRUE);
+        MacWindowCalls.setButtonAppearance(getRawHandle(), dark == Boolean.TRUE);
     }
 
     private void updateHeaderButtonMetrics(NSWindowToolbarStyle toolbarStyle, double buttonHeight) {
@@ -198,12 +263,65 @@ final class MacWindow extends Window {
         var size = isUtilityWindow() ? toolbarStyle.utilitySize : toolbarStyle.size;
 
         HeaderButtonMetrics metrics = buttonHeight != 0
-            ? _isRightToLeftLayoutDirection()
+            ? MacWindowCalls.isRightToLeftLayoutDirection()
                 ? new HeaderButtonMetrics(empty, size, minHeight)
                 : new HeaderButtonMetrics(size, empty, minHeight)
             : new HeaderButtonMetrics(empty, empty, minHeight);
 
         headerButtonMetrics.set(metrics);
+    }
+
+    /**
+     * Where the window slots of {@code GmacWindowCallbacks} reach this window: the methods the JNI called on its
+     * global reference, through the IDs {@code _initIDs} looked up on {@code MacWindow}.
+     */
+    private record CallbackTarget(MacWindow window) implements MacWindowCallbacks.Receiver {
+
+        @Override
+        public void notifyMove(int x, int y, boolean isZoomed) {
+            window.notifyMove(x, y, isZoomed);
+        }
+
+        @Override
+        public void notifyResize(int type, int width, int height) {
+            window.notifyResize(type, width, height);
+        }
+
+        @Override
+        public void notifyMoveToAnotherScreen(Screen screen) {
+            window.notifyMoveToAnotherScreen(screen);
+        }
+
+        @Override
+        public void notifyScaleChanged(float platformScaleX, float platformScaleY, float outputScaleX,
+                                       float outputScaleY) {
+            window.notifyScaleChanged(platformScaleX, platformScaleY, outputScaleX, outputScaleY);
+        }
+
+        @Override
+        public void notifyClose() {
+            window.notifyClose();
+        }
+
+        @Override
+        public void notifyFocus(int event) {
+            window.notifyFocus(event);
+        }
+
+        @Override
+        public void notifyFocusUngrab() {
+            window.notifyFocusUngrab();
+        }
+
+        @Override
+        public void notifyFocusDisabled() {
+            window.notifyFocusDisabled();
+        }
+
+        @Override
+        public void notifyDestroy() {
+            window.notifyDestroy();
+        }
     }
 
     private enum NSWindowToolbarStyle {

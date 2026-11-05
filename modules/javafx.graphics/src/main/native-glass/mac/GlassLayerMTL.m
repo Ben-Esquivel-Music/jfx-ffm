@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2024, 2025, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2024, 2026, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -52,7 +52,7 @@
     self.opaque = NO; //to support shaped window
 
     if (!isSwPipe) {
-        self->_blitCommandQueue = (id<MTLCommandQueue>)(jlong_to_ptr(mtlCommandQueuePtr));
+        self->_blitCommandQueue = (id<MTLCommandQueue>)(intptr_t)mtlCommandQueuePtr;
     } else {
         self->_blitCommandQueue = [self.device newCommandQueue];
     }

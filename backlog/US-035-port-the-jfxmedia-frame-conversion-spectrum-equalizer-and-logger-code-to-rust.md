@@ -69,7 +69,7 @@ RAII-managed and bounds-checked, with no Java change.
 ## Approach
 - One crate for all of jfxmedia (location per US-027), built as a `staticlib` into the existing
   `jfxmedia` CMake target on Windows and Linux. A per-slice CMake option selects C++ or Rust. It defaults to C++ on
-  macOS, which keeps compiling these files (no macOS host).
+  macOS, which keeps compiling these files (Rust on macOS is US-028).
 - Rust and the remaining C++ talk through internal `extern "C"` functions declared in a private header. These are
   never exported: the export list is generated from `jfxmedia_api.h` alone.
 - Every export and every GLib/GStreamer callback entry is guarded with `catch_unwind`. Allocation keeps GLib's

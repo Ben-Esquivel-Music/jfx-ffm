@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2023, 2024, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2023, 2026, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -26,19 +26,15 @@
 #pragma once
 
 #import <Cocoa/Cocoa.h>
-#import <jni.h>
 
-@interface PlatformSupport : NSObject {
-    JNIEnv* env;
-    jobject application;
-}
+#import "glass_mac_api.h"
 
-+ (void)initIDs:(JNIEnv*)env;
+@interface PlatformSupport : NSObject
 
 /**
  * Initializes a new PlatformSupport instance.
  */
-- (id)initWithEnv:(JNIEnv*)env application:(jobject)app;
+- (id)init;
 
 /**
  * Stops event processing, which must be done prior to releasing this PlatformSupport instance.
@@ -46,8 +42,9 @@
 - (void)stopEventProcessing;
 
 /**
- * Collect all platform preferences and return them as a new java/util/Map.
+ * Collect all platform preferences as one malloc'd block of entries, in the order Java puts them into its map, the
+ * colour arrays included; NULL when the block cannot be allocated.
  */
-- (jobject)collectPreferences;
+- (GmacPref*)collectPreferenceEntries:(int32_t*)count;
 
 @end

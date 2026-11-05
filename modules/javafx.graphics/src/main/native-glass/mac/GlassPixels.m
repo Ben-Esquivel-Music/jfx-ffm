@@ -24,10 +24,9 @@
  */
 
 #import "common.h"
-#import "com_sun_glass_ui_Pixels_Format.h"
-#import "com_sun_glass_ui_mac_MacPixels.h"
 
 #import "GlassMacros.h"
+#import "glass_mac_api.h"
 
 //#define VERBOSE
 #ifndef VERBOSE
@@ -35,26 +34,6 @@
 #else
     #define LOG(MSG, ...) GLASS_LOG(MSG, ## __VA_ARGS__);
 #endif
-
-/*
- * Class:     com_sun_glass_ui_mac_MacPixels
- * Method:    _initIDs
- * Signature: ()I
- */
-JNIEXPORT jint JNICALL Java_com_sun_glass_ui_mac_MacPixels__1initIDs
-(JNIEnv *env, jclass jClass)
-{
-    LOG("Java_com_sun_glass_ui_mac_MacPixels__1initIDs");
-
-    if (jPixelsAttachData == NULL)
-    {
-        jPixelsAttachData =  (*env)->GetMethodID(env, jClass, "attachData", "(J)V");
-    }
-
-    // http://developer.apple.com/library/mac/#documentation/GraphicsImaging/Conceptual/OpenGL-MacProgGuide/opengl_designstrategies/opengl_designstrategies.html%23//apple_ref/doc/uid/TP40001987-CH2-SW17
-    // GL_BGRA + GL_UNSIGNED_INT_8_8_8_8_REV == ARGB (big) == BGRA (little)
-    return com_sun_glass_ui_Pixels_Format_BYTE_BGRA_PRE;
-}
 
 NSImage* getImage(u_int8_t* data, int jWidth, int jHeight, int jOffset) {
     NSImage* image = NULL;
@@ -88,103 +67,13 @@ NSImage* getImage(u_int8_t* data, int jWidth, int jHeight, int jOffset) {
     return image;
 }
 
-void attachCommon
-(JNIEnv *env, jobject jPixels, jlong jPtr, jint jWidth, jint jHeight, jobject jBuffer, jbyteArray jArray, jint jOffset)
+// The callers of the former attachCommon reached getImage through the attachData upcall inside their own Glass pool,
+// so this pool only nests there. Once the caller is Java, it drains what the image's construction autoreleased.
+void gmac_image_create(const uint8_t *pixels, int32_t width, int32_t height, void **out_image)
 {
-    GLASS_ASSERT_MAIN_JAVA_THREAD(env);
+    GLASS_POOL_ENTER;
     {
-        u_int8_t *data = NULL;
-        if (jArray != NULL)
-        {
-            jboolean isCopy = JNI_FALSE;
-            data = (*env)->GetPrimitiveArrayCritical(env, jArray, &isCopy);
-        }
-        else
-        {
-            data = (*env)->GetDirectBufferAddress(env, jBuffer);
-        }
-
-        NSImage **nsImage = (NSImage**)jlong_to_ptr(jPtr);
-        *nsImage = getImage(data, jWidth, jHeight, jOffset);
-
-        if (jArray != NULL)
-        {
-            (*env)->ReleasePrimitiveArrayCritical(env, jArray, data, JNI_ABORT);
-        }
+        *out_image = getImage((u_int8_t *)pixels, width, height, 0);
     }
-    GLASS_CHECK_EXCEPTION(env);
-}
-
-/*
- * Class:     com_sun_glass_ui_mac_MacPixels
- * Method:    _attachInt
- * Signature: (JIILjava/nio/IntBuffer;[II)V
- */
-JNIEXPORT void JNICALL Java_com_sun_glass_ui_mac_MacPixels__1attachInt
-(JNIEnv *env, jobject jPixels, jlong jPtr, jint jWidth, jint jHeight, jobject jBuffer, jintArray jArray, jint jOffset)
-{
-    LOG("Java_com_sun_glass_ui_mac_MacPixels__1attachInt");
-
-    if (!jPtr) return;
-    if (!(jArray || jBuffer)) return;
-    if (jOffset < 0) return;
-    if (jWidth <= 0 || jHeight <= 0) return;
-
-    if (jOffset > (INT_MAX / 4)) {
-        return;
-    }
-
-    if (jWidth > (((INT_MAX - 4 * jOffset) / 4) / jHeight))
-    {
-        return;
-    }
-
-    jsize numElem;
-    if (jArray != NULL) {
-        numElem = (*env)->GetArrayLength(env, jArray);
-    } else {
-        numElem = (*env)->GetDirectBufferCapacity(env, jBuffer);
-    }
-
-    if ((jWidth * jHeight + jOffset) > numElem)
-    {
-        return;
-    }
-
-    attachCommon(env, jPixels, jPtr, jWidth, jHeight, jBuffer, jArray, 4 * jOffset);
-}
-
-/*
- * Class:     com_sun_glass_ui_mac_MacPixels
- * Method:    _attachByte
- * Signature: (JIILjava/nio/ByteBuffer;[BI)V
- */
-JNIEXPORT void JNICALL Java_com_sun_glass_ui_mac_MacPixels__1attachByte
-(JNIEnv *env, jobject jPixels, jlong jPtr, jint jWidth, jint jHeight, jobject jBuffer, jbyteArray jArray, jint jOffset)
-{
-    LOG("Java_com_sun_glass_ui_mac_MacPixels__1attachByte");
-
-    if (!jPtr) return;
-    if (!(jArray || jBuffer)) return;
-    if (jOffset < 0) return;
-    if (jWidth <= 0 || jHeight <= 0) return;
-
-    if (jWidth > (((INT_MAX - jOffset) / 4) / jHeight))
-    {
-        return;
-    }
-
-    jsize numElem;
-    if (jArray != NULL) {
-        numElem = (*env)->GetArrayLength(env, jArray);
-    } else {
-        numElem = (*env)->GetDirectBufferCapacity(env, jBuffer);
-    }
-
-    if ((4 * jWidth * jHeight + jOffset) > numElem)
-    {
-        return;
-    }
-
-    attachCommon(env, jPixels, jPtr, jWidth, jHeight, jBuffer, jArray, jOffset);
+    GLASS_POOL_EXIT;
 }

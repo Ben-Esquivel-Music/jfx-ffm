@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2010, 2024, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2010, 2026, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -32,13 +32,15 @@ import com.sun.glass.ui.delegate.MenuItemDelegate;
 
 class MacMenuDelegate implements MenuDelegate, MenuItemDelegate {
 
-    private static native void _initIDs();
     static {
-        _initIDs();
+        MacMenuCallbacks.install();
     }
 
     // GlassMenu *
     long ptr;
+
+    // The MacMenuCallbacks id of the GlassMenu at ptr
+    private long menuId;
 
     // GlassMenu <-> Menu
     private Menu menu;
@@ -49,44 +51,43 @@ class MacMenuDelegate implements MenuDelegate, MenuItemDelegate {
     public MacMenuDelegate() {
     }
 
-    private native long _createMenu(String title, boolean enabled);
-    @Override public boolean createMenu(String title, boolean enabled) {
-        ptr = _createMenu(title, enabled);
-        return ptr != 0;
+    Menu menu() {
+        return menu;
     }
 
-    private native long _createMenuItem(String title, char shortcut, int modifiers,
-                                        Pixels icon, boolean enabled, boolean checked,
-                                        Callback callback);
+    @Override public boolean createMenu(String title, boolean enabled) {
+        menuId = MacMenuCallbacks.register(this, null);
+        ptr = MacMenuCalls.createMenu(menuId, title, enabled);
+        return ptr != 0;
+    }
 
     @Override public boolean createMenuItem(String title, Callback callback,
                                             int shortcutKey, int shortcutModifiers, Pixels pixels,
                                             boolean enabled, boolean checked) {
-        ptr = _createMenuItem(title, (char)shortcutKey, shortcutModifiers,
-                              pixels, enabled, checked, callback);
+        menuId = MacMenuCallbacks.register(this, callback);
+        ptr = MacMenuCalls.createMenuItem(menuId, title, (char)shortcutKey, shortcutModifiers,
+                                          pixels, enabled, checked);
         return ptr != 0;
     }
 
-    private native void _insert(long menuPtr, long submenuPtr, int pos);
     @Override public boolean insert(MenuDelegate menu, int pos) {
         if (ptr == 0) return false;
         MacMenuDelegate macMenu = (MacMenuDelegate)menu;
-        _insert(ptr, macMenu.ptr, pos);
+        MacMenuCalls.insert(ptr, macMenu.ptr, pos);
         return true;
     }
 
     @Override public boolean insert(MenuItemDelegate item, int pos) {
         MacMenuDelegate macMenu = (MacMenuDelegate)item;
         if (ptr == 0) return false;
-        _insert(ptr, macMenu != null ? macMenu.ptr : 0, pos);
+        MacMenuCalls.insert(ptr, macMenu != null ? macMenu.ptr : 0, pos);
         return true;
     }
 
-    private native void _remove(long menuPtr, long submenuPtr, int pos);
     @Override public boolean remove(MenuDelegate menu, int pos) {
         MacMenuDelegate macMenu = (MacMenuDelegate)menu;
         if (ptr == 0) return false;
-        _remove(ptr, macMenu.ptr, pos);
+        MacMenuCalls.remove(ptr, macMenu.ptr, pos);
         macMenu.ptr = 0;
         return true;
     }
@@ -94,50 +95,44 @@ class MacMenuDelegate implements MenuDelegate, MenuItemDelegate {
     @Override public boolean remove(MenuItemDelegate item, int pos) {
         MacMenuDelegate macMenu = (MacMenuDelegate)item;
         if (ptr == 0) return false;
-        _remove(ptr, macMenu == null ? 0L : macMenu.ptr, pos);
+        MacMenuCalls.remove(ptr, macMenu == null ? 0L : macMenu.ptr, pos);
         if (macMenu != null) {
             macMenu.ptr = 0L;
         }
         return true;
     }
 
-    private native void _setTitle(long menuPtr, String title);
     @Override public boolean setTitle(String title) {
         if (ptr == 0) return false;
-        _setTitle(ptr, title);
+        MacMenuCalls.setTitle(ptr, title);
         return true;
     }
 
-    private native void _setShortcut(long menuPtr, char shortcut, int modifiers);
     @Override public boolean setShortcut(int shortcutKey, int shortcutModifiers) {
         if (ptr == 0) return false;
-        _setShortcut(ptr, (char)shortcutKey, shortcutModifiers);
+        MacMenuCalls.setShortcut(ptr, (char)shortcutKey, shortcutModifiers);
         return true;
     }
 
-    private native void _setPixels(long menuPtr, Pixels pixels);
     @Override public boolean setPixels(Pixels pixels) {
         if (ptr == 0) return false;
-        _setPixels(ptr, pixels);
+        MacMenuCalls.setPixels(ptr, pixels);
         return true;
     }
 
-    private native void _setEnabled(long menuPtr, boolean enabled);
     @Override public boolean setEnabled(boolean enabled) {
         if (ptr == 0) return false;
-        _setEnabled(ptr, enabled);
+        MacMenuCalls.setEnabled(ptr, enabled);
         return true;
     }
 
-    private native void _setChecked(long menuPtr, boolean checked);
     @Override public boolean setChecked(boolean checked) {
-        _setChecked(ptr, checked);
+        MacMenuCalls.setChecked(ptr, checked);
         return true;
     }
 
-    private native void _setCallback(long menuPtr, Callback callback);
     @Override public boolean setCallback(Callback callback) {
-        _setCallback(ptr, callback);
+        MacMenuCalls.setCallback(menuId, ptr, callback);
         return true;
     }
 

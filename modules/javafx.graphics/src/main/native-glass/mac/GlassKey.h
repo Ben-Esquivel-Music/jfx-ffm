@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2011, 2024, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2011, 2026, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -23,18 +23,21 @@
  * questions.
  */
 
-#import <jni.h>
 #import <Cocoa/Cocoa.h>
 
 
-jint GetJavaKeyModifiers(NSEvent *event);
-jint GetJavaMouseModifiers(NSUInteger buttons);
-jint GetJavaModifiers(NSEvent *event);
-jint GetJavaKeyCodeFor(unsigned short keyCode);
-jint GetJavaKeyCode(NSEvent *event);
-jcharArray GetJavaKeyChars(JNIEnv *env, NSEvent *event);
-NSString* GetStringForJavaKey(jchar key);
+int32_t GetJavaKeyModifiers(NSEvent *event);
+int32_t GetJavaMouseModifiers(NSUInteger buttons);
+int32_t GetJavaModifiers(NSEvent *event);
+int32_t GetJavaKeyCodeFor(unsigned short keyCode);
+int32_t GetJavaKeyCode(NSEvent *event);
+
+// For a key that sends its characters to Java, copies the first min(length, capacity) of the length UTF-16 units of
+// [event characters] to out and answers length, which can exceed capacity; answers -1 for a key that sends none.
+__attribute__((visibility("hidden"))) int32_t GetJavaKeyCharsUtf16(NSEvent *event, uint16_t *out, int32_t capacity);
+
+NSString* GetStringForJavaKey(uint16_t key);
 NSString* GetStringForMacKey(unsigned short keyCode, bool shifted);
 
 // for key event injection
-BOOL GetMacKey(jint javaKeyCode, unsigned short *outMacKeyCode);
+BOOL GetMacKey(int32_t javaKeyCode, unsigned short *outMacKeyCode);

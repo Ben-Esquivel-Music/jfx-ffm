@@ -28,11 +28,11 @@
 #import "com_sun_glass_events_WindowEvent.h"
 #import "com_sun_glass_ui_Window.h"
 #import "com_sun_glass_ui_Window_Level.h"
-#import "com_sun_glass_ui_mac_MacWindow.h"
 
 #import "GlassMacros.h"
 #import "GlassWindow+Java.h"
 #import "GlassScreen.h"
+#import "glass_mac_internal.h"
 
 //#define VERBOSE
 #ifndef VERBOSE
@@ -64,15 +64,25 @@ extern NSSize maxScreenDimensions;
     {
         self->currentScreen = newScreen;
 
-        GET_MAIN_JENV;
-        (*env)->CallVoidMethod(env, jWindow, jWindowNotifyMoveToAnotherScreen, createJavaScreen(env, newScreen));
+        GLASS_WARN_IF_MAIN_JAVA_DETACHED;
+        const GmacWindowCallbacks *callbacks = [self _windowCallbacks];
+        if (callbacks != NULL && callbacks->notify_move_to_another_screen != NULL)
+        {
+            GmacScreenInfo info;
+            GlassFillScreenInfo(newScreen, &info);
+            callbacks->notify_move_to_another_screen(self->windowId, &info);
+        }
     }
 }
 
 - (void)_sendJavaWindowNotifyScaleChanged:(CGFloat)newScale
 {
-    GET_MAIN_JENV;
-    (*env)->CallVoidMethod(env, jWindow, jWindowNotifyScaleChanged, 1.0f, 1.0f, newScale, newScale);
+    GLASS_WARN_IF_MAIN_JAVA_DETACHED;
+    const GmacWindowCallbacks *callbacks = [self _windowCallbacks];
+    if (callbacks != NULL && callbacks->notify_scale_changed != NULL)
+    {
+        callbacks->notify_scale_changed(self->windowId, 1.0f, 1.0f, (float)newScale, (float)newScale);
+    }
 }
 
 - (void)_sendJavaWindowMoveEventForFrame:(NSRect)frame
@@ -81,10 +91,14 @@ extern NSSize maxScreenDimensions;
     {
         self->lastReportedLocation = frame.origin;
 
-        GET_MAIN_JENV;
+        GLASS_WARN_IF_MAIN_JAVA_DETACHED;
 
-        (*env)->CallVoidMethod(env, jWindow, jWindowNotifyMove,
-            (int)frame.origin.x,  (int)frame.origin.y, [self->nsWindow isZoomed]);
+        const GmacWindowCallbacks *callbacks = [self _windowCallbacks];
+        if (callbacks != NULL && callbacks->notify_move != NULL)
+        {
+            callbacks->notify_move(self->windowId, (int)frame.origin.x, (int)frame.origin.y,
+                    [self->nsWindow isZoomed] ? 1 : 0);
+        }
         [self _sendJavaWindowMoveToAnotherScreenEventIfNeeded];
     }
 }
@@ -93,7 +107,7 @@ extern NSSize maxScreenDimensions;
 {
     if (self->suppressWindowResizeEvent == NO)
     {
-        GET_MAIN_JENV;
+        GLASS_WARN_IF_MAIN_JAVA_DETACHED;
 
         if ([self->nsWindow isMiniaturized]) {
             type = com_sun_glass_events_WindowEvent_MINIMIZE;
@@ -101,15 +115,19 @@ extern NSSize maxScreenDimensions;
             type = com_sun_glass_events_WindowEvent_MAXIMIZE;
         }
 
-        (*env)->CallVoidMethod(env, jWindow, jWindowNotifyResize, type,
-             (int)frame.size.width, (int)frame.size.height);
+        const GmacWindowCallbacks *callbacks = [self _windowCallbacks];
+        if (callbacks != NULL && callbacks->notify_resize != NULL)
+        {
+            callbacks->notify_resize(self->windowId, type, (int)frame.size.width, (int)frame.size.height);
+        }
         [self _sendJavaWindowMoveToAnotherScreenEventIfNeeded];
     }
 }
 
 #pragma mark --- Additions
 
-- (id)_initWithContentRect:(NSRect)contentRect styleMask:(NSUInteger)windowStyle screen:(NSScreen *)screen jwindow:(jobject)jwindow
+- (id)_initWithContentRect:(NSRect)contentRect styleMask:(NSUInteger)windowStyle screen:(NSScreen *)screen
+                  windowId:(int64_t)identifier
 {
     self = [super init];
     if (self == nil) {
@@ -133,7 +151,7 @@ extern NSSize maxScreenDimensions;
         return nil;
     }
 
-    self->jWindow = jwindow;
+    self->windowId = identifier;
 
     self->isFocusable = YES;
     self->isEnabled = YES;
@@ -168,10 +186,19 @@ extern NSSize maxScreenDimensions;
         return;
     }
 
-    GET_MAIN_JENV;
-    (*env)->CallVoidMethod(env, self->jWindow, jWindowNotifyFocusUngrab);
+    GLASS_WARN_IF_MAIN_JAVA_DETACHED;
+    const GmacWindowCallbacks *callbacks = [self _windowCallbacks];
+    if (callbacks != NULL && callbacks->notify_focus_ungrab != NULL)
+    {
+        callbacks->notify_focus_ungrab(self->windowId);
+    }
 
     s_grabWindow = nil;
+}
+
+- (const GmacWindowCallbacks *)_windowCallbacks
+{
+    return GlassIsMainJavaAttached() ? GlassWindowCallbacks() : NULL;
 }
 
 + (void)_resetGrab
@@ -299,25 +326,26 @@ extern NSSize maxScreenDimensions;
     }
 }
 
-- (void)_setWindowFrameWithRect:(NSRect)rect withDisplay:(jboolean)display withAnimate:(jboolean)animate
+- (void)_setWindowFrameWithRect:(NSRect)rect withDisplay:(uint8_t)display withAnimate:(uint8_t)animate
 {
     NSRect frame = [self _constrainFrame:rect];
     [self _setFlipFrame:frame display:(BOOL)display animate:(BOOL)animate];
 }
 
-- (void)_setBounds:(jint)x y:(jint)y xSet:(jboolean)xSet ySet:(jboolean)ySet w:(jint)w h:(jint)h cw:(jint)cw ch:(jint)ch
+- (void)_setBounds:(int32_t)x y:(int32_t)y xSet:(uint8_t)xSet ySet:(uint8_t)ySet w:(int32_t)w h:(int32_t)h
+                cw:(int32_t)cw ch:(int32_t)ch
 {
     NSPoint origin = [self _flipFrame].origin;
     NSSize size = [self->nsWindow frame].size;
     NSSize sizeForClient = [NSWindow frameRectForContentRect:NSMakeRect(0.0, 0.0, cw > 0 ? cw : 0.0, ch > 0 ? ch : 0.0) styleMask:[self->nsWindow styleMask]].size;
 
-    jint newX = xSet == JNI_TRUE ? x : (jint)origin.x;
-    jint newY = ySet == JNI_TRUE ? y : (jint)origin.y;
+    int32_t newX = xSet == 1 ? x : (int32_t)origin.x;
+    int32_t newY = ySet == 1 ? y : (int32_t)origin.y;
 
-    jint newW = (w > 0) ? w : (cw > 0) ? (jint)sizeForClient.width : (jint)size.width;
-    jint newH = (h > 0) ? h : (ch > 0) ? (jint)sizeForClient.height : (jint)size.height;
+    int32_t newW = (w > 0) ? w : (cw > 0) ? (int32_t)sizeForClient.width : (int32_t)size.width;
+    int32_t newH = (h > 0) ? h : (ch > 0) ? (int32_t)sizeForClient.height : (int32_t)size.height;
 
-    [self _setWindowFrameWithRect:NSMakeRect(newX, newY, newW, newH) withDisplay:JNI_TRUE withAnimate:JNI_FALSE];
+    [self _setWindowFrameWithRect:NSMakeRect(newX, newY, newW, newH) withDisplay:1 withAnimate:0];
 
     NSRect flipFrame = [self _flipFrame];
     if (newX != flipFrame.origin.x || newY != flipFrame.origin.y) {

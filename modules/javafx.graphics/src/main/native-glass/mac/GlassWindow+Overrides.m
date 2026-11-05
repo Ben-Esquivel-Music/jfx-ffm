@@ -28,7 +28,6 @@
 #import "com_sun_glass_events_WindowEvent.h"
 #import "com_sun_glass_ui_Window.h"
 #import "com_sun_glass_ui_Window_Level.h"
-#import "com_sun_glass_ui_mac_MacWindow.h"
 
 #import "GlassMacros.h"
 #import "GlassWindow.h"
@@ -37,6 +36,7 @@
 #import "GlassViewDelegate.h"
 #import "GlassApplication.h"
 #import "GlassScreen.h"
+#import "glass_mac_internal.h"
 
 #import <AppKit/NSGraphics.h> // NSBeep();
 
@@ -45,14 +45,14 @@
 - (void)dealloc
 {
     assert(pthread_main_np() == 1);
-    JNIEnv *env = jEnv;
-    if (env != NULL)
+    if (GlassIsMainJavaAttached())
     {
-        (*env)->DeleteGlobalRef(env, self->jWindow);
-        GLASS_CHECK_EXCEPTION(env);
+        const GmacWindowCallbacks *callbacks = [self _windowCallbacks];
+        if (callbacks != NULL && callbacks->notify_dispose != NULL)
+        {
+            callbacks->notify_dispose(self->windowId);
+        }
     }
-
-    self->jWindow = NULL;
 
     [super dealloc];
 }
@@ -75,15 +75,22 @@
     // just store a default menu
     self->hostMenu = [NSApp mainMenu];
 
-    GET_MAIN_JENV;
+    GLASS_WARN_IF_MAIN_JAVA_DETACHED;
+    const GmacWindowCallbacks *callbacks = [self _windowCallbacks];
     if (!self->isEnabled)
     {
         NSBeep();
-        (*env)->CallVoidMethod(env, self->jWindow, jWindowNotifyFocusDisabled);
+        if (callbacks != NULL && callbacks->notify_focus_disabled != NULL)
+        {
+            callbacks->notify_focus_disabled(self->windowId);
+        }
         return;
     }
 
-    (*env)->CallVoidMethod(env, self->jWindow, jWindowNotifyFocus, com_sun_glass_events_WindowEvent_FOCUS_GAINED);
+    if (callbacks != NULL && callbacks->notify_focus != NULL)
+    {
+        callbacks->notify_focus(self->windowId, com_sun_glass_events_WindowEvent_FOCUS_GAINED);
+    }
 
     if (self->menubar != nil)
     {
@@ -114,9 +121,12 @@
 
     [self _ungrabFocus];
 
-    GET_MAIN_JENV_NOWARN;
-    if (env != NULL) {
-        (*env)->CallVoidMethod(env, self->jWindow, jWindowNotifyFocus, com_sun_glass_events_WindowEvent_FOCUS_LOST);
+    assert(pthread_main_np() == 1);
+    if (GlassIsMainJavaAttached()) {
+        const GmacWindowCallbacks *callbacks = [self _windowCallbacks];
+        if (callbacks != NULL && callbacks->notify_focus != NULL) {
+            callbacks->notify_focus(self->windowId, com_sun_glass_events_WindowEvent_FOCUS_LOST);
+        }
     }
 }
 
@@ -145,9 +155,11 @@
 
     // Call the notification method
     assert(pthread_main_np() == 1);
-    JNIEnv *env = jEnv;
-    if (env != NULL) {
-        (*env)->CallVoidMethod(env, self->jWindow, jWindowNotifyDestroy);
+    if (GlassIsMainJavaAttached()) {
+        const GmacWindowCallbacks *callbacks = [self _windowCallbacks];
+        if (callbacks != NULL && callbacks->notify_destroy != NULL) {
+            callbacks->notify_destroy(self->windowId);
+        }
     }
 }
 
@@ -221,7 +233,7 @@
 
 - (BOOL)windowShouldZoom:(NSWindow *)window toFrame:(NSRect)newFrame
 {
-    GET_MAIN_JENV;
+    GLASS_WARN_IF_MAIN_JAVA_DETACHED;
 
     // This is called both to zoom a window and to unzoom it. If the window was
     // zoomed when it was initially created the OS might try to unzoom it to a
@@ -298,9 +310,12 @@
 {
     if (self->isEnabled)
     {
-        GET_MAIN_JENV_NOWARN;
-        if (env != NULL) {
-            (*env)->CallVoidMethod(env, jWindow, jWindowNotifyClose);
+        assert(pthread_main_np() == 1);
+        if (GlassIsMainJavaAttached()) {
+            const GmacWindowCallbacks *callbacks = [self _windowCallbacks];
+            if (callbacks != NULL && callbacks->notify_close != NULL) {
+                callbacks->notify_close(self->windowId);
+            }
         }
     }
 

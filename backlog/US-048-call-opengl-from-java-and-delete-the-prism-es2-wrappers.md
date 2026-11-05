@@ -56,17 +56,21 @@ no COM and no UB to gain from Rust.
 4. **Lifecycle and factory: WGL (Windows) and GLX (Linux).** Follow the `es2_context_adopt` pattern, so Java creates
    the context and hands it to what remains.
 5. **Delete** `windows/`, `x11/` and `monocle/`, and the `prismES2` and `prismES2Monocle` blocks of `win.cmake` and
-   `linux.cmake`. The shared C and the vendored `GL/` and `KHR/` headers stay, because macOS still compiles them and
-   there is no macOS host here (US-001):
+   `linux.cmake`. The shared C and the vendored `GL/` and `KHR/` headers stay, because macOS still compiles them:
    - `mac.cmake:182-188` compiles the four shared `.c` files beside `macosx/`, and those four and the five `macosx/`
      sources all include `PrismES2Defs.h`;
    - on macOS, `PrismES2Defs.h:72-73` includes `<GL/gl.h>` and `<GL/glext.h>`, which resolve to the vendored copies,
      and `GL/glext.h:56` includes `<KHR/khrplatform.h>`.
 
-   The headers are KEEP (`backlog/README.md:145`). They can go only when `mac.cmake` no longer compiles
-   `native-prism-es2`, which is macOS work that needs the host US-001 lacks. `GL/glx.h`, `GL/glxext.h` and
-   `GL/wglext.h` are then reached only from the Linux and Windows arms of `PrismES2Defs.h` (`:51`, `:86`). They stay
-   too: removing those arms edits a header that only macOS compiles.
+   The headers are KEEP (`backlog/README.md:177`). They can go only when `mac.cmake` no longer compiles
+   `native-prism-es2`, which is macOS work. `GL/glx.h`, `GL/glxext.h` and `GL/wglext.h` are then reached only from
+   the Linux and Windows arms of `PrismES2Defs.h` (`:51`, `:86`). They stay too: removing those arms edits a header
+   that only macOS compiles.
+
+   This story was drafted on 2026-09-30, before this project had a macOS host. A macOS host has built and tested
+   `javafx.graphics` since 2026-10-24 (US-003), and its US-001b runs of 2026-11-03 and 2026-11-05 built
+   `libprism_es2.dylib` and passed `ES2NativeTest` ([gate](US-001b-macos-gate.md),
+   [per-class results](US-001b-macos-before-per-class.tsv)).
 
 ## Acceptance criteria
 - The slice-1 corpus is exact on both recorded machines.
@@ -86,4 +90,4 @@ Merged PRs, verified on Windows (ES2) and WSL Linux; macOS unverified. `backlog/
 | 1 | Per-context pointers differ between contexts (WGL) | Keep the per-context pointer table, and pass each pointer to one `static final` address-taking handle per signature, as the C passes it to one wrapper. Handles bound per context could not be `static final`, and slice 3's A/B would then measure that JIT penalty |
 | 2 | Extra Java overhead on state-heavy frames | The downcall count does not change (one per GL call either way); only the wrapper's native call goes. Slice 3's frame-time A/B is the mitigation and decides |
 | 3 | Mesa output drifts with the Mesa version | Record the version with the golden; skip elsewhere, as the Linux font goldens do |
-| 4 | Slice 5 deletes something the macOS build still compiles, and nothing here builds macOS | Slice 5 leaves the shared C and every vendored header; CI's macOS jobs are the compile check |
+| 4 | Slice 5 deletes something the macOS build still compiles. Nothing here built macOS when the story was drafted; a macOS host has built and tested `javafx.graphics` since 2026-10-24 (US-003), and its US-001b runs built `libprism_es2.dylib` (see slice 5) | Slice 5 leaves the shared C and every vendored header; CI's macOS jobs are the compile check |

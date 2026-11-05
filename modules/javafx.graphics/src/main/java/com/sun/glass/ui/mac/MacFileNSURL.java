@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2013, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2013, 2026, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -38,17 +38,12 @@ import java.io.File;
  */
 public final class MacFileNSURL extends File {
 
-    private native static void _initIDs();
-    static {
-        _initIDs();
-    }
-
     /**
      * A pointer to the NSURL object.
      */
     private long ptr;
 
-    private MacFileNSURL(String name, long ptr) {
+    MacFileNSURL(String name, long ptr) {
         super(name);
         this.ptr = ptr;
         Application.checkEventThread();
@@ -63,7 +58,6 @@ public final class MacFileNSURL extends File {
         }
     }
 
-    native private void _dispose(long ptr);
     /**
      * Releases the underlying NSURL object.
      *
@@ -73,11 +67,10 @@ public final class MacFileNSURL extends File {
     public void dispose() {
         Application.checkEventThread();
         checkNotDisposed();
-        _dispose(ptr);
+        MacDialogCalls.release(ptr);
         ptr = 0L;
     }
 
-    native private boolean _startAccessingSecurityScopedResource(long ptr);
     /**
      * Makes the resource pointed to by a security-scoped URL available to the app.
      *
@@ -89,23 +82,21 @@ public final class MacFileNSURL extends File {
     public boolean startAccessingSecurityScopedResource() {
         Application.checkEventThread();
         checkNotDisposed();
-        return _startAccessingSecurityScopedResource(ptr);
+        return MacDialogCalls.startAccessingSecurityScopedResource(ptr);
     }
 
-    native private void _stopAccessingSecurityScopedResource(long ptr);
     /**
      * Revokes access to the resource pointed to by a security-scoped URL.
      */
     public void stopAccessingSecurityScopedResource() {
         Application.checkEventThread();
         checkNotDisposed();
-        _stopAccessingSecurityScopedResource(ptr);
+        MacDialogCalls.stopAccessingSecurityScopedResource(ptr);
     }
 
 
     // ------------- Bookmarks --------------
 
-    native private byte[] _getBookmark(long ptr, long baseDocumentPtr);
     /**
      * Returns a byte array representing a persistent bookmark for this URL.
      * An app can store this data, and later re-create the URL with a call
@@ -116,10 +107,9 @@ public final class MacFileNSURL extends File {
     public byte[] getBookmark() {
         Application.checkEventThread();
         checkNotDisposed();
-        return _getBookmark(ptr, 0L);
+        return MacDialogCalls.bookmark(ptr, 0L);
     }
 
-    native private static MacFileNSURL _createFromBookmark(byte[] data, long baseDocumentPtr);
     /**
      * Returns an instance of the MacFileNSURL class created from bookmark
      * data stored in the byte array passed as an argument.
@@ -137,7 +127,7 @@ public final class MacFileNSURL extends File {
         if (!MacCommonDialogs.isFileNSURLEnabled()) {
             throw new RuntimeException("The system property glass.macosx.enableFileNSURL is not 'true'");
         }
-        return _createFromBookmark(data, 0L);
+        return MacDialogCalls.fromBookmark(data, 0L);
     }
 
     /**
@@ -152,7 +142,7 @@ public final class MacFileNSURL extends File {
     public byte[] getDocumentScopedBookmark(MacFileNSURL baseDocument) {
         Application.checkEventThread();
         checkNotDisposed();
-        return _getBookmark(ptr, baseDocument.ptr);
+        return MacDialogCalls.bookmark(ptr, baseDocument.ptr);
     }
 
     /**
@@ -174,7 +164,7 @@ public final class MacFileNSURL extends File {
         if (!MacCommonDialogs.isFileNSURLEnabled()) {
             throw new RuntimeException("The system property glass.macosx.enableFileNSURL is not 'true'");
         }
-        return _createFromBookmark(data, baseDocument.ptr);
+        return MacDialogCalls.fromBookmark(data, baseDocument.ptr);
     }
 }
 

@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2011, 2025, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2011, 2026, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -28,6 +28,8 @@
 #import "GlassMacros.h"
 #import "GlassScreen.h"
 #import "GlassTimer.h"
+#import "glass_mac_api.h"
+#import "glass_mac_internal.h"
 
 #pragma clang diagnostic ignored "-Wdeprecated-declarations"
 
@@ -51,121 +53,104 @@ CGFloat GetScreenScaleFactor(NSScreen *screen)
     }
 }
 
-jobject createJavaScreen(JNIEnv *env, NSScreen* screen)
+void GlassFillScreenInfo(NSScreen *screen, GmacScreenInfo *info)
 {
-    jobject jscreen = NULL;
+    // Note that NSDeviceResolution always reports 72 DPI, so we use Core Graphics API instead
+    const CGDirectDisplayID displayID = [[[screen deviceDescription] objectForKey:@"NSScreenNumber"] intValue];
+    CGSize size = CGDisplayScreenSize(displayID);
+    CGRect rect = CGDisplayBounds(displayID);
+    const CGFloat MM_PER_INCH = 25.4f; // 1 inch == 25.4 mm
+    // Avoid division by zero, default to 72 DPI
+    if (size.width == 0) size.width = rect.size.width * MM_PER_INCH / 72.f;
+    if (size.height == 0) size.height = rect.size.height * MM_PER_INCH / 72.f;
+    NSSize resolution = {rect.size.width / (size.width / MM_PER_INCH), rect.size.height / (size.height / MM_PER_INCH)};
 
-    if (screen != nil)
+    NSRect primaryFrame = [[[NSScreen screens] objectAtIndex:0] frame];
+
+    if (floor(NSAppKitVersionNumber) > 1265) // NSAppKitVersionNumber10_9
     {
-        jmethodID screenInit = (*env)->GetMethodID(env, jScreenClass,
-                                                   "<init>",
-                                                   "(JIIIIIIIIIIIIIIIFFFF)V");
-        GLASS_CHECK_EXCEPTION(env);
-
-        // Note that NSDeviceResolution always reports 72 DPI, so we use Core Graphics API instead
-        const CGDirectDisplayID displayID = [[[screen deviceDescription] objectForKey:@"NSScreenNumber"] intValue];
-        CGSize size = CGDisplayScreenSize(displayID);
-        CGRect rect = CGDisplayBounds(displayID);
-        const CGFloat MM_PER_INCH = 25.4f; // 1 inch == 25.4 mm
-        // Avoid division by zero, default to 72 DPI
-        if (size.width == 0) size.width = rect.size.width * MM_PER_INCH / 72.f;
-        if (size.height == 0) size.height = rect.size.height * MM_PER_INCH / 72.f;
-        NSSize resolution = {rect.size.width / (size.width / MM_PER_INCH), rect.size.height / (size.height / MM_PER_INCH)};
-
-        NSRect primaryFrame = [[[NSScreen screens] objectAtIndex:0] frame];
-
-        if (floor(NSAppKitVersionNumber) > 1265) // NSAppKitVersionNumber10_9
-        {
-            // On MacOS X 10.10 beta the objects returned by [NSScreen screens] are released
-            // without any notification. This means JavaFX must retain its own references to
-            // avoid crashes when using them later on.
-            // Note, this fix is deliberately allowing the objects to leak. This is the
-            // safest and least intrusive fix appropriate for a maintenance release.
-            // Screens are usually create and released when an external monitor is added
-            // or removed, therefore the memory leaked should never grow too much.
-            [screen retain];
-        }
-
-        jfloat scale = (jfloat)GetScreenScaleFactor(screen);
-        jscreen = (jobject)(*env)->NewObject(env, jScreenClass, screenInit,
-                                             ptr_to_jlong(screen),
-
-                                             (jint)NSBitsPerPixelFromDepth([screen depth]),
-
-                                             (jint)[screen frame].origin.x,
-                                             (jint)(primaryFrame.size.height - [screen frame].size.height - [screen frame].origin.y),
-                                             (jint)[screen frame].size.width,
-                                             (jint)[screen frame].size.height,
-
-                                             (jint)[screen frame].origin.x,
-                                             (jint)(primaryFrame.size.height - [screen frame].size.height - [screen frame].origin.y),
-                                             (jint)[screen frame].size.width,
-                                             (jint)[screen frame].size.height,
-
-                                             (jint)[screen visibleFrame].origin.x,
-                                             (jint)(primaryFrame.size.height - [screen visibleFrame].size.height - [screen visibleFrame].origin.y),
-                                             (jint)[screen visibleFrame].size.width,
-                                             (jint)[screen visibleFrame].size.height,
-
-
-                                             (jint)resolution.width,
-                                             (jint)resolution.height,
-                                             1.0f, 1.0f,
-                                             scale, scale);
-
-        GLASS_CHECK_EXCEPTION(env);
+        // On MacOS X 10.10 beta the objects returned by [NSScreen screens] are released
+        // without any notification. This means JavaFX must retain its own references to
+        // avoid crashes when using them later on.
+        // Note, this fix is deliberately allowing the objects to leak. This is the
+        // safest and least intrusive fix appropriate for a maintenance release.
+        // Screens are usually create and released when an external monitor is added
+        // or removed, therefore the memory leaked should never grow too much.
+        [screen retain];
     }
 
-    return jscreen;
+    float scale = (float)GetScreenScaleFactor(screen);
+    info->screen = screen;
+
+    info->depth = (int32_t)NSBitsPerPixelFromDepth([screen depth]);
+
+    info->x = (int32_t)[screen frame].origin.x;
+    info->y = (int32_t)(primaryFrame.size.height - [screen frame].size.height - [screen frame].origin.y);
+    info->width = (int32_t)[screen frame].size.width;
+    info->height = (int32_t)[screen frame].size.height;
+
+    info->platform_x = (int32_t)[screen frame].origin.x;
+    info->platform_y = (int32_t)(primaryFrame.size.height - [screen frame].size.height - [screen frame].origin.y);
+    info->platform_width = (int32_t)[screen frame].size.width;
+    info->platform_height = (int32_t)[screen frame].size.height;
+
+    info->visible_x = (int32_t)[screen visibleFrame].origin.x;
+    info->visible_y = (int32_t)(primaryFrame.size.height - [screen visibleFrame].size.height
+                                - [screen visibleFrame].origin.y);
+    info->visible_width = (int32_t)[screen visibleFrame].size.width;
+    info->visible_height = (int32_t)[screen visibleFrame].size.height;
+
+    info->resolution_x = (int32_t)resolution.width;
+    info->resolution_y = (int32_t)resolution.height;
+    info->platform_scale_x = 1.0f;
+    info->platform_scale_y = 1.0f;
+    info->output_scale_x = scale;
+    info->output_scale_y = scale;
 }
 
-jobjectArray createJavaScreens(JNIEnv* env) {
-    //Update the Java notion of screens[]
-    NSArray* screens = [NSScreen screens];
+int32_t gmac_screens_query(GmacScreenInfo **out_screens, int32_t *out_count)
+{
+    int32_t status = GMAC_OK;
+    *out_screens = NULL;
+    *out_count = 0;
 
-    if (jScreenClass == NULL)
+    GLASS_POOL_ENTER;
     {
-        jclass jcls = (*env)->FindClass(env, "com/sun/glass/ui/Screen");
-        GLASS_CHECK_EXCEPTION(env);
-        jScreenClass = (*env)->NewGlobalRef(env, jcls);
-    }
+        NSArray* screens = [NSScreen screens];
+        NSUInteger count = [screens count];
+        GmacScreenInfo *infos = count > 0 ? calloc(count, sizeof(GmacScreenInfo)) : NULL;
+        if (count > 0 && infos == NULL) {
+            status = GMAC_ERR_NO_DATA;
+        } else {
+            maxScreenDimensions = NSMakeSize(0.f,0.f);
+            for (NSUInteger index = 0; index < count; index++) {
+                NSRect screenRect = [[screens objectAtIndex:index] frame];
 
-    jobjectArray screenArray = (*env)->NewObjectArray(env,
-                                                      [screens count],
-                                                      jScreenClass,
-                                                      NULL);
-    GLASS_CHECK_EXCEPTION(env);
-    if (screenArray != NULL) {
-        maxScreenDimensions = NSMakeSize(0.f,0.f);
-        for (NSUInteger index = 0; index < [screens count]; index++) {
-            NSRect screenRect = [[screens objectAtIndex:index] frame];
+                if (screenRect.size.width > maxScreenDimensions.width) {
+                    maxScreenDimensions.width = screenRect.size.width;
+                }
+                if (screenRect.size.height > maxScreenDimensions.height) {
+                    maxScreenDimensions.height = screenRect.size.height;
+                }
 
-            if (screenRect.size.width > maxScreenDimensions.width) {
-                maxScreenDimensions.width = screenRect.size.width;
+                GlassFillScreenInfo([screens objectAtIndex:index], &infos[index]);
             }
-            if (screenRect.size.height > maxScreenDimensions.height) {
-                maxScreenDimensions.height = screenRect.size.height;
-            }
-
-            jobject javaScreen = createJavaScreen(env, [screens objectAtIndex:index]);
-            (*env)->SetObjectArrayElement(env, screenArray, index, javaScreen);
-            GLASS_CHECK_EXCEPTION(env);
+            *out_screens = infos;
+            *out_count = (int32_t)count;
         }
     }
+    GLASS_POOL_EXIT;
 
-    return screenArray;
+    return status;
 }
 
-void GlassScreenDidChangeScreenParameters(JNIEnv *env)
+void GlassScreenDidChangeScreenParameters(void)
 {
-    if (jScreenNotifySettingsChanged == NULL)
+    const GmacAppCallbacks *callbacks = GlassAppCallbacks();
+    if (callbacks != NULL && callbacks->notify_screen_settings_changed != NULL)
     {
-        jScreenNotifySettingsChanged = (*env)->GetStaticMethodID(env, jScreenClass, "notifySettingsChanged", "()V");
-        GLASS_CHECK_EXCEPTION(env);
+        callbacks->notify_screen_settings_changed();
     }
-
-    (*env)->CallStaticVoidMethod(env, jScreenClass, jScreenNotifySettingsChanged);
-    GLASS_CHECK_EXCEPTION(env);
 }
 
 @implementation NSScreen (FullscreenAdditions)

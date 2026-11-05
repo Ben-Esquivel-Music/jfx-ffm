@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2021, 2025, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2021, 2026, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -54,7 +54,6 @@
 }
 
 - (void) setArgsUpdated:(bool)updated;
-- (jobject) getUniformNameIdMap:(JNIEnv*)env;
 - (id) initWithContext:(MetalContext*)ctx
           withFragFunc:(NSString*)fragName;
 - (id<MTLRenderPipelineState>) getPipelineState:(bool)isMSAA
@@ -67,6 +66,7 @@
 
 - (NSMutableDictionary*) getTexutresDict;
 - (NSMutableDictionary*) getSamplersDict;
+- (NSDictionary*) getFragArgIndicesDict;
 
 - (NSUInteger) getArgumentID:(NSString*)name;
 - (void) enable;

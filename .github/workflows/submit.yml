@@ -37,7 +37,7 @@
 # everywhere. Two media libraries exist on one platform only and are checked by
 # a dedicated step after the build: avplugin on Linux (optional, needs the
 # ffmpeg development packages) and jfxmedia_avf on macOS (the AVFoundation
-# backend, which no development machine in this project can compile).
+# backend).
 #
 # The Linux jobs then run the GTK glass display tests, which the build skips for
 # want of a display, on a private Xvfb: once without and once with a window
@@ -402,13 +402,11 @@ jobs:
         working-directory: jfx
         run: |
           set -x
-          # These two jobs are the only place jfxmedia/platform/osx/avf is ever
-          # compiled: no machine this project is developed on has an Objective-C
-          # toolchain. add_media_library uses SHARED with clang's default
-          # -undefined error, so macOS is also the one platform where a dangling
-          # symbol is fatal at link - which is what makes a clean link here real
-          # evidence rather than a formality. This runs even when an earlier step
-          # failed, so the AVF result is reported either way.
+          # add_media_library uses SHARED with clang's default -undefined error,
+          # so macOS is the one platform where a dangling symbol is fatal at
+          # link - which is what makes a clean link here real evidence rather
+          # than a formality. This runs even when an earlier step failed, so the
+          # AVF result is reported either way.
           dylib=modules/javafx.media/target/native/bin/libjfxmedia_avf.dylib
           if [ ! -f "${dylib}" ]; then
             echo "::error::${dylib} was not built - the AVFoundation backend did not compile or link"
@@ -469,13 +467,11 @@ jobs:
         working-directory: jfx
         run: |
           set -x
-          # These two jobs are the only place jfxmedia/platform/osx/avf is ever
-          # compiled: no machine this project is developed on has an Objective-C
-          # toolchain. add_media_library uses SHARED with clang's default
-          # -undefined error, so macOS is also the one platform where a dangling
-          # symbol is fatal at link - which is what makes a clean link here real
-          # evidence rather than a formality. This runs even when an earlier step
-          # failed, so the AVF result is reported either way.
+          # add_media_library uses SHARED with clang's default -undefined error,
+          # so macOS is the one platform where a dangling symbol is fatal at
+          # link - which is what makes a clean link here real evidence rather
+          # than a formality. This runs even when an earlier step failed, so the
+          # AVF result is reported either way.
           dylib=modules/javafx.media/target/native/bin/libjfxmedia_avf.dylib
           if [ ! -f "${dylib}" ]; then
             echo "::error::${dylib} was not built - the AVFoundation backend did not compile or link"

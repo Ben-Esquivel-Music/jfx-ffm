@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2021, 2025, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2021, 2026, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -26,12 +26,8 @@
 #ifndef METAL_COMMON_H
 #define METAL_COMMON_H
 
-#import <jni.h>
 #import <simd/simd.h>
 #import <Metal/Metal.h>
 #import <Foundation/Foundation.h>
-
-#define jlong_to_ptr(value) (intptr_t)value
-#define ptr_to_jlong(value) (jlong)((intptr_t)value)
 
 #endif

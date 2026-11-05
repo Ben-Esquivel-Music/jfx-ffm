@@ -24,9 +24,9 @@
  */
 
 #import <Cocoa/Cocoa.h>
-#import <jni.h>
 
 #import "GlassWindow.h"
+#import "glass_mac_api.h"
 
 @interface GlassWindow (Java)
 
@@ -35,7 +35,9 @@
 - (void)_sendJavaWindowResizeEvent:(int)type forFrame:(NSRect)frame;
 - (void)_sendJavaWindowNotifyScaleChanged:(CGFloat)newScale;
 
-- (id)_initWithContentRect:(NSRect)contentRect styleMask:(NSUInteger)windowStyle screen:(NSScreen *)screen jwindow:(jobject)jwindow;
+- (id)_initWithContentRect:(NSRect)contentRect styleMask:(NSUInteger)windowStyle screen:(NSScreen *)screen
+                  windowId:(int64_t)identifier;
+- (const GmacWindowCallbacks *)_windowCallbacks;
 - (void)_ungrabFocus;
 + (void)_resetGrab;
 + (BOOL)_hasGrab;
@@ -44,8 +46,9 @@
 - (void)_setResizable:(bool)resizable;
 - (NSRect)_constrainFrame:(NSRect)frame;
 - (void)_setVisible;
-- (void)_setBounds:(jint)x y:(jint)y xSet:(jboolean)xSet ySet:(jboolean)ySet w:(jint)w h:(jint)h cw:(jint)cw ch:(jint)ch;
-- (void)_setWindowFrameWithRect:(NSRect)rect withDisplay:(jboolean)display withAnimate:(jboolean)animate;
+- (void)_setBounds:(int32_t)x y:(int32_t)y xSet:(uint8_t)xSet ySet:(uint8_t)ySet w:(int32_t)w h:(int32_t)h
+                cw:(int32_t)cw ch:(int32_t)ch;
+- (void)_setWindowFrameWithRect:(NSRect)rect withDisplay:(uint8_t)display withAnimate:(uint8_t)animate;
 - (NSScreen*)_getScreen;
 
 - (void)_setFlipFrame:(NSRect)frameRect display:(BOOL)displayFlag animate:(BOOL)animateFlag;

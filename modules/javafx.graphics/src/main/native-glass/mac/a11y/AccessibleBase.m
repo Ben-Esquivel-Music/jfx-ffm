@@ -26,7 +26,6 @@
 #import "AccessibleBase.h"
 #import "GlassMacros.h"
 #import "GlassAccessible.h"
-#import "com_sun_glass_ui_mac_MacAccessible.h"
 #import "com_sun_glass_ui_mac_MacVariant.h"
 #import "common.h"
 
@@ -83,11 +82,11 @@ static NSMutableDictionary * rolesMap;
     return [GlassAccessible class];
 }
 
-- (id)initWithEnv:(JNIEnv*)env accessible:(jobject)acc
+- (id)initWithPeerId:(int64_t)identifier
 {
     self = [super init];
     if (self != nil) {
-        self->jAccessible = (*env)->NewGlobalRef(env, acc);
+        self->peerId = identifier;
     }
     self->parent = nil;
     return self;
@@ -95,18 +94,17 @@ static NSMutableDictionary * rolesMap;
 
 - (void)dealloc
 {
-    GET_MAIN_JENV_NOWARN;
-    if (env != NULL) {
-        (*env)->DeleteGlobalRef(env, jAccessible);
-        GLASS_CHECK_EXCEPTION(env);
+    assert(pthread_main_np() == 1);
+    const GmacAccessibleCallbacks *callbacks = GlassAccessibleCallbacks();
+    if (callbacks != NULL) {
+        GlassDialPeerReleased(callbacks, self->peerId);
     }
-    jAccessible = NULL;
     [super dealloc];
 }
 
-- (jobject)getJAccessible
+- (int64_t)getPeerId
 {
-    return self->jAccessible;
+    return self->peerId;
 }
 
 - (NSString *)getJavaRole
@@ -126,12 +124,10 @@ static NSMutableDictionary * rolesMap;
  */
 - (id)requestNodeAttribute:(NSString *)attribute
 {
-    GET_MAIN_JENV;
-    if (env == NULL) return NULL;
-    jobject jresult = (jobject)(*env)->CallLongMethod(env, [self getJAccessible],
-                                              jAccessibilityAttributeValue, (jlong)attribute);
-    GLASS_CHECK_EXCEPTION(env);
-    return variantToID(env, jresult);
+    GLASS_WARN_IF_MAIN_JAVA_DETACHED;
+    const GmacAccessibleCallbacks *callbacks = GlassAccessibleCallbacks();
+    if (!GlassIsMainJavaAttached() || callbacks == NULL) return NULL;
+    return GlassDialAttributeValue(callbacks, self->peerId, attribute);
 }
 
 /*
@@ -142,13 +138,10 @@ static NSMutableDictionary * rolesMap;
 
 - (id)requestNodeAttribute:(NSString *)attribute forParameter:(id)parameter
 {
-    GET_MAIN_JENV;
-    if (env == NULL) return NULL;
-    jobject jresult = (jobject)(*env)->CallLongMethod(env, [self getJAccessible],
-                                              jAccessibilityAttributeValueForParameter,
-                                              (jlong)attribute, (jlong)parameter);
-    GLASS_CHECK_EXCEPTION(env);
-    return variantToID(env, jresult);
+    GLASS_WARN_IF_MAIN_JAVA_DETACHED;
+    const GmacAccessibleCallbacks *callbacks = GlassAccessibleCallbacks();
+    if (!GlassIsMainJavaAttached() || callbacks == NULL) return NULL;
+    return GlassDialAttributeValueForParameter(callbacks, self->peerId, attribute, parameter);
 }
 
 /*
@@ -156,13 +149,10 @@ static NSMutableDictionary * rolesMap;
  */
 - (BOOL)isNodeAttributeSettable:(NSString *)attribute
 {
-    GET_MAIN_JENV;
-    if (env == NULL) return FALSE;
-    jboolean jresult = (*env)->CallBooleanMethod(env, [self getJAccessible],
-                                                 jAccessibilityIsAttributeSettable,
-                                                 (jlong)attribute);
-    GLASS_CHECK_EXCEPTION(env);
-    return jresult;
+    GLASS_WARN_IF_MAIN_JAVA_DETACHED;
+    const GmacAccessibleCallbacks *callbacks = GlassAccessibleCallbacks();
+    if (!GlassIsMainJavaAttached() || callbacks == NULL) return FALSE;
+    return GlassDialIsAttributeSettable(callbacks, self->peerId, attribute);
 }
 
 /*
@@ -170,11 +160,10 @@ static NSMutableDictionary * rolesMap;
  */
 - (void)setNodeAttribute:(id)value forAttribute:(NSString *)attribute
 {
-    GET_MAIN_JENV;
-    if (env == NULL) return;
-    (*env)->CallVoidMethod(env, [self getJAccessible], jAccessibilitySetValue,
-                           (jlong)value, (jlong)attribute);
-    GLASS_CHECK_EXCEPTION(env);
+    GLASS_WARN_IF_MAIN_JAVA_DETACHED;
+    const GmacAccessibleCallbacks *callbacks = GlassAccessibleCallbacks();
+    if (!GlassIsMainJavaAttached() || callbacks == NULL) return;
+    GlassDialSetValue(callbacks, self->peerId, value, attribute);
 }
 
 - (id)accessibilityValue
@@ -236,17 +225,10 @@ static NSMutableDictionary * rolesMap;
 // Actions support
 - (BOOL)performAccessibleAction:(NSString *)action
 {
-    GET_MAIN_JENV;
-    if (env != NULL) {
-        BOOL result = TRUE;
-        (*env)->CallVoidMethod(env, self->jAccessible, jAccessibilityPerformAction, (jlong)action);
-        if ((*env)->ExceptionCheck(env)) {
-            result = FALSE;
-        }
-        GLASS_CHECK_EXCEPTION(env);
-        return result;
-    }
-    return FALSE;
+    GLASS_WARN_IF_MAIN_JAVA_DETACHED;
+    const GmacAccessibleCallbacks *callbacks = GlassAccessibleCallbacks();
+    if (!GlassIsMainJavaAttached() || callbacks == NULL) return FALSE;
+    return GlassDialPerformAction(callbacks, self->peerId, action) != GMAC_UPCALL_THREW;
 }
 
 
@@ -290,59 +272,21 @@ static NSMutableDictionary * rolesMap;
 
 @end
 
-/*
- * Class:     com_sun_glass_ui_mac_MacAccessible
- * Method:    _createAccessiblePeer
- * Signature: (Ljava/lang/String;)J
- */
-JNIEXPORT jlong JNICALL Java_com_sun_glass_ui_mac_MacAccessible__1createAccessiblePeer
-        (JNIEnv *env, jobject jAccessible, jstring forRole)
+void *gmac_a11y_create_peer(const uint16_t *role, int32_t role_length, int64_t peer_id)
 {
-    NSString *roleName = jStringToNSString(env, forRole);
+    NSString *roleName = GlassNSStringOrNil(role, role_length);
     Class classType = [AccessibleBase getComponentAccessibilityClass:roleName];
     NSObject* accessible = NULL;
-    accessible = [[classType alloc] initWithEnv: env accessible: jAccessible];
+    accessible = [[classType alloc] initWithPeerId: peer_id];
     if ([accessible isKindOfClass:[AccessibleBase class]]) {
         [(AccessibleBase *) accessible setJavaRole:roleName];
     }
-    return ptr_to_jlong(accessible);
+    return accessible;
 }
 
-/*
- * Class:     com_sun_glass_ui_mac_MacAccessible
- * Method:    _destroyAccessiblePeer
- * Signature: (J)V
- */
-JNIEXPORT void JNICALL Java_com_sun_glass_ui_mac_MacAccessible__1destroyAccessiblePeer
-(JNIEnv *env, jobject jAccessible, jlong macAccessible)
+void gmac_a11y_invalidate_parent(void *peer)
 {
-    NSObject* accessible = (NSObject*)jlong_to_ptr(macAccessible);
-    if ([accessible respondsToSelector:@selector(release)]) {
-        [accessible release];
-    }
-}
-
-/*
- * Class:     com_sun_glass_ui_mac_MacAccessible
- * Method:    NSAccessibilityUnignoredAncestor
- * Signature: (J)J
- */
-JNIEXPORT jlong JNICALL Java_com_sun_glass_ui_mac_MacAccessible_NSAccessibilityUnignoredAncestor
-        (JNIEnv *env, jclass jClass, jlong macAccessible)
-{
-    NSObject* accessible = (NSObject*)jlong_to_ptr(macAccessible);
-    return ptr_to_jlong(NSAccessibilityUnignoredAncestor(accessible));
-}
-
-/*
- * Class:     com_sun_glass_ui_mac_MacAccessible
- * Method:    _invalidateParent
- * Signature: (J)V
- */
-JNIEXPORT void JNICALL Java_com_sun_glass_ui_mac_MacAccessible__1invalidateParent
-(JNIEnv *env, jobject jAccessible, long macAccessible)
-{
-    NSObject* accessible = (NSObject*)jlong_to_ptr(macAccessible);
+    NSObject* accessible = (NSObject*)peer;
     if ([accessible isKindOfClass: [AccessibleBase class]]) {
         [((AccessibleBase*) accessible) clearParent];
     }

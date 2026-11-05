@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2021, 2025, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2021, 2026, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -26,24 +26,7 @@
 #import "PrismShaderCommon.h"
 #import "DecoraShaderCommon.h"
 #import "MetalShader.h"
-#import "com_sun_prism_mtl_MTLShader.h"
-
-NSString* jStringToNSString(JNIEnv *env, jstring string)
-{
-    if (string == NULL) return NULL;
-    jsize length = (*env)->GetStringLength(env, string);
-    NSString *result = NULL;
-    const jchar *chars =(*env)->GetStringCritical(env, string, 0);
-    if (chars) {
-        @try {
-            result = [NSString stringWithCharacters: chars length: length];
-        }
-        @finally {
-            (*env)->ReleaseStringCritical(env, string, chars);
-        }
-    }
-    return result;
-}
+#import "prism_mtl_api.h"
 
 @implementation MetalShader
 
@@ -86,50 +69,6 @@ NSString* jStringToNSString(JNIEnv *env, jstring string)
 - (void) setArgsUpdated:(bool)updated
 {
     argsUpdated = updated;
-}
-
-- (jobject) getUniformNameIdMap:(JNIEnv*)env
-{
-    jclass HashMapClass  = (*env)->FindClass(env, "java/util/HashMap");
-    jclass IntegerClass  = (*env)->FindClass(env, "java/lang/Integer");
-    if(HashMapClass == NULL || IntegerClass == NULL) {
-        NSLog(@"can't find the class");
-        return NULL;
-    }
-
-    jmethodID HashMapClassInitMId  = (*env)->GetMethodID(env, HashMapClass, "<init>", "()V");
-    jmethodID IntegerClassInitMId  = (*env)->GetMethodID(env, IntegerClass, "<init>", "(I)V");
-    if (HashMapClassInitMId == NULL || IntegerClassInitMId == NULL) {
-        NSLog(@"can't find the constructor");
-        (*env)->DeleteLocalRef(env, HashMapClass);
-        (*env)->DeleteLocalRef(env, IntegerClass);
-        return NULL;
-    }
-
-    jmethodID putMId = (*env)->GetMethodID(env, HashMapClass, "put",
-                        "(Ljava/lang/Object;Ljava/lang/Object;)Ljava/lang/Object;");
-    if (putMId == NULL) {
-        NSLog(@"can't find the put method");
-        (*env)->DeleteLocalRef(env, HashMapClass);
-        (*env)->DeleteLocalRef(env, IntegerClass);
-        return NULL;
-    }
-
-    jobject nameIdMap = (*env)->NewObject(env, HashMapClass, HashMapClassInitMId);
-    for (NSString *key in fragArgIndicesDict) {
-        NSNumber *index = fragArgIndicesDict[key];
-        jobject jKey = (*env)->NewStringUTF(env, [key UTF8String]);
-        jint value = index.intValue;
-        jobject jValue = (*env)->NewObject(env, IntegerClass, IntegerClassInitMId, value);
-        (*env)->CallObjectMethod(env, nameIdMap, putMId, jKey, jValue);
-    }
-    jobject hashMapGobal = (jobject) (*env)->NewGlobalRef(env, nameIdMap);
-
-    (*env)->DeleteLocalRef(env, nameIdMap);
-    (*env)->DeleteLocalRef(env, HashMapClass);
-    (*env)->DeleteLocalRef(env, IntegerClass);
-
-    return hashMapGobal;
 }
 
 - (void) enable
@@ -210,6 +149,11 @@ NSString* jStringToNSString(JNIEnv *env, jstring string)
 - (NSMutableDictionary*) getSamplersDict
 {
     return fragTexSamplerDict;
+}
+
+- (NSDictionary*) getFragArgIndicesDict
+{
+    return fragArgIndicesDict;
 }
 
 - (NSUInteger) getArgumentID:(NSString*)name
@@ -317,162 +261,28 @@ NSString* jStringToNSString(JNIEnv *env, jstring string)
 
 @end // MetalShader
 
-
-// ** JNI METHODS **
-
-/*
- * Class:     com_sun_prism_mtl_MTLShader
- * Method:    nCreateMetalShader
- * Signature: (JLjava/lang/String;)J
- */
-JNIEXPORT jlong JNICALL Java_com_sun_prism_mtl_MTLShader_nCreateMetalShader
-    (JNIEnv *env, jclass jClass, jlong ctx, jstring fragFuncName)
+int32_t mtl_shader_uniform_count(void* shader)
 {
-    MetalContext* context = (MetalContext*)jlong_to_ptr(ctx);
-    NSString *nameString = jStringToNSString(env, fragFuncName);
-    MetalShader* shader = [[MetalShader alloc] initWithContext:context withFragFunc:nameString];
-    jlong shader_ptr = ptr_to_jlong(shader);
-    return shader_ptr;
+    return (int32_t) [[(MetalShader *)shader getFragArgIndicesDict] count];
 }
 
-/*
- * Class:     com_sun_prism_mtl_MTLShader
- * Method:    nGetUniformNameIdMap
- * Signature: (J)Ljava/util/HashMap;
- */
-JNIEXPORT jobject JNICALL Java_com_sun_prism_mtl_MTLShader_nGetUniformNameIdMap
-    (JNIEnv *env, jclass jClass, jlong shader)
+int32_t mtl_shader_uniform_table(void* shader, int32_t* ids, int32_t ids_cap, char* names, int32_t names_cap)
 {
-    MetalShader *mtlShader = (MetalShader*)jlong_to_ptr(shader);
-    return [mtlShader getUniformNameIdMap:env];
-}
-
-/*
- * Class:     com_sun_prism_mtl_MTLShader
- * Method:    nEnable
- * Signature: (J)V
- */
-JNIEXPORT void JNICALL Java_com_sun_prism_mtl_MTLShader_nEnable
-    (JNIEnv *env, jclass jClass, jlong shader)
-{
-    MetalShader *mtlShader = (MetalShader *)jlong_to_ptr(shader);
-    [mtlShader enable];
-}
-
-/*
- * Class:     com_sun_prism_mtl_MTLShader
- * Method:    nDisable
- * Signature: (J)V
- */
-JNIEXPORT void JNICALL Java_com_sun_prism_mtl_MTLShader_nDisable
-    (JNIEnv *env, jclass jClass, jlong shader)
-{
-    MetalShader *mtlShader = (MetalShader *)jlong_to_ptr(shader);
-    [mtlShader disable];
-}
-
-/*
- * Class:     com_sun_prism_mtl_MTLShader
- * Method:    nSetTexture
- * Signature: (JIIJZI)V
- */
-JNIEXPORT void JNICALL Java_com_sun_prism_mtl_MTLShader_nSetTexture
-    (JNIEnv *env, jclass jClass, jlong shader, jint texID, jint uniformID,
-    jlong nTexturePtr, jboolean isLinear, jint wrapMode)
-{
-    MetalShader* mtlShader = (MetalShader*)jlong_to_ptr(shader);
-    MetalTexture* mtlTex   = (MetalTexture*)jlong_to_ptr(nTexturePtr);
-    id<MTLTexture> tex     = [mtlTex getTexture];
-    [mtlShader setTexture:texID uniformID:uniformID texture:tex isLinear:isLinear wrapMode:wrapMode];
-}
-
-/*
- * Class:     com_sun_prism_mtl_MTLShader
- * Method:    nSetInt
- * Signature: (JII)V
- */
-JNIEXPORT void JNICALL Java_com_sun_prism_mtl_MTLShader_nSetInt
-    (JNIEnv *env, jclass jClass, jlong shader, jint uniformID, jint i0)
-{
-    MetalShader *mtlShader = (MetalShader *)jlong_to_ptr(shader);
-    [mtlShader setInt:uniformID i0:i0];
-}
-
-/*
- * Class:     com_sun_prism_mtl_MTLShader
- * Method:    nSetFloat1
- * Signature: (JIF)V
- */
-JNIEXPORT void JNICALL Java_com_sun_prism_mtl_MTLShader_nSetFloat1
-    (JNIEnv *env, jclass jClass, jlong shader, jint uniformID, jfloat f0)
-{
-    MetalShader *mtlShader = (MetalShader *)jlong_to_ptr(shader);
-    [mtlShader setFloat1:uniformID f0:f0];
-}
-
-/*
- * Class:     com_sun_prism_mtl_MTLShader
- * Method:    nSetFloat2
- * Signature: (JIFF)V
- */
-JNIEXPORT void JNICALL Java_com_sun_prism_mtl_MTLShader_nSetFloat2
-    (JNIEnv *env, jclass jClass, jlong shader, jint uniformID, jfloat f0, jfloat f1)
-{
-    MetalShader *mtlShader = (MetalShader *)jlong_to_ptr(shader);
-    [mtlShader setFloat2:uniformID f0:f0 f1:f1];
-}
-
-/*
- * Class:     com_sun_prism_mtl_MTLShader
- * Method:    nSetFloat3
- * Signature: (JIFFF)V
- */
-JNIEXPORT void JNICALL Java_com_sun_prism_mtl_MTLShader_nSetFloat3
-    (JNIEnv *env, jclass jClass, jlong shader, jint uniformID,
-    jfloat f0, jfloat f1, jfloat f2)
-{
-    MetalShader *mtlShader = (MetalShader *)jlong_to_ptr(shader);
-    [mtlShader setFloat3:uniformID f0:f0 f1:f1 f2:f2];
-}
-
-/*
- * Class:     com_sun_prism_mtl_MTLShader
- * Method:    nSetFloat4
- * Signature: (JIFFFF)V
- */
-JNIEXPORT void JNICALL Java_com_sun_prism_mtl_MTLShader_nSetFloat4
-    (JNIEnv *env, jclass jClass, jlong shader, jint uniformID,
-    jfloat f0, jfloat f1, jfloat f2, jfloat f3)
-{
-    MetalShader *mtlShader = (MetalShader *)jlong_to_ptr(shader);
-    [mtlShader setFloat4:uniformID f0:f0 f1:f1 f2:f2 f3:f3];
-}
-
-/*
- * Class:     com_sun_prism_mtl_MTLShader
- * Method:    nSetConstantsBuf
- * Signature: (JILjava/nio/FloatBuffer;II)V
- */
-JNIEXPORT void JNICALL Java_com_sun_prism_mtl_MTLShader_nSetConstantsBuf
-    (JNIEnv *env, jclass class, jlong shader, jint uniformID,
-    jobject values, jint valuesByteOffset, jint size)
-{
-    MetalShader *mtlShader = (MetalShader *)jlong_to_ptr(shader);
-    float *valuesPtr = (float *) (((char *) (*env)->GetDirectBufferAddress(env, values)) + valuesByteOffset);
-    [mtlShader setConstants:uniformID values:valuesPtr size:size];
-}
-
-/*
- * Class:     com_sun_prism_mtl_MTLShader
- * Method:    nSetConstants
- * Signature: (JI[FI)V
- */
-JNIEXPORT void JNICALL Java_com_sun_prism_mtl_MTLShader_nSetConstants
-  (JNIEnv *env, jclass jClass, jlong shader, jint uniformID,
-    jfloatArray valuesArray, jint size)
-{
-    MetalShader *mtlShader = (MetalShader *)jlong_to_ptr(shader);
-    jfloat* values = (*env)->GetFloatArrayElements(env, valuesArray, 0);
-    [mtlShader setConstants:uniformID values:values size:size];
-    (*env)->ReleaseFloatArrayElements(env, valuesArray, values, 0);
+    NSDictionary *dict = [(MetalShader *)shader getFragArgIndicesDict];
+    int32_t entry = 0;
+    int32_t namesSize = 0;
+    for (NSString *key in dict) {
+        NSNumber *index = dict[key];
+        const char *name = [key UTF8String];
+        int32_t nameSize = (int32_t) strlen(name) + 1;
+        if (ids != NULL && entry < ids_cap) {
+            ids[entry] = index.intValue;
+        }
+        if (names != NULL && namesSize + nameSize <= names_cap) {
+            memcpy(names + namesSize, name, nameSize);
+        }
+        namesSize += nameSize;
+        entry++;
+    }
+    return namesSize;
 }

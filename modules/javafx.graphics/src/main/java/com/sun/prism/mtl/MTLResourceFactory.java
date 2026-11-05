@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2021, 2025, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2021, 2026, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -181,9 +181,8 @@ class MTLResourceFactory extends BaseShaderFactory {
             return null;
         }
 
-        long pResource = nCreateTexture(context.getContextHandle() ,
-                formatHint.ordinal(), usageHint.ordinal(),
-                false, allocw, alloch, 0, useMipmap);
+        long pResource = MTLNative.textureCreate(context.getContextHandle(),
+                formatHint.ordinal(), allocw, alloch, useMipmap);
 
         if (pResource == 0L) {
             return null;
@@ -410,13 +409,6 @@ class MTLResourceFactory extends BaseShaderFactory {
     }
 
     static void releaseTexture(long resource) {
-        nReleaseTexture(resource);
+        MTLNative.objcRelease(resource);
     }
-
-    // Native methods
-
-    static native long nCreateTexture(long pContext, int format, int hint, boolean isRTT,
-                                      int width, int height, int samples, boolean useMipmap);
-
-    static native void nReleaseTexture(long pTexture);
 }

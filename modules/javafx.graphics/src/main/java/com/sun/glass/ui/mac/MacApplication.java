@@ -42,23 +42,22 @@ import java.util.concurrent.TimeUnit;
 
 final class MacApplication extends Application implements InvokeLaterDispatcher.InvokeLaterSubmitter {
 
-    private native static void _initIDs(boolean disableSyncRendering);
     static {
         Application.loadNativeLibrary();
         boolean disableSyncRendering =
             Boolean.getBoolean("glass.disableSyncRendering");
-        _initIDs(disableSyncRendering);
+        MacApplicationCalls.init(disableSyncRendering);
     }
 
-    native static int _getMacKey(int code);
+    static int _getMacKey(int code) {
+        return MacKeyCalls.javaToMacKey(code);
+    }
 
     private String applicationClassName;
     private boolean isTaskbarApplication = false;
     private final InvokeLaterDispatcher invokeLaterDispatcher;
 
     private static final CountDownLatch keepAliveLatch = new CountDownLatch(1);
-
-    private static native int _openURI(String uri);
 
     /**
      * Starts a non-daemon KeepAlive thread to ensure that the
@@ -107,10 +106,6 @@ final class MacApplication extends Application implements InvokeLaterDispatcher.
 
     private long delegateHandle;
 
-    native long _initDelegate(ClassLoader classLoader, Runnable launchable, boolean isTaskbarApplication);
-
-    native void _runLoop(long delegate);
-
     @Override
     protected void runLoop(final Runnable launchable) {
         // For normal (not embedded) taskbar applications the masOS activation
@@ -123,7 +118,7 @@ final class MacApplication extends Application implements InvokeLaterDispatcher.
                 waitForReactivation();
             }
 
-            applicationClassName = _getApplicationClassName();
+            applicationClassName = MacApplicationCalls.applicationClassName();
             launchable.run();
         };
 
@@ -133,9 +128,9 @@ final class MacApplication extends Application implements InvokeLaterDispatcher.
         // doesn't exit prematurely.
         startKeepAliveThread();
 
-        ClassLoader classLoader = MacApplication.class.getClassLoader();
-        delegateHandle = _initDelegate(classLoader, wrappedRunnable, isTaskbarApplication);
-        _runLoop(delegateHandle);
+        MacAppCallbacks.install(this, wrappedRunnable);
+        delegateHandle = MacMainLoopCalls.createDelegate(isTaskbarApplication, wrappedRunnable != null);
+        MacMainLoopCalls.runLoop(delegateHandle);
     }
 
     private final CountDownLatch reactivationLatch = new CountDownLatch(1);
@@ -161,10 +156,9 @@ final class MacApplication extends Application implements InvokeLaterDispatcher.
         eventLoop.enter();
     }
 
-    native private void _finishTerminating(long delegateHandle);
     @Override
     protected void finishTerminating() {
-        _finishTerminating(delegateHandle);
+        MacMainLoopCalls.finishTerminating(delegateHandle);
         finishKeepAliveThread();
 
         super.finishTerminating();
@@ -195,13 +189,12 @@ final class MacApplication extends Application implements InvokeLaterDispatcher.
         setEventThread(Thread.currentThread());
     }
 
-    native private Object _enterNestedEventLoopImpl();
     @Override protected Object _enterNestedEventLoop() {
         if (invokeLaterDispatcher != null) {
             invokeLaterDispatcher.notifyEnteringNestedEventLoop();
         }
         try {
-            return _enterNestedEventLoopImpl();
+            return MacMainLoopCalls.enterNestedEventLoop();
         } finally {
             if (invokeLaterDispatcher != null) {
                 invokeLaterDispatcher.notifyLeftNestedEventLoop();
@@ -209,24 +202,19 @@ final class MacApplication extends Application implements InvokeLaterDispatcher.
         }
     }
 
-    native private void _leaveNestedEventLoopImpl(Object retValue);
     @Override protected void _leaveNestedEventLoop(Object retValue) {
         if (invokeLaterDispatcher != null) {
             invokeLaterDispatcher.notifyLeavingNestedEventLoop();
         }
-        _leaveNestedEventLoopImpl(retValue);
+        MacMainLoopCalls.leaveNestedEventLoop(retValue);
     }
-
-    native private void _hide();
-    native private void _hideOtherApplications();
-    native private void _unhideAllApplications();
 
     public void installAppleMenu(MenuBar menubar) {
         this.appleMenu = createMenu("Apple");
 
         MenuItem hideMenu = createMenuItem("Hide " + getName(), new MenuItem.Callback() {
             @Override public void action() {
-                MacApplication.this._hide();
+                MacApplicationCalls.hide();
             }
             @Override public void validate() {
             }
@@ -235,7 +223,7 @@ final class MacApplication extends Application implements InvokeLaterDispatcher.
 
         MenuItem hideOthersMenu = createMenuItem("Hide Others", new MenuItem.Callback() {
             @Override public void action() {
-                MacApplication.this._hideOtherApplications();
+                MacApplicationCalls.hideOtherApplications();
             }
             @Override public void validate() {
             }
@@ -244,7 +232,7 @@ final class MacApplication extends Application implements InvokeLaterDispatcher.
 
         MenuItem unhideAllMenu = createMenuItem("Show All", new MenuItem.Callback() {
             @Override public void action() {
-                MacApplication.this._unhideAllApplications();
+                MacApplicationCalls.unhideAllApplications();
             }
             @Override public void validate() {
             }
@@ -328,8 +316,13 @@ final class MacApplication extends Application implements InvokeLaterDispatcher.
         return new MacRobot();
     }
 
-    @Override native protected double staticScreen_getVideoRefreshPeriod();
-    @Override native protected Screen[] staticScreen_getScreens();
+    @Override protected double staticScreen_getVideoRefreshPeriod() {
+        return MacScreenCalls.videoRefreshPeriod();
+    }
+
+    @Override protected Screen[] staticScreen_getScreens() {
+        return MacScreenCalls.screens();
+    }
 
     @Override public Timer createTimer(Runnable runnable) {
         return new MacTimer(runnable);
@@ -369,12 +362,13 @@ final class MacApplication extends Application implements InvokeLaterDispatcher.
         return MacView.getMultiClickMaxY_impl();
     }
 
-    @Override native protected void _invokeAndWait(Runnable runnable);
+    @Override protected void _invokeAndWait(Runnable runnable) {
+        MacMainLoopCalls.invokeAndWait(runnable);
+    }
 
-    private native void _submitForLaterInvocation(Runnable r);
     // InvokeLaterDispatcher.InvokeLaterSubmitter
     @Override public void submitForLaterInvocation(Runnable r) {
-        _submitForLaterInvocation(r);
+        MacMainLoopCalls.invokeLater(r);
     }
 
     @Override protected void _invokeLater(Runnable runnable) {
@@ -408,18 +402,16 @@ final class MacApplication extends Application implements InvokeLaterDispatcher.
         return true;
     }
 
-    // NOTE: this will not return a valid result until the native _runloop
-    // method has been executed and called the Runnable passed to that method.
-    native private boolean _isTriggerReactivation();
+    // NOTE: this will not return a valid result until MacMainLoopCalls.runLoop
+    // (gmac_app_run_loop) has been executed and called the launchable passed to runLoop.
     boolean isTriggerReactivation() {
-        return _isTriggerReactivation();
+        return MacApplicationCalls.isTriggerReactivation();
     }
 
-    private native String _getDataDirectory();
     @Override
     public String getDataDirectory() {
         checkEventThread();
-        String baseDirectory = _getDataDirectory();
+        String baseDirectory = MacApplicationCalls.dataDirectory();
         if (baseDirectory == null || baseDirectory.length() == 0) {
             return super.getDataDirectory();
         }
@@ -427,18 +419,18 @@ final class MacApplication extends Application implements InvokeLaterDispatcher.
     }
 
     @Override
-    protected native int _getKeyCodeForChar(char c, int hint);
+    protected int _getKeyCodeForChar(char c, int hint) {
+        return MacKeyCalls.keyCodeForChar(c);
+    }
 
     @Override
-    protected native int _isKeyLocked(int keyCode);
-
-    private native String _getApplicationClassName();
-
-    private native Map<String, Object> _getPlatformPreferences(long delegateHandle);
+    protected int _isKeyLocked(int keyCode) {
+        return MacKeyCalls.isKeyLocked(keyCode);
+    }
 
     @Override
     public Map<String, Object> getPlatformPreferences() {
-        return _getPlatformPreferences(delegateHandle);
+        return MacPreferenceCalls.platformPreferences(delegateHandle);
     }
 
     @Override
@@ -540,6 +532,6 @@ final class MacApplication extends Application implements InvokeLaterDispatcher.
 
     @Override
     protected void _showDocument(String uri) {
-        _openURI(uri);
+        MacApplicationCalls.openUri(uri);
     }
 }

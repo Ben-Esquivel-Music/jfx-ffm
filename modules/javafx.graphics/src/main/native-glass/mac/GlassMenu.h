@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2011, 2013, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2011, 2026, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -24,7 +24,8 @@
  */
 
 #import <Cocoa/Cocoa.h>
-#import <jni.h>
+
+#import "glass_mac_api.h"
 
 @interface GlassMenubar : NSObject
 {
@@ -38,27 +39,26 @@
 
 @interface GlassMenu : NSObject<NSMenuDelegate>
 {
-    jobject     jMenu;
 @public
 
-    jobject     jDelegate;
-    jobject     jCallback;
+    // Java's id of the menu or item, which the GmacMenuCallbacks slots take.
+    int64_t     menuId;
 
     NSMenuItem  *item;
     NSMenu      *menu;
 }
 
 // Menu
-- (id)initWithJavajdelegate:(jobject)jdelegate
-                     jtitle:(jstring)jtitle
-                   jenabled:(jboolean)jenabled;
+- (id)initMenuWithId:(int64_t)identifier title:(NSString *)title enabled:(BOOL)enabled;
 
 // MenuItem
-- (id)initWithJavajdelegate:(jobject)jdelegate jtitle:(jstring)jtitle jshortcut:(jchar)jshortcut jmodifiers:(int)jmodifiers jicon:(jobject)jicon jenabled:(jboolean)jenabled jchecked:(jboolean)jchecked jcallback:(jobject)jcallback;
+- (id)initItemWithId:(int64_t)identifier title:(NSString *)title shortcut:(uint16_t)shortcut
+           modifiers:(int32_t)modifiers icon:(const GmacMenuImage *)icon enabled:(BOOL)enabled
+             checked:(BOOL)checked;
 
 - (void)action:(id)sender;
-- (void)_setShortcut:(jchar)jshortcut modifiers:(jint)jmodifiers;
+- (void)_setShortcut:(uint16_t)shortcut modifiers:(int32_t)modifiers;
 - (void)_setChecked:(BOOL)checked;
-- (void)_setPixels:(jobject)pixels;
+- (void)_setImage:(const GmacMenuImage *)icon;
 
 @end

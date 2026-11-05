@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2011, 2023, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2011, 2026, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -28,13 +28,13 @@
 #ifndef        GLASS_MACROS_H
 #define        GLASS_MACROS_H
 
-#import <jni.h>
 #import <Cocoa/Cocoa.h>
 #import <assert.h>
 #import <execinfo.h>
 
 #import "GlassStatics.h"
 #import "common.h"
+#import "glass_mac_internal.h"
 
 // thread specific data to provide multiple call stack mechanism for pools
 struct
@@ -43,8 +43,6 @@ struct
     int                 counter;
 }
 typedef GlassThreadData;
-
-#define MAIN_JVM jVM
 
 // debugging utility
 
@@ -149,45 +147,6 @@ static __inline__ void GlassLog(char *message, ...)
 
 #define GLASS_LOG(MSG, ...) GlassLog(MSG, ## __VA_ARGS__ )
 
-// assert there is no outstanding java exception pending
-#define GLASS_CHECK_EXCEPTION(ENV)                                                 \
-do {                                                                               \
-    jthrowable t = (*ENV)->ExceptionOccurred(ENV);                                 \
-    if (t) {                                                                       \
-        (*ENV)->ExceptionClear(ENV);                                               \
-        (*ENV)->CallStaticVoidMethod(                                              \
-            ENV, jApplicationClass, javaIDs.Application.reportException, t);       \
-        (*ENV)->ExceptionClear(ENV);                                               \
-    };                                                                             \
-} while (0)
-
-// assert there is no outstanding java exception pending, return otherwise
-#define GLASS_CHECK_EXCEPTION_RETURN(ENV)                                          \
-do {                                                                               \
-    jthrowable t = (*ENV)->ExceptionOccurred(ENV);                                 \
-    if (t) {                                                                       \
-        (*ENV)->ExceptionClear(ENV);                                               \
-        (*ENV)->CallStaticVoidMethod(                                              \
-            ENV, jApplicationClass, javaIDs.Application.reportException, t);       \
-        (*ENV)->ExceptionClear(ENV);                                               \
-        return;                                                                    \
-    };                                                                             \
-} while (0)
-
-#define GLASS_CHECK_NONNULL_EXCEPTION_RETURN(ENV, EXPR)                            \
-    GLASS_CHECK_EXCEPTION_RETURN(ENV);                                             \
-    if ((EXPR) == nil) return;
-
-// assert main Java thread is still attached
-#define GLASS_ASSERT_MAIN_JAVA_THREAD(env) \
-        if ((pthread_main_np() == 0) && (jEnv == NULL)) { \
-                GLASS_CHECK_EXCEPTION(env); \
-                jclass newExcCls = (*env)->FindClass(env, "java/lang/RuntimeException"); \
-                if (newExcCls != 0) { \
-                        (*env)->ThrowNew(env, newExcCls, "Main Java thread is detached."); \
-                } \
-        }
-
 // setup/release autorelase pools
 #define GLASS_POOL_ENTER \
 { \
@@ -247,19 +206,11 @@ do {                                                                            
 }
 
 
-// Retrieve Java env, asserting the call originated on main thread.
-// Warn if the JVM has already been detached.
-#define GET_MAIN_JENV \
+// Asserts that the call originated on the main thread, and prints the call stack when Java has been detached from
+// it, which happens once [NSApp run] has returned. The caller then runs no Java.
+#define GLASS_WARN_IF_MAIN_JAVA_DETACHED \
     assert(pthread_main_np() == 1); \
-    if (jEnv == NULL) \
-        GLASS_CALLSTACK("Java has been detached already, but someone is still trying to use it at ") \
-    JNIEnv *env = jEnv;
-
-// Retrieve Java env, asserting the call originated on main thread.
-// This variant is silent if the JVM has been detached, making it suitable
-// for use by dealloc methods, which are called by the auto-release mechanism.
-#define GET_MAIN_JENV_NOWARN \
-    assert(pthread_main_np() == 1); \
-    JNIEnv *env = jEnv;
+    if (!GlassIsMainJavaAttached()) \
+        GLASS_CALLSTACK("Java has been detached already, but someone is still trying to use it at ")
 
 #endif

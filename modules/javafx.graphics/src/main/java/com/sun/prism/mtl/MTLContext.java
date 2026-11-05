@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2021, 2025, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2021, 2026, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -70,6 +70,7 @@ class MTLContext extends BaseShaderContext {
 
     private State state;
     private final long pContext;
+    private final MTLScratch scratch = new MTLScratch();
     private MTLRTTexture renderTarget;
     private MTLResourceFactory resourceFactory;
     private MTLPipeline pipeline;
@@ -121,7 +122,7 @@ class MTLContext extends BaseShaderContext {
     MTLContext(Screen screen, MTLResourceFactory factory) {
         super(screen, factory, NUM_QUADS);
         resourceFactory = factory;
-        pContext = nInitialize(shaderLibBuffer);
+        pContext = MTLNative.contextCreate(shaderLibBuffer);
     }
 
     @Override
@@ -132,11 +133,15 @@ class MTLContext extends BaseShaderContext {
     protected void initState() {
         super.init();
         state = new State();
-        nSetCompositeMode(getContextHandle(), MTL_COMPMODE_SRCOVER);
+        MTLNative.contextSetCompositeMode(getContextHandle(), MTL_COMPMODE_SRCOVER);
     }
 
     long getContextHandle() {
         return pContext;
+    }
+
+    MTLScratch getScratch() {
+        return scratch;
     }
 
     /**
@@ -157,7 +162,7 @@ class MTLContext extends BaseShaderContext {
     @Override
     protected State updateRenderTarget(RenderTarget target, NGCamera camera, boolean depthTest) {
         renderTarget = (MTLRTTexture)target;
-        int res = nUpdateRenderTarget(pContext, renderTarget.getNativeHandle(), depthTest);
+        int res = MTLNative.contextUpdateRenderTarget(pContext, renderTarget.getNativeHandle(), depthTest);
 
         if (res != -1) {
             resetLastClip(state);
@@ -180,7 +185,7 @@ class MTLContext extends BaseShaderContext {
         }
 
         // Set projection view matrix
-        nSetProjViewMatrix(pContext, depthTest,
+        MTLNative.contextSetProjViewMatrix(pContext, depthTest,
             projViewTx.get(0),  projViewTx.get(1),  projViewTx.get(2),  projViewTx.get(3),
             projViewTx.get(4),  projViewTx.get(5),  projViewTx.get(6),  projViewTx.get(7),
             projViewTx.get(8),  projViewTx.get(9),  projViewTx.get(10), projViewTx.get(11),
@@ -238,7 +243,7 @@ class MTLContext extends BaseShaderContext {
         } else {
             scratchTx = scratchTx.mul(xform).mul(perspectiveTransform);
         }
-        nSetTransform(pContext,
+        MTLNative.contextSetTransform(pContext,
             scratchTx.get(0),  scratchTx.get(1),  scratchTx.get(2),  scratchTx.get(3),
             scratchTx.get(4),  scratchTx.get(5),  scratchTx.get(6),  scratchTx.get(7),
             scratchTx.get(8),  scratchTx.get(9),  scratchTx.get(10), scratchTx.get(11),
@@ -256,13 +261,13 @@ class MTLContext extends BaseShaderContext {
     @Override
     protected void updateClipRect(Rectangle clipRect) {
         if (clipRect == null || clipRect.isEmpty()) {
-            nResetClipRect(pContext);
+            MTLNative.contextResetClipRect(pContext);
         } else {
             int x = clipRect.x;
             int y = clipRect.y;
             int width  = clipRect.width;
             int height = clipRect.height;
-            nSetClipRect(pContext, x, y, width, height);
+            MTLNative.contextSetClipRect(pContext, x, y, width, height);
         }
     }
 
@@ -275,7 +280,7 @@ class MTLContext extends BaseShaderContext {
             case DST_OUT  -> MTL_COMPMODE_DSTOUT;
             case ADD      -> MTL_COMPMODE_ADD;
         };
-        nSetCompositeMode(getContextHandle(), mtlCompMode);
+        MTLNative.contextSetCompositeMode(getContextHandle(), mtlCompMode);
     }
 
     @Override
@@ -288,22 +293,22 @@ class MTLContext extends BaseShaderContext {
         // implement or change in future if necessary
         long dstNativeHandle = (dstRTT instanceof MTLTexture mtl) ? mtl.getNativeHandle() : 0L;
         long srcNativeHandle = (srcRTT instanceof MTLTexture mtl) ? mtl.getNativeHandle() : 0L;
-        nBlit(pContext, srcNativeHandle, dstNativeHandle,
+        MTLNative.contextBlit(pContext, srcNativeHandle, dstNativeHandle,
             srcX0, srcY0, srcX1, srcY1,
             dstX0, dstY0, dstX1, dstY1);
     }
 
     @Override
     protected void renderQuads(float[] coordArray, byte[] colorArray, int numVertices) {
-        nDrawIndexedQuads(getContextHandle(), coordArray, colorArray, numVertices);
+        MTLNative.contextDrawIndexedQuads(scratch, getContextHandle(), coordArray, colorArray, numVertices);
     }
 
     public void commitCurrentCommandBuffer() {
-        nCommitCurrentCommandBuffer(pContext);
+        MTLNative.contextCommit(pContext);
     }
 
     public long getMetalCommandQueue() {
-        return nGetCommandQueue(pContext);
+        return MTLNative.contextGetCommandQueue(pContext);
     }
 
     @Override
@@ -322,51 +327,51 @@ class MTLContext extends BaseShaderContext {
 
     long createMTLMesh() {
         if (checkDisposed()) return 0;
-        return nCreateMTLMesh(pContext);
+        return MTLNative.meshCreate(pContext);
     }
 
     void releaseMTLMesh(long nativeHandle) {
-        nReleaseMTLMesh(pContext, nativeHandle);
+        MTLNative.objcRelease(nativeHandle);
     }
 
     boolean buildNativeGeometry(long nativeHandle, float[] vertexBuffer, int vertexBufferLength,
                                 short[] indexBuffer, int indexBufferLength) {
-        return nBuildNativeGeometryShort(pContext, nativeHandle, vertexBuffer,
+        return MTLNative.meshBuildGeometryShort(scratch, nativeHandle, vertexBuffer,
             vertexBufferLength, indexBuffer, indexBufferLength);
     }
 
     boolean buildNativeGeometry(long nativeHandle, float[] vertexBuffer, int vertexBufferLength,
                                 int[] indexBuffer, int indexBufferLength) {
-        return nBuildNativeGeometryInt(pContext, nativeHandle, vertexBuffer,
+        return MTLNative.meshBuildGeometryInt(scratch, nativeHandle, vertexBuffer,
             vertexBufferLength, indexBuffer, indexBufferLength);
     }
 
     long createMTLPhongMaterial() {
-        return nCreateMTLPhongMaterial(pContext);
+        return MTLNative.phongMaterialCreate(pContext);
     }
 
     void releaseMTLPhongMaterial(long nativeHandle) {
-        nReleaseMTLPhongMaterial(pContext, nativeHandle);
+        MTLNative.objcRelease(nativeHandle);
     }
 
     void setDiffuseColor(long nativePhongMaterial, float r, float g, float b, float a) {
-        nSetDiffuseColor(pContext, nativePhongMaterial, r, g, b, a);
+        MTLNative.phongMaterialSetDiffuseColor(nativePhongMaterial, r, g, b, a);
     }
 
     void setSpecularColor(long nativePhongMaterial, boolean set, float r, float g, float b, float a) {
-        nSetSpecularColor(pContext, nativePhongMaterial, set, r, g, b, a);
+        MTLNative.phongMaterialSetSpecularColor(nativePhongMaterial, set, r, g, b, a);
     }
 
     void setMap(long nativePhongMaterial, int mapType, long nativeTexture) {
-        nSetMap(pContext, nativePhongMaterial, mapType, nativeTexture);
+        MTLNative.phongMaterialSetMap(nativePhongMaterial, mapType, nativeTexture);
     }
 
     long createMTLMeshView(long nativeMesh) {
-        return nCreateMTLMeshView(pContext, nativeMesh);
+        return MTLNative.meshViewCreate(pContext, nativeMesh);
     }
 
     void releaseMTLMeshView(long nativeMeshView) {
-        nReleaseMTLMeshView(pContext, nativeMeshView);
+        MTLNative.objcRelease(nativeMeshView);
     }
 
     void setCullingMode(long nativeMeshView, int cullMode) {
@@ -380,19 +385,19 @@ class MTLContext extends BaseShaderContext {
         } else {
             throw new IllegalArgumentException("illegal value for CullMode: " + cullMode);
         }
-        nSetCullingMode(pContext, nativeMeshView, cm);
+        MTLNative.meshViewSetCullingMode(nativeMeshView, cm);
     }
 
     void setMaterial(long nativeMeshView, long nativePhongMaterial) {
-        nSetMaterial(pContext, nativeMeshView, nativePhongMaterial);
+        MTLNative.meshViewSetMaterial(nativeMeshView, nativePhongMaterial);
     }
 
     void setWireframe(long nativeMeshView, boolean wireframe) {
-        nSetWireframe(pContext, nativeMeshView, wireframe);
+        MTLNative.meshViewSetWireframe(nativeMeshView, wireframe);
     }
 
     void setAmbientLight(long nativeMeshView, float r, float g, float b) {
-        nSetAmbientLight(pContext, nativeMeshView, r, g, b);
+        MTLNative.meshViewSetAmbientLight(nativeMeshView, r, g, b);
     }
 
     void setLight(long nativeMeshView, int index, float x, float y, float z,
@@ -400,7 +405,7 @@ class MTLContext extends BaseShaderContext {
                   float ca, float la, float qa, float isAttenuated, float maxRange,
                   float dirX, float dirY, float dirZ,
                   float innerAngle, float outerAngle, float falloff) {
-        nSetLight(pContext, nativeMeshView, index, x, y, z, r, g, b, w,
+        MTLNative.meshViewSetLight(nativeMeshView, index, x, y, z, r, g, b, w,
                     ca, la, qa, isAttenuated, maxRange,
                     dirX, dirY, dirZ, innerAngle, outerAngle, falloff);
     }
@@ -418,13 +423,13 @@ class MTLContext extends BaseShaderContext {
         }
         // printRawMatrix("Projection");
         // Set projection view matrix
-        nSetProjViewMatrix(pContext, g.isDepthTest(),
+        MTLNative.contextSetProjViewMatrix(pContext, g.isDepthTest(),
             rawMatrix[0], rawMatrix[1], rawMatrix[2], rawMatrix[3],
             rawMatrix[4], rawMatrix[5], rawMatrix[6], rawMatrix[7],
             rawMatrix[8], rawMatrix[9], rawMatrix[10], rawMatrix[11],
             rawMatrix[12], rawMatrix[13], rawMatrix[14], rawMatrix[15]);
 
-        nSetCameraPosition(pContext, cameraPos.x, cameraPos.y, cameraPos.z);
+        MTLNative.contextSetCameraPosition(pContext, cameraPos.x, cameraPos.y, cameraPos.z);
 
         // Undo the SwapChain scaling done in createGraphics() because 3D needs
         // this information in the shader (via projViewTx)
@@ -440,12 +445,12 @@ class MTLContext extends BaseShaderContext {
 
         updateRawMatrix(worldTx);
         // printRawMatrix("World");
-        nSetWorldTransform(pContext,
+        MTLNative.contextSetWorldTransform(pContext,
             rawMatrix[0], rawMatrix[1], rawMatrix[2], rawMatrix[3],
             rawMatrix[4], rawMatrix[5], rawMatrix[6], rawMatrix[7],
             rawMatrix[8], rawMatrix[9], rawMatrix[10], rawMatrix[11],
             rawMatrix[12], rawMatrix[13], rawMatrix[14], rawMatrix[15]);
-        nRenderMeshView(pContext, nativeMeshView);
+        MTLNative.meshViewRender(pContext, nativeMeshView);
     }
 
     private void printRawMatrix(String mesg) {
@@ -476,90 +481,22 @@ class MTLContext extends BaseShaderContext {
     }
 
     public void disposeShader(long nMetalShaderRef) {
-        nDisposeShader(nMetalShaderRef);
+        MTLNative.objcRelease(nMetalShaderRef);
     }
 
     public boolean isCurrentRTT(long texPtr) {
-        return nIsCurrentRTT(pContext, texPtr);
+        return MTLNative.contextIsCurrentRtt(pContext, texPtr);
     }
 
     @Override
     public void dispose() {
-        disposeLCDBuffer();
-        nRelease(pContext);
-        state = null;
-        super.dispose();
+        try {
+            disposeLCDBuffer();
+            MTLNative.contextRelease(pContext);
+            state = null;
+            super.dispose();
+        } finally {
+            scratch.close();
+        }
     }
-
-    // Native methods
-
-    private static native long nInitialize(ByteBuffer shaderLibPathStr);
-    private static native void nCommitCurrentCommandBuffer(long context);
-    private static native long nGetCommandQueue(long context);
-    private static native void nDrawIndexedQuads(long context, float coords[], byte volors[], int numVertices);
-    private static native int  nUpdateRenderTarget(long context, long texPtr, boolean depthTest);
-
-    private static native void nSetProjViewMatrix(long pContext, boolean isOrtho,
-                                                    double m00, double m01, double m02, double m03,
-                                                    double m10, double m11, double m12, double m13,
-                                                    double m20, double m21, double m22, double m23,
-                                                    double m30, double m31, double m32, double m33);
-    private static native void nSetTransform(long pContext,
-                                                  double m00, double m01, double m02, double m03,
-                                                  double m10, double m11, double m12, double m13,
-                                                  double m20, double m21, double m22, double m23,
-                                                  double m30, double m31, double m32, double m33);
-
-    private static native void nSetCompositeMode(long context, int mode);
-    private static native void nResetClipRect(long context);
-    private static native void nSetClipRect(long context, int x, int y, int width, int height);
-
-    private static native void nSetWorldTransformToIdentity(long pContext);
-    private static native void nSetWorldTransform(long pContext,
-                                                  double m00, double m01, double m02, double m03,
-                                                  double m10, double m11, double m12, double m13,
-                                                  double m20, double m21, double m22, double m23,
-                                                  double m30, double m31, double m32, double m33);
-    private static native void nSetCameraPosition(long pContext, double x, double y, double z);
-    private static native long nCreateMTLMesh(long pContext);
-    private static native void nReleaseMTLMesh(long pContext, long nativeHandle);
-    private static native boolean nBuildNativeGeometryShort(long pContext, long nativeHandle,
-                                                            float[] vertexBuffer, int vertexBufferLength, short[] indexBuffer, int indexBufferLength);
-    private static native boolean nBuildNativeGeometryInt(long pContext, long nativeHandle,
-                                                          float[] vertexBuffer, int vertexBufferLength, int[] indexBuffer, int indexBufferLength);
-    private static native long nCreateMTLPhongMaterial(long pContext);
-    private static native void nReleaseMTLPhongMaterial(long pContext, long nativeHandle);
-    private static native void nSetDiffuseColor(long pContext, long nativePhongMaterial,
-                                                float r, float g, float b, float a);
-    private static native void nSetSpecularColor(long pContext, long nativePhongMaterial,
-                                                 boolean set, float r, float g, float b, float a);
-    private static native void nSetMap(long pContext, long nativePhongMaterial,
-                                       int mapType, long texID);
-    private static native long nCreateMTLMeshView(long pContext, long nativeMesh);
-    private static native void nReleaseMTLMeshView(long pContext, long nativeHandle);
-    private static native void nSetCullingMode(long pContext, long nativeMeshView,
-                                               int cullingMode);
-    private static native void nSetMaterial(long pContext, long nativeMeshView,
-                                            long nativePhongMaterialInfo);
-    private static native void nSetWireframe(long pContext, long nativeMeshView,
-                                             boolean wireframe);
-    private static native void nSetAmbientLight(long pContext, long nativeMeshView,
-                                                float r, float g, float b);
-    private static native void nSetLight(long pContext, long nativeMeshView, int index,
-                                         float x, float y, float z,
-                                         float r, float g, float b, float w,
-                                         float ca, float la, float qa,
-                                         float isAttenuated, float maxRange,
-                                         float dirX, float dirY, float dirZ,
-                                         float innerAngle, float outerAngle, float falloff);
-    private static native void nRenderMeshView(long pContext, long nativeMeshView);
-
-    private static native void nBlit(long pContext, long nSrcRTT, long nDstRTT,
-                                     int srcX0, int srcY0, int srcX1, int srcY1,
-                                     int dstX0, int dstY0, int dstX1, int dstY1);
-
-    private static native void nRelease(long pContext);
-
-    private static native boolean nIsCurrentRTT(long pContext, long texPtr);
-    private static native void nDisposeShader(long nMetalShaderRef);
 }

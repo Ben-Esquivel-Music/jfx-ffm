@@ -1159,8 +1159,8 @@ public abstract class View {
      * {@link #getAccessible()} for a platform peer that lives in another package. The Windows peer
      * answers {@code WM_GETOBJECT} from Java now, where its JNI caller used to reach the
      * package-private method through {@code GetMethodID}, which bypasses access control; a subclass
-     * in {@code com.sun.glass.ui.win} cannot. Same thread, same checks, same value - nothing else
-     * changes, and the mac peer keeps calling {@code getAccessible()} from C.
+     * in {@code com.sun.glass.ui.win} cannot. The mac peer answers its {@code get_accessible} upcall
+     * through it for the same reason. Same thread, same checks, same value - nothing else changes.
      */
     protected final long getAccessibleForNative() {
         return getAccessible();

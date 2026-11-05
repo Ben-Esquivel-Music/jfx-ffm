@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2011, 2025, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2011, 2026, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -24,7 +24,6 @@
  */
 
 #import "common.h"
-#import "com_sun_glass_ui_View_Capability.h"
 #import "GlassMacros.h"
 #import "GlassViewCGL.h"
 
@@ -87,61 +86,25 @@
     return ctx;
 }
 
-- (void)_initialize3dWithJproperties:(jobject)jproperties
-                         useMTLForSW:(BOOL)mtlForSW
+- (void)_initialize3dWithCaps:(const GmacViewCaps *)caps
+                  useMTLForSW:(BOOL)mtlForSW
 {
-    GET_MAIN_JENV;
-
-    int depthBits = 0;
-    if (jproperties != NULL)
-    {
-        jobject k3dDepthKey = (*env)->NewObject(env, jIntegerClass, jIntegerInitMethod, com_sun_glass_ui_View_Capability_k3dDepthKeyValue);
-        GLASS_CHECK_EXCEPTION(env);
-        jobject k3dDepthKeyValue = (*env)->CallObjectMethod(env, jproperties, jMapGetMethod, k3dDepthKey);
-        GLASS_CHECK_EXCEPTION(env);
-        if (k3dDepthKeyValue != NULL)
-        {
-            depthBits = (*env)->CallIntMethod(env, k3dDepthKeyValue, jIntegerValueMethod);
-            GLASS_CHECK_EXCEPTION(env);
-        }
-    }
+    int depthBits = caps->depth_bits;
 
     CGLContextObj sharedCGL = NULL;
-    if (jproperties != NULL)
+    if (caps->share_context != NULL)
     {
-        jobject sharedContextPtrKey = (*env)->NewStringUTF(env, "shareContextPtr");
-        jobject sharedContextPtrValue = (*env)->CallObjectMethod(env, jproperties, jMapGetMethod, sharedContextPtrKey);
-        GLASS_CHECK_EXCEPTION(env);
-        if (sharedContextPtrValue != NULL)
-        {
-            jlong jsharedContextPtr = (*env)->CallLongMethod(env, sharedContextPtrValue, jLongValueMethod);
-            GLASS_CHECK_EXCEPTION(env);
-            if (jsharedContextPtr != 0)
-            {
-                NSOpenGLContext *sharedContextNS = (NSOpenGLContext*)jlong_to_ptr(jsharedContextPtr);
-                sharedCGL = [sharedContextNS CGLContextObj];
-            }
-        }
+        NSOpenGLContext *sharedContextNS = (NSOpenGLContext*)caps->share_context;
+        sharedCGL = [sharedContextNS CGLContextObj];
     }
 
     CGLContextObj clientCGL = NULL;
     BOOL isSwPipe = NO;
 
-    if (jproperties != NULL)
+    if (caps->context != NULL)
     {
-        jobject contextPtrKey = (*env)->NewStringUTF(env, "contextPtr");
-        jobject contextPtrValue = (*env)->CallObjectMethod(env, jproperties, jMapGetMethod, contextPtrKey);
-        GLASS_CHECK_EXCEPTION(env);
-        if (contextPtrValue != NULL)
-        {
-            jlong jcontextPtr = (*env)->CallLongMethod(env, contextPtrValue, jLongValueMethod);
-            GLASS_CHECK_EXCEPTION(env);
-            if (jcontextPtr != 0)
-            {
-                NSOpenGLContext *clientContextNS = (NSOpenGLContext*)jlong_to_ptr(jcontextPtr);
-                clientCGL = [clientContextNS CGLContextObj];
-            }
-        }
+        NSOpenGLContext *clientContextNS = (NSOpenGLContext*)caps->context;
+        clientCGL = [clientContextNS CGLContextObj];
     }
     if (clientCGL == NULL)
     {
@@ -156,19 +119,7 @@
         isSwPipe = YES;
     }
 
-    BOOL isHiDPIAware = NO;
-    if (jproperties != NULL)
-    {
-        jobject kHiDPIAwareKey = (*env)->NewObject(env, jIntegerClass, jIntegerInitMethod, com_sun_glass_ui_View_Capability_kHiDPIAwareKeyValue);
-        GLASS_CHECK_EXCEPTION(env);
-        jobject kHiDPIAwareValue = (*env)->CallObjectMethod(env, jproperties, jMapGetMethod, kHiDPIAwareKey);
-        GLASS_CHECK_EXCEPTION(env);
-        if (kHiDPIAwareValue != NULL)
-        {
-            isHiDPIAware = (*env)->CallBooleanMethod(env, kHiDPIAwareValue, jBooleanValueMethod) ? YES : NO;
-            GLASS_CHECK_EXCEPTION(env);
-        }
-    }
+    BOOL isHiDPIAware = caps->hidpi_aware != 0 ? YES : NO;
 
     self->layer = [[GlassLayer alloc] initGlassLayer:(NSObject*)sharedCGL
                                     andClientContext:(NSObject*)clientCGL
@@ -184,11 +135,10 @@
 }
 
 - (id)initWithFrame:(NSRect)frame
-          withJview:(jobject)jView
-    withJproperties:(jobject)jproperties
+               caps:(const GmacViewCaps *)caps
         useMTLForSW:(BOOL)mtlForSW;
 {
-    LOG("GlassViewCGL initWithFrame:withJview:withJproperties");
+    LOG("GlassViewCGL initWithFrame:caps:useMTLForSW");
 
     NSOpenGLPixelFormatAttribute pixelFormatAttributes[] =
     {
@@ -204,8 +154,8 @@
     self = [super initWithFrame:frame pixelFormat:pFormat];
     if (self != nil)
     {
-        [self _initialize3dWithJproperties:jproperties
-                               useMTLForSW:(BOOL)mtlForSW];
+        [self _initialize3dWithCaps:caps
+                        useMTLForSW:(BOOL)mtlForSW];
     }
     return self;
 }

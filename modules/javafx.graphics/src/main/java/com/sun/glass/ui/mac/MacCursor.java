@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2011, 2014, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2011, 2026, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -33,9 +33,8 @@ import com.sun.glass.ui.Size;
  */
 final class MacCursor extends Cursor {
 
-    private native static void _initIDs();
     static {
-        _initIDs();
+        MacCursorCalls.initCursors();
     }
 
     protected MacCursor(int type) {
@@ -46,7 +45,10 @@ final class MacCursor extends Cursor {
         super(x, y, pixels);
     }
 
-    @Override native protected long _createCursor(int x, int y, Pixels pixels);
+    @Override
+    protected long _createCursor(int x, int y, Pixels pixels) {
+        return MacCursorCalls.createCursor(x, y, pixels);
+    }
 
     void set() {
         int type = getType();
@@ -59,19 +61,13 @@ final class MacCursor extends Cursor {
             case CURSOR_NONE:
                 break;
             case CURSOR_CUSTOM:
-                _setCustom(getNativeCursor());
+                MacCursorCalls.setCustomCursor(getNativeCursor());
                 break;
             default:
-                _set(type);
+                MacCursorCalls.setCursor(type);
                 break;
         }
     }
-
-    native private void _set(int type);
-    native private void _setCustom(long ptr);
-
-    native private static void _setVisible(boolean visible);
-    native private static Size _getBestSize(int width, int height);
 
     // [NSCursor (un)hide] method calls must be balanced,
     // so we keep the state in the boolean field to avoid
@@ -90,12 +86,12 @@ final class MacCursor extends Cursor {
             return;
         } else {
             isNSCursorVisible = effectiveVisible;
-            _setVisible(effectiveVisible);
+            MacCursorCalls.setCursorVisible(effectiveVisible);
         }
     }
 
     static Size getBestSize_impl(int width, int height) {
-        return _getBestSize(width, height);
+        return MacCursorCalls.bestSize(width, height);
     }
 }
 

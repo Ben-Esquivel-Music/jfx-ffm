@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2011, 2025, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2011, 2026, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -51,7 +51,7 @@
 }
 
 - (GlassViewDelegate*)delegate;
-- (id)initWithFrame:(NSRect)frame withJview:(jobject)jView withJproperties:(jobject)jproperties;
+- (id)initWithFrame:(NSRect)frame viewId:(int64_t)viewId caps:(const GmacViewCaps *)caps;
 - (void)setFrameOrigin:(NSPoint)newOrigin;
 - (CALayer*)getLayer;
 
