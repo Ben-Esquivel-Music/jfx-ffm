@@ -27,6 +27,7 @@ package test.com.sun.glass.ui.mac;
 
 import com.sun.glass.ui.View;
 import com.sun.glass.ui.mac.MacGlassNativeShim;
+import com.sun.glass.ui.mac.MacGlassNativeShim.KeyChars;
 import com.sun.glass.ui.mac.MacGlassNativeShim.KeyEventFire;
 import com.sun.glass.ui.mac.MacGlassNativeShim.ViewCallbackRecorder;
 import java.io.IOException;
@@ -61,6 +62,7 @@ import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.IdentityHashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -72,6 +74,7 @@ import java.util.concurrent.FutureTask;
 import java.util.concurrent.TimeUnit;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
+import java.util.stream.IntStream;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeAll;
@@ -95,14 +98,15 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
  * {@code MacView} and {@code MacGestureSupport} over {@code GmacViewCallbacks}, {@code GmacGestureCallbacks} and the
- * {@code gmac_view_*} exports: the two tables, each slot's arguments, out-parameters and exception sink, the
- * {@code char[]} the key slot passes per key event, the registry of view ids, the {@code GmacViewCaps} that
- * {@code _create} builds from the device details, the frames of the view calls, and the {@code MacGestureSupport}
- * handles that {@code MacView}'s adapter invokes.
+ * {@code gmac_view_*} exports: the two tables, each slot's arguments, out-parameters and exception sink, the units a
+ * key event passes and the {@code char[]} the key slot makes of them, the registry of view ids, the
+ * {@code GmacViewCaps} that {@code _create} builds from the device details, the frames of the view calls, and the
+ * {@code MacGestureSupport} handles that {@code MacView}'s adapter invokes.
  * <p>
  * No test makes a view, calls {@code gmac_view_create} or asks AppKit for the double-click interval. Slots are
  * dialled through the {@code gmac_test_fire_*} hooks for ids filed with a recording stand-in, and the calls that would
- * reach AppKit take a stand-in where the export would be. The other view exports are called only with the NULL view,
+ * reach AppKit take a stand-in where the export would be. The key-chars hooks make key-down {@code NSEvent}s, which
+ * no window or application receives. The other view exports are called only with the NULL view,
  * for which each returns at its first statement, {@code if (!ptr) return}, before any pool or AppKit message:
  * {@code GlassView.m} lines 104, 126, 150, 195, 207, 222, 235, 250, 277, 307 and 319. The uploads are also called
  * with a stand-in view and arguments for which the export returns before it messages the view
@@ -142,8 +146,28 @@ public class MacViewNativeTest {
     private static final long FAKE_VIEW = 0x7E57_0000_5678L;
 
     private static final Path HEADER = Path.of("src/main/native-glass/mac/glass_mac_api.h");
+    private static final Path VIEW_DELEGATE_SOURCE = Path.of("src/main/native-glass/mac/GlassViewDelegate.m");
+    private static final Path API_SOURCE = Path.of("src/main/native-glass/mac/glass_mac_api.m");
+
+    /** {@code kVK_ANSI_A}, whose key sends its characters, the left arrow, which sends none, and a code not mapped. */
+    private static final char KEY_A = 0x00;
+    private static final char KEY_LEFT_ARROW = 0x7B;
+    private static final char KEY_NOT_IN_THE_KEY_MAP = 0x90;
+
+    /** What a key-chars out buffer holds where nothing was written: no unit of {@link #KEY_CHARACTERS}. */
+    private static final char UNWRITTEN_UNIT = 0x5A5A;
+    private static final int GUARD_UNITS = 16;
+
+    /**
+     * Lengths around the 16 units the views keep inline: 20 is the most {@code CGEventKeyboardSetUnicodeString} takes,
+     * and the 21 units with a surrogate pair at units 15 and 16 put the pair across the inline end.
+     */
+    private static final List<String> KEY_CHARACTERS = List.of("", distinctUnits(1), distinctUnits(15),
+            distinctUnits(16), distinctUnits(17), distinctUnits(20), "a".repeat(15) + "😀" + "b".repeat(4),
+            "😀".repeat(8), "😀".repeat(10), distinctUnits(2000));
 
     private static final Pattern COMMENT = Pattern.compile("/\\*.*?\\*/", Pattern.DOTALL);
+    private static final Pattern LINE_COMMENT = Pattern.compile("//[^\\n]*");
 
     private static final Pattern SLOT = Pattern.compile("\\(\\s*\\*\\s*(\\w+)\\s*\\)");
 
@@ -417,6 +441,162 @@ public class MacViewNativeTest {
         assertEquals(reportedAfterEach(List.of(
                 "notifyKeyAndReturnConsumed(1001, 2001, [0061 00e9], 3001)",
                 "notifyKeyAndReturnConsumed(1002, 2002, [0061 00e9], 3001)")), events);
+    }
+
+    @Test
+    public void theKeyCharsHelperCopiesAtMostItsCapacityAndAnswersTheWholeLength() {
+        for (String characters : KEY_CHARACTERS) {
+            int length = characters.length();
+            for (int capacity : capacitiesAround(length)) {
+                char[] out = unwrittenUnits(Math.max(length, capacity) + GUARD_UNITS);
+                KeyChars copy = MacGlassNativeShim.keyCharsUtf16(KEY_A, characters, capacity, out);
+                char[] expected = unwrittenUnits(out.length);
+                characters.getChars(0, Math.min(length, capacity), expected, 0);
+                String label = length + " units, capacity " + capacity;
+                assertEquals(length, copy.answer(), label);
+                assertArrayEquals(expected, copy.out(), label);
+            }
+        }
+    }
+
+    @Test
+    public void aCapacityBelowOneCopiesNothingNotEvenToTheNullBuffer() {
+        for (String characters : KEY_CHARACTERS) {
+            for (int capacity : new int[] {0, -1, Integer.MIN_VALUE}) {
+                String label = characters.length() + " units, capacity " + capacity;
+                assertEquals(new KeyChars(characters.length(), null),
+                        MacGlassNativeShim.keyCharsUtf16(KEY_A, characters, capacity, null), label);
+                KeyChars copy = MacGlassNativeShim.keyCharsUtf16(KEY_A, characters, capacity,
+                        unwrittenUnits(GUARD_UNITS));
+                assertEquals(characters.length(), copy.answer(), label);
+                assertArrayEquals(unwrittenUnits(GUARD_UNITS), copy.out(), label);
+            }
+        }
+    }
+
+    @Test
+    public void aKeyThatSendsNoCharactersCopiesNoneOfThemAndAnswersMinusOne() {
+        for (char keyCode : new char[] {KEY_LEFT_ARROW, KEY_NOT_IN_THE_KEY_MAP}) {
+            for (String characters : KEY_CHARACTERS) {
+                int capacity = characters.length() + GUARD_UNITS;
+                KeyChars copy = MacGlassNativeShim.keyCharsUtf16(keyCode, characters, capacity,
+                        unwrittenUnits(capacity));
+                String label = "key code " + (int) keyCode + ", " + characters.length() + " units";
+                assertEquals(-1, copy.answer(), label);
+                assertArrayEquals(unwrittenUnits(capacity), copy.out(), label);
+            }
+        }
+    }
+
+    @Test
+    public void everyUnitOfAKeyEventReachesTheKeySlotInOrderWhateverItsLength() throws Exception {
+        List<String> events = new CopyOnWriteArrayList<>();
+        ViewCallbackRecorder view = new ViewCallbackRecorder(events, false);
+        long viewId = MacGlassNativeShim.registerView(view);
+        List<KeyEventFire> fired = onFreshThread(events, () -> KEY_CHARACTERS.stream()
+                .map(characters -> MacGlassNativeShim.fireKeyChars(viewId, KEY_A, characters, '\0')).toList());
+        assertEquals(Collections.nCopies(KEY_CHARACTERS.size(), new KeyEventFire(GMAC_UPCALL_OK, 1)), fired);
+        assertEquals(KEY_CHARACTERS.stream().map(MacViewNativeTest::keyCharsCall).toList(), events);
+        assertKeyChars(KEY_CHARACTERS, view.keyChars());
+    }
+
+    @Test
+    public void aTextCharIsTheOnlyUnitWhateverTheCharactersOfItsEvent() throws Exception {
+        List<String> events = new CopyOnWriteArrayList<>();
+        ViewCallbackRecorder view = new ViewCallbackRecorder(events, false);
+        long viewId = MacGlassNativeShim.registerView(view);
+        List<KeyEventFire> fired = onFreshThread(events, () -> KEY_CHARACTERS.stream()
+                .flatMap(characters -> List.of(MacGlassNativeShim.fireKeyChars(viewId, KEY_A, characters, 'A'),
+                        MacGlassNativeShim.fireKeyChars(viewId, KEY_LEFT_ARROW, characters, 'é')).stream())
+                .toList());
+        List<String> textChars = KEY_CHARACTERS.stream().flatMap(characters -> List.of("A", "é").stream())
+                .toList();
+        assertEquals(Collections.nCopies(textChars.size(), new KeyEventFire(GMAC_UPCALL_OK, 1)), fired);
+        assertEquals(textChars.stream().map(MacViewNativeTest::keyCharsCall).toList(), events);
+        assertKeyChars(textChars, view.keyChars());
+    }
+
+    @Test
+    public void aKeyThatSendsNoCharactersPassesAnEmptyArrayWhateverItsCharacters() throws Exception {
+        List<String> events = new CopyOnWriteArrayList<>();
+        ViewCallbackRecorder view = new ViewCallbackRecorder(events, false);
+        long viewId = MacGlassNativeShim.registerView(view);
+        List<KeyEventFire> fired = onFreshThread(events, () -> KEY_CHARACTERS.stream()
+                .flatMap(characters -> List.of(
+                        MacGlassNativeShim.fireKeyChars(viewId, KEY_LEFT_ARROW, characters, '\0'),
+                        MacGlassNativeShim.fireKeyChars(viewId, KEY_NOT_IN_THE_KEY_MAP, characters, '\0')).stream())
+                .toList());
+        List<String> none = Collections.nCopies(2 * KEY_CHARACTERS.size(), "");
+        assertEquals(Collections.nCopies(none.size(), new KeyEventFire(GMAC_UPCALL_OK, 1)), fired);
+        assertEquals(none.stream().map(MacViewNativeTest::keyCharsCall).toList(), events);
+        assertKeyChars(none, view.keyChars());
+    }
+
+    @Test
+    public void aKeyEventOfMoreThanSixteenUnitsGetsACharArrayOfItsOwn() throws Exception {
+        List<String> events = new CopyOnWriteArrayList<>();
+        ViewCallbackRecorder view = new ViewCallbackRecorder(events, false);
+        long viewId = MacGlassNativeShim.registerView(view);
+        String characters = distinctUnits(2000);
+        List<KeyEventFire> nested = new CopyOnWriteArrayList<>();
+        view.duringNextKey(() -> nested.add(MacGlassNativeShim.fireKeyChars(viewId, KEY_A, characters, '\0')));
+        KeyEventFire outer = onFreshThread(events, () -> MacGlassNativeShim.fireKeyEvent(viewId, 2));
+        List<KeyEventFire> next = onFreshThread(events, () -> List.of(
+                MacGlassNativeShim.fireKeyChars(viewId, KEY_A, characters, '\0'),
+                MacGlassNativeShim.fireKeyChars(viewId, KEY_A, characters, '\0')));
+        assertEquals(new KeyEventFire(GMAC_UPCALL_OK, 1), outer);
+        assertEquals(List.of(new KeyEventFire(GMAC_UPCALL_OK, 1)), nested);
+        assertEquals(Collections.nCopies(2, new KeyEventFire(GMAC_UPCALL_OK, 1)), next);
+        List<char[]> chars = view.keyChars();
+        assertKeyChars(List.of("aé", characters, "aé", characters, characters), chars);
+        Set<char[]> distinct = Collections.newSetFromMap(new IdentityHashMap<>());
+        distinct.addAll(chars);
+        assertEquals(chars.size(), distinct.size(), "each key event, and a dial after a nested one, gets a new char[]");
+    }
+
+    /** Each event's units take a 64 KiB heap block, so 1,024 events keep 64 MiB in use if the block is not freed. */
+    @Test
+    public void theHeapBlockOfALongKeyEventIsFreedAfterItsDial() throws Exception {
+        String characters = distinctUnits(32_768);
+        int events = 1024;
+        List<String> reports = new CopyOnWriteArrayList<>();
+        long growth = onFreshThread(reports, () -> {
+            fireKeyCharsOfNoView(characters, 64);
+            long before = MacGlassNativeShim.mallocBytesInUse();
+            fireKeyCharsOfNoView(characters, events);
+            return MacGlassNativeShim.mallocBytesInUse() - before;
+        });
+        assertTrue(growth < 16L << 20, growth + " bytes more in use after " + events + " key events");
+        assertEquals(List.of(), reports);
+    }
+
+    /**
+     * What the key-chars hook dials proves what {@code -_dialKeyEvent:} dials only while both size the units with the
+     * one function, and the heap block is freed only if {@code -_dialKeyEvent:} releases it before each return.
+     */
+    @Test
+    public void theViewsAndTheKeyCharsHookSizeTheUnitsWithOneFunctionAndReleaseThem() throws IOException {
+        String dial = sourceBlock(VIEW_DELEGATE_SOURCE, "- (BOOL)_dialKeyEvent:");
+        String hook = sourceBlock(API_SOURCE, "int32_t gmac_test_fire_key_chars(");
+        for (String body : List.of(dial, hook)) {
+            assertEquals(1, occurrences(body, "GlassKeyCharsFill(&keyChars, "), body);
+            assertTrue(body.contains("GlassKeySend send = {callbacks, "), body);
+            assertTrue(body.contains(", keyChars.units, keyChars.count, "), body);
+            assertFalse(body.contains("GetJavaKeyCharsUtf16"), body);
+            assertFalse(Pattern.compile("\\w\\s*\\[\\s*\\d+\\s*]").matcher(body).find(), body);
+            assertTrue(body.indexOf("GlassKeyCharsFill(") < body.indexOf("GlassDialKeySlot("), body);
+            assertTrue(body.lastIndexOf("GlassDialKeySlot(") < body.lastIndexOf("GlassKeyCharsRelease(&keyChars);"),
+                    body);
+        }
+        Matcher returns = Pattern.compile("\\breturn\\b").matcher(dial);
+        int count = 0;
+        while (returns.find()) {
+            count++;
+            assertTrue(dial.substring(0, returns.start()).strip().endsWith("GlassKeyCharsRelease(&keyChars);"),
+                    "return " + count + " of " + dial);
+        }
+        assertTrue(count > 0, dial);
+        assertEquals(count, occurrences(dial, "GlassKeyCharsRelease(&keyChars);"), dial);
     }
 
     @Test
@@ -1094,6 +1274,8 @@ public class MacViewNativeTest {
         });
         List<Integer> gestures = onFreshThread(events, () -> fireEveryGestureSlot(viewId));
         KeyEventFire key = onFreshThread(events, () -> MacGlassNativeShim.fireKeyEvent(viewId, 2));
+        KeyEventFire keyChars = onFreshThread(events, () -> MacGlassNativeShim.fireKeyChars(viewId, KEY_A,
+                distinctUnits(2000), '\0'));
         int inputMethod = onFreshThread(events, () -> MacGlassNativeShim.fireInputMethod(viewId, "ab", false, 1, 2,
                 2, 0, 0));
         assertEquals(List.of(0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0), fired.stream().map(ViewFire::status)
@@ -1103,6 +1285,7 @@ public class MacViewNativeTest {
         }
         assertEquals(List.of(0, 0, 0, 0, 0), gestures, "view id " + viewId);
         assertEquals(new KeyEventFire(GMAC_UPCALL_OK, 0), key, "view id " + viewId);
+        assertEquals(new KeyEventFire(GMAC_UPCALL_OK, 0), keyChars, "view id " + viewId);
         assertEquals(GMAC_UPCALL_OK, inputMethod, "view id " + viewId);
         assertEquals(List.of(), events);
     }
@@ -1117,7 +1300,78 @@ public class MacViewNativeTest {
         assertEquals(Collections.nCopies(VIEW_SLOT_COUNT, GMAC_ERR_NO_DATA), statuses);
         assertEquals(Collections.nCopies(GESTURE_SLOT_COUNT, GMAC_ERR_NO_DATA), fireEveryGestureSlot(viewId));
         assertEquals(new KeyEventFire(GMAC_ERR_NO_DATA, 0), MacGlassNativeShim.fireKeyEvent(viewId, 1));
+        assertEquals(new KeyEventFire(GMAC_ERR_NO_DATA, 0),
+                MacGlassNativeShim.fireKeyChars(viewId, KEY_A, distinctUnits(20), '\0'));
         assertEquals(GMAC_ERR_NO_DATA, MacGlassNativeShim.fireInputMethod(viewId, "ab", false, 1, 2, 2, 0, 0));
+    }
+
+    /** {@code count} units that differ from one another, so that a unit out of place or out of order shows. */
+    private static String distinctUnits(int count) {
+        StringBuilder units = new StringBuilder(count);
+        for (int i = 0; i < count; i++) {
+            units.append((char) ('\u4e00' + i));
+        }
+        return units.toString();
+    }
+
+    /** Fires {@code events} key events of {@code characters} for view id 0, which the registry never holds. */
+    private static void fireKeyCharsOfNoView(String characters, int events) {
+        for (int i = 0; i < events; i++) {
+            assertEquals(new KeyEventFire(GMAC_UPCALL_OK, 0),
+                    MacGlassNativeShim.fireKeyChars(0L, KEY_A, characters, '\0'), "event " + i);
+        }
+    }
+
+    /** The capacities from 1 up at the inline end, at 20 and 21 units, and at {@code length}, either side included. */
+    private static int[] capacitiesAround(int length) {
+        return IntStream.of(1, 15, 16, 17, 20, 21, length - 1, length, length + 1).filter(units -> units > 0)
+                .distinct().toArray();
+    }
+
+    private static char[] unwrittenUnits(int count) {
+        char[] units = new char[count];
+        Arrays.fill(units, UNWRITTEN_UNIT);
+        return units;
+    }
+
+    /** What the recorder logs for the one dial of {@code gmac_test_fire_key_chars} that passes {@code units}. */
+    private static String keyCharsCall(String units) {
+        StringBuilder hex = new StringBuilder("notifyKeyAndReturnConsumed(1001, 2001, [");
+        for (int i = 0; i < units.length(); i++) {
+            hex.append(i == 0 ? "" : " ").append(String.format("%04x", (int) units.charAt(i)));
+        }
+        return hex.append("], 3001)").toString();
+    }
+
+    private static void assertKeyChars(List<String> expected, List<char[]> actual) {
+        assertEquals(expected.size(), actual.size());
+        for (int i = 0; i < expected.size(); i++) {
+            assertArrayEquals(expected.get(i).toCharArray(), actual.get(i), "dial " + i);
+        }
+    }
+
+    /**
+     * The function or method of {@code source} whose definition starts with {@code start}, up to its closing brace at
+     * the start of a line, without comments.
+     */
+    private static String sourceBlock(Path source, String start) throws IOException {
+        assertTrue(Files.isRegularFile(source), "run from modules/javafx.graphics: no " + source.toAbsolutePath());
+        String text = Files.readString(source);
+        int begin = text.indexOf(start);
+        assertTrue(begin >= 0, "no " + start + " in " + source);
+        assertEquals(-1, text.indexOf(start, begin + 1), "two of " + start + " in " + source);
+        int end = text.indexOf("\n}\n", begin);
+        assertTrue(end > begin, "no end of " + start + " in " + source);
+        String block = COMMENT.matcher(text.substring(begin, end + 2)).replaceAll(" ");
+        return LINE_COMMENT.matcher(block).replaceAll(" ");
+    }
+
+    private static int occurrences(String text, String part) {
+        int count = 0;
+        for (int at = text.indexOf(part); at >= 0; at = text.indexOf(part, at + part.length())) {
+            count++;
+        }
+        return count;
     }
 
     /** Dials {@code slot} with every out-parameter byte {@link #UNWRITTEN}, and answers the bytes afterwards. */

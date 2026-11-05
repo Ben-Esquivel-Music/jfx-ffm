@@ -158,6 +158,43 @@ int32_t GlassDialKeySlot(GlassKeySend *send, int32_t type, int32_t key_code, int
     return status;
 }
 
+void GlassKeyCharsFill(GlassKeyChars *key_chars, NSEvent *event, unichar text_char)
+{
+    const int32_t inlineCapacity = (int32_t)(sizeof(key_chars->inline_units) / sizeof(uint16_t));
+    key_chars->units = key_chars->inline_units;
+    if (text_char != 0)
+    {
+        key_chars->inline_units[0] = text_char;
+        key_chars->count = 1;
+        return;
+    }
+    int32_t count = MAX(GetJavaKeyCharsUtf16(event, key_chars->inline_units, inlineCapacity), 0);
+    if (count > inlineCapacity)
+    {
+        uint16_t *block = (uint16_t *)malloc(sizeof(uint16_t) * (size_t)count);
+        if (block != NULL)
+        {
+            GetJavaKeyCharsUtf16(event, block, count);
+            key_chars->units = block;
+        }
+        else
+        {
+            count = inlineCapacity;
+        }
+    }
+    key_chars->count = count;
+}
+
+void GlassKeyCharsRelease(GlassKeyChars *key_chars)
+{
+    if (key_chars->units != key_chars->inline_units)
+    {
+        free(key_chars->units);
+    }
+    key_chars->units = key_chars->inline_units;
+    key_chars->count = 0;
+}
+
 static void dialModifierKeySlot(GlassKeySend *send, NSUInteger changedFlags, NSUInteger currentFlags, NSUInteger mask,
                                 int32_t vkCode)
 {
@@ -783,21 +820,15 @@ static int32_t dialDragSlot(int32_t (*slot)(int64_t, int32_t, int32_t, int32_t, 
 - (BOOL)_dialKeyEvent:(NSEvent *)theEvent isDown:(BOOL)isDown character:(unichar)textChar keyCode:(int32_t)keyCode
             modifiers:(int32_t)modifiers callbacks:(const GmacViewCallbacks *)callbacks
 {
-    // The JNI's 16-unit key-chars buffer, so that its latent overflow stays what it was.
-    uint16_t keyChars[16];
-    int32_t charCount;
-    if (textChar != 0) {
-        keyChars[0] = textChar;
-        charCount = 1;
-    } else {
-        charCount = MAX(GetJavaKeyCharsUtf16(theEvent, keyChars), 0);
-    }
+    GlassKeyChars keyChars;
+    GlassKeyCharsFill(&keyChars, theEvent, textChar);
     if (!GlassIsMainJavaAttached())
     {
+        GlassKeyCharsRelease(&keyChars);
         return NO;
     }
 
-    GlassKeySend send = {callbacks, self->viewId, keyChars, charCount, modifiers, 0};
+    GlassKeySend send = {callbacks, self->viewId, keyChars.units, keyChars.count, modifiers, 0};
     // This routine returns YES if the PRESS event was consumed. This is
     // used to ensure that performKeyEquivalent doesn't allow an event
     // to be processed by both JavaFX and the system menus.
@@ -829,6 +860,7 @@ static int32_t dialDragSlot(int32_t (*slot)(int64_t, int32_t, int32_t, int32_t, 
         }
     }
 
+    GlassKeyCharsRelease(&keyChars);
     return wasConsumed != 0 ? YES : NO;
 }
 

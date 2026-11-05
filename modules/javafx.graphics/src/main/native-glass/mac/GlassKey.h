@@ -32,10 +32,9 @@ int32_t GetJavaModifiers(NSEvent *event);
 int32_t GetJavaKeyCodeFor(unsigned short keyCode);
 int32_t GetJavaKeyCode(NSEvent *event);
 
-// The UTF-16 units of [event characters], written to out, for a key that sends its characters to Java; answers their
-// count, or -1 for a key that sends none. Callers pass 16 units of out. Latent bug: every unit is written, so more than
-// 16 overflow it, as they overflowed the JNI's stack buffer.
-__attribute__((visibility("hidden"))) int32_t GetJavaKeyCharsUtf16(NSEvent *event, uint16_t *out);
+// For a key that sends its characters to Java, copies the first min(length, capacity) of the length UTF-16 units of
+// [event characters] to out and answers length, which can exceed capacity; answers -1 for a key that sends none.
+__attribute__((visibility("hidden"))) int32_t GetJavaKeyCharsUtf16(NSEvent *event, uint16_t *out, int32_t capacity);
 
 NSString* GetStringForJavaKey(uint16_t key);
 NSString* GetStringForMacKey(unsigned short keyCode, bool shifted);

@@ -38,6 +38,7 @@
 
 #define GLASS_INTERNAL __attribute__((visibility("hidden")))
 
+@class NSEvent;
 @class NSScreen;
 
 /* @"" when len <= 0, else an autoreleased copy of the len code units. chars may be NULL only when len is 0. */
@@ -95,6 +96,21 @@ typedef struct GlassKeySend {
  * dial again, as the JNI passed every dial of one event the same jcharArray.
  */
 GLASS_INTERNAL int32_t GlassDialKeySlot(GlassKeySend *send, int32_t type, int32_t key_code, int32_t *out_consumed);
+
+/*
+ * The units one key event passes notify_key: text_char alone when it is not 0, else every unit GetJavaKeyCharsUtf16
+ * answers for event, none for a key that sends none. units is inline_units, or a heap block for more units than
+ * inline_units holds; if that block cannot be allocated, units keeps the first 16 and count is 16. Holds a pointer into
+ * itself, so it is never copied. Every GlassKeyCharsFill is followed by one GlassKeyCharsRelease.
+ */
+typedef struct GlassKeyChars {
+    uint16_t inline_units[16];
+    uint16_t *units;
+    int32_t count;
+} GlassKeyChars;
+
+GLASS_INTERNAL void GlassKeyCharsFill(GlassKeyChars *key_chars, NSEvent *event, unichar text_char);
+GLASS_INTERNAL void GlassKeyCharsRelease(GlassKeyChars *key_chars);
 
 /*
  * Main thread. Dials notify_input_method for text, an NSString or NSAttributedString, with the units the JNI gave

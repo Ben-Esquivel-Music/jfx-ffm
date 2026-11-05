@@ -30,6 +30,7 @@
 
 #import <ApplicationServices/ApplicationServices.h>
 
+#import "GlassKey.h"
 #import "GlassMacros.h"
 #import "GlassStatics.h"
 #import "glass_mac_api.h"
@@ -1075,6 +1076,47 @@ int32_t gmac_test_fire_key_event(int64_t view_id, int32_t dials, int32_t *out_co
     for (int32_t i = 1; i < dials; i++) {
         status = GlassDialKeySlot(&send, 1001 + i, 2001 + i, NULL);
     }
+    return status;
+}
+
+static NSEvent *testKeyEvent(uint16_t key_code, const uint16_t *chars, int32_t len)
+{
+    NSString *characters = GlassNSStringOrEmpty(chars, len);
+    return [NSEvent keyEventWithType:NSEventTypeKeyDown location:NSZeroPoint modifierFlags:0 timestamp:0
+                        windowNumber:0 context:nil characters:characters charactersIgnoringModifiers:characters
+                           isARepeat:NO keyCode:key_code];
+}
+
+int32_t gmac_test_key_chars_utf16(uint16_t key_code, const uint16_t *chars, int32_t len, uint16_t *out,
+                                  int32_t capacity)
+{
+    int32_t result;
+    GLASS_POOL_ENTER;
+    {
+        result = GetJavaKeyCharsUtf16(testKeyEvent(key_code, chars, len), out, capacity);
+    }
+    GLASS_POOL_EXIT;
+    return result;
+}
+
+int32_t gmac_test_fire_key_chars(int64_t view_id, uint16_t key_code, const uint16_t *chars, int32_t len,
+                                 uint16_t text_char, int32_t *out_consumed)
+{
+    *out_consumed = 0;
+    const GmacViewCallbacks *callbacks = GlassViewCallbacks();
+    if (callbacks == NULL || callbacks->notify_key == NULL) {
+        return GMAC_ERR_NO_DATA;
+    }
+    int32_t status;
+    GLASS_POOL_ENTER;
+    {
+        GlassKeyChars keyChars;
+        GlassKeyCharsFill(&keyChars, testKeyEvent(key_code, chars, len), text_char);
+        GlassKeySend send = {callbacks, view_id, keyChars.units, keyChars.count, 3001, 0};
+        status = GlassDialKeySlot(&send, 1001, 2001, out_consumed);
+        GlassKeyCharsRelease(&keyChars);
+    }
+    GLASS_POOL_EXIT;
     return status;
 }
 

@@ -1701,6 +1701,26 @@ GMAC_EXPORT int32_t gmac_test_fire_gesture_callback(int32_t slot, int64_t view_i
 GMAC_EXPORT int32_t gmac_test_fire_key_event(int64_t view_id, int32_t dials, int32_t *out_consumed);
 
 /*
+ * What GetJavaKeyCharsUtf16, the views' helper, does for a key-down NSEvent with the Mac key code key_code whose
+ * characters are the len units at chars, made inside a GLASS_POOL_ENTER/EXIT pair. For a key that sends its characters
+ * it copies min(len, capacity) of the units to out, none for a capacity below 1, writes nothing else there, and
+ * answers len. For a key code whose key sends none, such as 0x7B (the left arrow) or one the key map lacks, it writes
+ * nothing and answers -1. 0x00, kVK_ANSI_A, sends them.
+ */
+GMAC_EXPORT int32_t gmac_test_key_chars_utf16(uint16_t key_code, const uint16_t *chars, int32_t len, uint16_t *out,
+                                              int32_t capacity);
+
+/*
+ * Dials notify_key of the installed GmacViewCallbacks once on the calling thread, inside a GLASS_POOL_ENTER/EXIT pair,
+ * with type 1001, key code 2001, modifiers 3001 and the units the views' code passes for text_char and a key-down
+ * NSEvent made as gmac_test_key_chars_utf16 makes it: text_char alone when it is not 0, else every unit of the event's
+ * characters, beyond 16 too, and none for a key that sends none. *out_consumed takes what the dial wrote, 0 when it
+ * wrote nothing. Answers the dial's status, GMAC_ERR_NO_DATA when no table is installed or the slot is NULL.
+ */
+GMAC_EXPORT int32_t gmac_test_fire_key_chars(int64_t view_id, uint16_t key_code, const uint16_t *chars, int32_t len,
+                                             uint16_t text_char, int32_t *out_consumed);
+
+/*
  * Dials notify_input_method of the installed GmacViewCallbacks on the calling thread through the code the views use,
  * inside a GLASS_POOL_ENTER/EXIT pair, for an NSString of the len units at chars, wrapped in an NSAttributedString
  * when attributed is not 0, and attr, length, cursor and the range (sel_location, sel_length). Answers the slot's

@@ -82,7 +82,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * {@code gmac_menu_set_checked} (493) message the NULL {@code GlassMenu}, which runs no method, and
  * {@code gmac_menu_set_image} (461) tests it (468) and, for a NULL icon, does nothing else.
  * {@code gmac_test_menu_key_equivalent} (505) runs {@code menuKeyEquivalent} (52), which makes {@code NSString}s
- * only, through {@code GetStringForJavaKey} ({@code GlassKey.m}, 508), a switch over static values. The images come
+ * only, through {@code GetStringForJavaKey} ({@code GlassKey.m}, 513), a switch over static values. The images come
  * from {@code Pixels.attachData}, which makes an {@code NSImage} of its pixels, and are read back and released through
  * {@code gmac_test_inspect_and_release_image}. Making a {@code MacMenuDelegate} runs its initialization, which
  * installs the table. Nothing here creates an {@code NSApplication}: AppKit's {@code NSApp} is nil before the first

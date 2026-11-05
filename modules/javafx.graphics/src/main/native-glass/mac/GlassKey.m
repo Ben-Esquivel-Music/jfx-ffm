@@ -439,7 +439,7 @@ int32_t GetJavaKeyCode(NSEvent *event)
     return GetJavaKeyCodeFor([event keyCode]);
 }
 
-int32_t GetJavaKeyCharsUtf16(NSEvent *event, uint16_t *out)
+int32_t GetJavaKeyCharsUtf16(NSEvent *event, uint16_t *out, int32_t capacity)
 {
     NSString *chars = [event characters];
 
@@ -459,8 +459,13 @@ int32_t GetJavaKeyCharsUtf16(NSEvent *event, uint16_t *out)
         return -1;
     }
 
-    [chars getCharacters:out range:NSMakeRange(0, [chars length])];
-    return (int32_t)[chars length];
+    NSUInteger length = [chars length];
+    NSUInteger copied = capacity > 0 ? MIN(length, (NSUInteger)capacity) : 0;
+    if (copied > 0)
+    {
+        [chars getCharacters:out range:NSMakeRange(0, copied)];
+    }
+    return (int32_t)length;
 }
 
 BOOL GetMacKey(int32_t javaKeyCode, unsigned short *outMacKeyCode)

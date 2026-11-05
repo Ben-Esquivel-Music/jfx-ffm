@@ -74,7 +74,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * {@code gmac_url_stop_accessing_security_scoped_resource} (210) send the URL one message each, and
  * {@code gmac_url_copy_path} (287) its {@code path} and {@code dataUsingEncoding:} inside a pool, then
  * {@code malloc}s. {@code gmac_test_dialog_describe_filters} (466) makes {@code NSString}s and {@code NSArray}s only,
- * through {@code makeFilterArrays} (54), and {@code gmac_dialog_install_callbacks} ({@code glass_mac_api.m}, 523)
+ * through {@code makeFilterArrays} (54), and {@code gmac_dialog_install_callbacks} ({@code glass_mac_api.m}, 524)
  * copies the table. {@code MacFileNSURL._dispose} compiled to {@code mov x0, x2; b _objc_release}, so its
  * replacement is {@code objc_release} itself (PB2 (i)), and {@link #releaseDropsTheRetainCountOfTheUrlByOne} checks
  * it on the retain count. Nothing here creates an {@code NSApplication}: AppKit's {@code NSApp} is nil before the

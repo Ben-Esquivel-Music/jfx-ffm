@@ -263,9 +263,9 @@ public class MacRobotNativeTest {
     }
 
     /**
-     * In {@code GlassKey.m}, {@code gmac_key_find_mac} (628) answers what {@code GetMacKey} (466) found, and only the
-     * search after its table (492-503) reads the keyboard layout. {@code VK_UNDEFINED} returns at 469, before the
-     * table. {@code VK_ESCAPE} (table key 0x35) and {@code VK_ENTER} (first table key 0x24) return at 487, because
+     * In {@code GlassKey.m}, {@code gmac_key_find_mac} (633) answers what {@code GetMacKey} (471) found, and only the
+     * search after its table (497-508) reads the keyboard layout. {@code VK_UNDEFINED} returns at 474, before the
+     * table. {@code VK_ESCAPE} (table key 0x35) and {@code VK_ENTER} (first table key 0x24) return at 492, because
      * {@code macKeyCodeIsLayoutSensitive} (185) answers NO for both: for 0x24 at 195, for 0x35, outside both ranges,
      * at 210. The -1 is what makes {@code postKeyEvent} post nothing.
      */

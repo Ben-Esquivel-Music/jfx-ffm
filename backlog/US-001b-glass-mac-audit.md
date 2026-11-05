@@ -743,7 +743,6 @@ their last `native`. Their hand-kept copies must already be in `constants/`, or 
 - `leaveNestedEventLoopWithEnv` overwrites the previous global ref (:829).
 - `GlassRunnable run` with `jEnv == NULL` leaks its ref (:127-135).
 - `_getMacKey` ignores `GetMacKey`'s `NO` and returns 0, which is `kVK_ANSI_A` (:1305-1307).
-- `GetJavaKeyChars` uses a `jchar jc[16]` stack buffer for a `[chars length]` of any size (`GlassKey.m:463-469`).
 - `[screen retain]` on every enumeration (`GlassScreen.m:86`), deliberate.
 - `currentPreferences` is never released (`PlatformSupport.m:288`).
 - `GlassMTLOffscreen dealloc` calls `[super dealloc]` only when `_fbo != nil` (:64-71).
@@ -2242,7 +2241,7 @@ slice 5's.
   - `_create` (assertion at `:281`). The GlassView3D initializer's `GET_MAIN_JENV` printed `GLASS_CALLSTACK`
     (`GlassView3D.m:86`), and the NULL `JNIEnv` was used at the first `Map` read (`:90`) or, with no map, by the
     delegate's `NewGlobalRef` (`GlassViewDelegate.m:149`) at the latest. Now the delegate's
-    `GLASS_WARN_IF_MAIN_JAVA_DETACHED` (current `GlassViewDelegate.m:222`; `GET_MAIN_JENV` until slice 11 part 3)
+    `GLASS_WARN_IF_MAIN_JAVA_DETACHED` (current `GlassViewDelegate.m:259`; `GET_MAIN_JENV` until slice 11 part 3)
     prints the same text once and the view is made, with no report: Java evaluates nothing around
     `gmac_view_create`, because the JNI never reached a closing check. A crash became a normal result, as
     `_getDataDirectory`'s did in g1 §6 (c), but without its report.
@@ -2260,6 +2259,26 @@ slice 5's.
   MaxY's surfaced as `ExceptionInInitializerError`. Now the maxima are the constant 3 (current
   `MacViewCalls.MULTI_CLICK_MAX`), so `<clinit>` succeeds. The window has no fixed width in either build; it depends
   on scheduling.
+- (n) The key-chars stack overflow is fixed (PR 48 review), not carried. `GetJavaKeyChars` copied every unit of
+  `[event characters]` into `jchar jc[16]` (`GlassKey.m:463-469` at 1a6788cc4d), so more than 16 units, which a
+  custom keyboard layout or a synthesized event (`CGEventKeyboardSetUnicodeString` takes up to 20) can send, wrote
+  past it; it then made a `char[]` of `[chars length]` units. Slice 6 had carried that into `_dialKeyEvent:`'s
+  `uint16_t keyChars[16]`, where the `notify_key` upcall also read past the buffer.
+  - Now `GetJavaKeyCharsUtf16(event, out, capacity)` copies min(length, capacity) units and answers the length, or -1
+    for a key that sends none, the idiom of `gmac_test_menu_key_equivalent`. `GlassKeyCharsFill`
+    (`GlassViewDelegate.m`, declared in `glass_mac_internal.h`) keeps up to 16 units in its inline buffer and puts a
+    longer `[event characters]` in a `malloc`'d block of exactly its length, with no variable-length array.
+    `GlassKeyCharsRelease` frees it on both exits of `_dialKeyEvent:`, the early `return NO` of a detached main
+    thread included.
+  - Java gets every unit, a `char[]` as long as the JNI's. For 16 units or fewer, for a non-zero `textChar` and for a
+    key that sends none, the units, the count, `same_chars_as_previous`, the `char[]` identity, the dial order and the
+    consumed result are as before.
+  - The one new outcome: if the block cannot be allocated, `notify_key` gets the first 16 units, a count of 16. Where
+    the JNI's `NewCharArray` failed, it made its `notifyKeyAndReturnConsumed` calls with a null `char[]` while the
+    `OutOfMemoryError` was pending, which JNI leaves undefined.
+  - Test hooks, shim-only, so `GLASS_MAC_ABI_VERSION` stays 1: `gmac_test_key_chars_utf16` runs the helper on a
+    synthesized key-down `NSEvent` with a caller's capacity, and `gmac_test_fire_key_chars` dials `notify_key` once
+    with what `GlassKeyCharsFill` makes of such an event. libglass exports 195 `gmac_*`, 34 of them `gmac_test_*`.
 
 ### 7. Proposed C ABI header
 
@@ -2441,7 +2460,8 @@ The cleanup landed after the Java flip, in the same slice. Deleted:
   `SEND_MODIFIER_KEY_EVENT_WITH_TYPE`, `convertNSStringToJString`, the `jView` ivar and `-jView`. Only the JNI
   `_create` set `jView`, so nothing could reach them (PB16);
 - the `withJview:` parameter of GlassView.h, GlassView3D.h/.m, GlassViewDelegate.h/.m and `createView`;
-- `GetJavaKeyChars` (GlassKey.h/.m). The hidden `GetJavaKeyCharsUtf16` stays;
+- `GetJavaKeyChars` (GlassKey.h/.m). The hidden `GetJavaKeyCharsUtf16` stays, with a capacity since the
+  key-chars fix (§6 (n));
 - `javaIDs.GestureSupport`, `jViewClass` and the 15 `jView*` method IDs, `jIntegerClass`, `jLongClass`,
   `jIntegerInitMethod`, `jIntegerValueMethod`, `jLongValueMethod`, `jMapGetMethod` and `jBooleanValueMethod`.
   `jMapClass` and `jBooleanClass` stay.
@@ -2592,9 +2612,9 @@ Contract the header must state:
   same `jcharArray`. `same_chars_as_previous` is 1 only when the immediately preceding `notify_key` dial was the same
   event's; Java then passes the `char[]` it passed that dial. It is 0 for an event's first dial and for a dial that
   follows a nested event's dial: Java then builds a new `char[]` with the same units, so identity is lost after a
-  nested event (§6 (i)). This replaces GTK's address match; it is needed because `GetJavaKeyChars` uses a stack
-  buffer whose address repeats across events. Slice 6 built it (`GlassDialKeySlot`; test hook
-  `gmac_test_fire_key_event`).
+  nested event (§6 (i)). This replaces GTK's address match; it is needed because the units' address is no identity:
+  `_dialKeyEvent:` keeps up to 16 of them in a stack buffer whose address repeats across events, and more in a heap
+  block (§6 (n)). Slice 6 built it (`GlassDialKeySlot`; test hook `gmac_test_fire_key_event`).
 
 ### 9. Deletion candidates (cleared the parity gate)
 
@@ -2747,7 +2767,6 @@ These must be restated in `glass_mac_api.h`; §7 pins them.
   `window_id` and makes no global ref.
 - `_setMenubar` dereferences `menubar->menu` without a NULL check (:1000).
 - `_uploadPixelsDirect` has no capacity check (GlassView.m:569-586).
-- `GetJavaKeyChars` overflows its `jchar jc[16]` stack buffer (GlassKey.m:458-459).
 - `convertNSStringToJString`, attributed branch: copies `length` units from data that may be shorter
   (ViewDelegate.m:1158-1162).
 - Local-ref leaks on the attached main thread (reading-based): `ClassForName` results on every wheel or gesture event,
@@ -4028,7 +4047,7 @@ shim-only hooks, where the sketch had 8 and 3. `GLASS_MAC_ABI_VERSION` stays 1. 
 header's 191, 32 of them `gmac_test_*`, beside 16 `_Java_` (MacAccessible 14, MacApplication 2) and `JNI_OnLoad`.
 - **`GmacVariant`, 120 bytes, alignment 8.** It has the sketch's members at the sketch's offsets, except offset 116:
   it holds `utf8_length` where the sketch had `reserved`, so a string to Java follows the strings-out convention
-  (`utf8` and its length). `_Static_assert`s pin the size and every offset (`glass_mac_api.m:76`, `:205-215`).
+  (`utf8` and its length). `_Static_assert`s pin the size and every offset (`glass_mac_api.m:77`, `:206-216`).
   - `type` takes the `com_sun_glass_ui_mac_MacVariant_*` constants of the hand-kept
     `constants/com_sun_glass_ui_mac_MacVariant.h`, with 0 for a null variant. There is no `GMAC_VARIANT_*` enum
     (R3 item 9, PB10).
@@ -4125,7 +4144,7 @@ That flag has to be whatever the MacApplication slice uses to replace `jEnv`.
 - `peer_released` may run on a foreign thread, so its target may touch only the map.
 
 **As built (slice 10), C side.** `GmacAccessibleCallbacks` has the sketch's 16 slots in the sketch's order, 16
-pointers and so 128 bytes (`glass_mac_api.m:77`). It differs from the sketch in four ways:
+pointers and so 128 bytes (`glass_mac_api.m:78`). It differs from the sketch in four ways:
 - **Status returns.** Every slot answers an `int32_t`, `GMAC_UPCALL_OK` or `GMAC_UPCALL_THREW` (R3 item 6). What it
   answers goes to out-parameters, in place of the sketch's counts, booleans, `int64_t`, `void*` and `void` returns:
   - `*out_ids` and `*out_count` for the name lists and `array_attribute_values`;
@@ -5063,6 +5082,8 @@ The flipped natives add up to 19 + 9 + 8 + 12 + 30 + 21 + 16 + 10 + 14 + 14 + 2 
   - With this, `glass` and `prismMTL` both meet AC 9 on macOS.
 - **The first FFM upcall** now attaches the main thread (`set_event_thread`), at the point the JNI attach used to
   (g0 §6.2).
+- **After the PR 48 review:** the key-chars stack overflow is fixed (g2 §6 (n)). Its two shim-only hooks bring
+  libglass to 195 `gmac_*` exports, 34 of them `gmac_test_*`; `GLASS_MAC_ABI_VERSION` stays 1.
 - **Proof:**
   - `grep -rnE 'JNIEXPORT|jni\.h|JNIEnv' native-glass/mac` comes back empty (AC 1);
   - the `native` grep of §R1 row 4 over `com/sun/glass/ui/mac` gives 0 (AC 2);

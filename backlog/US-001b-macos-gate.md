@@ -8,10 +8,14 @@ CMake 4.4.4.
 | --- | --- | --- |
 | Before | `master` at `1a6788cc4d` | 2026-11-03, 16:24:27 to 16:26:01 (Maven total 01:33 min) |
 | After, workstream A | the US-001b working tree on `1a6788cc4d`: `prism_mtl` on FFM, Glass mac still JNI, before the round-1 review fixes | 2026-11-03, about 20:01:51 to 20:03:07 (Maven total 01:16 min) |
-| After, workstream B (final) | the final US-001b working tree on `1a6788cc4d`: `prism_mtl` and Glass mac on FFM | 2026-11-05, 01:40:37 to 01:41:57 (Maven total 01:19 min) |
+| After, workstream B | the US-001b working tree on `1a6788cc4d`: `prism_mtl` and Glass mac on FFM, before the key-chars fix of the PR 48 review | 2026-11-05, 01:40:37 to 01:41:57 (Maven total 01:19 min) |
+| After the key-chars fix | workstream B's tree plus the key-chars fix, before three comment-only test edits | 2026-11-05, 17:19:23 to 17:20:43 (Maven total 01:19 min) |
+| After the key-chars fix (final) | the final US-001b working tree: that tree plus the three comment edits | 2026-11-05, 17:49:04 to 17:50:23 (Maven total 01:19 min) |
 
-The workstream A run covers `prism_mtl` only. Workstream B repeated the after run on the story's final tree, with
-both libraries on FFM; see [Final after run (workstream B)](#final-after-run-workstream-b).
+The workstream A run covers `prism_mtl` only. Workstream B repeated the after run with both libraries on FFM; see
+[After run (workstream B)](#after-run-workstream-b). The PR 48 review's key-chars fix then changed Glass mac. The run
+on that tree was repeated after three test comments changed, and the repeat is the story's final run; see
+[After the key-chars fix (final)](#after-the-key-chars-fix-final).
 
 The before run used a plain clone of the repository, detached at `1a6788cc4d`, in a session scratch directory under
 `/private/tmp` that is gone now. Its per-class results are checked in as
@@ -43,11 +47,11 @@ the libraries are arm64.
 
 ## Module run (run / failures / errors / skipped)
 
-| Module | Before | After, workstream A | After, workstream B (final) |
-| --- | --- | --- | --- |
-| `javafx-jslc` | 159 / 0 / 0 / 0 | 159 / 0 / 0 / 0 | 159 / 0 / 0 / 0 |
-| `javafx-base` | 5,510 / 0 / 0 / 22 | 5,510 / 0 / 0 / 22 | 5,510 / 0 / 0 / 22 |
-| `javafx-graphics` | 26,238 / 1 / 0 / 824 | 26,283 / 0 / 0 / 824 | 26,627 / 0 / 0 / 824 |
+| Module | Before | After, workstream A | After, workstream B | After the key-chars fix (final) |
+| --- | --- | --- | --- | --- |
+| `javafx-jslc` | 159 / 0 / 0 / 0 | 159 / 0 / 0 / 0 | 159 / 0 / 0 / 0 | 159 / 0 / 0 / 0 |
+| `javafx-base` | 5,510 / 0 / 0 / 22 | 5,510 / 0 / 0 / 22 | 5,510 / 0 / 0 / 22 | 5,510 / 0 / 0 / 22 |
+| `javafx-graphics` | 26,238 / 1 / 0 / 824 | 26,283 / 0 / 0 / 824 | 26,627 / 0 / 0 / 824 | 26,636 / 0 / 0 / 824 |
 
 The one failure, `test.com.sun.javafx.font.MacFontProcessGoldenTest.processStateMatchesTheJniGolden`:
 
@@ -109,14 +113,15 @@ four `MTLGoldenRenderTest` profiles and `MTLShaderTableGoldenTest` matched the `
 `-Xlog:jni+resolve` logs of the six child JVMs (`target/mtl-golden/*/verify/jni-resolve.log`) name no
 `com.sun.prism.mtl` native method. The module run was not repeated on this tree.
 
-## Final after run (workstream B)
+## After run (workstream B)
 
-The final after run used the repository's own working tree with the whole story in it: `prism_mtl` and Glass mac on
-FFM, and `mac.cmake` without a `JNI` keyword. It repeats a run of 00:30:07 to 00:31:26, after which two Java comments
-changed (the Javadoc of `MacGlassNative.unexpected()` and the `GmacFileFilter` comment in `MacDialogCalls`). Its
-totals, its per-class list and its export lists are those of that run. No source, CMake or pom file changed after
-it: `git status --porcelain` and the SHA-256 of `git diff` were the same before it and after the Metal parity run
-below. The only file outside `target/` that the two runs wrote is the gitignored
+The workstream B after run used the repository's own working tree with both libraries on FFM and `mac.cmake` without
+a `JNI` keyword: the whole story but the key-chars fix, which the PR 48 review asked for later on 2026-11-05 (see
+[After the key-chars fix (final)](#after-the-key-chars-fix-final)). It repeats a run of 00:30:07 to 00:31:26, after
+which two Java comments changed (the Javadoc of `MacGlassNative.unexpected()` and the `GmacFileFilter` comment in
+`MacDialogCalls`). Its totals, its per-class list and its export lists are those of that run. No source, CMake or pom
+file changed between it and the Metal parity run below: `git status --porcelain` and the SHA-256 of `git diff` were
+the same before it and after that run. The only file outside `target/` that the two runs wrote is the gitignored
 `modules/javafx.base/build/module-lib/javafx.properties`, which javafx-base's `write-javafx-properties` execution
 rewrites on every build. The command, the private local repository and the reactor are those of the workstream A
 after run, so nothing under `tests/system` ran:
@@ -145,7 +150,7 @@ The per-class list, made as before, has 934 classes. `diff` against
 [US-001b-macos-before-per-class.tsv](US-001b-macos-before-per-class.tsv) shows 22 classes, all expected:
 `MacFontProcessGoldenTest` passes from the repository, as in the workstream A run, and 21 classes are new.
 
-| Class | Before | After, workstream B (final) |
+| Class | Before | After, workstream B |
 | --- | --- | --- |
 | `test.com.sun.javafx.font.MacFontProcessGoldenTest` | 2 / 1 / 0 / 0 | 2 / 0 / 0 / 0 |
 | `test.com.sun.glass.ui.mac.MacAccessibleNativeTest` | — | 33 / 0 / 0 / 0 |
@@ -190,6 +195,54 @@ mvn -B -ntp -Dmaven.repo.local=<scratchpad>/m2-baseline -pl modules/javafx.graph
 Under `-Djfx.parity.require=true` the four `MTLGoldenRenderTest` profiles and `MTLShaderTableGoldenTest` matched the
 `1a6788cc4d` goldens.
 
+## After the key-chars fix (final)
+
+The PR 48 review's key-chars fix (audit g2 §6 (n)) changed `GlassKey.h`, `GlassKey.m`, `GlassViewDelegate.m`,
+`glass_mac_api.h`, `glass_mac_api.m` and `glass_mac_internal.h`, added the shim-only hooks `gmac_test_key_chars_utf16`
+and `gmac_test_fire_key_chars`, and extended `MacGlassNativeShim`, `MacGlassNativeTest` (its export list) and
+`MacViewNativeTest`. The 17:19:23 run repeats the workstream B command on that tree, from the repository root, with
+the same private local repository, so nothing under `tests/system` ran:
+
+```
+mvn -B -ntp -Dmaven.repo.local=<scratchpad>/m2-baseline -pl modules/javafx.graphics -am clean test
+```
+
+BUILD SUCCESS, with the totals in the module table above. CMake rebuilt the four libraries from clean, all arm64. The
+only native compiler warnings are the same 4 `-Wdeprecated-declarations` of
+`native-prism-es2/macosx/MacOSXWindowSystemInterface.m`, none in a file the fix touched. `git status --porcelain` and
+the SHA-256 of `git diff` were the same before the run and after the Metal parity run below.
+
+| Library | `Java_` exports | `JNI_OnLoad` | C ABI exports |
+| --- | ---: | ---: | --- |
+| `libglass.dylib` | 0 | no | 195 `gmac_*`: the 195 functions `glass_mac_api.h` declares, 34 of them the shim-only `gmac_test_*` hooks |
+| `libprism_mtl.dylib` | 0 | no | 53 `mtl_*`: the 53 of `prism_mtl_api.h` |
+| `libprism_es2.dylib`, `libjavafx_iio.dylib` | 0 | no | not changed by this story |
+
+`GetJavaKeyCharsUtf16`, `GlassKeyCharsFill` and `GlassKeyCharsRelease` stay hidden: `nm -m` lists them as
+non-external.
+
+The per-class list, made as before, has 934 classes. `diff` against
+[US-001b-macos-before-per-class.tsv](US-001b-macos-before-per-class.tsv) shows the 22 classes of the workstream B run
+with the same counts, except `test.com.sun.glass.ui.mac.MacViewNativeTest`: 57 / 0 / 0 / 0, where workstream B had
+48. Its 9 new tests are the 9 between 26,627 and 26,636. Summed over the `TEST-*.xml` test cases, the totals equal
+the module table (32,305 run, 0 failures, 0 errors, 846 skipped). No glass class skips, so the three machine-gated
+Glass goldens compared on this host.
+
+`find modules -name 'hs_err_pid*' -type f` and `find . -maxdepth 2 -name 'hs_err_pid*'` printed nothing
+(2026-11-05, 17:21:04); the 33 `hs_err` directories that child-JVM tests create under `target/` hold no files.
+
+The Metal parity run followed on the same tree, with the command of the workstream B one: 2026-11-05, 17:22:00 to
+17:22:28, BUILD SUCCESS, 55 / 0 / 0 / 0 in 7 classes. Under `-Djfx.parity.require=true` the four
+`MTLGoldenRenderTest` profiles and `MTLShaderTableGoldenTest` matched the `1a6788cc4d` goldens.
+
+At 17:26:02 the comments of `MacDialogNativeTest`, `MacMenuNativeTest` and `MacRobotNativeTest` took the
+`GlassKey.m` and `glass_mac_api.m` line numbers the fix had moved; nothing else in them changed. Apart from those
+edits, nothing outside `backlog/` changed after the Metal parity run. The same command then ran on that tree, the
+final one: 2026-11-05, 17:49:04 to 17:50:23, BUILD SUCCESS. Its totals, export counts, 4 warnings and per-class list
+equal those of the 17:19:23 run, and `find modules -name 'hs_err_pid*' -type f` printed nothing (17:50:30).
+`git status --porcelain` and the SHA-256 of `git diff` were the same before and after it. The Metal parity run was
+not repeated.
+
 ## Owner-run, deferred
 
 Agents ran none of these. They need a display, start the Glass toolkit or activate the app (AppKit, robot,
@@ -206,11 +259,14 @@ Maven, and the sRGB IEC61966-2.1 display profile. The 2026-11-05 robot runs belo
 - [ ] Baseline: `-DFULL_TEST=true -DUSE_ROBOT=true` on a clone of the repository detached at `1a6788cc4d`.
 - [ ] The same run on the final tree, compared per class with the baseline. It is the only check of the Glass mac
   windowing, input and present paths, and of the Metal swap chain, present, `blitToScreen` and `mtl_rtt_wrap`
-  (formerly `nCreateRT2`), which no golden covers. The owner's run of it on the US-001b tree, 2026-11-05, 08:25 to
-  09:07: 1,099 tests, 2 failures, 0 errors, 60 skipped. The failures are
+  (formerly `nCreateRT2`), which no golden covers. No robot run has been made on the final tree; the owner makes it,
+  agents do not. The owner's full run of 2026-11-05, 08:25 to 09:07 (1,099 tests, 2 failures, 0 errors, 60 skipped),
+  and the owner's run at 11:53 below were on workstream B's tree, before the PR 48 key-chars fix. That fix rewrote
+  `_dialKeyEvent:` in `GlassViewDelegate.m`, through which a Glass view sends its `keyDown:` and `keyUp:` events to
+  Java, robot key presses included, so neither run stands for the final tree. The full run's failures were
   `SystemMenuBarClickEventsTest.testSystemMenuBarProcessesClickEvent`, pre-existing (Menus below), and
-  `SliderTooltipNPETest.testSliderTooltipNPE`, intermittent (View and gestures below). It stays unticked until the
-  baseline above is run and compared with it per class. Cover in it, by area:
+  `SliderTooltipNPETest.testSliderTooltipNPE`, intermittent (View and gestures below). Cover in the run on the final
+  tree, by area:
   - [ ] Start-up (slice 11): run an app normally and under `-XstartOnFirstThread`, each up to a normal exit, and
     compare stderr and the uncaught-exception handler output with the JNI build. The macOS version check passes,
     the Dock icon matches the taskbar flag (regular app or UI element), the launchable runs (`run_launchable` from
@@ -246,11 +302,11 @@ Maven, and the sRGB IEC61966-2.1 display profile. The 2026-11-05 robot runs belo
     ⌘-key RELEASE synthesis, Caps Lock PRESS/RELEASE, full screen enter and exit. Every pipeline:
     `-Dprism.order=mtl`, `es2` and `sw`, because `GmacViewCaps` takes a different branch for each; `_begin`, `_end`
     and `_getNativeFrameBuffer` stay on the render thread with the pool spanning `_begin` to `_end`.
-    `SliderTooltipNPETest.testSliderTooltipNPE` failed once, in the owner's full run: "Timeout waiting for tooltip
-    to display" at line 99 (`dragSliderAfterTooltipDisplayed`, its 5 s wait for the tooltip). Not a US-001b
-    regression: it passed on the same tree in the owner's run at 11:53 (1 / 0 / 0 / 0, with `TooltipTest`
-    8 / 0 / 0 / 0 in the same run), so it is intermittent, and a reading of its path found no FFM-vs-JNI difference.
-    It was not run on the JNI build.
+    `SliderTooltipNPETest.testSliderTooltipNPE` failed once, in the owner's full run on workstream B's tree:
+    "Timeout waiting for tooltip to display" at line 99 (`dragSliderAfterTooltipDisplayed`, its 5 s wait for the
+    tooltip). On that tree it is intermittent, not a US-001b regression: it passed there in the owner's run at 11:53
+    (1 / 0 / 0 / 0, with `TooltipTest` 8 / 0 / 0 / 0 in the same run), and a reading of its path found no FFM-vs-JNI
+    difference. It was not run on the JNI build or on the final tree.
   - [ ] Pasteboard and clipboard (slice 7): `MacPasteboardTest`, `test.javafx.scene.input.ClipboardTest`, and the
     manual `tests/manual` dnd and clipboard checks: copy and paste of text, HTML, RTF, URLs, file lists, images and a
     custom MIME type; drags with a custom drag image and offset, each drag action (copy, move, link), and a drag from
@@ -272,9 +328,9 @@ Maven, and the sRGB IEC61966-2.1 display profile. The 2026-11-05 robot runs belo
     without a window grab, `dealloc` → `menu_disposed`, key equivalents and item icons.
     `SystemMenuBarClickEventsTest.testSystemMenuBarProcessesClickEvent` fails at line 136 ("Context menu should be
     showing after right-click ==> expected: <true> but was: <false>"). It is pre-existing, not a US-001b regression:
-    on 2026-11-05 it failed there in 3 of 3 runs on the FFM tree and 2 of 2 on the JNI build at `1a6788cc4d`, each
-    in 0.21 to 0.22 s, and a reading of the right-click path in both trees found no FFM-vs-JNI behaviour difference.
-    Filed, with the runs, as
+    on 2026-11-05 it failed there in 3 of 3 runs on workstream B's tree and 2 of 2 on the JNI build at `1a6788cc4d`,
+    each in 0.21 to 0.22 s, and a reading of the right-click path in both trees found no FFM-vs-JNI behaviour
+    difference. Filed, with the runs, as
     [US-073](US-073-make-the-system-menu-bar-click-test-pass-with-a-non-auto-hide-context-menu.md).
   - [ ] Metal (workstream A): the robot `painttest`, `scenegraph` and `test3d`; on Metal also a `SwingNode` with small
     dirty-rectangle repaints and an `ImageView` of an image wider than 16384 px (the packed and span upload copies).
@@ -349,7 +405,9 @@ Each stays native behind a `gmac_*` export (the "Kept native" sections, §10 of 
   the 7 device-detail keys once, in Java; (k) the initializer's `GET_MAIN_JENV`; (l) the detached view calls under
   `glass.disableThreadChecks` that crashed now have defined outcomes; (m) the multi-click maxima are the constant 3, so
   the JNI's `ExceptionInInitializerError`, which needed the main thread to detach inside `MacView`'s initializer, is
-  not reproduced.
+  not reproduced; (n) the key-chars stack overflow is fixed: every unit of `[event characters]` reaches Java, and if
+  the heap block for more than 16 units cannot be allocated, `notify_key` gets the first 16 units, count 16, where the
+  JNI dialled with a null `char[]` while an `OutOfMemoryError` was pending.
 - [ ] g3 §6: (a)-(d), (f) the dialogs (a detached main thread answers as cancelled, L33; a late leave after a throwing
   `enter()` is a no-op, L14; filter upcalls before the panel; URLs converted after the pool; `new EventLoop()` on the
   calling thread); (g)-(j), (n) the menus; (o) `createFromBookmark` answers null on the `enableFileNSURL` race, L31;
@@ -378,11 +436,12 @@ Each stays native behind a `gmac_*` export (the "Kept native" sections, §10 of 
 
 ### Test hooks in the shipping libglass
 
-For the record, not a check: `libglass.dylib` exports 32 `gmac_test_*` hooks (`nm -gU … | grep -c ' T _gmac_test_'`),
-following the `glass_win_api.h` and `glass_gtk_api.h` precedent: `glass_mac_api.h` declares them shim-only,
-`MacGlassNative` binds none, and a change to them does not move `GLASS_MAC_ABI_VERSION` (US-068 is the Windows story
-about keeping such hooks out of the release library). PB19 keeps the oracle hooks that are the replaced C there on
-purpose, a deliberate exception and not a follow-up: `gmac_test_clipboard_mime_to_uti`,
+For the record, not a check: `libglass.dylib` exports 34 `gmac_test_*` hooks (`nm -gU … | grep -c ' T _gmac_test_'`;
+32 at the workstream B after run, before the key-chars fix of the PR 48 review added `gmac_test_key_chars_utf16` and
+`gmac_test_fire_key_chars`), following the `glass_win_api.h` and `glass_gtk_api.h` precedent: `glass_mac_api.h`
+declares them shim-only, `MacGlassNative` binds none, and a change to them does not move `GLASS_MAC_ABI_VERSION`
+(US-068 is the Windows story about keeping such hooks out of the release library). PB19 keeps the oracle hooks that
+are the replaced C there on purpose, a deliberate exception and not a follow-up: `gmac_test_clipboard_mime_to_uti`,
 `gmac_test_clipboard_uti_to_mime` and `gmac_test_nslocale_language_direction`, and under the same rule slice 10's
 `gmac_test_a11y_utf8_string`, `gmac_test_a11y_is_equal_to_string` and `gmac_test_a11y_enum_pointer`. The JNI goldens
 are machine-gated and can no longer be captured from this tree, so these in-process A/Bs are the only parity check on

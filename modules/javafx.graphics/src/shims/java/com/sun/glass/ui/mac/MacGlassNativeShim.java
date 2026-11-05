@@ -89,7 +89,8 @@ import static java.lang.foreign.ValueLayout.JAVA_LONG;
  * {@code gmac_test_fire_timer_callback},
  * {@code gmac_test_sdk_constant}, {@code gmac_test_color_space_srgb_name}, {@code gmac_test_fire_window_callback},
  * {@code gmac_test_nslocale_language_direction}, {@code gmac_test_fire_view_callback},
- * {@code gmac_test_fire_gesture_callback}, {@code gmac_test_fire_key_event},
+ * {@code gmac_test_fire_gesture_callback}, {@code gmac_test_fire_key_event}, {@code gmac_test_key_chars_utf16},
+ * {@code gmac_test_fire_key_chars},
  * {@code gmac_test_fire_input_method}, {@code gmac_test_default_view_caps}, {@code gmac_test_clipboard_mime_to_uti},
  * {@code gmac_test_clipboard_uti_to_mime}, {@code gmac_test_pasteboard_utis_block},
  * {@code gmac_test_pasteboard_raw_image}, {@code gmac_test_pasteboard_raw_image_bounds},
@@ -98,8 +99,8 @@ import static java.lang.foreign.ValueLayout.JAVA_LONG;
  * {@code gmac_test_menu_key_equivalent}, {@code gmac_test_fire_accessible_callback},
  * {@code gmac_test_a11y_variant_to_object}, {@code gmac_test_a11y_utf8_string},
  * {@code gmac_test_a11y_is_equal_to_string} and {@code gmac_test_a11y_enum_pointer}. The hooks are bound only once
- * the facade has run {@code gmac_init}, because the string, image, locale, input-method, clipboard, pasteboard, filter,
- * key-equivalent, variant and accessibility string hooks open an autorelease pool.
+ * the facade has run {@code gmac_init}, because the string, image, locale, key-chars, input-method, clipboard,
+ * pasteboard, filter, key-equivalent, variant and accessibility string hooks open an autorelease pool.
  * <p>
  * Of the bootstrap, {@code gmac_app_init} reads {@code -[NSProcessInfo operatingSystemVersion]} and sets a flag, and
  * is called only with 0, the flag's initial value. {@code gmac_app_create_delegate} only allocates and initializes a
@@ -138,8 +139,9 @@ import static java.lang.foreign.ValueLayout.JAVA_LONG;
  * runs its initialization, which installs the accessibility table and reads the {@code com.apple.Cocoa} bundle's data
  * symbols.
  * <p>
- * Two process probes bypass {@code libglass}: whether the calling thread is the main thread ({@code pthread_main_np})
- * and whether AppKit's {@code NSApp} is nil. CoreGraphics reads events back ({@link #readEvent}, {@link #eventData})
+ * Three process probes bypass {@code libglass}: whether the calling thread is the main thread
+ * ({@code pthread_main_np}), whether AppKit's {@code NSApp} is nil, and the bytes the malloc zones hold in use
+ * ({@code malloc_zone_statistics}). CoreGraphics reads events back ({@link #readEvent}, {@link #eventData})
  * and makes the reference events the C would have made ({@link #referenceMouseEvent},
  * {@link #referenceScrollWheelEvent}), none of them posted.
  */
@@ -152,6 +154,11 @@ public final class MacGlassNativeShim {
     private static final int RTLD_NOLOAD = 0x10;
 
     private static final int IMAGE_READBACK_VALUES = 9;
+
+    /** {@code malloc_statistics_t}. */
+    private static final StructLayout MALLOC_STATISTICS = MemoryLayout.structLayout(
+            JAVA_INT.withName("blocks_in_use"), MemoryLayout.paddingLayout(4), JAVA_LONG.withName("size_in_use"),
+            JAVA_LONG.withName("max_size_in_use"), JAVA_LONG.withName("size_allocated"));
 
     /** {@code kCFURLPOSIXPathStyle}. */
     private static final long CF_URL_POSIX_PATH_STYLE = 0;
@@ -210,8 +217,15 @@ public final class MacGlassNativeShim {
         long create(long viewId, MemorySegment caps);
     }
 
-    /** What {@code gmac_test_fire_key_event} answered: the last dial's status and the first dial's consumed flag. */
+    /**
+     * What {@code gmac_test_fire_key_event} or {@code gmac_test_fire_key_chars} answered: the last dial's status and
+     * the first dial's consumed flag.
+     */
     public record KeyEventFire(int status, int consumed) {
+    }
+
+    /** What {@code gmac_test_key_chars_utf16} answered, and its out buffer afterwards, null for the NULL one. */
+    public record KeyChars(int answer, char[] out) {
     }
 
     /** The {@code gmac_timer_*} calls of {@code MacTimer}, for a stand-in of the library's timers. */
@@ -1018,6 +1032,39 @@ public final class MacGlassNativeShim {
             MemorySegment consumed = arena.allocate(JAVA_INT);
             consumed.set(JAVA_INT, 0, Integer.MIN_VALUE);
             int status = (int) Hooks.FIRE_KEY_EVENT.invokeExact(viewId, dials, consumed);
+            return new KeyEventFire(status, consumed.get(JAVA_INT, 0));
+        } catch (Throwable t) {
+            throw unexpected(t);
+        }
+    }
+
+    /**
+     * {@code gmac_test_key_chars_utf16} for a key-down event of the Mac key code {@code keyCode} whose characters are
+     * the code units of {@code chars}, with {@code capacity}, into a native copy of {@code out}, or into NULL when
+     * {@code out} is null.
+     */
+    public static KeyChars keyCharsUtf16(char keyCode, String chars, int capacity, char[] out) {
+        try (Arena arena = Arena.ofConfined()) {
+            MemorySegment outUnits = out == null ? MemorySegment.NULL : arena.allocateFrom(JAVA_CHAR, out);
+            int answer = (int) Hooks.KEY_CHARS_UTF16.invokeExact(keyCode, MacGlassNative.utf16(arena, chars),
+                    chars.length(), outUnits, capacity);
+            return new KeyChars(answer, out == null ? null : outUnits.toArray(JAVA_CHAR));
+        } catch (Throwable t) {
+            throw unexpected(t);
+        }
+    }
+
+    /**
+     * {@code gmac_test_fire_key_chars}: dials {@code notify_key} once, as one key event, with the units the views pass
+     * for {@code textChar} and a key-down event of the Mac key code {@code keyCode} whose characters are the code
+     * units of {@code chars}.
+     */
+    public static KeyEventFire fireKeyChars(long viewId, char keyCode, String chars, char textChar) {
+        try (Arena arena = Arena.ofConfined()) {
+            MemorySegment consumed = arena.allocate(JAVA_INT);
+            consumed.set(JAVA_INT, 0, Integer.MIN_VALUE);
+            int status = (int) Hooks.FIRE_KEY_CHARS.invokeExact(viewId, keyCode, MacGlassNative.utf16(arena, chars),
+                    chars.length(), textChar, consumed);
             return new KeyEventFire(status, consumed.get(JAVA_INT, 0));
         } catch (Throwable t) {
             throw unexpected(t);
@@ -3382,6 +3429,17 @@ public final class MacGlassNativeShim {
         }
     }
 
+    /** The bytes in use in every malloc zone of the process, summed. */
+    public static long mallocBytesInUse() {
+        try (Arena arena = Arena.ofConfined()) {
+            MemorySegment statistics = arena.allocate(MALLOC_STATISTICS);
+            LibSystem.MALLOC_ZONE_STATISTICS.invokeExact(MemorySegment.NULL, statistics);
+            return statistics.get(JAVA_LONG, MALLOC_STATISTICS.byteOffset(PathElement.groupElement("size_in_use")));
+        } catch (Throwable t) {
+            throw unexpected(t);
+        }
+    }
+
     /**
      * Whether AppKit's {@code NSApp} is nil, that is, no {@code NSApplication} exists in this process. An AppKit that
      * is not mapped has none either, and this does not map it.
@@ -3471,6 +3529,10 @@ public final class MacGlassNativeShim {
                 FunctionDescriptor.of(JAVA_INT, JAVA_INT, JAVA_LONG));
         static final MethodHandle FIRE_KEY_EVENT = bind("gmac_test_fire_key_event",
                 FunctionDescriptor.of(JAVA_INT, JAVA_LONG, JAVA_INT, ADDRESS));
+        static final MethodHandle KEY_CHARS_UTF16 = bind("gmac_test_key_chars_utf16",
+                FunctionDescriptor.of(JAVA_INT, JAVA_CHAR, ADDRESS, JAVA_INT, ADDRESS, JAVA_INT));
+        static final MethodHandle FIRE_KEY_CHARS = bind("gmac_test_fire_key_chars",
+                FunctionDescriptor.of(JAVA_INT, JAVA_LONG, JAVA_CHAR, ADDRESS, JAVA_INT, JAVA_CHAR, ADDRESS));
         static final MethodHandle FIRE_INPUT_METHOD = bind("gmac_test_fire_input_method",
                 FunctionDescriptor.of(JAVA_INT, JAVA_LONG, ADDRESS, JAVA_INT, JAVA_INT, JAVA_INT, JAVA_INT, JAVA_INT,
                         JAVA_LONG, JAVA_LONG));
@@ -3539,6 +3601,8 @@ public final class MacGlassNativeShim {
         static final MethodHandle FREE = bind("free", FunctionDescriptor.ofVoid(ADDRESS));
         static final MethodHandle DLOPEN = bind("dlopen", FunctionDescriptor.of(ADDRESS, ADDRESS, JAVA_INT));
         static final MethodHandle DLCLOSE = bind("dlclose", FunctionDescriptor.of(JAVA_INT, ADDRESS));
+        static final MethodHandle MALLOC_ZONE_STATISTICS = bind("malloc_zone_statistics",
+                FunctionDescriptor.ofVoid(ADDRESS, ADDRESS));
 
         private static MethodHandle bind(String name, FunctionDescriptor descriptor) {
             return LINKER.downcallHandle(LOOKUP.findOrThrow(name), descriptor);
