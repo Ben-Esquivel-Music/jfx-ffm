@@ -221,7 +221,7 @@ Two options; the choice is part of the story.
   - `target/gensrc/{jsl-decora,jsl-prism,headers,mtl-headers}` is identical by name and md5 before and after. In the
     US-008 gate these held 108, 424, 46 and 0 files on each system.
   - `javafx.graphics` has the same test counts per class as before.
-  - `javafx-jslc` runs its 159 tests plus the new ones, with no failure.
+  - `javafx-jslc` runs its 182 tests plus the new ones, with no failure.
 - **Upstream.** Repeat the JBS search when the story is picked up. Draft an upstream issue with the `Brightpass.jsl`
   repro, the outputs without `main` and the chosen fix. The draft says that upstream runs no jslc test
   (JDK-8226635), so the fix's test needs that port too.

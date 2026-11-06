@@ -28,6 +28,7 @@ package com.sun.scenario.effect.compiler;
 import com.sun.scenario.effect.compiler.backend.hw.ES2Backend;
 import com.sun.scenario.effect.compiler.backend.hw.HLSLBackend;
 import com.sun.scenario.effect.compiler.backend.hw.MSLBackend;
+import com.sun.scenario.effect.compiler.backend.hw.MetalHeaders;
 import com.sun.scenario.effect.compiler.backend.prism.PrismBackend;
 import com.sun.scenario.effect.compiler.backend.sw.java.JSWBackend;
 import com.sun.scenario.effect.compiler.tree.JSLVisitor;
@@ -168,20 +169,32 @@ public class JSLC {
         return parser;
     }
 
+    /**
+     * The program of one compile, parsed at most once: by the first output that is out of date, or by the Metal
+     * header entry of a shader whose outputs are all up to date.
+     */
+    private static final class Source {
+        private final InputStream stream;
+        private ParserInfo pinfo;
+
+        Source(InputStream stream) {
+            this.stream = stream;
+        }
+
+        ParserInfo parse() throws Exception {
+            if (pinfo == null) {
+                pinfo = getParserInfo(stream);
+            }
+            return pinfo;
+        }
+    }
+
     private static ParserInfo compile(JSLCInfo jslcinfo,
                                       InputStream stream,
                                       long sourceTime)
         throws Exception
     {
-        return compile(jslcinfo, stream, sourceTime, null);
-    }
-
-    private static ParserInfo compile(JSLCInfo jslcinfo,
-                                      InputStream stream,
-                                      long sourceTime,
-                                      ParserInfo pinfo)
-        throws Exception
-    {
+        Source source = new Source(stream);
         int outTypes = jslcinfo.outTypes;
         String genericsName = jslcinfo.genericsName;
         String interfaceName = jslcinfo.interfaceName;
@@ -193,7 +206,7 @@ public class JSLC {
         if ((outTypes & OUT_D3D) != 0) {
             File outFile = jslcinfo.getOutputFile(OUT_D3D);
             if (jslcinfo.force || outOfDate(outFile, sourceTime)) {
-                if (pinfo == null) pinfo = getParserInfo(stream);
+                ParserInfo pinfo = source.parse();
                 HLSLBackend hlslBackend = new HLSLBackend(pinfo.parser, pinfo.visitor);
                 hlslBackend.scan(pinfo.program);
                 write(hlslBackend.getShader(), outFile);
@@ -203,7 +216,7 @@ public class JSLC {
         if ((outTypes & OUT_ES2) != 0) {
             File outFile = jslcinfo.getOutputFile(OUT_ES2);
             if (jslcinfo.force || outOfDate(outFile, sourceTime)) {
-                if (pinfo == null) pinfo = getParserInfo(stream);
+                ParserInfo pinfo = source.parse();
                 ES2Backend es2Backend = new ES2Backend(pinfo.parser, pinfo.visitor);
                 es2Backend.scan(pinfo.program);
                 write(es2Backend.getShader(), outFile);
@@ -212,21 +225,25 @@ public class JSLC {
 
         if ((outTypes & OUT_MTL) != 0) {
             File outFile = jslcinfo.getOutputFile(OUT_MTL);
+            String shaderFileName = outFile.getName().replace(".metal", "");
+            MetalHeaders metalHeaders = jslcinfo.metalHeaders;
+            metalHeaders.target(jslcinfo.getMetalHeaderDir(), jslcinfo.metalHeaderKind);
             if (jslcinfo.force || outOfDate(outFile, sourceTime)) {
-                if (pinfo == null) pinfo = getParserInfo(stream);
-                MSLBackend mslBackend = new MSLBackend(pinfo.parser, pinfo.visitor);
-                String shaderFileName = outFile.getName().replace(".metal", "");
-                mslBackend.setShaderNameAndHeaderPath(shaderFileName, outFile.getCanonicalPath());
+                ParserInfo pinfo = source.parse();
+                MSLBackend mslBackend = new MSLBackend(pinfo.parser, pinfo.visitor, shaderFileName);
                 mslBackend.scan(pinfo.program);
                 String shader = mslBackend.getShader();
                 write(shader, outFile);
+                metalHeaders.addCompiled(shaderFileName, mslBackend.getObjCHeaderEntry());
+            } else {
+                metalHeaders.addUpToDate(shaderFileName, () -> getObjCHeaderEntry(source.parse(), shaderFileName));
             }
         }
 
         if ((outTypes & OUT_JAVA) != 0) {
             File outFile = jslcinfo.getOutputFile(OUT_JAVA);
             if (jslcinfo.force || outOfDate(outFile, sourceTime)) {
-                if (pinfo == null) pinfo = getParserInfo(stream);
+                ParserInfo pinfo = source.parse();
                 JSWBackend javaBackend = new JSWBackend(pinfo.parser, pinfo.visitor, pinfo.program);
                 String genCode = javaBackend.getGenCode(shaderName, peerName, genericsName, interfaceName);
                 write(genCode, outFile);
@@ -236,14 +253,20 @@ public class JSLC {
         if ((outTypes & OUT_PRISM) != 0) {
             File outFile = jslcinfo.getOutputFile(OUT_PRISM);
             if (jslcinfo.force || outOfDate(outFile, sourceTime)) {
-                if (pinfo == null) pinfo = getParserInfo(stream);
+                ParserInfo pinfo = source.parse();
                 PrismBackend prismBackend = new PrismBackend(pinfo.parser, pinfo.visitor, pinfo.program);
                 String genCode = prismBackend.getGlueCode(shaderName, peerName, genericsName, interfaceName);
                 write(genCode, outFile);
             }
         }
 
-        return pinfo;
+        return source.pinfo;
+    }
+
+    private static String getObjCHeaderEntry(ParserInfo pinfo, String shaderFileName) {
+        MSLBackend mslBackend = new MSLBackend(pinfo.parser, pinfo.visitor, shaderFileName);
+        mslBackend.scan(pinfo.program);
+        return mslBackend.getObjCHeaderEntry();
     }
 
     public static boolean outOfDate(File outFile, long sourceTime) {
@@ -273,6 +296,10 @@ public class JSLC {
         public String interfaceName;
         public String pkgName = rootPkg;
         public Map<Integer, String> outNameMap = new HashMap<>(DEFAULT_INFO_MAP);
+        public String metalHeaderDir;
+        public MetalHeaders.Kind metalHeaderKind = MetalHeaders.Kind.DECORA;
+        /** The run this JSLCInfo's Metal shaders join; call {@code write()} on it after the run's last compile. */
+        public MetalHeaders metalHeaders = new MetalHeaders();
 
         private String extraOpts;
 
@@ -290,7 +317,7 @@ public class JSLC {
             String prefix1 = "";
             for (int i = 0; i < prefix0.length(); i++) prefix1 += " ";
             out.println(prefix0+"[-d3d | -es2 | -mtl | -java | -sw | -hw | -all]");
-            out.println(prefix1+"[-o <outdir>] [-i <srcdir>] [-t]");
+            out.println(prefix1+"[-o <outdir>] [-i <srcdir>] [-t] [-mtlheaders <dir>] [-mtlprism]");
             out.println(prefix1+"[-name <name>] [-ifname <interface name>]");
             if (extraOpts != null) {
                 out.println(prefix1+extraOpts);
@@ -348,6 +375,8 @@ public class JSLC {
                 System.exit(0);
             } else if (arg.equals("-t")) {
                 trimToOutDir = true;
+            } else if (arg.equals("-mtlprism")) {
+                metalHeaderKind = MetalHeaders.Kind.PRISM;
             } else {
                 try {
                     // options with 1 argument
@@ -361,6 +390,8 @@ public class JSLC {
                         interfaceName = args[index];
                     } else if (arg.equals("-pkg")) {
                         pkgName = args[index];
+                    } else if (arg.equals("-mtlheaders")) {
+                        metalHeaderDir = args[index];
                     } else {
                         return 0;
                     }
@@ -413,6 +444,13 @@ public class JSLC {
             String fileName = outNameMap.get(outType);
             return getOutputFile(fileName);
         }
+
+        public File getMetalHeaderDir() {
+            if (metalHeaderDir != null) {
+                return new File(metalHeaderDir);
+            }
+            return outDir == null ? new File("mtl-headers") : new File(outDir, "mtl-headers");
+        }
     }
 
     public static void main(String[] args) throws Exception {
@@ -432,5 +470,6 @@ public class JSLC {
         }
 
         compile(jslcinfo, inFile);
+        jslcinfo.metalHeaders.write();
     }
 }

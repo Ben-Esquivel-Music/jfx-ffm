@@ -320,7 +320,7 @@ Two parts, both about where an error points.
     US-008 gate these held 108, 424, 46 and 0 files on each system, so the Metal output is covered only by the
     `-d3d -es2 -mtl` regeneration above.
   - `javafx.graphics` has the same test counts per class as before.
-  - `javafx-jslc` runs its 159 tests plus the new ones, with no failure.
+  - `javafx-jslc` runs its 182 tests plus the new ones, with no failure.
 - **Upstream.** Repeat the JBS search when the story is picked up. Draft an upstream issue with the measured cases
   and the chosen option. The draft says that upstream runs no jslc test (JDK-8226635), so the fix's test needs that
   port too.

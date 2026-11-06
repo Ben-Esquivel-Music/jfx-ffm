@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2009, 2025, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2009, 2026, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -26,6 +26,7 @@
 import com.sun.scenario.effect.compiler.JSLC;
 import com.sun.scenario.effect.compiler.JSLC.JSLCInfo;
 import com.sun.scenario.effect.compiler.JSLParser;
+import com.sun.scenario.effect.compiler.backend.hw.MetalHeaders;
 import com.sun.scenario.effect.compiler.model.BaseType;
 import com.sun.scenario.effect.compiler.model.Qualifier;
 import com.sun.scenario.effect.compiler.model.Variable;
@@ -470,6 +471,7 @@ public class CompileJSL {
         nameMap.put(JSLC.OUT_D3D, "prism-d3d/build/gensrc/{pkg}/d3d/hlsl/{name}.hlsl");
         nameMap.put(JSLC.OUT_ES2, "prism-es2/build/gensrc/{pkg}/es2/glsl/{name}.frag");
         nameMap.put(JSLC.OUT_MTL, "prism-mtl/build/gensrc/{pkg}/mtl/msl/{name}.metal");
+        jslcinfo.metalHeaderKind = MetalHeaders.Kind.PRISM;
         jslcinfo.parseAllArgs(args);
 
         boolean alphaTest = false;
@@ -505,6 +507,7 @@ public class CompileJSL {
             compileSolidTexture(jslcinfo, "FirstPassLCD", alphaTest);
             compileLCDShader(jslcinfo, "SecondPassLCD", alphaTest);
         }
+        jslcinfo.metalHeaders.write();
     }
 }
 

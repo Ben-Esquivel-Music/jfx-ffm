@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2008, 2013, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2008, 2026, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -25,6 +25,7 @@
 
 import com.sun.scenario.effect.compiler.JSLC;
 import com.sun.scenario.effect.compiler.JSLC.JSLCInfo;
+import com.sun.scenario.effect.compiler.backend.hw.MetalHeaders;
 import com.sun.scenario.effect.light.Light;
 import java.io.File;
 
@@ -65,7 +66,14 @@ public class CompilePhong {
         "float3 Lrgb = lightColor * pow(-LdotS, lightSpecularExponent);";
 
     public static void main(String[] args) throws Exception {
+        MetalHeaders metalHeaders = new MetalHeaders();
+        compile(args, metalHeaders);
+        metalHeaders.write();
+    }
+
+    public static void compile(String[] args, MetalHeaders metalHeaders) throws Exception {
         JSLCInfo jslcinfo = new JSLCInfo("PhongLighting");
+        jslcinfo.metalHeaders = metalHeaders;
         jslcinfo.shaderName = "PhongLighting";
         int index = jslcinfo.parseArgs(args);
         if (index != args.length - 1) {

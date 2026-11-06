@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2021, 2025, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2021, 2026, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -40,8 +40,6 @@ import com.sun.scenario.effect.compiler.tree.FuncDef;
 import com.sun.scenario.effect.compiler.tree.JSLVisitor;
 import com.sun.scenario.effect.compiler.tree.VarDecl;
 
-import java.io.FileWriter;
-import java.io.IOException;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
@@ -55,34 +53,31 @@ import static java.util.Map.entry;
 
 public class MSLBackend extends SLBackend {
 
-    private static String headerFilesDir = null;
-    private static final String FRAGMENT_SHADER_HEADER_FILE_NAME = "FragmentShaderCommon.h";
-    private static final StringBuilder objCHeader = new StringBuilder();
-    private static String objCHeaderFileName;
-    private static final String PRISM_SHADER_HEADER_FILE_NAME = "PrismShaderCommon.h";
-    private static final String DECORA_SHADER_HEADER_FILE_NAME = "DecoraShaderCommon.h";
-    private static final List<String> shaderFunctionNameList = new ArrayList<>();
-
-    private String shaderFunctionName;
-    private String sampleTexFuncName;
-    private String uniformStructName;
+    private final String shaderFunctionName;
+    private final String sampleTexFuncName;
+    private final String uniformStructName;
     private final List<String> uniformNames = new ArrayList<>();
-    private String uniformIDsEnumName;
-    private String uniformIDs;
+    private final String uniformIDsEnumName;
+    private String uniformIDs = "";
     private int uniformIDCount;
-    private String uniformsForShaderFile; // visitVarDecl() accumulates all the Uniforms in this string.
-    private String uniformsForObjCFiles;
-    private boolean isPrismShader;
+    private String uniformsForShaderFile = ""; // visitVarDecl() accumulates all the Uniforms in this string.
+    private String uniformsForObjCFiles = "";
+
+    // MTLArguemntEncoder requires the argument struct buffer to contain atleast one variable
+    // of type: buffers, textures, samplers, or any element with the [[id]] attribute’
+    // We have some(22) prism shaders for which the Uniform struct is either empty or contains only float2's
+    // That causes MTL_SHADER_VALIDATION to fail and causes run time crash on Ventura.
+    // So we add a variable texture2d<float> UNUSED; to each shader which does not
+    // already have a texture variable.
     private boolean hasTextureVar;
 
     private final List<String> helperFunctions = new ArrayList<>();
-    private static final String MTL_HEADERS_DIR = "/mtl-headers/";
     private static final String MAIN = "void main() {";
 
     private static final Map<String, String> QUAL_MAP = Map.of(
         "param", "constant");
 
-    private static final Map<String, String> texSamplerMap = new HashMap<>();
+    private final Map<String, String> texSamplerMap = new HashMap<>();
 
     private static final Map<String, String> TYPE_MAP = Map.of(
         "sampler",  "texture2d<float>",
@@ -169,8 +164,12 @@ public class MSLBackend extends SLBackend {
         "ddy",     "dfdy",
         "intcast", "int");
 
-    public MSLBackend(JSLParser parser, JSLVisitor visitor) {
+    public MSLBackend(JSLParser parser, JSLVisitor visitor, String shaderFunctionName) {
         super(parser, visitor);
+        this.shaderFunctionName = shaderFunctionName;
+        uniformStructName = shaderFunctionName + "_Uniforms";
+        uniformIDsEnumName = shaderFunctionName + "_ArgumentBufferID";
+        sampleTexFuncName = shaderFunctionName + "_SampleTexture";
     }
 
     @Override
@@ -308,101 +307,66 @@ public class MSLBackend extends SLBackend {
         output(" discard_fragment();\n");
     }
 
-    private void updateCommonHeaders() {
-        String shaderType = isPrismShader ? "PRISM" : "DECORA";
+    /**
+     * Returns this shader's part of the Objective-C header: its argument IDs, uniform struct and uniform
+     * dictionary function.
+     */
+    public String getObjCHeaderEntry() {
+        List<String> uniformNames = new ArrayList<>(this.uniformNames);
+        String uniformIDs = this.uniformIDs;
+        String uniformsForObjCFiles = this.uniformsForObjCFiles;
+        StringBuilder objCHeader = new StringBuilder();
 
-        try (FileWriter objCHeaderFile = new FileWriter(headerFilesDir + objCHeaderFileName)) {
-
-            if (!hasTextureVar) {
-                String unusedUniform = "UNUSED";
-                uniformNames.add(unusedUniform);
-                uniformsForObjCFiles  += "    texture2d<float> " + unusedUniform + ";\n";
-                uniformIDs += "    " + shaderFunctionName + "_" + unusedUniform + "_ID = " + uniformIDCount + ",\n";
-                uniformIDCount++;
-            }
-
-            uniformsForObjCFiles = uniformsForObjCFiles.replace("texture2d<float>", "id<MTLTexture>");
-            uniformsForObjCFiles = uniformsForObjCFiles.replace(" float2", " packed_float2");
-            uniformsForObjCFiles = uniformsForObjCFiles.replace(" float3", " vector_float3");
-            uniformsForObjCFiles = uniformsForObjCFiles.replace(" float4", " packed_float4");
-
-            if (objCHeader.length() == 0) {
-                objCHeader.append("#ifndef " + shaderType + "_SHADER_COMMON_H\n" +
-                                "#define " + shaderType + "_SHADER_COMMON_H\n\n" +
-                                "#import <Metal/Metal.h>\n" +
-                                "#import <simd/simd.h>\n\n" +
-                                "#ifdef MSL_BACKEND_VERBOSE\n" +
-                                "#define MSL_LOG NSLog\n" +
-                                "#else\n" +
-                                "#define MSL_LOG(...)\n" +
-                                "#endif\n\n" +
-                                "typedef struct " + shaderType + "_VS_INPUT {\n" +
-                                "    packed_float2 position;\n" +
-                                "    packed_float4 color;\n" +
-                                "    packed_float2 texCoord0;\n" +
-                                "    packed_float2 texCoord1;\n" +
-                                "} " + shaderType + "_VS_INPUT;" +
-                                "\n\n");
-            }
-
-            if (uniformIDs != "") {
-                objCHeader.append("typedef enum " + uniformIDsEnumName +
-                    " {\n" + uniformIDs + "\n} " + shaderFunctionName + "ArgumentBufferID;\n\n");
-
-                objCHeader.append("typedef struct " + uniformStructName + " {\n"
-                    + uniformsForObjCFiles + "} " + uniformStructName + ";\n\n");
-
-                objCHeader.append("NSDictionary* get" + shaderFunctionName + "_Uniform_VarID_Dict() {\n");
-                objCHeader.append("    id ids[] = {\n");
-                for (String aUniformName : uniformNames) {
-                    objCHeader.append("        [NSNumber numberWithInt:" + shaderFunctionName + "_" +
-                        aUniformName + "_ID" + "],\n");
-                }
-                objCHeader.append("    };\n\n");
-                objCHeader.append("    NSUInteger count = sizeof(ids) / sizeof(id);\n");
-                objCHeader.append("    NSArray *idArray = [NSArray arrayWithObjects:ids count:count];\n");
-
-                objCHeader.append("    id uniforms[] = {\n");
-                for (String aUniformName : uniformNames) {
-                    objCHeader.append("        @\"" + aUniformName + "\",\n");
-                }
-                objCHeader.append("    };\n\n");
-                objCHeader.append("    NSArray *uniformArray = [NSArray arrayWithObjects:uniforms count:count];\n");
-                objCHeader.append("    return [NSDictionary dictionaryWithObjects:idArray forKeys:uniformArray];\n");
-                objCHeader.append("}\n\n\n");
-            } else {
-                objCHeader.append("NSDictionary* get" + shaderFunctionName + "_Uniform_VarID_Dict() {\n");
-                objCHeader.append("    return nil;\n");
-                objCHeader.append("}\n\n\n");
-            }
-
-            objCHeaderFile.write(objCHeader.toString());
-
-            StringBuilder getShaderDictFunc = new StringBuilder();
-            getShaderDictFunc.append("NSDictionary* get" + shaderType + "Dict(NSString* inShaderName) {\n");
-            getShaderDictFunc.append("    MSL_LOG(@\"get" + shaderType + "Dict \");\n");
-            for (String aShaderName : shaderFunctionNameList) {
-                getShaderDictFunc.append("    if ([inShaderName isEqualToString:@\"" + aShaderName + "\"]) {\n");
-                getShaderDictFunc.append("        MSL_LOG(@\"get" + shaderType + "Dict() : calling -> get" + aShaderName + "_Uniform_VarID_Dict()\");\n");
-                getShaderDictFunc.append("        return get" + aShaderName + "_Uniform_VarID_Dict();\n");
-                getShaderDictFunc.append("    }\n");
-            }
-            getShaderDictFunc.append("    return nil;\n");
-            getShaderDictFunc.append("};\n\n");
-            objCHeaderFile.write(getShaderDictFunc.toString());
-
-            objCHeaderFile.write("#endif\n");
-        } catch (IOException e) {
-            System.err.println("An error occurred.");
-            e.printStackTrace();
+        if (!hasTextureVar) {
+            String unusedUniform = "UNUSED";
+            uniformNames.add(unusedUniform);
+            uniformsForObjCFiles  += "    texture2d<float> " + unusedUniform + ";\n";
+            uniformIDs += "    " + shaderFunctionName + "_" + unusedUniform + "_ID = " + uniformIDCount + ",\n";
         }
+
+        uniformsForObjCFiles = uniformsForObjCFiles.replace("texture2d<float>", "id<MTLTexture>");
+        uniformsForObjCFiles = uniformsForObjCFiles.replace(" float2", " packed_float2");
+        uniformsForObjCFiles = uniformsForObjCFiles.replace(" float3", " vector_float3");
+        uniformsForObjCFiles = uniformsForObjCFiles.replace(" float4", " packed_float4");
+
+        if (uniformIDs != "") {
+            objCHeader.append("typedef enum " + uniformIDsEnumName +
+                " {\n" + uniformIDs + "\n} " + shaderFunctionName + "ArgumentBufferID;\n\n");
+
+            objCHeader.append("typedef struct " + uniformStructName + " {\n"
+                + uniformsForObjCFiles + "} " + uniformStructName + ";\n\n");
+
+            objCHeader.append("NSDictionary* get" + shaderFunctionName + "_Uniform_VarID_Dict() {\n");
+            objCHeader.append("    id ids[] = {\n");
+            for (String aUniformName : uniformNames) {
+                objCHeader.append("        [NSNumber numberWithInt:" + shaderFunctionName + "_" +
+                    aUniformName + "_ID" + "],\n");
+            }
+            objCHeader.append("    };\n\n");
+            objCHeader.append("    NSUInteger count = sizeof(ids) / sizeof(id);\n");
+            objCHeader.append("    NSArray *idArray = [NSArray arrayWithObjects:ids count:count];\n");
+
+            objCHeader.append("    id uniforms[] = {\n");
+            for (String aUniformName : uniformNames) {
+                objCHeader.append("        @\"" + aUniformName + "\",\n");
+            }
+            objCHeader.append("    };\n\n");
+            objCHeader.append("    NSArray *uniformArray = [NSArray arrayWithObjects:uniforms count:count];\n");
+            objCHeader.append("    return [NSDictionary dictionaryWithObjects:idArray forKeys:uniformArray];\n");
+            objCHeader.append("}\n\n\n");
+        } else {
+            objCHeader.append("NSDictionary* get" + shaderFunctionName + "_Uniform_VarID_Dict() {\n");
+            objCHeader.append("    return nil;\n");
+            objCHeader.append("}\n\n\n");
+        }
+        return objCHeader.toString();
     }
 
     @Override
     protected String getHeader() {
         StringBuilder header = new StringBuilder();
 
-        header.append("#include \"" + FRAGMENT_SHADER_HEADER_FILE_NAME + "\"\n\n");
+        header.append("#include \"" + MetalHeaders.FRAGMENT_SHADER_HEADER_FILE_NAME + "\"\n\n");
 
         if (!hasTextureVar) {
             String unusedUniform = "UNUSED";
@@ -426,7 +390,6 @@ public class MSLBackend extends SLBackend {
     @Override
     public String getShader() {
         String shader = super.getShader();
-        updateCommonHeaders();
         String fragmentFunctionDef = "\n[[fragment]] float4 " + shaderFunctionName + "(VS_OUTPUT in [[ stage_in ]],";
         fragmentFunctionDef += "\n    device " + uniformStructName + "& uniforms [[ buffer(0) ]]";
         for (int i = 0; i < texSamplerMap.size(); i++) {
@@ -459,73 +422,5 @@ public class MSLBackend extends SLBackend {
         }
 
         return shader;
-    }
-
-    public void setShaderNameAndHeaderPath(String name, String genMetalShaderPath) {
-        shaderFunctionName = name;
-        shaderFunctionNameList.add(shaderFunctionName);
-        if (headerFilesDir == null) {
-            headerFilesDir = genMetalShaderPath.substring(0, genMetalShaderPath.indexOf("jsl-"));
-            headerFilesDir += MTL_HEADERS_DIR;
-            writeFragmentShaderHeader();
-        }
-        isPrismShader = genMetalShaderPath.contains("jsl-prism");
-        resetVariables();
-    }
-
-    private void writeFragmentShaderHeader() {
-        String fragmentShaderHeader = """
-        #ifndef FRAGMENT_COMMON_H
-        #define FRAGMENT_COMMON_H
-
-        #pragma clang diagnostic ignored "-Wunused"
-
-        #include <simd/simd.h>
-        #include <metal_stdlib>
-
-        using namespace metal;
-
-        struct VS_OUTPUT {
-            float4 position [[ position ]];
-            float4 fragColor;
-            float2 texCoord0;
-            float2 texCoord1;
-        };
-
-        #endif
-        """;
-
-        try (FileWriter fragmentShaderHeaderFile = new FileWriter(headerFilesDir + FRAGMENT_SHADER_HEADER_FILE_NAME)) {
-            fragmentShaderHeaderFile.write(fragmentShaderHeader);
-        } catch (IOException e) {
-            System.err.println("IOException occurred while creating " + FRAGMENT_SHADER_HEADER_FILE_NAME +
-                ": " + e.getMessage());
-            e.printStackTrace();
-        }
-    }
-
-    private void resetVariables() {
-        uniformStructName = shaderFunctionName + "_Uniforms";
-        uniformIDsEnumName = shaderFunctionName + "_ArgumentBufferID";
-        sampleTexFuncName = shaderFunctionName + "_SampleTexture";
-
-        texSamplerMap.clear();
-        helperFunctions.clear();
-        uniformNames.clear();
-        uniformsForShaderFile = "";
-        uniformsForObjCFiles = "";
-        uniformIDs = "";
-        uniformIDCount = 0;
-
-        // MTLArguemntEncoder requires the argument struct buffer to contain atleast one variable
-        // of type: buffers, textures, samplers, or any element with the [[id]] attribute’
-        // We have some(22) prism shaders for which the Uniform struct is either empty or contains only float2's
-        // That causes MTL_SHADER_VALIDATION to fail and causes run time crash on Ventura.
-        // So we add a variable texture2d<float> UNUSED; to each shader which does not
-        // already have a texture variable.
-        hasTextureVar = false;
-
-        objCHeaderFileName = isPrismShader ? PRISM_SHADER_HEADER_FILE_NAME :
-                                                DECORA_SHADER_HEADER_FILE_NAME;
     }
 }
