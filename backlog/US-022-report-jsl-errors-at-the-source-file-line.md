@@ -14,7 +14,7 @@ Paths are relative to `modules/javafx.graphics` unless they start with `backlog/
 to the file named in the same sentence, else to the one named in the lead-in of its list. Line numbers are those of
 `b5b00d4416`, the commit that filed the story, except in [A limit of the Java peer is an `InternalError`, thrown after
 the shaders are written](#a-limit-of-the-java-peer-is-an-internalerror-thrown-after-the-shaders-are-written), which
-uses the tree of US-018 (`a8d6688172` with its PR 50 review fix).
+uses the tree of US-018 at `ba2b68e991`, the fix for the first PR 50 review round.
 
 ### Most programs are assembled
 The build runs the Decora and Prism generators (`pom.xml:156-216`). Every program goes through `JSLC.compile`, which
@@ -109,9 +109,9 @@ programs, 52 Decora and 212 Prism (US-019 counted them). For line N of a `.jsl` 
     Metal headers, which the generator writes only after the compile returns
     (`src/main/jsl-decora/CompileJSL.java:70-71`).
   - The file counts in this section are from a rerun on 2026-11-06, on macOS with JDK 27.0.1, with the compiler of
-    US-018 (`a8d6688172` and its PR 50 review fix) and the Decora `CompileJSL` given `-mtlheaders` as the pom gives
-    it. Before US-018 the compiler wrote both Metal headers during the compile, so the run of 2026-09-27 wrote them
-    before the error too.
+    US-018 at `ba2b68e991` (the fix for the first PR 50 review round) and the Decora `CompileJSL` given
+    `-mtlheaders` as the pom gives it. Before US-018 the compiler wrote both Metal headers during the compile, so the
+    run of 2026-09-27 wrote them before the error too.
   - `InternalError` is the `java.lang.Error` documented for an unexpected internal error of the JVM. This one has no
     location, and its "not yet" has been there since the compiler was open-sourced (`d0a313da5d`, 2012).
 - 7 of the 12 `InternalError` sites (above) can be reached from a `.jsl` file. Each was reached with a small change to
@@ -208,8 +208,8 @@ programs, 52 Decora and 212 Prism (US-019 counted them). For line N of a `.jsl` 
   `CompileJSL` as the pom runs it, with the gate's `javafx.base` and `javafx.graphics` classes on the module path.
   The open-file probe called `JSLC.compile(JSLCInfo, File)` directly, on Windows and on Linux (WSL, no display).
 - On 2026-11-06 the `InternalError` cases and the reused-output sequence were rerun on macOS (JDK 27.0.1) with the
-  compiler of US-018 (`a8d6688172` and its PR 50 review fix), the Decora `CompileJSL` given `-mtlheaders`; the file
-  counts of that section are from the rerun.
+  compiler of US-018 at `ba2b68e991` (the fix for the first PR 50 review round), the Decora `CompileJSL` given
+  `-mtlheaders`; the file counts of that section are from the rerun.
 - Not run for these two additions: a fixed compiler (nothing was prototyped), Maven; macOS only in the rerun above.
 
 ## Proposed fix

@@ -1,6 +1,6 @@
 # US-018 — Stop the jslc Metal backend depending on `jsl-` in the output path and on static state
 
-**Status:** 🔷 Implemented (2026-11-05) in `a8d6688172` (PR 50) and `ba2b68e991` (the fix for the first PR 50 review round), with the fix for the second review round uncommitted · **Found:** 2026-09-27, US-008 (review of the jslc test port: `SymbolTest` would have passed for any program that parses, because the Metal backend threw)
+**Status:** 🔶 Merged, not Done (2026-11-07, PR #50): implemented 2026-11-05 in `a8d6688172`, with the fixes for the two PR 50 review rounds in `ba2b68e991` and `84f699400e`; the Windows and WSL gates and the upstream report are [pending](#owner-run-and-pending) · **Found:** 2026-09-27, US-008 (review of the jslc test port: `SymbolTest` would have passed for any program that parses, because the Metal backend threw)
 
 ## Story
 As a maintainer who builds `javafx.graphics` on macOS, or who runs the JSL compiler from a test or a tool,
@@ -271,23 +271,22 @@ Each case runs in a new JVM:
   native check.
 
 ## Implementation (2026-11-05, macOS)
-The story's change is commit `a8d6688172` on the PR 50 branch, made on `0281b2fde8`. The fix for the first PR 50
-review round is commit `ba2b68e991`; the fix for the second round is uncommitted at the time of writing. This section
-describes the final state, `ba2b68e991` with the round-2 fix. A result dated 2026-11-05 was taken when the story was
-written, one dated 2026-11-06 on the content of `ba2b68e991` before it was committed, and one dated 2026-11-07 on the
-round-2 fix. The last change of that fix removed a set of uniform names from `MSLBackend`, whose `add` always returned
-true, since the JSL symbol table rejects a second declaration of a name. Of the results dated 2026-11-07, F1, F2, the
-jslc suite in default and random method order and the clean generator run outside Maven were taken on the final
-state, after that removal. The others were taken just before it, and those of the fix itself on what this story calls
-the round-2 tree. The removal cannot change their outputs: F1's per-class lines, generated files and natives and that
-clean run are the same as the round-2 tree's. Below, HEAD is `0281b2fde8`, as when the story was written. Everything
-was built and tested on one arm64 Mac with Apache Maven 3.10.0 and Oracle JDK 27.0.1: on macOS 27.0.1 for the results
-dated 2026-11-05 and 2026-11-06, and on macOS 27.2 (build 26B123) for those dated 2026-11-07 (see
+The story's change is commit `a8d6688172` on the PR 50 branch, made on `0281b2fde8`. The fixes for the first and
+second PR 50 review rounds are commits `ba2b68e991` and `84f699400e`. The commits this story names are those of the
+PR 50 branch, which GitHub keeps as `refs/pull/50/head`. This section describes the final state, `84f699400e`. A
+result dated 2026-11-05 was taken when the story was written, one dated 2026-11-06 on the content of `ba2b68e991`
+before it was committed, and one dated 2026-11-07 on the round-2 fix before it was committed. The last change of
+that fix removed a set of uniform names from `MSLBackend`, whose `add` always returned true, since the JSL symbol
+table rejects a second declaration of a name. Of the results dated 2026-11-07, F1, F2, the jslc suite in default and
+random method order and the clean generator run outside Maven were taken on the final state, after that removal.
+The others were taken just before it, and those of the fix itself on what this story calls the round-2 tree. The
+removal cannot change their outputs: F1's per-class lines, generated files and natives and that clean run are the
+same as the round-2 tree's. Below, HEAD is `0281b2fde8`, as when the story was written. Everything was built and
+tested on one arm64 Mac with Apache Maven 3.10.0 and Oracle JDK 27.0.1: on macOS 27.0.1 for the results dated
+2026-11-05 and 2026-11-06, and on macOS 27.2 (build 26B123) for those dated 2026-11-07 (see
 [F3](#final-gates-2026-11-05-macos)). This host has no Windows and no Linux, so those gates are
-[owner-run](#owner-run-and-pending). They expect the final state, so their `<US-018 commit>` must hold the round-2 fix:
-`ba2b68e991` alone runs 190 jslc tests, with `MetalHeadersTest` at 27, and `a8d6688172` 182 and 19, where the gates
-expect 196 and 33. Until a commit with the round-2 fix is pushed, F8.1 to F8.3 run on the patch that the owner-run
-recipe makes from the working tree.
+[owner-run](#owner-run-and-pending). They run on the final state: `ba2b68e991` alone runs 190 jslc tests, with
+`MetalHeadersTest` at 27, and `a8d6688172` 182 and 19, where the gates expect 196 and 33.
 
 ### Change
 Relative to `0281b2fde8`:
@@ -353,7 +352,7 @@ Relative to `0281b2fde8`:
   up-to-date `.metal` that `0281b2fde8` or `a8d6688172` wrote for such a program, `ba2b68e991` keys the renamed member
   (C1 of round 2).
 
-**The PR 50 review, round 2,** relative to `ba2b68e991` (Copilot, 2026-11-07; uncommitted):
+**The PR 50 review, round 2,** relative to `ba2b68e991` (Copilot, 2026-11-07; commit `84f699400e`):
 - **C2, a commented-out struct** (on `MetalHeaders.java:148-149`). `ba2b68e991` looked for
   `typedef struct <Shader>_Uniforms {` anywhere in an up-to-date `.metal`. With the old struct in a block comment
   before the active one, it read the commented layout, so a reordering of the active uniforms left stale argument IDs
@@ -426,7 +425,7 @@ Relative to `0281b2fde8`:
 | Write errors fail | `aHeaderDirectoryThatCannotBeCreatedFailsNamingIt`, `aHeaderThatCannotBeWrittenFailsNamingIt`; both generators exit 1 ([Generator runs](#generator-runs)) | Met |
 | Incremental runs keep complete headers | `aSecondRunWithOneShaderOutOfDateKeepsTheHeadersOfBoth` and its `jsl-decora` twin; for the entries, `aShaderRecompiledWithOtherUniformsGetsItsNewEntryInTheHeader`, `aShaderWrittenByARunThatStoppedBeforeItsHeadersGetsItsEntryInTheNextRun` and the review comment's `aHeaderThatListsTheSameShadersWithTheirUniformsInAnotherOrderIsWrittenAgain`; for outputs an earlier compiler wrote, `upToDateMetalShadersWithUniformsThatAnEarlierCompilerRenamedGetTheOutputsOfACleanRun` (review round 2); the generators outside Maven, including the upgrade without `clean` over the outputs of `0281b2fde8` and `a8d6688172`; F5 (2026-11-07) and F7 | Met on macOS; the Windows run (F8.1) is owner-run |
 | Generated files unchanged | The generators outside Maven, on 2026-11-07 on the final state (the clean run), the round-2 tree, `ba2b68e991`, `a8d6688172` and `0281b2fde8`, and Maven on 2026-11-06 on the content of `ba2b68e991`, both with `-d3d -es2 -mtl` ([Generator runs](#generator-runs)); F2 and F4 (2026-11-07); the goldens of `aDecoraRunWritesTheHeadersOfTheCompilerBeforeThisStory` and `aShaderWithHelperFunctionsGetsTheMetalShaderOfTheCompilerBeforeThisStory`, captured from `0281b2fde8`'s compiler and unchanged by review round 2 | Met |
-| Build gate | F1 on macOS (2026-11-07); Windows (F8.2) and WSL (F8.3) | Met on macOS; Windows and WSL owner-run |
+| Build gate | F1 on macOS (2026-11-07); Windows (F8.2) and WSL (F8.3); [CI](#before-the-merge-2026-11-07) ran the module tests on Windows and Linux but is not those gates | Met on macOS; Windows and WSL owner-run |
 | macOS | F4 and F5 (2026-11-07), and F6 (2026-11-06) | Met |
 | Upstream | [Upstream check](#upstream-check-2026-11-05-macos); the draft report, kept outside the repository | Checked and drafted; filing pending |
 
@@ -748,27 +747,29 @@ run / failures / errors / skipped.
   run with nothing out of date rewrites only `DecoraShaderCommon.h`, which then has `ColorAdjust_saturation_ID = 1`
   as the `.metal` does. `a8d6688172` rewrites nothing and keeps the stale `ColorAdjust_hue_ID = 1`.
 
+### Before the merge (2026-11-07)
+- **Robot tests.** The owner ran the robot tests on `84f699400e` on the macOS host, and they passed. No criterion of
+  this story asks for them.
+- **CI.** The `JavaFX pre-submit tests` run on `84f699400e` (Actions run 42399409422) passed in all five jobs, with
+  `BUILD SUCCESS` and no `hs_err_pid` or fatal error in any log. Its `mvn -B -ntp -fae install` gave, run / failures /
+  errors / skipped:
+
+  | Job | jslc | javafx.base | javafx.graphics |
+  | --- | --- | --- | --- |
+  | Windows x64 | 196 / 0 / 0 / 3 | 5,510 / 0 / 0 / 22 | 26,624 / 0 / 0 / 823 |
+  | Linux x64, Linux aarch64 | 196 / 0 / 0 / 0 | 5,510 / 0 / 0 / 22 | 26,385 / 0 / 0 / 946 |
+  | macOS x64 | 196 / 0 / 0 / 0 | 5,510 / 0 / 0 / 22 | 26,636 / 0 / 0 / 843 |
+  | macOS aarch64 | 196 / 0 / 0 / 0 | 5,510 / 0 / 0 / 22 | 26,636 / 0 / 0 / 837 |
+
+  Windows skips only the three `link/..` tests of `MetalHeadersTest`, as [F8.2](#f82-windows-gate) expects. The run
+  does not replace F8.1 to F8.3: no job passes `-mtl` on Windows or `-Djfx.parity.require=true`, and none compares its
+  counts per class or its `target/gensrc` with a build of `0281b2fde8`.
+
 ### Owner-run and pending
-Replace `<repo-url>` with the repository's remote. `<US-018 commit>` is a commit that holds the round-2 fix, which
-`ba2b68e991`, the head of the PR 50 branch, does not ([Implementation](#implementation-2026-11-05-macos)). A clone of
-`<repo-url>` has such a commit only once the owner commits the round-2 fix and pushes it (a branch is enough). Until
-then, run the gates on a patch from `0281b2fde8` to the working tree, which carries `a8d6688172`, `ba2b68e991` and the
-uncommitted round-2 fix. The patch is made in a scratch clone, so that it also takes any untracked file. At the root of
-the main repository on the macOS host (its index is not touched):
-```bash
-R="$PWD"; D="$(mktemp -d)"
-git clone -q "$R" "$D/us018" && git -C "$D/us018" checkout -q --detach 0281b2fde8
-{ git diff -z --name-only 0281b2fde8; git ls-files -z -o --exclude-standard; } | xargs -0 tar -cf - | tar -xf - -C "$D/us018"
-git -C "$D/us018" add -A && git -C "$D/us018" diff --cached --binary 0281b2fde8 > "$D/us018.patch"
-git -C "$D/us018" status --short | grep '^A'; echo "patch: $D/us018.patch"
-```
-The `A` lines must name `MetalHeaders.java`, `JSLCInfoTest.java`, `MetalHeadersTest.java` and `MSLBackendTest.java`.
-Copy the patch to the Windows host, into the directory that holds `jfx-before` and `jfx-after`, and to the WSL home
-directory. In F8.2 and F8.3, replace the `jfx-after` clone line with:
-```bash
-git clone <repo-url> jfx-after && git -C jfx-after checkout --detach 0281b2fde8 && git -C jfx-after apply "$PWD/us018.patch"
-```
-In PowerShell, quote every `-D` argument; under Git Bash, Maven 3.10's `bin/mvn` converts the paths.
+Replace `<repo-url>` with the repository's remote. The gates run on `84f699400e`, the final state
+([Implementation](#implementation-2026-11-05-macos)). A clone gets it from `refs/pull/50/head`, whether or not the PR 50
+branch still exists. In PowerShell, quote every `-D` argument; under Git Bash, Maven 3.10's `bin/mvn` converts the
+paths.
 
 #### F8.1 Windows: build without `clean` with `"-Djfx.jsl.backends=-d3d -mtl"`
 In Git Bash, at the root of `jfx-after` (F8.2), before or after its gate, which starts with `clean`. The block touches
@@ -807,7 +808,7 @@ On HEAD it prints `differ` for the manifest and the Decora and Prism headers, al
 Two sibling checkouts, in Git Bash:
 ```bash
 git clone <repo-url> jfx-before && git -C jfx-before checkout --detach 0281b2fde8
-git clone <repo-url> jfx-after && git -C jfx-after checkout --detach <US-018 commit>
+git clone <repo-url> jfx-after && git -C jfx-after fetch -q origin pull/50/head && git -C jfx-after checkout --detach 84f699400e
 ```
 Maven from PowerShell, in the directory that holds both, so that MSVC builds the natives:
 ```powershell
@@ -845,7 +846,7 @@ In WSL (Ubuntu), with JDK 27 and Maven 3.10.0 on `PATH`, from fresh clones, with
 ```bash
 cd ~
 git clone <repo-url> jfx-before && git -C jfx-before checkout --detach 0281b2fde8
-git clone <repo-url> jfx-after && git -C jfx-after checkout --detach <US-018 commit>
+git clone <repo-url> jfx-after && git -C jfx-after fetch -q origin pull/50/head && git -C jfx-after checkout --detach 84f699400e
 for t in before after; do
   (cd ~/jfx-$t && env -u DISPLAY -u WAYLAND_DISPLAY mvn -B -ntp -l ../us018-wsl-$t.log -pl buildtools/jslc,modules/javafx.graphics -am clean test; echo "$t exit $?")
   (cd ~/jfx-$t/modules/javafx.graphics/target/gensrc && find . -type f | LC_ALL=C sort | xargs md5sum) > ~/us018-wsl-$t-gensrc.md5
@@ -865,5 +866,4 @@ skip one test in both runs (US-008).
 #### After the gates
 The rest of the [Definition of Done](#definition-of-done):
 - File the upstream report. Its draft is kept outside the repository until it is filed (`backlog/README.md`).
-- Commit the round-2 fix, if the gates ran on the patch. Set the status to ✅ Done with the date and the PR, and move
-  the row to the done table of `backlog/README.md`.
+- Set the status to ✅ Done with the date and PR #50, and move the row to the done table of `backlog/README.md`.
