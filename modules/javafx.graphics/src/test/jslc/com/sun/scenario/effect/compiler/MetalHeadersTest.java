@@ -204,6 +204,140 @@ public class MetalHeadersTest {
 
     private static final String NOT_JSL = "this is not JSL";
 
+    // Programs with uniforms that the compilers of 0281b2fde8 and a8d6688172 renamed in the uniform struct, one kind of
+    // rename each: they put vector_ before a name that starts with float2, float3 or float4, and the shader name before
+    // a word that names a function the program defines, be it the name of a uniform, of UNUSED or of a type, or a part
+    // of a name that a $ separates, and turned sampleTex into <Shader>_SampleTexture.
+    private static final String A_FLOAT2_NAME = """
+        param float2 float2Scale;
+        param float float2x;
+        param float opacity;
+        void main() {
+            color = float4(opacity);
+        }
+        """;
+
+    private static final String A_FLOAT3_NAME = """
+        param float3 float3Glow;
+        param float opacity;
+        void main() {
+            color = float4(opacity);
+        }
+        """;
+
+    // The renamed uniform comes after another, so that looking at the first member alone misses it.
+    private static final String A_FLOAT4_NAME = """
+        param float opacity;
+        param float4 float4Tint;
+        void main() {
+            color = float4(opacity);
+        }
+        """;
+
+    private static final String A_UNIFORM_NAMED_LIKE_A_HELPER = """
+        param float opacity;
+        param float2 offset;
+        float opacity(float x) {
+            return x * 0.5;
+        }
+        void main() {
+            float o = opacity(opacity);
+            color = float4(o, offset.x, offset.y, 1.0);
+        }
+        """;
+
+    private static final String NAMES_AND_PARTS_NAMED_LIKE_FUNCTIONS = """
+        param float level$gain;
+        param float gain$level;
+        param float main;
+        float gain(float x) {
+            return x * 2.0;
+        }
+        float UNUSED(float x) {
+            return x;
+        }
+        void main() {
+            float v = gain(UNUSED(0.5));
+            color = float4(v, v, v, 1.0);
+        }
+        """;
+
+    // In NAMES_AND_PARTS_NAMED_LIKE_FUNCTIONS other members start with the shader name, so here the part after the $ is
+    // the only one renamed.
+    private static final String A_PART_NAMED_LIKE_A_HELPER = """
+        param float level$gain;
+        param float opacity;
+        float gain(float x) {
+            return x * 2.0;
+        }
+        void main() {
+            float v = gain(opacity);
+            color = float4(v, v, v, 1.0);
+        }
+        """;
+
+    // Those compilers also left at out of the struct, because the struct text before it contained "at", in float. The
+    // two vector_ they put in make up for its line, so their Metal shader is exactly as long as a clean run's and
+    // differs only in its bytes.
+    private static final String FLOAT2_NAMES_AND_A_DROPPED_UNIFORM = """
+        param float float2x;
+        param float float2y;
+        param float at;
+        void main() {
+            color = float4(0.0);
+        }
+        """;
+
+    private static final String A_HELPER_NAMED_LIKE_THE_TEXTURE_TYPE = """
+        param sampler img;
+        param float opacity;
+        float4 texture2d(float2 tco) {
+            return sample(img, tco) * opacity;
+        }
+        void main() {
+            color = texture2d(pos0);
+        }
+        """;
+
+    // For the shader LookRenamed, whose struct this compiler writes with the JSL names, a struct that an earlier
+    // compiler may have written: names start with LookRenamed_ and vector_float3.
+    private static final String NAMES_THAT_LOOK_RENAMED = """
+        param float LookRenamed_level;
+        param float3 vector_float3w;
+        param float opacity;
+        void main() {
+            color = float4(opacity);
+        }
+        """;
+
+    // For the shader Near, names close to those an earlier compiler gave, but which none of them can have written:
+    // vector_float without 2, 3 or 4 after it, vector_float2, vector_float3 and vector_float4 later in a name, and the
+    // shader name without the _ after it.
+    private static final String NAMES_NEAR_A_RENAME = """
+        param float vector_floatx;
+        param float my_vector_float2;
+        param float my_vector_float3;
+        param float my_vector_float4;
+        param float Nearby;
+        param float opacity;
+        void main() {
+            color = float4(opacity);
+        }
+        """;
+
+    // Names that occur in an earlier member line of the uniform struct: in a type (at, exture) or a name (g, pacity).
+    private static final String NAMES_IN_EARLIER_MEMBERS = """
+        param float opacity;
+        param sampler img;
+        param float at;
+        param float g;
+        param float pacity;
+        param float exture;
+        void main() {
+            color = sample(img, pos0) * opacity;
+        }
+        """;
+
     // Struct members in other forms than MSLBackend writes, as a hand edit of a Metal shader can give them. An entry
     // read from most of them would get other uniforms or argument buffer IDs than the Metal shader has.
     private static final List<String> MEMBERS_IN_OTHER_FORMS = List.of(
@@ -357,12 +491,21 @@ public class MetalHeadersTest {
         Path outDir = gensrc.resolve("jsl-decora");
         probeRun(outDir, gensrc.resolve("mtl-headers"), OUT_OF_DATE, OUT_OF_DATE);
         Path metal = metalFile(outDir, "ProbeA");
-        String cutInsideTheStruct = "#include \"" + FRAGMENT_HEADER + "\"\n\ntypedef struct ProbeA_Uniforms {\n";
+        String include = "#include \"" + FRAGMENT_HEADER + "\"\n";
+        String cutInsideTheStruct = include + "\ntypedef struct ProbeA_Uniforms {\n";
         String structEnd = "} ProbeA_Uniforms;\n";
+        String struct = "typedef struct ProbeA_Uniforms {\n    float opacity;\n" + structEnd;
         List<String> unreadableShaders = new ArrayList<>(List.of(
                 cutInsideTheStruct,
                 "    float opacity;\n" + structEnd,
-                structEnd + cutInsideTheStruct + "    float opacity;\n"));
+                structEnd + cutInsideTheStruct + "    float opacity;\n",
+                include + "\n// float opacity;\n" + struct,
+                include + "\n#if 0\n" + struct + "#endif\n" + struct,
+                include + struct,
+                include + "\n\n" + struct,
+                "// edited\n" + include + "\n" + struct,
+                include + "\n" + struct.replace("ProbeA_", "ProbeB_"),
+                cutInsideTheStruct + "    float opacity;" + structEnd));
         for (String member : MEMBERS_IN_OTHER_FORMS) {
             unreadableShaders.add(cutInsideTheStruct + member + "\n" + structEnd);
         }
@@ -374,6 +517,58 @@ public class MetalHeadersTest {
                     unreadable);
             assertTrue(e.getMessage().contains(metal.toString()), e.getMessage());
         }
+    }
+
+    @Test
+    public void anUpToDateMetalShaderWithItsOldUniformStructCommentedOutBeforeItFailsNamingIt() throws Exception {
+        String oldStruct = uniformStructOfProbe(tmp.resolve("old"), SATURATION_THEN_HUE);
+        Path gensrc = tmp.resolve("gensrc");
+        Path outDir = gensrc.resolve("jsl-decora");
+        compile(newRun(outDir, gensrc.resolve("mtl-headers"), DECORA), "Probe", HUE_THEN_SATURATION, OUT_OF_DATE);
+        Path metal = metalFile(outDir, "Probe");
+        String shader = Files.readString(metal);
+        String include = "#include \"" + FRAGMENT_HEADER + "\"\n";
+        assertTrue(shader.startsWith(include + "\ntypedef struct Probe_Uniforms {\n    float hue;\n"), shader);
+        String afterTheEmptyLine = shader.substring(include.length() + 1);
+        // The second shader starts with a text exactly as long as the start MSLBackend writes, so that only the check
+        // of the start can reject it. The Metal compiler accepts both.
+        List<String> editedShaders = List.of(
+                include + "\n/*\n" + oldStruct + "*/\n" + afterTheEmptyLine,
+                include.replace("#include \"", "#include\"") + "/*" + oldStruct + "*/\n" + afterTheEmptyLine);
+
+        for (String edited : editedShaders) {
+            Files.writeString(metal, edited);
+            JSLCInfo rerun = newRun(outDir, gensrc.resolve("mtl-headers"), DECORA);
+            IOException e = assertThrows(IOException.class,
+                    () -> compile(rerun, "Probe", HUE_THEN_SATURATION, UP_TO_DATE), edited);
+            assertTrue(e.getMessage().contains(metal.toString()), e.getMessage());
+        }
+    }
+
+    @Test
+    public void anUpToDateMetalShaderWithItsOldUniformStructCommentedOutAfterItGetsTheEntryOfItsStruct()
+            throws Exception {
+        String oldStruct = uniformStructOfProbe(tmp.resolve("old"), SATURATION_THEN_HUE);
+        Path gensrc = tmp.resolve("gensrc");
+        Path outDir = gensrc.resolve("jsl-decora");
+        Path decoraHeader = gensrc.resolve("mtl-headers").resolve(DECORA_HEADER);
+        JSLCInfo run = newRun(outDir, gensrc.resolve("mtl-headers"), DECORA);
+        compile(run, "Probe", HUE_THEN_SATURATION, OUT_OF_DATE);
+        finish(run);
+        String firstRunHeader = Files.readString(decoraHeader);
+        Files.delete(decoraHeader);
+        Path metal = metalFile(outDir, "Probe");
+        String shader = Files.readString(metal);
+        String structEnd = "} Probe_Uniforms;\n";
+        int afterTheStruct = shader.indexOf(structEnd) + structEnd.length();
+        Files.writeString(metal,
+                shader.substring(0, afterTheStruct) + "/*\n" + oldStruct + "*/\n" + shader.substring(afterTheStruct));
+
+        JSLCInfo rerun = newRun(outDir, gensrc.resolve("mtl-headers"), DECORA);
+        compile(rerun, "Probe", NOT_JSL, UP_TO_DATE);
+        finish(rerun);
+
+        assertEquals(firstRunHeader, Files.readString(decoraHeader));
     }
 
     @Test
@@ -422,6 +617,28 @@ public class MetalHeadersTest {
         for (String shaderName : List.of("ProbeA", "ProbeB")) {
             Path metal = metalFile(outDir, shaderName);
             assertNotEquals(AGED, Files.getLastModifiedTime(metal), metal + " was not compiled again");
+        }
+    }
+
+    @Test
+    public void aRunWithForceWritesEveryOutputAgainThoughNothingIsOutOfDate() throws Exception {
+        Path gensrc = tmp.resolve("gensrc");
+        Path outDir = gensrc.resolve("jsl-decora");
+        probeRun(outDir, gensrc.resolve("mtl-headers"), OUT_OF_DATE, OUT_OF_DATE);
+        ageEveryFile(tmp);
+        Map<Path, FileState> firstRun = snapshot(tmp);
+
+        JSLCInfo forced = newRun(outDir, gensrc.resolve("mtl-headers"), DECORA);
+        forced.force = true;
+        compile(forced, "ProbeA", SAMPLING, UP_TO_DATE);
+        compile(forced, "ProbeB", UNTEXTURED, UP_TO_DATE);
+        finish(forced);
+
+        for (String shaderName : List.of("ProbeA", "ProbeB")) {
+            for (Path output : outputsOf(outDir, shaderName)) {
+                assertNotEquals(AGED, Files.getLastModifiedTime(output), output + " was not written again");
+                assertEquals(firstRun.get(output).content(), Files.readString(output), output.toString());
+            }
         }
     }
 
@@ -661,6 +878,136 @@ public class MetalHeadersTest {
                 "float4Tint", "float2Scale", "float3Glow", "vector_float2x", "vector_float4s", "opacity", "UNUSED");
     }
 
+    @Test
+    public void upToDateMetalShadersWithUniformsThatAnEarlierCompilerRenamedGetTheOutputsOfACleanRun()
+            throws Exception {
+        List<LegacyShader> shaders = List.of(
+                new LegacyShader("Scale", A_FLOAT2_NAME, SCALE_METAL_OF_0281B2FDE8,
+                        "float2Scale", "float2x", "opacity", "UNUSED"),
+                new LegacyShader("Glow", A_FLOAT3_NAME, GLOW_METAL_OF_0281B2FDE8, "float3Glow", "opacity", "UNUSED"),
+                new LegacyShader("Tint", A_FLOAT4_NAME, TINT_METAL_OF_0281B2FDE8, "opacity", "float4Tint", "UNUSED"),
+                new LegacyShader("Helper", A_UNIFORM_NAMED_LIKE_A_HELPER, HELPER_METAL_OF_0281B2FDE8,
+                        "opacity", "offset", "UNUSED"),
+                new LegacyShader("Parts", NAMES_AND_PARTS_NAMED_LIKE_FUNCTIONS, PARTS_METAL_OF_0281B2FDE8,
+                        "level$gain", "gain$level", "main", "UNUSED"),
+                new LegacyShader("Dollar", A_PART_NAMED_LIKE_A_HELPER, DOLLAR_METAL_OF_0281B2FDE8,
+                        "level$gain", "opacity", "UNUSED"),
+                new LegacyShader("Sampled", SAMPLE_TEX_BESIDE_A_SAMPLER, SAMPLED_METAL_OF_0281B2FDE8,
+                        "img", "sampleTex"),
+                new LegacyShader("Typed", A_HELPER_NAMED_LIKE_THE_TEXTURE_TYPE, TYPED_METAL_OF_0281B2FDE8,
+                        "img", "opacity"),
+                new LegacyShader("Dropped", FLOAT2_NAMES_AND_A_DROPPED_UNIFORM, DROPPED_METAL_OF_0281B2FDE8,
+                        "float2x", "float2y", "at", "UNUSED"));
+        Path gensrc = tmp.resolve("gensrc");
+        Path outDir = gensrc.resolve("jsl-decora");
+        Path headerDir = gensrc.resolve("mtl-headers");
+        for (LegacyShader shader : shaders) {
+            Path metal = metalFile(outDir, shader.name());
+            Files.createDirectories(metal.getParent());
+            Files.writeString(metal, shader.metalOf0281b2fde8());
+        }
+        ageEveryFile(tmp);
+
+        JSLCInfo run = newRun(outDir, headerDir, DECORA);
+        run.outTypes = JSLC.OUT_MTL;
+        for (LegacyShader shader : shaders) {
+            compile(run, shader.name(), shader.program(), UP_TO_DATE);
+        }
+        finish(run);
+
+        Path cleanGensrc = tmp.resolve("clean/gensrc");
+        JSLCInfo clean = newRun(cleanGensrc.resolve("jsl-decora"), cleanGensrc.resolve("mtl-headers"), DECORA);
+        clean.outTypes = JSLC.OUT_MTL;
+        for (LegacyShader shader : shaders) {
+            compile(clean, shader.name(), shader.program(), OUT_OF_DATE);
+        }
+        finish(clean);
+        for (LegacyShader shader : shaders) {
+            String cleanShader = Files.readString(metalFile(cleanGensrc.resolve("jsl-decora"), shader.name()));
+            assertNotEquals(shader.metalOf0281b2fde8(), cleanShader, shader.name());
+            assertEquals(cleanShader, Files.readString(metalFile(outDir, shader.name())), shader.name());
+        }
+        for (String headerName : List.of(FRAGMENT_HEADER, DECORA_HEADER)) {
+            assertArrayEquals(Files.readAllBytes(cleanGensrc.resolve("mtl-headers").resolve(headerName)),
+                    Files.readAllBytes(headerDir.resolve(headerName)), headerName);
+        }
+        String header = Files.readString(headerDir.resolve(DECORA_HEADER));
+        for (LegacyShader shader : shaders) {
+            assertUniformNames(header, shader.name(), shader.jslNames());
+        }
+
+        ageEveryFile(gensrc);
+        Map<Path, FileState> upgraded = snapshot(gensrc);
+        JSLCInfo rerun = newRun(outDir, headerDir, DECORA);
+        rerun.outTypes = JSLC.OUT_MTL;
+        for (LegacyShader shader : shaders) {
+            compile(rerun, shader.name(), NOT_JSL, UP_TO_DATE);
+        }
+        finish(rerun);
+        assertUnchanged(upgraded, snapshot(gensrc));
+    }
+
+    @Test
+    public void aRerunWithNothingChangedKeepsMetalShadersWhoseJslNamesLookRenamedAndParsesNoOtherProgram()
+            throws Exception {
+        Path gensrc = tmp.resolve("gensrc");
+        Path outDir = gensrc.resolve("jsl-decora");
+        Path headerDir = gensrc.resolve("mtl-headers");
+        Path decoraHeader = headerDir.resolve(DECORA_HEADER);
+        JSLCInfo run = newRun(outDir, headerDir, DECORA);
+        compile(run, "Floats", NAMES_THAT_START_WITH_A_TYPE, OUT_OF_DATE);
+        compile(run, "LookRenamed", NAMES_THAT_LOOK_RENAMED, OUT_OF_DATE);
+        compile(run, "Near", NAMES_NEAR_A_RENAME, OUT_OF_DATE);
+        compile(run, "ProbeB", UNTEXTURED, OUT_OF_DATE);
+        finish(run);
+        ageEveryFile(tmp);
+        String firstRunHeader = Files.readString(decoraHeader);
+        Files.delete(decoraHeader);
+        Map<Path, FileState> firstRun = snapshot(tmp);
+
+        JSLCInfo rerun = newRun(outDir, headerDir, DECORA);
+        compile(rerun, "Floats", NAMES_THAT_START_WITH_A_TYPE, UP_TO_DATE);
+        compile(rerun, "LookRenamed", NAMES_THAT_LOOK_RENAMED, UP_TO_DATE);
+        compile(rerun, "Near", NOT_JSL, UP_TO_DATE);
+        compile(rerun, "ProbeB", NOT_JSL, UP_TO_DATE);
+        finish(rerun);
+
+        assertEquals(firstRunHeader, Files.readString(decoraHeader));
+        assertUniformNames(firstRunHeader, "Floats",
+                "float4Tint", "float2Scale", "float3Glow", "vector_float2x", "vector_float4s", "opacity", "UNUSED");
+        assertUniformNames(firstRunHeader, "LookRenamed", "LookRenamed_level", "vector_float3w", "opacity", "UNUSED");
+        Map<Path, FileState> secondRun = snapshot(tmp);
+        secondRun.remove(decoraHeader);
+        assertUnchanged(firstRun, secondRun);
+    }
+
+    @Test
+    public void uniformsWhoseNamesOccurInEarlierMemberLinesAreAllInTheStructAndTheHeader() throws Exception {
+        Path gensrc = tmp.resolve("gensrc");
+        Path outDir = gensrc.resolve("jsl-decora");
+        JSLCInfo run = newRun(outDir, gensrc.resolve("mtl-headers"), DECORA);
+        run.outTypes = JSLC.OUT_MTL;
+        compile(run, "Substrings", NAMES_IN_EARLIER_MEMBERS, OUT_OF_DATE);
+        finish(run);
+
+        String struct = """
+            #include "FragmentShaderCommon.h"
+
+            typedef struct Substrings_Uniforms {
+                float opacity;
+                texture2d<float> img;
+                float at;
+                float g;
+                float pacity;
+                float exture;
+            } Substrings_Uniforms;
+            """;
+        String shader = Files.readString(metalFile(outDir, "Substrings"));
+        assertTrue(shader.startsWith(struct), shader);
+        assertUniformNames(Files.readString(gensrc.resolve("mtl-headers").resolve(DECORA_HEADER)), "Substrings",
+                "opacity", "img", "at", "g", "pacity", "exture");
+    }
+
     private void assertASecondRunWithOneShaderOutOfDateKeepsTheHeadersOfBoth(Path outDir, Path headerDir)
             throws Exception {
         probeRun(outDir, headerDir, OUT_OF_DATE, OUT_OF_DATE);
@@ -738,6 +1085,15 @@ public class MetalHeadersTest {
         compile(clean, "ProbeB", programB, OUT_OF_DATE);
         finish(clean);
         return Files.readString(cleanGensrc.resolve("mtl-headers").resolve(DECORA_HEADER));
+    }
+
+    private static String uniformStructOfProbe(Path gensrc, String program) throws Exception {
+        Path outDir = gensrc.resolve("jsl-decora");
+        compile(newRun(outDir, gensrc.resolve("mtl-headers"), DECORA), "Probe", program, OUT_OF_DATE);
+        String shader = Files.readString(metalFile(outDir, "Probe"));
+        String structEnd = "} Probe_Uniforms;\n";
+        return shader.substring(shader.indexOf("typedef struct Probe_Uniforms {\n"),
+                shader.indexOf(structEnd) + structEnd.length());
     }
 
     private static Path metalFile(Path outDir, String shaderName) {
@@ -843,6 +1199,9 @@ public class MetalHeadersTest {
     }
 
     private record FileState(FileTime modified, String content) {
+    }
+
+    private record LegacyShader(String name, String program, String metalOf0281b2fde8, String... jslNames) {
     }
 
     // The headers the compiler of 0281b2fde8 wrote for SAMPLING, UNTEXTURED, ARRAYS, INT_AND_FLOAT4, PRECISIONS,
@@ -1201,6 +1560,224 @@ public class MetalHeadersTest {
         float4 paintColor = Helpers_paint(sampler0, uniforms, in.texCoord0);
         float coverage = Helpers_mask(sampler0, uniforms, in.texCoord0, in.texCoord1);
         outFragColor = paintColor * coverage + Helpers_SampleTexture(sampler0, uniforms.img, in.texCoord1);
+        return outFragColor;
+
+        }
+        """;
+
+    // The Metal shaders the compiler of 0281b2fde8 wrote for A_FLOAT2_NAME, A_FLOAT3_NAME, A_FLOAT4_NAME,
+    // A_UNIFORM_NAMED_LIKE_A_HELPER, NAMES_AND_PARTS_NAMED_LIKE_FUNCTIONS, A_PART_NAMED_LIKE_A_HELPER,
+    // SAMPLE_TEX_BESIDE_A_SAMPLER, A_HELPER_NAMED_LIKE_THE_TEXTURE_TYPE and FLOAT2_NAMES_AND_A_DROPPED_UNIFORM, under
+    // the shader names Scale, Glow, Tint, Helper, Parts, Dollar, Sampled, Typed and Dropped. The compiler of a8d6688172
+    // wrote the same bytes.
+    private static final String SCALE_METAL_OF_0281B2FDE8 = """
+        #include "FragmentShaderCommon.h"
+
+        typedef struct Scale_Uniforms {
+            vector_float2 vector_float2Scale;
+            float vector_float2x;
+            float opacity;
+            texture2d<float> UNUSED;
+        } Scale_Uniforms;
+
+
+        [[fragment]] float4 Scale(VS_OUTPUT in [[ stage_in ]],
+            device Scale_Uniforms& uniforms [[ buffer(0) ]]) {
+
+        float4 outFragColor;
+        outFragColor = float4(uniforms.opacity, uniforms.opacity, uniforms.opacity, uniforms.opacity);
+        return outFragColor;
+
+        }
+        """;
+
+    private static final String GLOW_METAL_OF_0281B2FDE8 = """
+        #include "FragmentShaderCommon.h"
+
+        typedef struct Glow_Uniforms {
+            vector_float3 vector_float3Glow;
+            float opacity;
+            texture2d<float> UNUSED;
+        } Glow_Uniforms;
+
+
+        [[fragment]] float4 Glow(VS_OUTPUT in [[ stage_in ]],
+            device Glow_Uniforms& uniforms [[ buffer(0) ]]) {
+
+        float4 outFragColor;
+        outFragColor = float4(uniforms.opacity, uniforms.opacity, uniforms.opacity, uniforms.opacity);
+        return outFragColor;
+
+        }
+        """;
+
+    private static final String TINT_METAL_OF_0281B2FDE8 = """
+        #include "FragmentShaderCommon.h"
+
+        typedef struct Tint_Uniforms {
+            float opacity;
+            vector_float4 vector_float4Tint;
+            texture2d<float> UNUSED;
+        } Tint_Uniforms;
+
+
+        [[fragment]] float4 Tint(VS_OUTPUT in [[ stage_in ]],
+            device Tint_Uniforms& uniforms [[ buffer(0) ]]) {
+
+        float4 outFragColor;
+        outFragColor = float4(uniforms.opacity, uniforms.opacity, uniforms.opacity, uniforms.opacity);
+        return outFragColor;
+
+        }
+        """;
+
+    private static final String HELPER_METAL_OF_0281B2FDE8 = """
+        #include "FragmentShaderCommon.h"
+
+        typedef struct Helper_Uniforms {
+            float Helper_opacity;
+            vector_float2 offset;
+            texture2d<float> UNUSED;
+        } Helper_Uniforms;
+
+        float Helper_opacity(device Helper_Uniforms& uniforms,
+        float x) {
+        return x * 0.5;
+        }
+
+        [[fragment]] float4 Helper(VS_OUTPUT in [[ stage_in ]],
+            device Helper_Uniforms& uniforms [[ buffer(0) ]]) {
+
+        float4 outFragColor;
+        float o = Helper_opacity(uniforms, uniforms.Helper_opacity);
+        outFragColor = float4(o, uniforms.offset.x, uniforms.offset.y, 1.0);
+        return outFragColor;
+
+        }
+        """;
+
+    private static final String PARTS_METAL_OF_0281B2FDE8 = """
+        #include "FragmentShaderCommon.h"
+
+        typedef struct Parts_Uniforms {
+            float level$Parts_gain;
+            float Parts_gain$level;
+            float Parts_main;
+            texture2d<float> Parts_UNUSED;
+        } Parts_Uniforms;
+
+        float Parts_gain(device Parts_Uniforms& uniforms,
+        float x) {
+        return x * 2.0;
+        }
+        float Parts_UNUSED(device Parts_Uniforms& uniforms,
+        float x) {
+        return x;
+        }
+
+        [[fragment]] float4 Parts(VS_OUTPUT in [[ stage_in ]],
+            device Parts_Uniforms& uniforms [[ buffer(0) ]]) {
+
+        float4 outFragColor;
+        float v = Parts_gain(uniforms, Parts_UNUSED(uniforms, 0.5));
+        outFragColor = float4(v, v, v, 1.0);
+        return outFragColor;
+
+        }
+        """;
+
+    private static final String DOLLAR_METAL_OF_0281B2FDE8 = """
+        #include "FragmentShaderCommon.h"
+
+        typedef struct Dollar_Uniforms {
+            float level$Dollar_gain;
+            float opacity;
+            texture2d<float> UNUSED;
+        } Dollar_Uniforms;
+
+        float Dollar_gain(device Dollar_Uniforms& uniforms,
+        float x) {
+        return x * 2.0;
+        }
+
+        [[fragment]] float4 Dollar(VS_OUTPUT in [[ stage_in ]],
+            device Dollar_Uniforms& uniforms [[ buffer(0) ]]) {
+
+        float4 outFragColor;
+        float v = Dollar_gain(uniforms, uniforms.opacity);
+        outFragColor = float4(v, v, v, 1.0);
+        return outFragColor;
+
+        }
+        """;
+
+    private static final String SAMPLED_METAL_OF_0281B2FDE8 = """
+        #include "FragmentShaderCommon.h"
+
+        typedef struct Sampled_Uniforms {
+            texture2d<float> img;
+            float Sampled_SampleTexture;
+        } Sampled_Uniforms;
+
+        float4 Sampled_SampleTexture(sampler textureSampler, texture2d<float> colorTexture, float2 texCoord) {
+            return colorTexture.sample(textureSampler, texCoord);
+        }
+
+
+        [[fragment]] float4 Sampled(VS_OUTPUT in [[ stage_in ]],
+            device Sampled_Uniforms& uniforms [[ buffer(0) ]],
+            sampler sampler0 [[ sampler(0) ]]) {
+
+        float4 outFragColor;
+        outFragColor = Sampled_SampleTexture(sampler0, uniforms.img, in.texCoord0);
+        return outFragColor;
+
+        }
+        """;
+
+    private static final String TYPED_METAL_OF_0281B2FDE8 = """
+        #include "FragmentShaderCommon.h"
+
+        typedef struct Typed_Uniforms {
+            Typed_texture2d<float> img;
+            float opacity;
+        } Typed_Uniforms;
+
+        float4 Typed_SampleTexture(sampler textureSampler, Typed_texture2d<float> colorTexture, float2 texCoord) {
+            return colorTexture.sample(textureSampler, texCoord);
+        }
+
+        float4 Typed_texture2d(sampler sampler0, device Typed_Uniforms& uniforms,
+        float2 tco) {
+        return Typed_SampleTexture(sampler0, uniforms.img, tco) * uniforms.opacity;
+        }
+
+        [[fragment]] float4 Typed(VS_OUTPUT in [[ stage_in ]],
+            device Typed_Uniforms& uniforms [[ buffer(0) ]],
+            sampler sampler0 [[ sampler(0) ]]) {
+
+        float4 outFragColor;
+        outFragColor = Typed_texture2d(sampler0, uniforms, in.texCoord0);
+        return outFragColor;
+
+        }
+        """;
+
+    private static final String DROPPED_METAL_OF_0281B2FDE8 = """
+        #include "FragmentShaderCommon.h"
+
+        typedef struct Dropped_Uniforms {
+            float vector_float2x;
+            float vector_float2y;
+            texture2d<float> UNUSED;
+        } Dropped_Uniforms;
+
+
+        [[fragment]] float4 Dropped(VS_OUTPUT in [[ stage_in ]],
+            device Dropped_Uniforms& uniforms [[ buffer(0) ]]) {
+
+        float4 outFragColor;
+        outFragColor = float4(0.0, 0.0, 0.0, 0.0);
         return outFragColor;
 
         }

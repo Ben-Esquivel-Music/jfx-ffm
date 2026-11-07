@@ -1,6 +1,6 @@
 # US-018 — Stop the jslc Metal backend depending on `jsl-` in the output path and on static state
 
-**Status:** 🔷 Implemented (2026-11-05) in `a8d6688172` (PR 50), with the PR 50 review fix uncommitted · **Found:** 2026-09-27, US-008 (review of the jslc test port: `SymbolTest` would have passed for any program that parses, because the Metal backend threw)
+**Status:** 🔷 Implemented (2026-11-05) in `a8d6688172` (PR 50) and `ba2b68e991` (the fix for the first PR 50 review round), with the fix for the second review round uncommitted · **Found:** 2026-09-27, US-008 (review of the jslc test port: `SymbolTest` would have passed for any program that parses, because the Metal backend threw)
 
 ## Story
 As a maintainer who builds `javafx.graphics` on macOS, or who runs the JSL compiler from a test or a tool,
@@ -271,14 +271,23 @@ Each case runs in a new JVM:
   native check.
 
 ## Implementation (2026-11-05, macOS)
-The story's change is commit `a8d6688172` on the PR 50 branch, made on `0281b2fde8`. The fix for the PR 50 review is
-uncommitted at the time of writing. This section describes the final state, the story commit with that fix. Its
-evidence was taken on 2026-11-06 on the final state; a result dated 2026-11-05 was taken when the story was written.
-Below, HEAD is `0281b2fde8`, as when the story was written. Everything was built and tested on macOS 27.0.1 (arm64) with
-Apache Maven 3.10.0 and Oracle JDK 27.0.1. This host has no Windows and no Linux, so those gates are
-[owner-run](#owner-run-and-pending). They expect the final state, so their `<US-018 commit>` must hold the review fix:
-`a8d6688172` alone runs 182 jslc tests, with `MetalHeadersTest` at 19, where the gates expect 190 and 27. Until a
-commit with the fix is pushed, F8.1 to F8.3 run on the patch that the owner-run recipe makes from the working tree.
+The story's change is commit `a8d6688172` on the PR 50 branch, made on `0281b2fde8`. The fix for the first PR 50
+review round is commit `ba2b68e991`; the fix for the second round is uncommitted at the time of writing. This section
+describes the final state, `ba2b68e991` with the round-2 fix. A result dated 2026-11-05 was taken when the story was
+written, one dated 2026-11-06 on the content of `ba2b68e991` before it was committed, and one dated 2026-11-07 on the
+round-2 fix. The last change of that fix removed a set of uniform names from `MSLBackend`, whose `add` always returned
+true, since the JSL symbol table rejects a second declaration of a name. Of the results dated 2026-11-07, F1, F2, the
+jslc suite in default and random method order and the clean generator run outside Maven were taken on the final
+state, after that removal. The others were taken just before it, and those of the fix itself on what this story calls
+the round-2 tree. The removal cannot change their outputs: F1's per-class lines, generated files and natives and that
+clean run are the same as the round-2 tree's. Below, HEAD is `0281b2fde8`, as when the story was written. Everything
+was built and tested on one arm64 Mac with Apache Maven 3.10.0 and Oracle JDK 27.0.1: on macOS 27.0.1 for the results
+dated 2026-11-05 and 2026-11-06, and on macOS 27.2 (build 26B123) for those dated 2026-11-07 (see
+[F3](#final-gates-2026-11-05-macos)). This host has no Windows and no Linux, so those gates are
+[owner-run](#owner-run-and-pending). They expect the final state, so their `<US-018 commit>` must hold the round-2 fix:
+`ba2b68e991` alone runs 190 jslc tests, with `MetalHeadersTest` at 27, and `a8d6688172` 182 and 19, where the gates
+expect 196 and 33. Until a commit with the round-2 fix is pushed, F8.1 to F8.3 run on the patch that the owner-run
+recipe makes from the working tree.
 
 ### Change
 Relative to `0281b2fde8`:
@@ -289,16 +298,20 @@ Relative to `0281b2fde8`:
   go to the directory the file system resolves the path to, as every other output does: the path is not normalized,
   and two paths that resolve to one directory name the same header directory in one run.
 - The new `backend/hw/MetalHeaders.java` holds the headers of one generator run. `JSLC.compile` adds every Metal
-  shader of the run to it with its `.metal` file, compiled or up to date. `MetalHeaders` reads the shader's
-  Objective-C header entry (the argument buffer ID enum, the uniform struct with Objective-C types and the uniform
-  dictionary function) from the `typedef struct <Shader>_Uniforms { … } <Shader>_Uniforms;` block that `MSLBackend`
-  wrote into that `.metal`. So the program of an up-to-date shader is not parsed, and the header matches the `.metal`
-  files the Metal library is built from, whichever run or output root wrote the header before. `GenAllDecoraShaders`
-  shares one run among the drivers it calls.
-- A struct member is read only in the form `MSLBackend` writes: four spaces, an optional precision, a type, the
-  uniform's JSL identifier (`$` included), an optional array size and `;`. A missing or cut struct, or a member in any
-  other form, as a hand edit can give, fails the run with `Cannot read <Shader>_Uniforms from the Metal shader
-  <path>`. The 262 shaders of the build all pass this check.
+  shader of the run to it, compiled or up to date. A shader's Objective-C header entry (the argument buffer ID enum,
+  the uniform struct with Objective-C types and the uniform dictionary function) comes from the
+  `typedef struct <Shader>_Uniforms { … } <Shader>_Uniforms;` block that `MSLBackend` writes into the `.metal`: from
+  the text just written for a compiled shader, and from the `.metal` file for an up-to-date one. So the program of an
+  up-to-date shader is not parsed, and the header matches the `.metal` files the Metal library is built from,
+  whichever run or output root wrote the header before. The exception is an up-to-date `.metal` whose struct may hold
+  a member that an earlier compiler renamed: that shader is compiled again (review round 2 below).
+  `GenAllDecoraShaders` shares one run among the drivers it calls.
+- An up-to-date `.metal` is read only when it starts exactly as `MSLBackend` writes it: the line
+  `#include "FragmentShaderCommon.h"`, an empty line and `typedef struct <Shader>_Uniforms {`. The struct runs to the
+  first `} <Shader>_Uniforms;` line. A struct member is read only in the form `MSLBackend` writes: four spaces, an
+  optional precision, a type, the uniform's JSL identifier (`$` included), an optional array size and `;`. Any other
+  start, a cut struct or a member in any other form, as a hand edit can give, fails the run with `Cannot read
+  <Shader>_Uniforms from the Metal shader <path>`. The 262 shaders of the build all pass this check.
 - `MetalHeaders.write()` runs once at the end of a run: in `JSLC.main`, `GenAllDecoraShaders`, the Prism `CompileJSL`
   and the `main` of every Decora driver, so a driver run by hand writes its headers too. It creates the directory and
   writes `FragmentShaderCommon.h` and the Objective-C header, which it assembles from every shader's entry on every
@@ -308,11 +321,12 @@ Relative to `0281b2fde8`:
 - `MSLBackend` writes only the `.metal` file and keeps no per-compile or per-run data in static fields. Its static
   fields are `MAIN` and four immutable maps, all `static final`. Its `float2`, `float3` and `float4` rewrites match the
   type with the space after it, and it renames a helper function or `sampleTex` only where it is called or defined, so
-  every struct member keeps its uniform's JSL name, the name the Java peer sets.
+  every struct member keeps its uniform's JSL name, the name the Java peer sets. Every uniform the program declares
+  is in the struct.
 - Every changed production file is under 900 lines; the largest, `src/main/jsl-prism/CompileJSL.java`, has 565.
-  `MetalHeaders.java` has 334, `MSLBackend.java` 359 and `JSLC.java` 455.
+  `MetalHeaders.java` has 403, `MSLBackend.java` 356 and `JSLC.java` 473.
 
-**The PR 50 review fix,** relative to `a8d6688172`:
+**The PR 50 review, round 1,** relative to `a8d6688172` (commit `ba2b68e991`):
 - **The review comment** (Copilot, on `MetalHeaders.java:139`, `listsThisRun`): compile `Foo` with other uniforms
   into roots A and B that share a header directory, then rerun A with its `.metal` up to date. The story commit did
   not assemble a header again when no shader was compiled and the file started with the kind's prologue and ended with
@@ -335,7 +349,73 @@ Relative to `0281b2fde8`:
   uniform named like a helper function, a uniform named `sampleTex` beside a sampler, and uniforms whose names start
   with `float2`, `float3` or `float4` keep their JSL names in the struct, where `0281b2fde8` renamed them. Their header
   IDs and dictionary keys are the JSL names on all three trees; in the header only the typedef members differ, which
-  no native code uses. The 1,059 files the build generates are unchanged.
+  no native code uses. The 1,059 files the build generates are unchanged. That holds for a clean run: over an
+  up-to-date `.metal` that `0281b2fde8` or `a8d6688172` wrote for such a program, `ba2b68e991` keys the renamed member
+  (C1 of round 2).
+
+**The PR 50 review, round 2,** relative to `ba2b68e991` (Copilot, 2026-11-07; uncommitted):
+- **C2, a commented-out struct** (on `MetalHeaders.java:148-149`). `ba2b68e991` looked for
+  `typedef struct <Shader>_Uniforms {` anywhere in an up-to-date `.metal`. With the old struct in a block comment
+  before the active one, it read the commented layout, so a reordering of the active uniforms left stale argument IDs
+  in the header, and the run succeeded. Now `MetalHeaders` reads a `.metal` only when it starts with the generated
+  include line, empty line and typedef line, and takes the struct to the first end line ([Change](#change) above).
+  Any other start fails with the `IOException` that names the file, since no compiler version writes one.
+  `MSLBackend.getHeader` builds those lines with `MetalHeaders.metalShaderStart` and `uniformStructEnd`, so the writer
+  and the reader share one definition. The review's case through `GenAllDecoraShaders` is in
+  [Generator runs](#generator-runs). Tests:
+  `anUpToDateMetalShaderWithItsOldUniformStructCommentedOutBeforeItFailsNamingIt` (the review's case, and the same
+  behind a start exactly as long as the generated one, so that only the check of the start rejects it),
+  `aMetalShaderWhoseUniformStructCannotBeReadFailsNamingIt` with seven more starts, and
+  `anUpToDateMetalShaderWithItsOldUniformStructCommentedOutAfterItGetsTheEntryOfItsStruct`.
+- **C1, members an earlier compiler renamed** (on `JSLC.java:226`). `JSLC.compile` handed every up-to-date `.metal`
+  to `MetalHeaders` as it was. `0281b2fde8` and `a8d6688172` renamed some struct members: they put `vector_` before a
+  name that starts with `float2`, `float3` or `float4`, put `<Shader>_` before each word of the struct that names a
+  function the program defines (a name, a part of a name that a `$` separates, `main`, `UNUSED` or a type such as
+  `texture2d`), and turned `sampleTex` into `<Shader>_SampleTexture`. Over such an output, without `clean`,
+  `ba2b68e991` keyed the renamed member, for example `level$Dollar_gain` for the uniform `level$gain`, while the Java
+  peer sets the JSL name. `MTLShader.setConstant` passes `uniformNameIdMap.get(name)` as an `int`
+  (`src/main/java/com/sun/prism/mtl/MTLShader.java:144`), so that setter throws a `NullPointerException`.
+  - Now an up-to-date `.metal` whose struct may hold such a member is not read as it is: a member's name starts with
+    `vector_float2`, `vector_float3` or `vector_float4`, or the member text contains `<Shader>_`. `JSLC` compiles that
+    shader's program again and takes the entry from the result.
+  - In this path the `.metal` is written only when its bytes change, so a current output whose JSL names only look
+    renamed keeps its bytes and time. `-force` and out-of-date outputs are still written unconditionally, and a
+    compiled shader's entry comes from the text just written, even when the test holds.
+  - The test is false for all 262 shaders of the build, so a rerun with nothing changed still parses no program.
+  - Tests: `upToDateMetalShadersWithUniformsThatAnEarlierCompilerRenamedGetTheOutputsOfACleanRun` lays down 9 `.metal`
+    files captured from `0281b2fde8` (`a8d6688172` writes the same bytes), at least one per kind of rename, as
+    up-to-date outputs, and gets a clean run's `.metal` files and headers.
+    `aRerunWithNothingChangedKeepsMetalShadersWhoseJslNamesLookRenamedAndParsesNoOtherProgram` and
+    `aRunWithForceWritesEveryOutputAgainThoughNothingIsOutOfDate` pin the write rules.
+- **A dropped uniform,** found while tracing C1. `MSLBackend` left a uniform out of the struct when its name occurred
+  anywhere in the struct text before it, types included: `at` after any `float` member, `g` after
+  `texture2d<float> img`. A uniform that the shader body never uses passes the Metal compiler, so `ba2b68e991`'s header
+  had no key for it, and the peer's setter threw the same `NullPointerException`. `0281b2fde8`, whose header came from
+  the program, failed to compile `MetalShader.m` for `g` and bound `at` to the slot of another member. Now the
+  substring test is gone and every declared uniform is appended to the struct. No uniform can occur twice: the JSL
+  symbol table rejects a second declaration of a name. Test:
+  `uniformsWhoseNamesOccurInEarlierMemberLinesAreAllInTheStructAndTheHeader`.
+- **Removed:** `MetalHeaders.add(String, File)`. **Added:** `MetalHeaders.add(String, File, String)` for a compiled
+  shader; `addUnlessRenamed(String, File)` for an up-to-date one, which returns false when the struct may hold a
+  renamed member; the package-private `metalShaderStart` and `uniformStructEnd`; and `JSLC`'s private
+  `writeIfChanged`. `FRAGMENT_SHADER_HEADER_FILE_NAME` is private now.
+- **Cost:** none measured. A rerun with nothing changed takes 1449.4 ms of main time on the round-2 tree and
+  1497.1 ms on `ba2b68e991` ([Generator runs](#generator-runs)). The up-to-date path reads each `.metal` file once, as
+  before, and a compiled shader's file is no longer read back.
+- **Accepted:**
+  - A legacy `.metal` whose struct passes the test can differ from a current one in its body, for example where a
+    local variable is named like a helper function. Its struct, and so its header entry, is right, and the Metal
+    library is built from that same file.
+  - A legacy `.metal` that lost a uniform to the old substring test keeps it out after an upgrade without `clean`, if
+    its struct passes the test. From `param float opacity; param float at;`, `0281b2fde8` writes the struct
+    `float opacity; texture2d<float> UNUSED;` and a header with `At_at_ID = 1`, the slot of `UNUSED`. The final state
+    keeps that `.metal` and writes only the keys `opacity` and `UNUSED`, so setting `at` throws. A clean build or an
+    edit of the `.jsl` file gives the full struct. Such a struct that fails the test is compiled again and repaired:
+    the legacy shader `Dropped` of the C1 test, with `float2x`, `float2y` and `at`.
+  - `0281b2fde8` and `a8d6688172` also renamed a word of the include or typedef line (for a helper function named `h`,
+    `include`, `typedef`, `struct` or `FragmentShaderCommon`) or a precision (for one named `LOWP`, `MEDIUMP` or
+    `HIGHP`). The Metal compiler rejects every such file, so it exists only after a failed build. Such a file fails
+    naming it, as any other start does; deleting it, or a clean build, ends that.
 
 ### Acceptance criteria and evidence
 | Criterion | Evidence | State |
@@ -344,21 +424,44 @@ Relative to `0281b2fde8`:
 | A path without `jsl-` works | `aPathWithoutJslGetsTheMetalShaderThePeersAndTheHeaders` ([Tests](#tests)) | Met |
 | No carry-over between compiles | `twoOutputRootsInOneJvmGetTheirOwnCompleteHeaders`, `aPrismRunAfterADecoraRunGetsAPrismHeaderWithOnlyItsShader`, `anEarlierJslInThePathDoesNotMoveTheHeaders` | Met |
 | Write errors fail | `aHeaderDirectoryThatCannotBeCreatedFailsNamingIt`, `aHeaderThatCannotBeWrittenFailsNamingIt`; both generators exit 1 ([Generator runs](#generator-runs)) | Met |
-| Incremental runs keep complete headers | `aSecondRunWithOneShaderOutOfDateKeepsTheHeadersOfBoth` and its `jsl-decora` twin; for the entries, `aShaderRecompiledWithOtherUniformsGetsItsNewEntryInTheHeader`, `aShaderWrittenByARunThatStoppedBeforeItsHeadersGetsItsEntryInTheNextRun` and the review comment's `aHeaderThatListsTheSameShadersWithTheirUniformsInAnotherOrderIsWrittenAgain`; the generators outside Maven; F5 and F7 | Met on macOS; the Windows run (F8.1) is owner-run |
-| Generated files unchanged | The generators outside Maven and Maven, both with `-d3d -es2 -mtl` ([Generator runs](#generator-runs)); F2 and F4; the goldens of `aDecoraRunWritesTheHeadersOfTheCompilerBeforeThisStory` and `aShaderWithHelperFunctionsGetsTheMetalShaderOfTheCompilerBeforeThisStory`, captured from `0281b2fde8`'s compiler | Met |
-| Build gate | F1 on macOS; Windows (F8.2) and WSL (F8.3) | Met on macOS; Windows and WSL owner-run |
-| macOS | F4, F5 and F6 | Met |
+| Incremental runs keep complete headers | `aSecondRunWithOneShaderOutOfDateKeepsTheHeadersOfBoth` and its `jsl-decora` twin; for the entries, `aShaderRecompiledWithOtherUniformsGetsItsNewEntryInTheHeader`, `aShaderWrittenByARunThatStoppedBeforeItsHeadersGetsItsEntryInTheNextRun` and the review comment's `aHeaderThatListsTheSameShadersWithTheirUniformsInAnotherOrderIsWrittenAgain`; for outputs an earlier compiler wrote, `upToDateMetalShadersWithUniformsThatAnEarlierCompilerRenamedGetTheOutputsOfACleanRun` (review round 2); the generators outside Maven, including the upgrade without `clean` over the outputs of `0281b2fde8` and `a8d6688172`; F5 (2026-11-07) and F7 | Met on macOS; the Windows run (F8.1) is owner-run |
+| Generated files unchanged | The generators outside Maven, on 2026-11-07 on the final state (the clean run), the round-2 tree, `ba2b68e991`, `a8d6688172` and `0281b2fde8`, and Maven on 2026-11-06 on the content of `ba2b68e991`, both with `-d3d -es2 -mtl` ([Generator runs](#generator-runs)); F2 and F4 (2026-11-07); the goldens of `aDecoraRunWritesTheHeadersOfTheCompilerBeforeThisStory` and `aShaderWithHelperFunctionsGetsTheMetalShaderOfTheCompilerBeforeThisStory`, captured from `0281b2fde8`'s compiler and unchanged by review round 2 | Met |
+| Build gate | F1 on macOS (2026-11-07); Windows (F8.2) and WSL (F8.3) | Met on macOS; Windows and WSL owner-run |
+| macOS | F4 and F5 (2026-11-07), and F6 (2026-11-06) | Met |
 | Upstream | [Upstream check](#upstream-check-2026-11-05-macos); the draft report, kept outside the repository | Checked and drafted; filing pending |
 
 ### Tests
-- **jslc.** `mvn -B -ntp -pl buildtools/jslc test` runs 190 tests with 0 failures, 0 errors and 0 skipped, in the
-  default method order and in a random one (`MethodOrderer$Random`, seed 20261107), with the same counts per class.
-  The 22 existing classes keep their 159 tests, and `SymbolTest` keeps its message check. New: `MetalHeadersTest` 27,
-  `JSLCInfoTest` 3 and `backend.hw.MSLBackendTest` 1. The story commit runs 182, with `MetalHeadersTest` at 19. The
-  three `link/..` tests are `@DisabledOnOs(WINDOWS)`, because Windows drops `link\..` from a path as text, so on
-  Windows jslc is expected to run 190 with 3 skipped ([F8.2](#f82-windows-gate)).
-- **The review fix's tests.** Of the story commit's 19 `MetalHeadersTest` methods, 16 are unchanged, 1 is renamed and
-  2 changed, and 8 methods are new:
+- **jslc.** `mvn -B -ntp -pl buildtools/jslc test` runs 196 tests with 0 failures, 0 errors and 0 skipped, in the
+  default method order (F1) and in a random one (`MethodOrderer$Random`, seed 20261107), with the same counts per
+  class (2026-11-07, on the final state). The random run's report lists the orderer among its system properties, and its
+  `MetalHeadersTest` methods ran in another order than in F1. The 22 existing classes keep their 159 tests, and
+  `SymbolTest` keeps its message check. New: `MetalHeadersTest` 33, `JSLCInfoTest` 3 and
+  `backend.hw.MSLBackendTest` 1. `ba2b68e991` runs 190, with `MetalHeadersTest` at 27, and the story commit runs 182,
+  with 19. The three `link/..` tests are `@DisabledOnOs(WINDOWS)`, because Windows drops `link\..` from a path as
+  text, so on Windows jslc is expected to run 196 with 3 skipped ([F8.2](#f82-windows-gate)).
+- **The tests of review round 2.** Of `ba2b68e991`'s 27 `MetalHeadersTest` methods, 26 are unchanged and 1 is
+  extended, and 6 methods are new:
+  - New for C1: `upToDateMetalShadersWithUniformsThatAnEarlierCompilerRenamedGetTheOutputsOfACleanRun`. Its 9 legacy
+    shaders are `Scale`, `Glow` and `Tint` (`vector_` before a `float2`, `float3` or `float4` name; `Tint` declares
+    `opacity` first, so that looking at the first member alone misses it), `Helper` (a uniform named like a helper
+    function), `Parts` (`$`-separated parts, `main` and `UNUSED`), `Dollar` (only the part after a `$`), `Sampled`
+    (`sampleTex`), `Typed` (a helper named `texture2d`) and `Dropped`. `Dropped`'s `.metal` from `0281b2fde8` lost `at`
+    and gained two `vector_`, so it is exactly as long as a clean run's and differs only in its bytes. For every shader
+    the test asserts the clean run's `.metal`, the header IDs, struct members, `ids[]` and keys by JSL name, and both
+    headers byte-identical to a clean run's. A further rerun with a program that is not JSL rewrites nothing.
+  - New for C1's write rules: `aRerunWithNothingChangedKeepsMetalShadersWhoseJslNamesLookRenamedAndParsesNoOtherProgram`
+    (current outputs whose JSL names match the test keep their bytes and times, and `Near`, with names such as
+    `vector_floatx`, `my_vector_float2` and `Nearby`, parses no program) and
+    `aRunWithForceWritesEveryOutputAgainThoughNothingIsOutOfDate`.
+  - New for C2: `anUpToDateMetalShaderWithItsOldUniformStructCommentedOutBeforeItFailsNamingIt` and
+    `anUpToDateMetalShaderWithItsOldUniformStructCommentedOutAfterItGetsTheEntryOfItsStruct`.
+  - New for the dropped uniform: `uniformsWhoseNamesOccurInEarlierMemberLinesAreAllInTheStructAndTheHeader`, with
+    `at` inside the type `float`, `g` inside the name `img`, `pacity` inside `opacity` and `exture` inside `texture2d`.
+  - Extended: `aMetalShaderWhoseUniformStructCannotBeReadFailsNamingIt` gained seven starts: a line comment before the
+    struct, an `#if 0` copy of the struct before it, no empty line, an extra empty line, a line comment before the
+    include, another shader's struct name and the end marker at the end of a member line.
+- **The tests of review round 1.** Of the story commit's 19 `MetalHeadersTest` methods, 16 are unchanged, 1 is renamed
+  and 2 changed, and 8 methods are new:
   - New: `aHeaderThatListsTheSameShadersWithTheirUniformsInAnotherOrderIsWrittenAgain` (the review comment),
     `aShaderWrittenByARunThatStoppedBeforeItsHeadersGetsItsEntryInTheNextRun` (R1) and
     `aMetalShaderWhoseUniformStructCannotBeReadFailsNamingIt`. The last writes a cut struct, a struct without its
@@ -403,10 +506,24 @@ Relative to `0281b2fde8`:
   Three guards pass on `0281b2fde8` as well: a rerun with nothing out of date parses no program and writes nothing, a
   run without Metal output writes no headers, and the header bytes equal a golden captured from `0281b2fde8`'s
   compiler.
-- **Fail-before, review fix** (2026-11-06). The final `MetalHeadersTest`, copied into a clone of `a8d6688172`,
-  compiles there, since it uses no API the fix added. The class gives 27 / 6 / 1 / 0, and each method alone the same
-  result; the 16 unchanged methods pass. `0281b2fde8` cannot compile it, so its variants ran through that commit's
-  command-line drivers, one JVM per run, with the header directory created first.
+- **Fail-before, review round 2** (2026-11-07). The final `MetalHeadersTest`, copied into a clone of `ba2b68e991`,
+  compiles there and gives 33 / 4 / 0 / 0.
+
+  | Test | What it pins | On `ba2b68e991` |
+  | --- | --- | --- |
+  | `upToDateMetalShadersWithUniformsThatAnEarlierCompilerRenamedGetTheOutputsOfACleanRun` | C1 | `:928 Scale ==> expected: <the clean run's .metal>`: the legacy `.metal` is kept |
+  | `anUpToDateMetalShaderWithItsOldUniformStructCommentedOutBeforeItFailsNamingIt` | C2 | `:542`, no `IOException`: the commented struct is read |
+  | `aMetalShaderWhoseUniformStructCannotBeReadFailsNamingIt` | other starts fail | `:516`, no `IOException` for the first new start, a line comment before the struct |
+  | `uniformsWhoseNamesOccurInEarlierMemberLinesAreAllInTheStructAndTheHeader` | the dropped uniform | `:1006`: the struct is `float opacity; texture2d<float> img;`, without `at`, `g`, `pacity` and `exture` |
+
+  The 26 unchanged methods pass, and three new ones pass as guards: the struct with the old one commented out after it
+  (`ba2b68e991` also ends the struct at the first end line), the rerun of outputs whose names look renamed
+  (`ba2b68e991` never rewrites an up-to-date output) and the `-force` run. Through `JSLC.main`, `ba2b68e991` keeps
+  every legacy `.metal` it finds up to date ([Generator runs](#generator-runs)).
+- **Fail-before, review round 1** (2026-11-06). The final `MetalHeadersTest` of that round, copied into a clone of
+  `a8d6688172`, compiles there, since it uses no API the fix added. The class gives 27 / 6 / 1 / 0, and each method
+  alone the same result; the 16 unchanged methods pass. `0281b2fde8` cannot compile it, so its variants ran through
+  that commit's command-line drivers, one JVM per run, with the header directory created first.
 
   | Test | What it pins | On `a8d6688172` | On `0281b2fde8` |
   | --- | --- | --- | --- |
@@ -421,12 +538,12 @@ Relative to `0281b2fde8`:
   two changed tests and `aShaderWithHelperFunctionsGetsTheMetalShaderOfTheCompilerBeforeThisStory`. On `0281b2fde8`
   the variants of the two goldens give byte-identical files, as on the other two trees, and the variant of the renamed
   test, a rerun over an up-to-date root whose program is not JSL, exits 0 and moves no file time. The dictionary keys
-  that `aUniformNamedLike…` guards went wrong only in an intermediate state of the review fix (round 4 below), so on
-  `a8d6688172` it catches only the typedef members.
+  that `aUniformNamedLike…` guards went wrong only in an intermediate state of round 1's fix (its internal round 4
+  below), so on `a8d6688172` it catches only the typedef members.
 - **Mutation check.** The story's review ran two rounds of mutants of `MetalHeaders`, `JSLC` and `MSLBackend` (55,
   then 28). The gap that mattered then, a uniform edit kept out of the header by the names check, is gone with that
-  check, and `aShaderRecompiledWithOtherUniformsGetsItsNewEntryInTheHeader` still pins it. The review fix had five
-  review rounds, each with a mutation reviewer, and each confirmed gap got a test:
+  check, and `aShaderRecompiledWithOtherUniformsGetsItsNewEntryInTheHeader` still pins it. The fix for PR review
+  round 1 had five internal review rounds, each with a mutation reviewer, and each confirmed gap got a test:
   - **Round 1.** M06, the byte compare reduced to a length compare, passed the review comment's test, whose two
     headers differed in length; the test now swaps two uniforms, so both headers have the same length. Hand-edited
     member lines that the Metal compiler still accepts (a space before `;`, two declarators on one line,
@@ -450,72 +567,131 @@ Relative to `0281b2fde8`:
   - **Survivors, accepted.** Equivalent ones, for example: a precision matched without its trailing space, the
     explicit `typeEnd < 0` check removed, the `[` searched from the start of the line, `put` instead of `putIfAbsent`
     before the throw, `compile` returning null (the Prism `CompileJSL` then parses again) and the textual fast path of
-    the same-directory check dropped (only cost). Three that the story accepted stay: `FragmentShaderCommon.h`
-    written only when missing, `-force` no longer recompiling the Metal output (the header is still read from the
-    `.metal` the Metal library is built from) and the directory-creation `IOException` swallowed, whose code the fix
-    does not change and which was not run again. A miscount of array sizes of 2 to 9 digits passes jslc;
-    `MTLShaderTableGoldenTest`, which pins the argument buffer IDs of all 262 shaders, catches it on macOS.
+    the same-directory check dropped (only cost). Two that the story accepted stay: `FragmentShaderCommon.h` written
+    only when missing, and the directory-creation `IOException` swallowed, whose code the fix does not change and
+    which was not run again. The third, `-force` no longer recompiling the Metal output, is killed since PR review
+    round 2. A miscount of array sizes of 2 to 9 digits passes jslc; `MTLShaderTableGoldenTest`, which pins the
+    argument buffer IDs of all 262 shaders, catches it on macOS.
+  - **PR review round 2.** Its implementation ran 21 mutants (M01 to M21). Its review reasoned about N02 and N06, and
+    the fix pass after the review ran 20 (N01 to N20, partly reruns of the first set). Each gap got a test:
+    - `-force` dropped from the Metal decision (M13): `aRunWithForceWritesEveryOutputAgainThoughNothingIsOutOfDate`.
+    - The start check removed while the members are still cut at the generated start's length (N01): the C2 test's
+      start exactly as long as the generated one.
+    - The renamed-member test looking only at the first member (N02, N03): `Tint` declares `opacity` first.
+    - The struct end searched with `lastIndexOf` (N04): the test with the old struct commented out after the active
+      one.
+    - `writeIfChanged` comparing sizes instead of bytes (N05): `Dropped`, whose legacy `.metal` is as long as a clean
+      run's.
+    - The `<Shader>_` clause anchored at a space or a token start (N06, N07): `Dollar`, renamed only after its `$`.
+    - The `vector_` clause widened to `vector_float` or to a match anywhere in the name (N08, N09): `Near` in the
+      rerun test.
+    - **Survivors, accepted as equivalent:** the end searched one character later (M15, N11: the two differ only for
+      an empty struct, which both reject), `writeIfChanged` encoding UTF-8 instead of the default charset (M16, N12:
+      the same on JDK 18 and later unless `-Dfile.encoding=COMPAT` is set, and the generated text is ASCII) and the
+      recheck path reading its entry back from the file (M19, N13: after `writeIfChanged` the file holds exactly the
+      compiled text).
+    - **No longer applicable:** M18 and N10 made an exact-name check of `MSLBackend` unconditional and survived. That
+      check is gone, since the symbol table rejects a second declaration (the dropped uniform above).
 
 ### Generator runs
 - **The pom's way, outside Maven** (`GenAllDecoraShaders` in one JVM, `CompileJSL` once per Prism `.jsl` file,
-  `-d3d -es2 -mtl`, copies of the `.jsl` directories as input), on 2026-11-06 for the final state, `a8d6688172` and
-  `0281b2fde8`:
+  `-d3d -es2 -mtl`, copies of the `.jsl` directories as input): on 2026-11-06 for the content of `ba2b68e991`,
+  `a8d6688172` and `0281b2fde8`, and on 2026-11-07 for the round-2 tree, `ba2b68e991`, `a8d6688172` and `0281b2fde8`,
+  each with the compiler and generators built from a clone of that tree, and on the final state only the clean run,
+  with the compiler from the main tree's jslc build, its jar rebuilt at about 12:01 on 2026-11-07:
   - **Clean:** 1,059 files (`jsl-decora` 208, `jsl-prism` 848, `mtl-headers` 3), identical by name and md5 on all
-    three. The headers list 50 of 50 and 212 of 212 shaders.
-  - **Rerun with nothing changed:** 0 of the 1,059 file times move, on all three.
-  - **After touching `ColorAdjust.jsl` and `PaintColor.jsl`:** the final state and `a8d6688172` rewrite 117 files (5
-    Decora, 112 Prism, no header). The headers keep their times to the nanosecond, and the tree is identical by md5 to
-    the clean one. `0281b2fde8` rewrites 120, and its headers list 1 of 50 and 28 of 212.
-  - **Repair:** with `0281b2fde8`'s truncated headers (1 and 28) dated 2001, a run with nothing changed rewrites only
-    `DecoraShaderCommon.h` and `PrismShaderCommon.h`; with the three headers cut to 1,000, 200,000 and 100 bytes, it
-    rewrites those three. The tree then equals the clean one, and the next rerun rewrites nothing. `a8d6688172` does
-    the same, and `0281b2fde8` repairs nothing.
+    three trees, and on 2026-11-07 on all four and on the final state. The headers list 50 of 50 and 212 of 212
+    shaders. All 262 `.metal` files start with the generated include, empty and typedef lines, and the round-2 test for
+    a renamed member is false on all 1,368 of their member lines.
+  - **Rerun with nothing changed:** 0 of the 1,059 file times move, on all three trees; on 2026-11-07 on the round-2
+    tree, `ba2b68e991` and `0281b2fde8`, each tree staying md5-identical to the clean one.
+  - **After touching `ColorAdjust.jsl` and `PaintColor.jsl`:** `ba2b68e991` and `a8d6688172` rewrite 117 files (5
+    Decora, 112 Prism, no header), and on 2026-11-07 the round-2 tree and `ba2b68e991` do the same. The headers keep
+    their times to the nanosecond, and the tree is identical by md5 to the clean one. `0281b2fde8` rewrites 120, and
+    its headers list 1 of 50 and 28 of 212, on both dates.
+  - **Repair:** with `0281b2fde8`'s truncated headers (1 and 28) dated 2001, a run of `ba2b68e991` with nothing
+    changed rewrites only `DecoraShaderCommon.h` and `PrismShaderCommon.h`; with the three headers cut to 1,000,
+    200,000 and 100 bytes, it rewrites those three. The tree then equals the clean one, and the next rerun rewrites
+    nothing. `a8d6688172` does the same, and `0281b2fde8` repairs nothing. On 2026-11-07 the round-2 tree, run over
+    `0281b2fde8`'s output after the touch above, whose headers list 1 and 28, rewrites exactly `DecoraShaderCommon.h`
+    and `PrismShaderCommon.h`; the tree then equals the clean one, and the next rerun rewrites nothing.
+  - **Upgrade without `clean`** (2026-11-07): over the clean outputs of `0281b2fde8` and of `a8d6688172`, the round-2
+    tree rewrites no file, and both trees equal its clean run by name and md5.
+    - No compiler renamed a member of the build's shaders, so the legacy case ran through `JSLC.main -mtl`, one JVM
+      per program, on two programs of the C1 test: `Tint` (`opacity`, then `float4Tint`) and `Dollar` (`level$gain`
+      beside a helper function `gain`). `0281b2fde8` writes `vector_float4 vector_float4Tint;` and
+      `float level$Dollar_gain;`, and `a8d6688172` the same bytes.
+    - Over either output, the round-2 tree rewrites both `.metal` files and the header, and the tree then equals a
+      clean run's; a further rerun, over `a8d6688172`'s output, rewrites neither `.metal`. `ba2b68e991` keeps both
+      legacy files and writes the keys `level$Dollar_gain`, `opacity` and `UNUSED` for `Dollar`.
+    - From `param float opacity; param float at;`, `0281b2fde8` writes a struct without `at` that passes the test. The
+      round-2 tree keeps that `.metal` and writes only the keys `opacity` and `UNUSED`, where its clean run writes
+      `float at;` (round 2, Accepted).
   - **The review comment's case:** roots `gensrc/jsl-decora-A` and `gensrc/jsl-decora-B` share `gensrc/mtl-headers`,
-    B's `ColorAdjust.jsl` declares `saturation` before `hue`, and `GenAllDecoraShaders` runs for A, B and A again. In
-    the final state the header after the rerun of A equals the clean Decora header, with `ColorAdjust_hue_ID = 1,
+    B's `ColorAdjust.jsl` declares `saturation` before `hue`, and `GenAllDecoraShaders` runs for A, B and A again. On
+    `ba2b68e991` the header after the rerun of A equals the clean Decora header, with `ColorAdjust_hue_ID = 1,
     ColorAdjust_saturation_ID = 2`, and none of A's 208 outputs is rewritten. `a8d6688172` and `0281b2fde8` keep B's
     header, `saturation_ID = 1, hue_ID = 2`, while A's `ColorAdjust.metal` has `hue` first. Through `JSLC.main`, with
     `Foo` compiled into the two roots, the result is the same.
   - **Exit codes:** with `gensrc/mtl-headers` a regular file, `GenAllDecoraShaders` and the first Prism `CompileJSL`
-    exit 1 with `Cannot create the Metal header directory <path>`. With `DecoraShaderCommon.h` and
+    of `ba2b68e991` exit 1 with `Cannot create the Metal header directory <path>`. With `DecoraShaderCommon.h` and
     `PrismShaderCommon.h` directories, or `FragmentShaderCommon.h` a directory, both exit 1 with `Cannot write the
     Metal header <path>`, on a fresh output and over an up-to-date one. `a8d6688172` does the same. `0281b2fde8` exits
     0 in every case: it prints the exceptions on a fresh output and is silent over an up-to-date one. An up-to-date
     `ColorAdjust.metal` cut to 60 bytes makes `GenAllDecoraShaders` exit 1 with `Cannot read ColorAdjust_Uniforms from
-    the Metal shader <path>` and leaves the header as it was (measured on the review fix before its review rounds).
+    the Metal shader <path>` and leaves the header as it was (measured on round 1's fix before its internal review
+    rounds).
+  - **C2, the review's case** (2026-11-07): an up-to-date `ColorAdjust.metal` gets a copy of its struct, with `hue`
+    and `baseImg` swapped, in a block comment after the include line and its empty line, before the active struct.
+    The round-2 tree's `GenAllDecoraShaders` exits 1 with `Cannot read ColorAdjust_Uniforms from the Metal shader
+    <path>`, and `DecoraShaderCommon.h` keeps its md5 and time. `ba2b68e991` exits 0 and writes
+    `ColorAdjust_hue_ID = 0, ColorAdjust_baseImg_ID = 1`, against the clean `ColorAdjust_baseImg_ID = 0,
+    ColorAdjust_hue_ID = 1`.
   - **Time:** for a rerun with nothing changed, the main time summed over the 31 JVMs, as the median of 9 interleaved
-    repetitions, is 1224.6 ms on `0281b2fde8`, 1373.5 ms on `a8d6688172` and 1619.6 ms on the final state. That is
-    394.9 ms more than `0281b2fde8`, 12.74 ms per JVM: 148.8 ms (4.80 ms per JVM) from the story commit and 246.1 ms
-    (7.94 ms per JVM) from the review fix. The review fix's share is mostly reading and parsing every `.metal` of the
-    run: in a Prism JVM, profiled before the review rounds, adding the 212 shaders took 9.1 to 10.1 ms, 3.7 to 4.7 ms
-    of it reading the files. Computing every entry from the programs instead was measured at about 198 ms more per
-    JVM than `a8d6688172`.
-- **Maven with all three hardware backends:** `mvn -B -ntp -pl modules/javafx.graphics -am clean test-compile
-  "-Djfx.jsl.backends=-d3d -es2 -mtl" -DskipNative=true`. `target/gensrc` holds the same 1,079 files as
-  `a8d6688172`'s, identical by name and md5, including the 20 `javac -h` headers, and its 1,059 shader files equal the
-  clean run outside Maven. On 2026-11-05 the story's tree held the same 1,079 files as `0281b2fde8`'s. The three
-  headers are in `target/gensrc/mtl-headers` under the same names.
-- **Two of the four drivers the build does not run:** `CompileBoxBlur -mtl -hw` and `CompileExternal -mtl SepiaTone`,
-  each with its own `-mtlheaders`, exit 0 and write headers that list their 13 and 1 shaders, md5-identical to
-  `a8d6688172`'s. Without a backend option, `CompileExternal SepiaTone` writes no Metal shader and so no header.
+    repetitions, is 1224.6 ms on `0281b2fde8`, 1373.5 ms on `a8d6688172` and 1619.6 ms on the content of
+    `ba2b68e991` (2026-11-06). That is 394.9 ms more than `0281b2fde8`, 12.74 ms per JVM: 148.8 ms (4.80 ms per JVM)
+    from the story commit and 246.1 ms (7.94 ms per JVM) from round 1's fix. That share is mostly reading and parsing
+    every `.metal` of the run: in a Prism JVM, profiled before round 1's internal review rounds, adding the 212 shaders
+    took 9.1 to 10.1 ms, 3.7 to 4.7 ms of it reading the files. Computing every entry from the programs instead was
+    measured at about 198 ms more per JVM than `a8d6688172`.
+  - **Time, review round 2** (2026-11-07): each JVM's main time is taken from its uptime stamps, from the main class
+    load (`-XX:LogClassLoadingCauseFor`) to the first `-Xlog:gc+exit` line. The median of 9 interleaved repetitions,
+    the order alternating, is 1449.4 ms on the round-2 tree and 1497.1 ms on `ba2b68e991`; the repetitions span 1426.5
+    to 1560.8 ms and 1469.8 to 1507.0 ms, and the median wall times are 2147.0 and 2178.4 ms. No file was rewritten.
+    These figures were taken on another macOS version than those of 2026-11-06 and compare only with each other.
+- **Maven with all three hardware backends** (2026-11-06, on the content of `ba2b68e991`): `mvn -B -ntp -pl
+  modules/javafx.graphics -am clean test-compile "-Djfx.jsl.backends=-d3d -es2 -mtl" -DskipNative=true`.
+  `target/gensrc` holds the same 1,079 files as `a8d6688172`'s, identical by name and md5, including the 20 `javac -h`
+  headers, and its 1,059 shader files equal the clean run outside Maven. On 2026-11-05 the story's tree held the same
+  1,079 files as `0281b2fde8`'s. The three headers are in `target/gensrc/mtl-headers` under the same names.
+- **Two of the four drivers the build does not run** (2026-11-06, on the content of `ba2b68e991`): `CompileBoxBlur
+  -mtl -hw` and `CompileExternal -mtl SepiaTone`, each with its own `-mtlheaders`, exit 0 and write headers that list
+  their 13 and 1 shaders, md5-identical to `a8d6688172`'s. Without a backend option, `CompileExternal SepiaTone`
+  writes no Metal shader and so no header.
   `CompileGaussian` and `CompileZoomRadialBlur` got the same `write()` call but were not run.
 
 ### Final gates (2026-11-05, macOS)
-Rerun on 2026-11-06 on the final state: F1 to F3 in the main tree (`a8d6688172` with the review fix), F4 to F7 in a
-clone of `a8d6688172` that holds the review fix and whose path has no `jsl-`. Each gate also ran on a clone of
-`a8d6688172` without the review fix, with the same results apart from the jslc counts and that clone's path effect in
-F1. "Before the story" is the same steps on `0281b2fde8`, run on this host on 2026-11-05. Counts are run / failures /
-errors / skipped.
+Rerun on 2026-11-07 on macOS 27.2. F1 ran in the main tree on the final state, and F2 is taken from its output. F3,
+F4 and F5 ran on the round-2 tree ([Implementation](#implementation-2026-11-05-macos)): F3 in the main tree, F4 and F5
+in a clone of `ba2b68e991` that holds the round-2 fix as it was then and whose path has no `jsl-`. F1 and F2 had run
+on the round-2 tree too, with the same per-class lines and generated files. That F1's natives were overwritten by the
+final state's F1 before they were hashed; F2's equal those of the round-2 tree's F4 build and of `ba2b68e991`. Each of
+F1 to F5 also ran on a clone of `ba2b68e991` without the round-2 fix, with the same results apart from the jslc
+counts. F6 and F7 carry their result of 2026-11-06, on macOS 27.0.1, from the content of `ba2b68e991` in a clone of
+`a8d6688172`, which also ran on `a8d6688172` alone with the same results: F6's oracle can no longer run on this host
+(see F3), and F7's generators take the up-to-date path of F5 and of the runs outside Maven, where the round-2 fix
+changes no output. "Before the story" is the same steps on `0281b2fde8`, run on this host on 2026-11-05. Counts are
+run / failures / errors / skipped.
 
 | Gate | Command | Result |
 | --- | --- | --- |
-| F1 module gate | `mvn -B -ntp -Dmaven.test.failure.ignore=true -pl buildtools/jslc,modules/javafx.graphics -am clean test` | BUILD SUCCESS. jslc 190 / 0 / 0 / 0 in 25 classes, base 5,510 / 0 / 0 / 22, graphics 26,636 / 0 / 0 / 824. The 937 per-class lines (jslc 25, base 290, graphics 622) have the run and skipped counts of `a8d6688172`'s except `MetalHeadersTest`, 19 there; on 2026-11-05 the story's tree had those of `0281b2fde8` in every old class. `SymbolTest` keeps its message check. `MacFontProcessGoldenTest` passes (the clone of `a8d6688172`, under `/private/tmp`, has its 1 known failure; see `backlog/US-001b-macos-gate.md:56-68`). No `hs_err_pid*` file, and no Metal header message in the log |
-| F2 generated files | F1's `target/gensrc` and natives | 817 files (`jsl-decora` 158, `jsl-prism` 636, `mtl-headers` 3, `headers` 20), identical by name and md5 to `a8d6688172`'s, as the story's tree was to `0281b2fde8`'s on 2026-11-05. `DecoraShaderCommon.h` lists 50 of 50 shaders and `PrismShaderCommon.h` 212 of 212, and all three headers are byte-identical. `libprism_mtl.dylib` (272,192 bytes), `jfxshaders.metallib` (1,621,807 bytes) and `MetalShader.m.o` are md5-identical; `libglass.dylib` differs only by the checkout path it embeds |
-| F3 Metal goldens | `mvn -B -ntp -pl modules/javafx.graphics -am test '-Dtest=MTL*' -Dsurefire.failIfNoSpecifiedTests=false -Djfx.parity.require=true -DskipNative=true` | 55 / 0 / 0 / 0 in 7 classes, equal per class to `a8d6688172`'s. Its `jsl-codegen` rerun over F1's output rewrote no `jsl-decora`, `jsl-prism` or `mtl-headers` file |
-| F4 clean native build | `mvn -B -ntp -pl modules/javafx.graphics -am clean test-compile` | `target/gensrc` as in F2. `libprism_mtl.dylib`, `jfxshaders.metallib` and `MetalShader.m.o` (267,256 bytes) are md5-identical to `a8d6688172`'s |
-| F5 no `clean` after a `.jsl` edit | `touch` of `ColorAdjust.jsl` and `PaintColor.jsl`, then F4's command without `clean` | `target/gensrc` md5-identical to F4's. 108 files are rewritten (4 Decora, 84 Prism, the 20 `javac -h` headers) and no Metal header: the three keep F4's times to the nanosecond and list 50 and 212. CMake rebuilds only the 29 changed `.air` files and relinks `jfxshaders.metallib` (same md5); `MetalShader.m` is not recompiled and `libprism_mtl.dylib` not relinked. `a8d6688172` gives the same. Before the story: 111 files rewritten, headers listing 1 and 28, `MetalShader.m` recompiled and `libprism_mtl.dylib` relinked at 163,056 bytes |
-| F6 Metal goldens after F5 | F3's command | 55 / 0 / 0 / 0; the shader-table test creates 262 shaders (212 Prism, 50 Decora), none with an empty uniform table, and its `shader.*` keys equal the golden's. Before the story: 5 failures (4 in `MTLGoldenRenderTest`, 1 in `MTLShaderTableGoldenTest`); the 233 shaders the headers no longer list have no uniform table, and the first texture binding on one of them throws a `NullPointerException` in `MTLShader.setTexture` (`MTLShader.java:113`) |
-| F7 `-d3d -mtl` without `clean` | F4's command with `"-Djfx.jsl.backends=-d3d -mtl" -DskipNative=true`, F5's `touch`, then the same without `clean` (the stand-in for F8.1) | Clean: 817 files, each md5-equal to its file in the final state's `-d3d -es2 -mtl` build, and headers listing 50 and 212. Without `clean`: the headers byte-identical with unchanged times, the whole `target/gensrc` md5-identical, 108 files rewritten (4 Decora, 84 Prism, the 20 `javac -h` headers) and no Metal header. `a8d6688172` gives the same. Before the story the same Maven steps leave 1 and 28 and rewrite all three headers |
+| F1 module gate | `mvn -B -ntp -Dmaven.test.failure.ignore=true -pl buildtools/jslc,modules/javafx.graphics -am clean test` | BUILD SUCCESS. jslc 196 / 0 / 0 / 0 in 25 classes, base 5,510 / 0 / 0 / 22, graphics 26,636 / 0 / 0 / 837. The 937 per-class lines (jslc 25, base 290, graphics 622) equal the round-2 tree's in every class, and `ba2b68e991`'s, run the same day, except `MetalHeadersTest`, 27 there. On 2026-11-06 graphics skipped 824 and the per-class lines equalled `a8d6688172`'s except `MetalHeadersTest`; on 2026-11-05 the story's tree had those of `0281b2fde8` in every old class. The 13 more skips are on both trees and come from the host: since the update to macOS 27.2 (build 26B123, with another GPU driver and Metal version), `ParityGate` takes the goldens of 10 classes captured on macOS 27.0.1 as no oracle, so `MTLGoldenRenderTest` skips 4 tests, `MTLShaderTableGoldenTest` 1, and 8 classes 1 each: the 5 Mac font golden classes, `MacFontProcessGoldenTest` among them, and `MacAccessibleNativeTest`, `MacClipboardNativeTest` and `MacPixelsNativeTest`. `SymbolTest` keeps its message check. No `hs_err_pid*` file, and no Metal header message in the log |
+| F2 generated files | F1's `target/gensrc` and natives | 817 files (`jsl-decora` 158, `jsl-prism` 636, `mtl-headers` 3, `headers` 20), identical by name and md5 to the round-2 tree's and `ba2b68e991`'s, as round 1's were to `a8d6688172`'s on 2026-11-06 and the story's tree to `0281b2fde8`'s on 2026-11-05. `DecoraShaderCommon.h` lists 50 of 50 shaders and `PrismShaderCommon.h` 212 of 212. `libprism_mtl.dylib` (272,192 bytes), `jfxshaders.metallib` (1,621,807 bytes) and `MetalShader.m.o` (267,256 bytes) are md5-identical to the round-2 tree's and `ba2b68e991`'s |
+| F3 Metal goldens | `mvn -B -ntp -pl modules/javafx.graphics -am test '-Dtest=MTL*' -Dsurefire.failIfNoSpecifiedTests=false -Djfx.parity.require=true -DskipNative=true` | 55 / 5 / 0 / 0 in 7 classes, equal per class to `ba2b68e991`'s. The 5 failures, 4 in `MTLGoldenRenderTest` and 1 in `MTLShaderTableGoldenTest`, are `ParityGate` refusing the oracle on this host: `-Djfx.parity.require=true says this machine owns the oracle … the Metal golden describes another machine, macOS build, GPU driver, shader library or JDK`, with the macOS build, GPU driver and Metal version differing from the golden's. No comparison ran. On 2026-11-06, on macOS 27.0.1 and the content of `ba2b68e991`, F3 gave 55 / 0 / 0 / 0, equal per class to `a8d6688172`'s. The round-2 fix cannot change its outcome on any host: F2's generated files and native libraries are md5-identical to `ba2b68e991`'s. Its `jsl-codegen` rerun over the output of F1's run on the round-2 tree rewrote no `jsl-decora`, `jsl-prism` or `mtl-headers` file, only the 20 `javac -h` headers |
+| F4 clean native build | `mvn -B -ntp -pl modules/javafx.graphics -am clean test-compile` | `target/gensrc` as in F2. `libprism_mtl.dylib`, `jfxshaders.metallib` and `MetalShader.m.o` (267,256 bytes) are md5-identical to `ba2b68e991`'s |
+| F5 no `clean` after a `.jsl` edit | `touch` of `ColorAdjust.jsl` and `PaintColor.jsl`, then F4's command without `clean` | `target/gensrc` md5-identical to F4's. 108 files are rewritten (4 Decora, 84 Prism, the 20 `javac -h` headers) and no Metal header: the three keep F4's times to the nanosecond and list 50 and 212. CMake regenerates only the 29 changed `.air` files and relinks `jfxshaders.metallib` (same md5); `MetalShader.m` is not recompiled and `libprism_mtl.dylib` not relinked. `ba2b68e991` gives the same, as `a8d6688172` did on 2026-11-06. Before the story: 111 files rewritten, headers listing 1 and 28, `MetalShader.m` recompiled and `libprism_mtl.dylib` relinked at 163,056 bytes |
+| F6 Metal goldens after F5 | F3's command | 2026-11-06: 55 / 0 / 0 / 0; the shader-table test creates 262 shaders (212 Prism, 50 Decora), none with an empty uniform table, and its `shader.*` keys equal the golden's. Before the story: 5 failures (4 in `MTLGoldenRenderTest`, 1 in `MTLShaderTableGoldenTest`); the 233 shaders the headers no longer list have no uniform table, and the first texture binding on one of them throws a `NullPointerException` in `MTLShader.setTexture` (`MTLShader.java:113`) |
+| F7 `-d3d -mtl` without `clean` | F4's command with `"-Djfx.jsl.backends=-d3d -mtl" -DskipNative=true`, F5's `touch`, then the same without `clean` (the stand-in for F8.1) | 2026-11-06: clean, 817 files, each md5-equal to its file in the `-d3d -es2 -mtl` build of that state, and headers listing 50 and 212. Without `clean`: the headers byte-identical with unchanged times, the whole `target/gensrc` md5-identical, 108 files rewritten (4 Decora, 84 Prism, the 20 `javac -h` headers) and no Metal header. `a8d6688172` gives the same. Before the story the same Maven steps leave 1 and 28 and rewrite all three headers |
 
 ### Upstream check (2026-11-05, macOS)
 - **Setup.** `git archive ca9b07aeae` of `modules/javafx.graphics/src/{jslc,main/jsl-decora,main/jsl-prism}`. The
@@ -562,22 +738,22 @@ errors / skipped.
   ended with the run's `get<KIND>Dict`, so the names check kept it with the shader's old struct, IDs and dictionary,
   and `MetalShader.m` was built against uniforms that did not match the `.metal` file. The story accepted this, with a
   `clean` build, `-force` or a `touch` of a `.jsl` file as the remedy.
-- **Closed by the review fix.** Every run reads each shader's entry from its current `.metal`, so the next run writes
-  the header that matches it, and no remedy is needed.
+- **Closed by the fix for review round 1.** Every run reads each shader's entry from its current `.metal`, so the
+  next run writes the header that matches it, and no remedy is needed.
   `aShaderWrittenByARunThatStoppedBeforeItsHeadersGetsItsEntryInTheNextRun` covers it; on `a8d6688172` it fails at
   `:465`, with ProbeA's old struct `id<MTLTexture> baseImg; packed_float2 offset;` in the header.
-- **With the Decora generator** (measured on the review fix before its review rounds): with `hue` and `saturation`
-  swapped in `ColorAdjust.jsl` and `DecoraShaderCommon.h` read-only, the run exits 1 with `Cannot write the Metal
-  header …/DecoraShaderCommon.h` after writing the new `ColorAdjust.metal`. Once the header is writable, a run with
-  nothing out of date rewrites only `DecoraShaderCommon.h`, which then has `ColorAdjust_saturation_ID = 1` as the
-  `.metal` does. `a8d6688172` rewrites nothing and keeps the stale `ColorAdjust_hue_ID = 1`.
+- **With the Decora generator** (measured on round 1's fix before its internal review rounds): with `hue` and
+  `saturation` swapped in `ColorAdjust.jsl` and `DecoraShaderCommon.h` read-only, the run exits 1 with `Cannot write
+  the Metal header …/DecoraShaderCommon.h` after writing the new `ColorAdjust.metal`. Once the header is writable, a
+  run with nothing out of date rewrites only `DecoraShaderCommon.h`, which then has `ColorAdjust_saturation_ID = 1`
+  as the `.metal` does. `a8d6688172` rewrites nothing and keeps the stale `ColorAdjust_hue_ID = 1`.
 
 ### Owner-run and pending
-Replace `<repo-url>` with the repository's remote. `<US-018 commit>` is a commit that holds the review fix, which
-`a8d6688172`, the story's commit on the PR 50 branch, does not ([Implementation](#implementation-2026-11-05-macos)). A
-clone of `<repo-url>` has such a commit only once the owner commits the review fix and pushes it (a branch is enough).
-Until then, run the gates on a patch from `0281b2fde8` to the working tree, which carries the story's commit and the
-uncommitted review fix. The patch is made in a scratch clone, so that it also takes any untracked file. At the root of
+Replace `<repo-url>` with the repository's remote. `<US-018 commit>` is a commit that holds the round-2 fix, which
+`ba2b68e991`, the head of the PR 50 branch, does not ([Implementation](#implementation-2026-11-05-macos)). A clone of
+`<repo-url>` has such a commit only once the owner commits the round-2 fix and pushes it (a branch is enough). Until
+then, run the gates on a patch from `0281b2fde8` to the working tree, which carries `a8d6688172`, `ba2b68e991` and the
+uncommitted round-2 fix. The patch is made in a scratch clone, so that it also takes any untracked file. At the root of
 the main repository on the macOS host (its index is not touched):
 ```bash
 R="$PWD"; D="$(mktemp -d)"
@@ -650,9 +826,9 @@ find jfx-before jfx-after -maxdepth 3 -name 'hs_err_pid*'; find jfx-before/modul
 It must show:
 - `before exit 0` and `after exit 0`, and `BUILD SUCCESS` in both logs;
 - from `diff`, no `<` line and exactly three `>` lines: `com.sun.scenario.effect.compiler.JSLCInfoTest 3 0 0 0`,
-  `com.sun.scenario.effect.compiler.MetalHeadersTest 27 0 0 3` (the three `link/..` tests are disabled on Windows)
+  `com.sun.scenario.effect.compiler.MetalHeadersTest 33 0 0 3` (the three `link/..` tests are disabled on Windows)
   and `com.sun.scenario.effect.compiler.backend.hw.MSLBackendTest 1 0 0 0`;
-- jslc `Tests run: 159` before and `Tests run: 190, Failures: 0, Errors: 0, Skipped: 3` after, and the same
+- jslc `Tests run: 159` before and `Tests run: 196, Failures: 0, Errors: 0, Skipped: 3` after, and the same
   javafx.graphics line in both, with `Failures: 0, Errors: 0`;
 - `gensrc identical by name and md5`: Windows generates no `.metal` and no Metal header, and the empty
   `target/gensrc/mtl-headers` that HEAD's pom creates is not in a file manifest;
@@ -681,7 +857,7 @@ cmp ~/us018-wsl-before-gensrc.md5 ~/us018-wsl-after-gensrc.md5 && echo "gensrc i
 find ~/jfx-before ~/jfx-after -maxdepth 3 -name 'hs_err_pid*'; find ~/jfx-before/modules/javafx.graphics/target ~/jfx-after/modules/javafx.graphics/target -name 'hs_err_pid*'
 ```
 It must show what F8.2 shows, with Linux generating `-es2` only and running the three `link/..` tests:
-`com.sun.scenario.effect.compiler.MetalHeadersTest 27 0 0 0` and jslc `Tests run: 190, Failures: 0, Errors: 0,
+`com.sun.scenario.effect.compiler.MetalHeadersTest 33 0 0 0` and jslc `Tests run: 196, Failures: 0, Errors: 0,
 Skipped: 0` after. It must also show javafx.base `Tests run: 5510, Failures: 0, Errors: 0, Skipped: 22` in both runs.
 `LinuxFontConfigGoldenTest`, `LinuxFontProcessGoldenTest`, `LinuxFreetypeGoldenTest` and `LinuxPangoGoldenTest` each
 skip one test in both runs (US-008).
@@ -689,5 +865,5 @@ skip one test in both runs (US-008).
 #### After the gates
 The rest of the [Definition of Done](#definition-of-done):
 - File the upstream report. Its draft is kept outside the repository until it is filed (`backlog/README.md`).
-- Commit the review fix, if the gates ran on the patch. Set the status to ✅ Done with the date and the PR, and move
+- Commit the round-2 fix, if the gates ran on the patch. Set the status to ✅ Done with the date and the PR, and move
   the row to the done table of `backlog/README.md`.

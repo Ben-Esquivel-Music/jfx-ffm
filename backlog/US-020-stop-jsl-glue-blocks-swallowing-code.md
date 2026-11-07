@@ -265,7 +265,7 @@ own closer. Two options for the closer; the choice is part of the story.
     US-008 gate these held 108, 424, 46 and 0 files on each system, so the Metal output is covered only by the
     `-d3d -es2 -mtl` regeneration above.
   - `javafx.graphics` has the same test counts per class as before.
-  - `javafx-jslc` runs its 190 tests plus the new ones, with no failure.
+  - `javafx-jslc` runs its 196 tests plus the new ones, with no failure.
 - **Upstream.** Repeat the JBS search when the story is picked up. Draft an upstream issue with the two-block and
   comment repros, the ANTLR 3 comparison, the Prism glue repro and the chosen options. The draft says that upstream
   runs no jslc test (JDK-8226635), so the fix's test needs that port too.

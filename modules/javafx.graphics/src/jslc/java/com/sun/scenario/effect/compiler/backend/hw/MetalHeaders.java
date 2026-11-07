@@ -50,7 +50,9 @@ import static java.nio.charset.StandardCharsets.UTF_8;
  * the Metal library is built from, rather than computed from its program. So the program of a shader whose
  * output is up to date is not parsed, and the header holds exactly the entries of the run's {@code .metal}
  * files: an entry that another output root or a run that stopped before {@link #write} left in the file is
- * replaced.
+ * replaced. The one exception is an up-to-date output whose struct may hold a uniform under another name than
+ * its JSL name, as an earlier {@code MSLBackend} wrote some: that shader is compiled again, and its entry is read
+ * from the result.
  */
 public final class MetalHeaders {
 
@@ -65,7 +67,7 @@ public final class MetalHeaders {
         }
     }
 
-    static final String FRAGMENT_SHADER_HEADER_FILE_NAME = "FragmentShaderCommon.h";
+    private static final String FRAGMENT_SHADER_HEADER_FILE_NAME = "FragmentShaderCommon.h";
 
     private static final String FRAGMENT_SHADER_HEADER = """
         #ifndef FRAGMENT_COMMON_H
@@ -116,9 +118,42 @@ public final class MetalHeaders {
                 || dir.toFile().getCanonicalFile().equals(headerPath.toFile().getCanonicalFile());
     }
 
-    /** Adds a shader of the run, compiled or up to date, whose Metal output is {@code metalFile}. */
-    public void add(String shaderName, File metalFile) throws IOException {
-        if (entries.putIfAbsent(shaderName, objCHeaderEntry(shaderName, metalFile)) != null) {
+    /** Adds a shader of the run that was just compiled into {@code metalShader}, which went to {@code metalFile}. */
+    public void add(String shaderName, File metalFile, String metalShader) throws IOException {
+        addEntry(shaderName, uniformStruct(shaderName, metalFile, metalShader));
+    }
+
+    /**
+     * Adds a shader of the run from its up-to-date Metal output {@code metalFile}, unless a member of its uniform
+     * struct may have a name that an earlier {@code MSLBackend} gave the uniform instead of its JSL name. Returns
+     * whether it added the shader; if not, the caller compiles the shader again and adds it with
+     * {@link #add(String, File, String)}.
+     */
+    public boolean addUnlessRenamed(String shaderName, File metalFile) throws IOException {
+        UniformStruct uniformStruct = uniformStruct(shaderName, metalFile, readShader(metalFile));
+        if (uniformStruct.mayBeRenamed(shaderName)) {
+            return false;
+        }
+        addEntry(shaderName, uniformStruct);
+        return true;
+    }
+
+    /**
+     * Returns how every Metal shader that {@code MSLBackend} writes starts: the include line, an empty line and the
+     * first line of the uniform struct.
+     */
+    static String metalShaderStart(String shaderName) {
+        return "#include \"" + FRAGMENT_SHADER_HEADER_FILE_NAME + "\"\n\n"
+                + "typedef struct " + shaderName + "_Uniforms {\n";
+    }
+
+    /** Returns the last line of the uniform struct of a Metal shader that {@code MSLBackend} writes. */
+    static String uniformStructEnd(String shaderName) {
+        return "} " + shaderName + "_Uniforms;\n";
+    }
+
+    private void addEntry(String shaderName, UniformStruct uniformStruct) {
+        if (entries.putIfAbsent(shaderName, objCHeaderEntry(shaderName, uniformStruct)) != null) {
             throw new IllegalStateException("Shader " + shaderName + " was added twice in one run");
         }
     }
@@ -135,39 +170,76 @@ public final class MetalHeaders {
     }
 
     /**
-     * Returns the shader's argument IDs, its uniform struct with the Objective-C types and its uniform
-     * dictionary function, from the uniform struct that {@code MSLBackend} wrote into its Metal source.
-     * A member line in another form than {@code MSLBackend} writes, which a hand edit can give, makes the shader
-     * unreadable instead of getting a guessed entry, because {@code MetalShader.m} sets each uniform through the
-     * argument buffer ID that the entry gives it.
+     * Returns the uniform struct that {@code MSLBackend} wrote into the Metal source of the shader. A source that
+     * starts in any other way, or a member line in another form than {@code MSLBackend} writes, as a hand edit can
+     * give them, makes the shader unreadable instead of getting a guessed entry, because {@code MetalShader.m} sets
+     * each uniform through the argument buffer ID that the entry gives it.
      */
-    private static String objCHeaderEntry(String shaderName, File metalFile) throws IOException {
-        String uniformStructName = shaderName + "_Uniforms";
-        String structStart = "typedef struct " + uniformStructName + " {\n";
-        String shader = readShader(metalFile);
-        int start = shader.indexOf(structStart);
-        int end = start < 0 ? -1 : shader.indexOf("} " + uniformStructName + ";\n", start);
-        if (end < 0) {
-            throw cannotReadUniforms(uniformStructName, metalFile);
+    private static UniformStruct uniformStruct(String shaderName, File metalFile, String shader) throws IOException {
+        String start = metalShaderStart(shaderName);
+        if (!shader.startsWith(start)) {
+            throw cannotReadUniforms(shaderName, metalFile);
         }
-        String uniforms = shader.substring(start + structStart.length(), end);
-
-        List<String> uniformNames = new ArrayList<>();
-        StringBuilder uniformIDs = new StringBuilder();
-        int uniformIDCount = 0;
-        for (String member : uniforms.split("\n")) {
+        int end = shader.indexOf("\n" + uniformStructEnd(shaderName), start.length() - 1);
+        if (end < 0) {
+            throw cannotReadUniforms(shaderName, metalFile);
+        }
+        String members = shader.substring(start.length(), end + 1);
+        List<Uniform> uniforms = new ArrayList<>();
+        for (String member : members.split("\n")) {
             Uniform uniform = uniform(member);
             if (uniform == null) {
-                throw cannotReadUniforms(uniformStructName, metalFile);
+                throw cannotReadUniforms(shaderName, metalFile);
             }
-            uniformNames.add(uniform.name());
+            uniforms.add(uniform);
+        }
+        return new UniformStruct(members, uniforms);
+    }
+
+    /** The member lines of a uniform struct and the uniforms they declare. */
+    private record UniformStruct(String members, List<Uniform> uniforms) {
+
+        /**
+         * Returns whether a member may have another name than its uniform's JSL name. An earlier {@code MSLBackend}
+         * put {@code vector_} before a name that starts with {@code float2}, {@code float3} or {@code float4}. It
+         * also put {@code <Shader>_} before each word of the struct that names a function the program defines, be it
+         * a name, a part of a name that a {@code $} separates or a type, and turned {@code sampleTex} into
+         * {@code <Shader>_SampleTexture}.
+         */
+        boolean mayBeRenamed(String shaderName) {
+            if (members.contains(shaderName + "_")) {
+                return true;
+            }
+            for (Uniform uniform : uniforms) {
+                String name = uniform.name();
+                if (name.startsWith("vector_float2") || name.startsWith("vector_float3")
+                        || name.startsWith("vector_float4")) {
+                    return true;
+                }
+            }
+            return false;
+        }
+    }
+
+    private record Uniform(String name, int idCount) {
+    }
+
+    /**
+     * Returns the shader's argument IDs, its uniform struct with the Objective-C types and its uniform
+     * dictionary function.
+     */
+    private static String objCHeaderEntry(String shaderName, UniformStruct uniformStruct) {
+        String uniformStructName = shaderName + "_Uniforms";
+        StringBuilder uniformIDs = new StringBuilder();
+        int uniformIDCount = 0;
+        for (Uniform uniform : uniformStruct.uniforms()) {
             uniformIDs.append("    " + shaderName + "_" + uniform.name() + "_ID = " + uniformIDCount + ",\n");
             uniformIDCount += uniform.idCount();
         }
         // The Objective-C types the header had when its entries were computed from the programs: float2 and
         // float4 packed, float3 left as the vector_float3 that MSLBackend writes. As in MSLBackend, the space after
         // the type leaves a name like vector_float2x alone.
-        String uniformsForObjCFiles = uniforms.replace("texture2d<float>", "id<MTLTexture>")
+        String uniformsForObjCFiles = uniformStruct.members().replace("texture2d<float>", "id<MTLTexture>")
                 .replace(" vector_float2 ", " packed_float2 ")
                 .replace(" vector_float4 ", " packed_float4 ");
 
@@ -178,24 +250,21 @@ public final class MetalHeaders {
                 + uniformStructName + ";\n\n");
         objCHeader.append("NSDictionary* get" + shaderName + "_Uniform_VarID_Dict() {\n");
         objCHeader.append("    id ids[] = {\n");
-        for (String uniformName : uniformNames) {
-            objCHeader.append("        [NSNumber numberWithInt:" + shaderName + "_" + uniformName + "_ID],\n");
+        for (Uniform uniform : uniformStruct.uniforms()) {
+            objCHeader.append("        [NSNumber numberWithInt:" + shaderName + "_" + uniform.name() + "_ID],\n");
         }
         objCHeader.append("    };\n\n");
         objCHeader.append("    NSUInteger count = sizeof(ids) / sizeof(id);\n");
         objCHeader.append("    NSArray *idArray = [NSArray arrayWithObjects:ids count:count];\n");
         objCHeader.append("    id uniforms[] = {\n");
-        for (String uniformName : uniformNames) {
-            objCHeader.append("        @\"" + uniformName + "\",\n");
+        for (Uniform uniform : uniformStruct.uniforms()) {
+            objCHeader.append("        @\"" + uniform.name() + "\",\n");
         }
         objCHeader.append("    };\n\n");
         objCHeader.append("    NSArray *uniformArray = [NSArray arrayWithObjects:uniforms count:count];\n");
         objCHeader.append("    return [NSDictionary dictionaryWithObjects:idArray forKeys:uniformArray];\n");
         objCHeader.append("}\n\n\n");
         return objCHeader.toString();
-    }
-
-    private record Uniform(String name, int idCount) {
     }
 
     /**
@@ -259,16 +328,16 @@ public final class MetalHeaders {
         return c >= '0' && c <= '9';
     }
 
-    // Every run reads all of its .metal files, 212 in each Prism JVM, and a fresh JVM reads them about twice
-    // as fast through FileInputStream as through Files.readString.
+    // A rerun reads every up-to-date .metal file, all 212 in each Prism JVM when nothing changed, and a fresh JVM
+    // reads them about twice as fast through FileInputStream as through Files.readString.
     private static String readShader(File metalFile) throws IOException {
         try (FileInputStream in = new FileInputStream(metalFile)) {
             return new String(in.readAllBytes(), UTF_8);
         }
     }
 
-    private static IOException cannotReadUniforms(String uniformStructName, File metalFile) {
-        return new IOException("Cannot read " + uniformStructName + " from the Metal shader " + metalFile);
+    private static IOException cannotReadUniforms(String shaderName, File metalFile) {
+        return new IOException("Cannot read " + shaderName + "_Uniforms from the Metal shader " + metalFile);
     }
 
     private void createDirectory() throws IOException {

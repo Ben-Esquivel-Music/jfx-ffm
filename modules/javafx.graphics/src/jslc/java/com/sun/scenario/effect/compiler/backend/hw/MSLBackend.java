@@ -276,9 +276,7 @@ public class MSLBackend extends SLBackend {
                     aUniform += "[" + var.getArraySize() + "]";
                 }
 
-                if (!uniformsForShaderFile.contains(var.getName())) {
-                    uniformsForShaderFile += "    " + aUniform + ";\n";
-                }
+                uniformsForShaderFile += "    " + aUniform + ";\n";
             }
             case null -> super.visitVarDecl(d);
         }
@@ -293,8 +291,6 @@ public class MSLBackend extends SLBackend {
     protected String getHeader() {
         StringBuilder header = new StringBuilder();
 
-        header.append("#include \"" + MetalHeaders.FRAGMENT_SHADER_HEADER_FILE_NAME + "\"\n\n");
-
         if (!hasTextureVar) {
             String unusedUniform = "UNUSED";
             uniformsForShaderFile += "    texture2d<float> " + unusedUniform + ";\n";
@@ -307,7 +303,8 @@ public class MSLBackend extends SLBackend {
         uniformsForShaderFile = uniformsForShaderFile.replace(" float2 ", " vector_float2 ");
         uniformsForShaderFile = uniformsForShaderFile.replace(" float3 ", " vector_float3 ");
         uniformsForShaderFile = uniformsForShaderFile.replace(" float4 ", " vector_float4 ");
-        header.append("typedef struct " + uniformStructName + " {\n" + uniformsForShaderFile + "} " + uniformStructName + ";\n\n");
+        header.append(MetalHeaders.metalShaderStart(shaderFunctionName) + uniformsForShaderFile
+                + MetalHeaders.uniformStructEnd(shaderFunctionName) + "\n");
 
         if (hasTextureVar) {
             header.append("float4 " + sampleTexFuncName + "(sampler textureSampler, texture2d<float> colorTexture, float2 texCoord) {\n");

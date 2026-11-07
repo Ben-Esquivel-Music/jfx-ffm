@@ -45,7 +45,10 @@ import java.io.FileInputStream;
 import java.io.FileWriter;
 import java.io.InputStream;
 import java.io.PrintStream;
+import java.nio.charset.Charset;
+import java.nio.file.Files;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -216,14 +219,21 @@ public class JSLC {
             String shaderFileName = outFile.getName().replace(".metal", "");
             MetalHeaders metalHeaders = jslcinfo.metalHeaders;
             metalHeaders.target(jslcinfo.getMetalHeaderDir(), jslcinfo.metalHeaderKind);
-            if (jslcinfo.force || outOfDate(outFile, sourceTime)) {
+            boolean compileMetal = jslcinfo.force || outOfDate(outFile, sourceTime);
+            if (compileMetal || !metalHeaders.addUnlessRenamed(shaderFileName, outFile)) {
                 if (pinfo == null) pinfo = getParserInfo(stream);
                 MSLBackend mslBackend = new MSLBackend(pinfo.parser, pinfo.visitor, shaderFileName);
                 mslBackend.scan(pinfo.program);
                 String shader = mslBackend.getShader();
-                write(shader, outFile);
+                if (compileMetal) {
+                    write(shader, outFile);
+                } else {
+                    // Only an output that an earlier MSLBackend wrote changes; one whose JSL names just look
+                    // renamed keeps its file time.
+                    writeIfChanged(shader, outFile);
+                }
+                metalHeaders.add(shaderFileName, outFile, shader);
             }
-            metalHeaders.add(shaderFileName, outFile);
         }
 
         if ((outTypes & OUT_JAVA) != 0) {
@@ -261,6 +271,14 @@ public class JSLC {
         try (FileWriter fw = new FileWriter(outFile)) {
             fw.write(str);
             fw.flush();
+        }
+    }
+
+    private static void writeIfChanged(String str, File outFile) throws Exception {
+        // The charset that the FileWriter of write encodes with
+        byte[] bytes = str.getBytes(Charset.defaultCharset());
+        if (!Arrays.equals(Files.readAllBytes(outFile.toPath()), bytes)) {
+            write(str, outFile);
         }
     }
 

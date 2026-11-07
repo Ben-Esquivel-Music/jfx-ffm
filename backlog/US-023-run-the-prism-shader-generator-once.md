@@ -232,7 +232,7 @@ it is part of the story.
   - `target/gensrc/{jsl-decora,jsl-prism,headers,mtl-headers}` is identical by name and md5 before and after. In the
     US-008 gate these held 108, 424, 46 and 0 files on each system; `mtl-headers` is empty there, so the Metal output
     is covered only by the `-d3d -es2 -mtl` regeneration above.
-  - `javafx.graphics` has the same test counts per class as before, and `javafx-jslc` runs its 190 tests with no
+  - `javafx.graphics` has the same test counts per class as before, and `javafx-jslc` runs its 196 tests with no
     failure.
 - **Upstream.** Repeat the JBS search when the story is picked up and decide whether to propose the change upstream. A
   draft stays outside the repository.
