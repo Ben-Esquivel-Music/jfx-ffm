@@ -75,8 +75,8 @@ meanwhile; ranges are over 2 to 6 runs (Measured has the setup).
   `failonerror` stops the `<apply>` there (`apply returned: 1`): no other JVM starts (measured, Ant verbose log).
 - One `<java>` step prints the same message, writes the same files and stops with `Java returned: 1`.
 - Built again unfixed, both fail the same way and rewrite nothing. Fixed and built without `clean`, both complete;
-  the `-d3d` output then equals a clean build's by name and md5. With `-mtl`, `PrismShaderCommon.h` lists 196 of the
-  212 shaders in both (US-018, below).
+  the `-d3d` output then equals a clean build's by name and md5. With `-mtl`, `PrismShaderCommon.h` listed 196 of the
+  212 shaders in both before US-018's fix (below).
 - The message names no file (US-022). The loop adds a misleading one: the failing JVM was started with
   `-name …/MaskAlphaOne.jsl`, visible in a verbose log only.
 
@@ -89,15 +89,17 @@ meanwhile; ranges are over 2 to 6 runs (Measured has the setup).
   (measured with Ant: 60 such lines for today's step, 2 for one `<java>`).
 
 ### The Metal headers of US-018 across the loop
-- `MSLBackend` keeps the header directory and the Objective-C header in static fields
-  (`src/jslc/java/com/sun/scenario/effect/compiler/backend/hw/MSLBackend.java:58`, `:60`, `:64`), so each JVM has its
-  own, and only a JVM that compiles a Metal shader writes the headers (`:427-429`).
-- Clean build: the first JVM writes complete headers (`PrismShaderCommon.h` with 212 entries) and the others none.
-  After the two edits above both variants leave 16 and 66 entries, US-018's truncation; with the future time stamp
-  every JVM rewrites the header with the same 28. So the loop neither causes nor hides US-018.
-- It matters for US-018's fix. That story must keep "Prism's later JVMs" from overwriting the headers with fewer
-  entries, and one of its ways computes the entries of every shader in each run, which the loop repeats 30 times. A
-  run that compiles all 212 shaders, as `-force` makes it, takes 78.6 s through the loop and 2.8 s in one JVM.
+- Before US-018's fix, `MSLBackend` kept the header directory and the Objective-C header in static fields
+  (`src/jslc/java/com/sun/scenario/effect/compiler/backend/hw/MSLBackend.java:58`, `:60`, `:64`), so each JVM had its
+  own, and only a JVM that compiled a Metal shader wrote the headers (`:427-429`).
+- Clean build: the first JVM wrote complete headers (`PrismShaderCommon.h` with 212 entries) and the others none.
+  After the two edits above both variants left 16 and 66 entries, US-018's truncation; with the future time stamp
+  every JVM rewrote the header with the same 28. So the loop neither caused nor hid US-018.
+- With US-018's fix, the run of each Prism JVM lists all 212 shaders: it reads every shader's entry, compiled or up to
+  date, from the uniform struct in its `.metal` file and writes a header only when its bytes change, so the later JVMs
+  no longer overwrite the headers with fewer entries. A rerun with nothing changed takes 12.74 ms more per generator
+  JVM than before US-018 (on macOS, the median of 9 repetitions: 394.9 ms over the 31 JVMs). A run that compiles all 212
+  shaders, as `-force` makes it, takes 78.6 s through the loop and 2.8 s in one JVM.
 
 ### Why one JVM per file
 - JDK-8101343 (fixed in 2011 for fx2.0) made the JSL tools write only out-of-date outputs; the first open-source JSLC
@@ -167,14 +169,18 @@ Four options; the evidence decides for (a).
       <arg line="${jfx.jsl.backends}"/>
   </java>
   ```
+  - This is the step as measured, before US-018. Since US-018 the `<apply>` also passes `-mtlheaders
+    ${jfx.graphics.gensrc}/mtl-headers`, and the one step must keep it (One step, below): without it the Prism headers
+    go to `target/gensrc/jsl-prism/mtl-headers`, and `native/mac.cmake` looks for them only in
+    `target/gensrc/mtl-headers` (`:197`, `:240`).
   - The `<pathconvert>` (`:192-199`) can go: only the `<apply>` uses `jfx.jslc.prism.classpath` (`git grep`). The
     emulation kept it and passed its value as the class path, which is the same path.
   - `fork="true"` as today: the generator calls `System.exit(1)` for a missing input or a bad argument
     (`JSLC.java:300-304`), which must not reach the Maven JVM.
   - No Java change: without `-name`, `shaderName` is null until `CompileJSL.java:421` sets it (measured: exit 0, the
     same files).
-  - Cost: about 25 pom lines replaced by 17. Saves the 29 JVMs: about 10 s of every Windows build of the module,
-    clean or not, and 5 s of a clean Linux build.
+  - Cost: about 25 pom lines replaced by 17, or 27 by 19 with `-mtlheaders`. Saves the 29 JVMs: about 10 s of every
+    Windows build of the module, clean or not, and 5 s of a clean Linux build.
 - **(b) `<apply parallel="true">`.** Fails today (above). It would need `CompileJSL` to accept file names and ignore
   them, for the same one JVM as (a).
 - **(c) (a) with a step-level up-to-date check,** an Ant `<uptodate>` as in the 2013 Ant build. It would save the
@@ -185,8 +191,8 @@ Four options; the evidence decides for (a).
   (JDK-8093735). Not recommended.
 - **(d) Run the Prism generator in the Decora JVM,** from `GenAllDecoraShaders`. Both generators are a
   default-package `CompileJSL` (`src/main/jsl-decora/CompileJSL.java:40`, `src/main/jsl-prism/CompileJSL.java:85`),
-  so they cannot share a class path without a rename. In one JVM, US-018's static state puts Decora entries into
-  `PrismShaderCommon.h` (measured in US-018). It would save one more JVM start. Rejected.
+  so they cannot share a class path without a rename. In one JVM, US-018's static state put Decora entries into
+  `PrismShaderCommon.h` before its fix (measured in US-018). It would save one more JVM start. Rejected.
 
 **Recommendation: (a).** In every case measured it writes the same files, rewrites the same files and fails the same
 way as the loop, and it removes 29 JVMs that do nothing, with a pom change only.
@@ -196,8 +202,9 @@ JVMs in upstream clean builds and after any `.jsl` change; no-op builds are skip
 it is part of the story.
 
 ## Acceptance criteria
-- **One step.** `pom.xml` runs the Prism `CompileJSL` in one `<java fork="true" failonerror="true">` with today's
-  arguments except `-name` and the file. `git grep -n -e '<apply' -e '<srcfile' -e '"-name"' --
+- **One step.** `pom.xml` runs the Prism `CompileJSL` in one `<java fork="true" failonerror="true">` with every
+  generator argument of today's `<apply>`, US-018's `-mtlheaders ${jfx.graphics.gensrc}/mtl-headers` included, except
+  `-name` and the file. `git grep -n -e '<apply' -e '<srcfile' -e '"-name"' --
   modules/javafx.graphics/pom.xml` finds nothing. The same search on the current tree finds `:200`, `:213` and `:214`,
   so an empty result cannot come from a wrong path or pattern.
 - **One JVM.** In the log of a clean `mvn -B -ntp -X -pl buildtools/jslc,modules/javafx.graphics clean compile`, the
@@ -225,7 +232,7 @@ it is part of the story.
   - `target/gensrc/{jsl-decora,jsl-prism,headers,mtl-headers}` is identical by name and md5 before and after. In the
     US-008 gate these held 108, 424, 46 and 0 files on each system; `mtl-headers` is empty there, so the Metal output
     is covered only by the `-d3d -es2 -mtl` regeneration above.
-  - `javafx.graphics` has the same test counts per class as before, and `javafx-jslc` runs its 159 tests with no
+  - `javafx.graphics` has the same test counts per class as before, and `javafx-jslc` runs its 190 tests with no
     failure.
 - **Upstream.** Repeat the JBS search when the story is picked up and decide whether to propose the change upstream. A
   draft stays outside the repository.
@@ -234,14 +241,14 @@ it is part of the story.
 - All acceptance criteria met, with the logs, md5 lists and modification-time lists of the runs kept with the change.
 - The chosen option and the reason recorded in this file.
 - An independent review repeated the clean, without-`clean` and failure comparisons with its own inputs.
-- Open stories that describe the loop updated: US-018 ("How the build runs it" and "Prism's later JVMs" in its
-  Proposed fix) and US-021 ("starts 2 Prism JVMs fewer").
+- Open stories that describe the loop updated, such as US-021 ("starts 2 Prism JVMs fewer"). A done story's record
+  of the loop stays as it is.
 - Status set to ✅ Done with the date and the PR, and the row moved to the done table of `backlog/README.md`.
 
 ## Notes
 - Filed rather than fixed in US-008: US-008 removed dead code from the JSL compiler without changing the build. This
   story changes a build step, so it needs its own change and its own gate.
-- Independent of US-018 and US-021, but it changes their numbers. US-018's fix gets one Prism JVM per build to design
-  for, and US-021's deletion of the two YUV shaders then saves no JVM.
+- Independent of US-018 and US-021, but it changes their numbers. US-018's fix was measured with the loop's 30 Prism
+  JVMs, and US-021's deletion of the two YUV shaders then saves no JVM.
 - The Ant build file, the scratch copies and the probe runs were not kept in the repository. The Measured section
   describes them fully enough to rebuild.

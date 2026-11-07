@@ -124,10 +124,6 @@
                                 <mkdir dir="${jfx.graphics.gensrc}/jsl-decora"/>
                                 <mkdir dir="${jfx.graphics.gensrc}/jsl-prism"/>
                                 <mkdir dir="${jfx.graphics.gensrc}/headers"/>
-                                <!-- The JSLC MSL backend writes the Metal uniform-struct headers
-                                     here but does not create the directory itself (Gradle created
-                                     it in the generateShaders task) -->
-                                <mkdir dir="${jfx.graphics.gensrc}/mtl-headers"/>
 
                                 <javac destdir="${project.build.directory}/jsl-compilers/decora"
                                        includeantruntime="false" encoding="UTF-8" debug="true"
@@ -160,6 +156,8 @@
                                     <arg value="-o"/>
                                     <arg value="${jfx.graphics.gensrc}/jsl-decora"/>
                                     <arg value="-t"/>
+                                    <arg value="-mtlheaders"/>
+                                    <arg value="${jfx.graphics.gensrc}/mtl-headers"/>
                                     <arg value="-pkg"/>
                                     <arg value="com/sun/scenario/effect"/>
                                     <arg line="${jfx.jsl.backends}"/>
@@ -197,6 +195,8 @@
                                     <arg value="-o"/>
                                     <arg value="${jfx.graphics.gensrc}/jsl-prism"/>
                                     <arg value="-t"/>
+                                    <arg value="-mtlheaders"/>
+                                    <arg value="${jfx.graphics.gensrc}/mtl-headers"/>
                                     <arg value="-pkg"/>
                                     <arg value="com/sun/prism"/>
                                     <arg line="${jfx.jsl.backends}"/>

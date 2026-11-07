@@ -130,7 +130,7 @@ code it removed. The story was extended to cover them (resolved at the end of th
     - `FieldSelectTest` `notAFieldSelection2`, `tooManyVals` and `mixedVals`: upstream's helper called `fail`
       whenever an error was expected, whatever the input. The helper now asserts that the whole input was one field
       selection, and the 12 positive tests pass through it.
-    - `SymbolTest.specialVarUsedOutsideOfMain`: with the Metal backend in the mask, every program that parses throws
+    - `SymbolTest.specialVarUsedOutsideOfMain`: with the Metal backend in the mask, every program that parses threw
       a `StringIndexOutOfBoundsException` at `MSLBackend`'s `jsl-` path check (US-018), so
       `assertThrows(RuntimeException.class)` alone proved nothing. The test now also checks the message, "Unknown
       variable pos0".

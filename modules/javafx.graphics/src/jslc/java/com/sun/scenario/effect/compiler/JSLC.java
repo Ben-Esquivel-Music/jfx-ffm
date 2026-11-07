@@ -28,6 +28,7 @@ package com.sun.scenario.effect.compiler;
 import com.sun.scenario.effect.compiler.backend.hw.ES2Backend;
 import com.sun.scenario.effect.compiler.backend.hw.HLSLBackend;
 import com.sun.scenario.effect.compiler.backend.hw.MSLBackend;
+import com.sun.scenario.effect.compiler.backend.hw.MetalHeaders;
 import com.sun.scenario.effect.compiler.backend.prism.PrismBackend;
 import com.sun.scenario.effect.compiler.backend.sw.java.JSWBackend;
 import com.sun.scenario.effect.compiler.tree.JSLVisitor;
@@ -212,15 +213,17 @@ public class JSLC {
 
         if ((outTypes & OUT_MTL) != 0) {
             File outFile = jslcinfo.getOutputFile(OUT_MTL);
+            String shaderFileName = outFile.getName().replace(".metal", "");
+            MetalHeaders metalHeaders = jslcinfo.metalHeaders;
+            metalHeaders.target(jslcinfo.getMetalHeaderDir(), jslcinfo.metalHeaderKind);
             if (jslcinfo.force || outOfDate(outFile, sourceTime)) {
                 if (pinfo == null) pinfo = getParserInfo(stream);
-                MSLBackend mslBackend = new MSLBackend(pinfo.parser, pinfo.visitor);
-                String shaderFileName = outFile.getName().replace(".metal", "");
-                mslBackend.setShaderNameAndHeaderPath(shaderFileName, outFile.getCanonicalPath());
+                MSLBackend mslBackend = new MSLBackend(pinfo.parser, pinfo.visitor, shaderFileName);
                 mslBackend.scan(pinfo.program);
                 String shader = mslBackend.getShader();
                 write(shader, outFile);
             }
+            metalHeaders.add(shaderFileName, outFile);
         }
 
         if ((outTypes & OUT_JAVA) != 0) {
@@ -273,6 +276,10 @@ public class JSLC {
         public String interfaceName;
         public String pkgName = rootPkg;
         public Map<Integer, String> outNameMap = new HashMap<>(DEFAULT_INFO_MAP);
+        public String metalHeaderDir;
+        public MetalHeaders.Kind metalHeaderKind = MetalHeaders.Kind.DECORA;
+        /** The run this JSLCInfo's Metal shaders join; call {@code write()} on it after the run's last compile. */
+        public MetalHeaders metalHeaders = new MetalHeaders();
 
         private String extraOpts;
 
@@ -290,7 +297,7 @@ public class JSLC {
             String prefix1 = "";
             for (int i = 0; i < prefix0.length(); i++) prefix1 += " ";
             out.println(prefix0+"[-d3d | -es2 | -mtl | -java | -sw | -hw | -all]");
-            out.println(prefix1+"[-o <outdir>] [-i <srcdir>] [-t]");
+            out.println(prefix1+"[-o <outdir>] [-i <srcdir>] [-t] [-mtlheaders <dir>] [-mtlprism]");
             out.println(prefix1+"[-name <name>] [-ifname <interface name>]");
             if (extraOpts != null) {
                 out.println(prefix1+extraOpts);
@@ -348,6 +355,8 @@ public class JSLC {
                 System.exit(0);
             } else if (arg.equals("-t")) {
                 trimToOutDir = true;
+            } else if (arg.equals("-mtlprism")) {
+                metalHeaderKind = MetalHeaders.Kind.PRISM;
             } else {
                 try {
                     // options with 1 argument
@@ -361,6 +370,8 @@ public class JSLC {
                         interfaceName = args[index];
                     } else if (arg.equals("-pkg")) {
                         pkgName = args[index];
+                    } else if (arg.equals("-mtlheaders")) {
+                        metalHeaderDir = args[index];
                     } else {
                         return 0;
                     }
@@ -413,6 +424,13 @@ public class JSLC {
             String fileName = outNameMap.get(outType);
             return getOutputFile(fileName);
         }
+
+        public File getMetalHeaderDir() {
+            if (metalHeaderDir != null) {
+                return new File(metalHeaderDir);
+            }
+            return outDir == null ? new File("mtl-headers") : new File(outDir, "mtl-headers");
+        }
     }
 
     public static void main(String[] args) throws Exception {
@@ -432,5 +450,6 @@ public class JSLC {
         }
 
         compile(jslcinfo, inFile);
+        jslcinfo.metalHeaders.write();
     }
 }
