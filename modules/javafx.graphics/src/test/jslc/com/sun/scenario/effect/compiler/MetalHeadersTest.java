@@ -33,6 +33,7 @@ import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
 import java.nio.file.attribute.FileTime;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
 import java.util.TreeMap;
@@ -40,11 +41,13 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import java.util.stream.Stream;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.condition.DisabledOnOs;
 import org.junit.jupiter.api.io.TempDir;
 
 import static com.sun.scenario.effect.compiler.backend.hw.MetalHeaders.Kind.DECORA;
 import static com.sun.scenario.effect.compiler.backend.hw.MetalHeaders.Kind.PRISM;
 import static org.junit.jupiter.api.Assertions.*;
+import static org.junit.jupiter.api.condition.OS.WINDOWS;
 
 public class MetalHeadersTest {
 
@@ -81,11 +84,152 @@ public class MetalHeadersTest {
         }
         """;
 
+    private static final String INT_AND_FLOAT4 = """
+        param int count;
+        param float4 offset;
+        void main() {
+            int i;
+            float4 sum = float4(0.0, 0.0, 0.0, 0.0);
+            unroll (2, 0) for (i = 0; i < count; i++) {
+                sum += offset;
+            }
+            color = sum;
+        }
+        """;
+
+    private static final String PRECISIONS = """
+        param lowp float opacity;
+        param highp float2 offset;
+        param mediump float4 weights[2];
+        void main() {
+            color = weights[1] * opacity + float4(offset.x, offset.y, 0.0, 1.0);
+        }
+        """;
+
+    private static final String PAIRS = """
+        param sampler botImg;
+        param sampler topImg;
+        param float2 shift;
+        param float2 scale;
+        param float4 tint;
+        param float4 glow;
+        void main() {
+            float4 bot = sample(botImg, pos0 * scale + shift);
+            float4 top = sample(topImg, pos1 - shift);
+            color = bot * tint + top * glow;
+        }
+        """;
+
+    private static final String IDENTIFIER_CHARACTERS = """
+        param float $zZ_aA09;
+        void main() {
+            color = float4($zZ_aA09);
+        }
+        """;
+
+    // Helpers that MSLBackend renames at every call and definition in the Metal shader, as the build's mask and paint
+    // shaders have them: rrmask's name ends with mask's, and paint samples as main does.
+    private static final String HELPER_FUNCTIONS = """
+        param sampler img;
+        param float2 oinvarcradii;
+        param float2 iinvarcradii;
+        float rrmask(float2 arcreltco, float2 invarcradii) {
+            float2 ecctco = arcreltco * invarcradii;
+            return clamp(dot(ecctco, ecctco), 0.0, 1.0);
+        }
+        float mask(float2 tco, float2 flatdim) {
+            float2 arcreltco = max(abs(tco) - flatdim, 0.001);
+            float ocov = rrmask(arcreltco, oinvarcradii);
+            float icov = rrmask(arcreltco, iinvarcradii);
+            return ocov - icov;
+        }
+        float4 paint(float2 tco) {
+            return sample(img, tco);
+        }
+        void main() {
+            float4 paintColor = paint(pos0);
+            float coverage = mask(pos0, pos1);
+            color = paintColor * coverage + sample(img, pos1);
+        }
+        """;
+
+    // Uniforms named like what MSLBackend renames in a Metal shader, a helper function, sampleTex and the float2,
+    // float3 and float4 types, or like the vector_float2 and vector_float4 types that MetalHeaders maps back.
+    private static final String HELPER_NAMED_LIKE_ITS_UNIFORM = """
+        param float opacity;
+        param float2 offset;
+        float opacity(float x) {
+            return x * 0.5;
+        }
+        void main() {
+            color = float4(opacity(opacity) + offset.x);
+        }
+        """;
+
+    private static final String SAMPLE_TEX_BESIDE_A_SAMPLER = """
+        param sampler img;
+        param float sampleTex;
+        void main() {
+            color = sample(img, pos0);
+        }
+        """;
+
+    private static final String NAMES_THAT_START_WITH_A_TYPE = """
+        param float4 float4Tint;
+        param float2 float2Scale;
+        param float3 float3Glow;
+        param float vector_float2x;
+        param float2 vector_float4s;
+        param float opacity;
+        void main() {
+            color = float4(opacity);
+        }
+        """;
+
+    private static final String HUE_THEN_SATURATION = """
+        param float hue;
+        param float saturation;
+        void main() {
+            color = float4(hue, saturation, 0.0, 1.0);
+        }
+        """;
+
+    private static final String SATURATION_THEN_HUE = """
+        param float saturation;
+        param float hue;
+        void main() {
+            color = float4(hue, saturation, 0.0, 1.0);
+        }
+        """;
+
     private static final String NOT_JSL = "this is not JSL";
+
+    // Struct members in other forms than MSLBackend writes, as a hand edit of a Metal shader can give them. An entry
+    // read from most of them would get other uniforms or argument buffer IDs than the Metal shader has.
+    private static final List<String> MEMBERS_IN_OTHER_FORMS = List.of(
+            "    float opacity",
+            "    float opacity ;",
+            "    float ;",
+            "\tfloat opacity;",
+            "   float opacity;",
+            "    vector_float2 offset; float opacity;",
+            "    float/**/opacity, hue;",
+            "    texture2d<float> UNUSED [[id(2)]];",
+            "    LOWP HIGHP float opacity;",
+            "    vector_float2 2offset;",
+            "    float *offset;",
+            "    float &offset;",
+            "    float op<a>;",
+            "    vector_float4 weights[12;",
+            "    vector_float4 weights[0];",
+            "    vector_float4 weights[010];",
+            "    vector_float4 weights[99999999999];");
 
     private static final String FRAGMENT_HEADER = "FragmentShaderCommon.h";
     private static final String DECORA_HEADER = "DecoraShaderCommon.h";
     private static final String PRISM_HEADER = "PrismShaderCommon.h";
+
+    private static final String WINDOWS_DROPS_LINK_DOT_DOT = "Windows drops link\\.. from a path as text";
 
     private static final long UP_TO_DATE = 1L;
     private static final long OUT_OF_DATE = Long.MAX_VALUE;
@@ -159,6 +303,29 @@ public class MetalHeadersTest {
     }
 
     @Test
+    @DisabledOnOs(value = WINDOWS, disabledReason = WINDOWS_DROPS_LINK_DOT_DOT)
+    public void theHeadersGoWhereTheFileSystemResolvesAHeaderDirectoryWithDotDotAfterALink() throws Exception {
+        Path headerDir = deepLink().resolve("../gensrc/mtl-headers");
+        oneShaderRun(tmp.resolve("gensrc/jsl-decora"), headerDir, DECORA, "Probe");
+
+        assertHeaders(tmp.resolve("x/y/gensrc/mtl-headers"), DECORA, "Probe");
+        assertFalse(Files.exists(tmp.resolve("gensrc/mtl-headers")));
+    }
+
+    @Test
+    @DisabledOnOs(value = WINDOWS, disabledReason = WINDOWS_DROPS_LINK_DOT_DOT)
+    public void withoutAHeaderDirectoryTheHeadersFollowAnOutputDirectoryWithDotDotAfterALink() throws Exception {
+        JSLCInfo run = defaultRun(deepLink().resolve("../out"));
+        compile(run, "Probe", SAMPLING, OUT_OF_DATE);
+        finish(run);
+
+        Path outDir = tmp.resolve("x/y/out");
+        assertRegularFile(metalFile(outDir, "Probe"));
+        assertHeaders(outDir.resolve("mtl-headers"), DECORA, "Probe");
+        assertFalse(Files.exists(tmp.resolve("out")));
+    }
+
+    @Test
     public void aHeaderDirectoryThatCannotBeCreatedFailsNamingIt() throws Exception {
         Path headerDir = Files.createDirectories(tmp.resolve("gensrc")).resolve("mtl-headers");
         Files.writeString(headerDir, "a file, not a directory");
@@ -185,6 +352,31 @@ public class MetalHeadersTest {
     }
 
     @Test
+    public void aMetalShaderWhoseUniformStructCannotBeReadFailsNamingIt() throws Exception {
+        Path gensrc = tmp.resolve("gensrc");
+        Path outDir = gensrc.resolve("jsl-decora");
+        probeRun(outDir, gensrc.resolve("mtl-headers"), OUT_OF_DATE, OUT_OF_DATE);
+        Path metal = metalFile(outDir, "ProbeA");
+        String cutInsideTheStruct = "#include \"" + FRAGMENT_HEADER + "\"\n\ntypedef struct ProbeA_Uniforms {\n";
+        String structEnd = "} ProbeA_Uniforms;\n";
+        List<String> unreadableShaders = new ArrayList<>(List.of(
+                cutInsideTheStruct,
+                "    float opacity;\n" + structEnd,
+                structEnd + cutInsideTheStruct + "    float opacity;\n"));
+        for (String member : MEMBERS_IN_OTHER_FORMS) {
+            unreadableShaders.add(cutInsideTheStruct + member + "\n" + structEnd);
+        }
+
+        for (String unreadable : unreadableShaders) {
+            Files.writeString(metal, unreadable);
+            JSLCInfo run = newRun(outDir, gensrc.resolve("mtl-headers"), DECORA);
+            IOException e = assertThrows(IOException.class, () -> compile(run, "ProbeA", SAMPLING, UP_TO_DATE),
+                    unreadable);
+            assertTrue(e.getMessage().contains(metal.toString()), e.getMessage());
+        }
+    }
+
+    @Test
     public void aSecondRunWithOneShaderOutOfDateKeepsTheHeadersOfBoth() throws Exception {
         Path outDir = tmp.resolve("out");
         assertASecondRunWithOneShaderOutOfDateKeepsTheHeadersOfBoth(outDir, outDir.resolve("mtl-headers"));
@@ -198,7 +390,7 @@ public class MetalHeadersTest {
     }
 
     @Test
-    public void aRunWithNothingOutOfDateParsesAndRewritesNothing() throws Exception {
+    public void aRunWithNothingOutOfDateParsesNoProgramAndRewritesNothing() throws Exception {
         Path gensrc = tmp.resolve("gensrc");
         probeRun(gensrc.resolve("jsl-decora"), gensrc.resolve("mtl-headers"), OUT_OF_DATE, OUT_OF_DATE);
         ageEveryFile(tmp);
@@ -246,15 +438,32 @@ public class MetalHeadersTest {
         compile(run, "ProbeB", UNTEXTURED, UP_TO_DATE);
         finish(run);
 
-        Path cleanGensrc = tmp.resolve("clean/gensrc");
-        JSLCInfo clean = newRun(cleanGensrc.resolve("jsl-decora"), cleanGensrc.resolve("mtl-headers"), DECORA);
-        compile(clean, "ProbeA", UNTEXTURED_WITH_OFFSET, OUT_OF_DATE);
-        compile(clean, "ProbeB", UNTEXTURED, OUT_OF_DATE);
-        finish(clean);
-
-        String cleanHeader = Files.readString(cleanGensrc.resolve("mtl-headers").resolve(DECORA_HEADER));
+        String cleanHeader = headerOfACleanRun(UNTEXTURED_WITH_OFFSET, UNTEXTURED);
         assertNotEquals(firstRunHeader, cleanHeader);
         assertEquals(cleanHeader, Files.readString(headerDir.resolve(DECORA_HEADER)));
+    }
+
+    @Test
+    public void aShaderWrittenByARunThatStoppedBeforeItsHeadersGetsItsEntryInTheNextRun() throws Exception {
+        Path gensrc = tmp.resolve("gensrc");
+        Path outDir = gensrc.resolve("jsl-decora");
+        Path headerDir = gensrc.resolve("mtl-headers");
+        probeRun(outDir, headerDir, OUT_OF_DATE, OUT_OF_DATE);
+        String firstRunHeader = Files.readString(headerDir.resolve(DECORA_HEADER));
+        JSLCInfo stopped = newRun(outDir, headerDir, DECORA);
+        compile(stopped, "ProbeA", UNTEXTURED_WITH_OFFSET, OUT_OF_DATE);
+        ageEveryFile(tmp);
+        Map<Path, FileState> stoppedRun = snapshot(outDir);
+
+        JSLCInfo run = newRun(outDir, headerDir, DECORA);
+        compile(run, "ProbeA", UNTEXTURED_WITH_OFFSET, UP_TO_DATE);
+        compile(run, "ProbeB", UNTEXTURED, UP_TO_DATE);
+        finish(run);
+
+        String cleanHeader = headerOfACleanRun(UNTEXTURED_WITH_OFFSET, UNTEXTURED);
+        assertNotEquals(firstRunHeader, cleanHeader);
+        assertEquals(cleanHeader, Files.readString(headerDir.resolve(DECORA_HEADER)));
+        assertUnchanged(stoppedRun, snapshot(outDir));
     }
 
     @Test
@@ -304,6 +513,33 @@ public class MetalHeadersTest {
     }
 
     @Test
+    public void aHeaderThatListsTheSameShadersWithTheirUniformsInAnotherOrderIsWrittenAgain() throws Exception {
+        Path headerDir = tmp.resolve("gensrc/mtl-headers");
+        Path decoraHeader = headerDir.resolve(DECORA_HEADER);
+        Path outDirA = tmp.resolve("A/jsl-decora");
+        JSLCInfo runA = newRun(outDirA, headerDir, DECORA);
+        compile(runA, "Probe", HUE_THEN_SATURATION, OUT_OF_DATE);
+        finish(runA);
+        byte[] headerOfA = Files.readAllBytes(decoraHeader);
+        JSLCInfo runB = newRun(tmp.resolve("B/jsl-decora"), headerDir, DECORA);
+        compile(runB, "Probe", SATURATION_THEN_HUE, OUT_OF_DATE);
+        finish(runB);
+        byte[] headerOfB = Files.readAllBytes(decoraHeader);
+        // Of equal length, so that only their bytes tell the two headers apart.
+        assertEquals(headerOfA.length, headerOfB.length);
+        assertFalse(Arrays.equals(headerOfA, headerOfB), "B's run kept A's header");
+        ageEveryFile(tmp);
+        Map<Path, FileState> outputsOfA = snapshot(outDirA);
+
+        JSLCInfo rerunA = newRun(outDirA, headerDir, DECORA);
+        compile(rerunA, "Probe", HUE_THEN_SATURATION, UP_TO_DATE);
+        finish(rerunA);
+
+        assertArrayEquals(headerOfA, Files.readAllBytes(decoraHeader));
+        assertUnchanged(outputsOfA, snapshot(outDirA));
+    }
+
+    @Test
     public void jslcInfosThatShareARunWriteOneHeaderWithTheShadersOfBoth() throws Exception {
         Path gensrc = tmp.resolve("gensrc");
         JSLCInfo first = newRun(gensrc.resolve("jsl-decora"), gensrc.resolve("mtl-headers"), DECORA);
@@ -338,6 +574,27 @@ public class MetalHeadersTest {
     }
 
     @Test
+    @DisabledOnOs(value = WINDOWS, disabledReason = WINDOWS_DROPS_LINK_DOT_DOT)
+    public void aRunTellsHeaderDirectoriesApartAsTheFileSystemResolvesThem() throws Exception {
+        Path outDir = tmp.resolve("gensrc/jsl-decora");
+        Path headerDir = deepLink().resolve("../mtl-headers");
+        JSLCInfo run = newRun(outDir, headerDir, DECORA);
+        compile(run, "ProbeA", SAMPLING, OUT_OF_DATE);
+        JSLCInfo sameDirectory = newRun(outDir, tmp.resolve("x/y/mtl-headers"), DECORA);
+        sameDirectory.metalHeaders = run.metalHeaders;
+        compile(sameDirectory, "ProbeB", UNTEXTURED, OUT_OF_DATE);
+        JSLCInfo normalized = newRun(outDir, headerDir.normalize(), DECORA);
+        normalized.metalHeaders = run.metalHeaders;
+
+        IllegalStateException e = assertThrows(IllegalStateException.class,
+                () -> compile(normalized, "ProbeC", UNTEXTURED, OUT_OF_DATE));
+        assertTrue(e.getMessage().contains(headerDir.toString()), e.getMessage());
+        assertTrue(e.getMessage().contains(headerDir.normalize().toString()), e.getMessage());
+        finish(run);
+        assertHeaders(tmp.resolve("x/y/mtl-headers"), DECORA, "ProbeA", "ProbeB");
+    }
+
+    @Test
     public void aRunRejectsTheSameShaderTwice() throws Exception {
         Path gensrc = tmp.resolve("gensrc");
         JSLCInfo run = newRun(gensrc.resolve("jsl-decora"), gensrc.resolve("mtl-headers"), DECORA);
@@ -367,10 +624,41 @@ public class MetalHeadersTest {
         compile(run, "Textured", SAMPLING, OUT_OF_DATE);
         compile(run, "Untextured", UNTEXTURED, OUT_OF_DATE);
         compile(run, "Arrays", ARRAYS, OUT_OF_DATE);
+        compile(run, "IntAndFloat4", INT_AND_FLOAT4, OUT_OF_DATE);
+        compile(run, "Precisions", PRECISIONS, OUT_OF_DATE);
+        compile(run, "Pairs", PAIRS, OUT_OF_DATE);
+        compile(run, "IdentifierCharacters", IDENTIFIER_CHARACTERS, OUT_OF_DATE);
         finish(run);
 
         assertEquals(GOLDEN_FRAGMENT_HEADER, Files.readString(headerDir.resolve(FRAGMENT_HEADER)));
         assertEquals(GOLDEN_DECORA_HEADER, Files.readString(headerDir.resolve(DECORA_HEADER)));
+    }
+
+    @Test
+    public void aShaderWithHelperFunctionsGetsTheMetalShaderOfTheCompilerBeforeThisStory() throws Exception {
+        Path outDir = tmp.resolve("gensrc/jsl-decora");
+        JSLCInfo run = newRun(outDir, tmp.resolve("gensrc/mtl-headers"), DECORA);
+        run.outTypes = JSLC.OUT_MTL;
+        compile(run, "Helpers", HELPER_FUNCTIONS, OUT_OF_DATE);
+
+        assertEquals(GOLDEN_HELPERS_METAL, Files.readString(metalFile(outDir, "Helpers")));
+    }
+
+    @Test
+    public void aUniformNamedLikeAHelperFunctionATypeOrSampleTexKeepsItsJslNameInTheHeader() throws Exception {
+        Path headerDir = tmp.resolve("gensrc/mtl-headers");
+        JSLCInfo run = newRun(tmp.resolve("gensrc/jsl-decora"), headerDir, DECORA);
+        run.outTypes = JSLC.OUT_MTL;
+        compile(run, "HelperNamedLikeItsUniform", HELPER_NAMED_LIKE_ITS_UNIFORM, OUT_OF_DATE);
+        compile(run, "SampleTexBesideASampler", SAMPLE_TEX_BESIDE_A_SAMPLER, OUT_OF_DATE);
+        compile(run, "NamesThatStartWithAType", NAMES_THAT_START_WITH_A_TYPE, OUT_OF_DATE);
+        finish(run);
+
+        String header = Files.readString(headerDir.resolve(DECORA_HEADER));
+        assertUniformNames(header, "HelperNamedLikeItsUniform", "opacity", "offset", "UNUSED");
+        assertUniformNames(header, "SampleTexBesideASampler", "img", "sampleTex");
+        assertUniformNames(header, "NamesThatStartWithAType",
+                "float4Tint", "float2Scale", "float3Glow", "vector_float2x", "vector_float4s", "opacity", "UNUSED");
     }
 
     private void assertASecondRunWithOneShaderOutOfDateKeepsTheHeadersOfBoth(Path outDir, Path headerDir)
@@ -438,6 +726,20 @@ public class MetalHeadersTest {
         finish(run);
     }
 
+    // tmp/link, a link to tmp/x/y/z: to the file system tmp/link/.. is tmp/x/y, to Path.normalize it is tmp.
+    private Path deepLink() throws IOException {
+        return Files.createSymbolicLink(tmp.resolve("link"), Files.createDirectories(tmp.resolve("x/y/z")));
+    }
+
+    private String headerOfACleanRun(String programA, String programB) throws Exception {
+        Path cleanGensrc = tmp.resolve("clean/gensrc");
+        JSLCInfo clean = newRun(cleanGensrc.resolve("jsl-decora"), cleanGensrc.resolve("mtl-headers"), DECORA);
+        compile(clean, "ProbeA", programA, OUT_OF_DATE);
+        compile(clean, "ProbeB", programB, OUT_OF_DATE);
+        finish(clean);
+        return Files.readString(cleanGensrc.resolve("mtl-headers").resolve(DECORA_HEADER));
+    }
+
     private static Path metalFile(Path outDir, String shaderName) {
         return outDir.resolve(IMPL).resolve("hw/mtl/msl/" + shaderName + ".metal");
     }
@@ -470,6 +772,21 @@ public class MetalHeadersTest {
         String dictCase = "isEqualToString:@\"(\\w+)\"\\]\\) \\{\n[^\n]*\n"
                 + " {8}return get\\1_Uniform_VarID_Dict\\(\\);\n";
         assertEquals(names, matches(dict, dictCase), where);
+    }
+
+    // Every name the header gives a uniform is its JSL name: the Java peer sets the uniform by that name, and MTLShader
+    // looks it up in the map that MTLShaderCalls builds from the shader's dictionary.
+    private static void assertUniformNames(String header, String shaderName, String... jslNames) {
+        int entryStart = header.indexOf("typedef enum " + shaderName + "_ArgumentBufferID {\n");
+        assertTrue(entryStart >= 0, "no entry for " + shaderName);
+        String entry = header.substring(entryStart, header.indexOf("}\n\n\n", entryStart));
+        String uniformStruct = entry.substring(entry.indexOf("typedef struct "),
+                entry.indexOf("} " + shaderName + "_Uniforms;"));
+        List<String> names = List.of(jslNames);
+        assertEquals(names, matches(entry, "\n {4}" + shaderName + "_(\\S+)_ID = \\d+,"), shaderName + " IDs");
+        assertEquals(names, matches(uniformStruct, " (\\S+);\n"), shaderName + " struct members");
+        assertEquals(names, matches(entry, "numberWithInt:" + shaderName + "_(\\S+)_ID\\]"), shaderName + " ids[]");
+        assertEquals(names, matches(entry, "@\"(\\S+)\","), shaderName + " dictionary keys");
     }
 
     private static String objCHeaderName(Kind kind) {
@@ -528,8 +845,11 @@ public class MetalHeadersTest {
     private record FileState(FileTime modified, String content) {
     }
 
-    // The headers the compiler of 0281b2fde8 wrote for SAMPLING, UNTEXTURED and ARRAYS; off macOS this is the
-    // only check of their bytes.
+    // The headers the compiler of 0281b2fde8 wrote for SAMPLING, UNTEXTURED, ARRAYS, INT_AND_FLOAT4, PRECISIONS,
+    // PAIRS and IDENTIFIER_CHARACTERS. Between them they have every kind of uniform the build's shaders declare, the
+    // precisions that MSLBackend also writes into the struct, two uniforms of each type that the header spells
+    // differently from the Metal shader, and a name with the first and last character of each range an identifier
+    // may have. Off macOS this is the only check of their bytes.
     private static final String GOLDEN_FRAGMENT_HEADER = """
         #ifndef FRAGMENT_COMMON_H
         #define FRAGMENT_COMMON_H
@@ -662,6 +982,150 @@ public class MetalHeadersTest {
         }
 
 
+        typedef enum IntAndFloat4_ArgumentBufferID {
+            IntAndFloat4_count_ID = 0,
+            IntAndFloat4_offset_ID = 1,
+            IntAndFloat4_UNUSED_ID = 2,
+
+        } IntAndFloat4ArgumentBufferID;
+
+        typedef struct IntAndFloat4_Uniforms {
+            int count;
+            packed_float4 offset;
+            id<MTLTexture> UNUSED;
+        } IntAndFloat4_Uniforms;
+
+        NSDictionary* getIntAndFloat4_Uniform_VarID_Dict() {
+            id ids[] = {
+                [NSNumber numberWithInt:IntAndFloat4_count_ID],
+                [NSNumber numberWithInt:IntAndFloat4_offset_ID],
+                [NSNumber numberWithInt:IntAndFloat4_UNUSED_ID],
+            };
+
+            NSUInteger count = sizeof(ids) / sizeof(id);
+            NSArray *idArray = [NSArray arrayWithObjects:ids count:count];
+            id uniforms[] = {
+                @"count",
+                @"offset",
+                @"UNUSED",
+            };
+
+            NSArray *uniformArray = [NSArray arrayWithObjects:uniforms count:count];
+            return [NSDictionary dictionaryWithObjects:idArray forKeys:uniformArray];
+        }
+
+
+        typedef enum Precisions_ArgumentBufferID {
+            Precisions_opacity_ID = 0,
+            Precisions_offset_ID = 1,
+            Precisions_weights_ID = 2,
+            Precisions_UNUSED_ID = 4,
+
+        } PrecisionsArgumentBufferID;
+
+        typedef struct Precisions_Uniforms {
+            LOWP float opacity;
+            HIGHP packed_float2 offset;
+            MEDIUMP packed_float4 weights[2];
+            id<MTLTexture> UNUSED;
+        } Precisions_Uniforms;
+
+        NSDictionary* getPrecisions_Uniform_VarID_Dict() {
+            id ids[] = {
+                [NSNumber numberWithInt:Precisions_opacity_ID],
+                [NSNumber numberWithInt:Precisions_offset_ID],
+                [NSNumber numberWithInt:Precisions_weights_ID],
+                [NSNumber numberWithInt:Precisions_UNUSED_ID],
+            };
+
+            NSUInteger count = sizeof(ids) / sizeof(id);
+            NSArray *idArray = [NSArray arrayWithObjects:ids count:count];
+            id uniforms[] = {
+                @"opacity",
+                @"offset",
+                @"weights",
+                @"UNUSED",
+            };
+
+            NSArray *uniformArray = [NSArray arrayWithObjects:uniforms count:count];
+            return [NSDictionary dictionaryWithObjects:idArray forKeys:uniformArray];
+        }
+
+
+        typedef enum Pairs_ArgumentBufferID {
+            Pairs_botImg_ID = 0,
+            Pairs_topImg_ID = 1,
+            Pairs_shift_ID = 2,
+            Pairs_scale_ID = 3,
+            Pairs_tint_ID = 4,
+            Pairs_glow_ID = 5,
+
+        } PairsArgumentBufferID;
+
+        typedef struct Pairs_Uniforms {
+            id<MTLTexture> botImg;
+            id<MTLTexture> topImg;
+            packed_float2 shift;
+            packed_float2 scale;
+            packed_float4 tint;
+            packed_float4 glow;
+        } Pairs_Uniforms;
+
+        NSDictionary* getPairs_Uniform_VarID_Dict() {
+            id ids[] = {
+                [NSNumber numberWithInt:Pairs_botImg_ID],
+                [NSNumber numberWithInt:Pairs_topImg_ID],
+                [NSNumber numberWithInt:Pairs_shift_ID],
+                [NSNumber numberWithInt:Pairs_scale_ID],
+                [NSNumber numberWithInt:Pairs_tint_ID],
+                [NSNumber numberWithInt:Pairs_glow_ID],
+            };
+
+            NSUInteger count = sizeof(ids) / sizeof(id);
+            NSArray *idArray = [NSArray arrayWithObjects:ids count:count];
+            id uniforms[] = {
+                @"botImg",
+                @"topImg",
+                @"shift",
+                @"scale",
+                @"tint",
+                @"glow",
+            };
+
+            NSArray *uniformArray = [NSArray arrayWithObjects:uniforms count:count];
+            return [NSDictionary dictionaryWithObjects:idArray forKeys:uniformArray];
+        }
+
+
+        typedef enum IdentifierCharacters_ArgumentBufferID {
+            IdentifierCharacters_$zZ_aA09_ID = 0,
+            IdentifierCharacters_UNUSED_ID = 1,
+
+        } IdentifierCharactersArgumentBufferID;
+
+        typedef struct IdentifierCharacters_Uniforms {
+            float $zZ_aA09;
+            id<MTLTexture> UNUSED;
+        } IdentifierCharacters_Uniforms;
+
+        NSDictionary* getIdentifierCharacters_Uniform_VarID_Dict() {
+            id ids[] = {
+                [NSNumber numberWithInt:IdentifierCharacters_$zZ_aA09_ID],
+                [NSNumber numberWithInt:IdentifierCharacters_UNUSED_ID],
+            };
+
+            NSUInteger count = sizeof(ids) / sizeof(id);
+            NSArray *idArray = [NSArray arrayWithObjects:ids count:count];
+            id uniforms[] = {
+                @"$zZ_aA09",
+                @"UNUSED",
+            };
+
+            NSArray *uniformArray = [NSArray arrayWithObjects:uniforms count:count];
+            return [NSDictionary dictionaryWithObjects:idArray forKeys:uniformArray];
+        }
+
+
         NSDictionary* getDECORADict(NSString* inShaderName) {
             MSL_LOG(@"getDECORADict ");
             if ([inShaderName isEqualToString:@"Textured"]) {
@@ -676,9 +1140,69 @@ public class MetalHeadersTest {
                 MSL_LOG(@"getDECORADict() : calling -> getArrays_Uniform_VarID_Dict()");
                 return getArrays_Uniform_VarID_Dict();
             }
+            if ([inShaderName isEqualToString:@"IntAndFloat4"]) {
+                MSL_LOG(@"getDECORADict() : calling -> getIntAndFloat4_Uniform_VarID_Dict()");
+                return getIntAndFloat4_Uniform_VarID_Dict();
+            }
+            if ([inShaderName isEqualToString:@"Precisions"]) {
+                MSL_LOG(@"getDECORADict() : calling -> getPrecisions_Uniform_VarID_Dict()");
+                return getPrecisions_Uniform_VarID_Dict();
+            }
+            if ([inShaderName isEqualToString:@"Pairs"]) {
+                MSL_LOG(@"getDECORADict() : calling -> getPairs_Uniform_VarID_Dict()");
+                return getPairs_Uniform_VarID_Dict();
+            }
+            if ([inShaderName isEqualToString:@"IdentifierCharacters"]) {
+                MSL_LOG(@"getDECORADict() : calling -> getIdentifierCharacters_Uniform_VarID_Dict()");
+                return getIdentifierCharacters_Uniform_VarID_Dict();
+            }
             return nil;
         };
 
         #endif
+        """;
+
+    // The Metal shader the compiler of 0281b2fde8 wrote for HELPER_FUNCTIONS.
+    private static final String GOLDEN_HELPERS_METAL = """
+        #include "FragmentShaderCommon.h"
+
+        typedef struct Helpers_Uniforms {
+            texture2d<float> img;
+            vector_float2 oinvarcradii;
+            vector_float2 iinvarcradii;
+        } Helpers_Uniforms;
+
+        float4 Helpers_SampleTexture(sampler textureSampler, texture2d<float> colorTexture, float2 texCoord) {
+            return colorTexture.sample(textureSampler, texCoord);
+        }
+
+        float Helpers_rrmask(sampler sampler0, device Helpers_Uniforms& uniforms,
+        float2 arcreltco, float2 invarcradii) {
+        float2 ecctco = arcreltco * invarcradii;
+        return clamp(dot(ecctco, ecctco), 0.0, 1.0);
+        }
+        float Helpers_mask(sampler sampler0, device Helpers_Uniforms& uniforms,
+        float2 tco, float2 flatdim) {
+        float2 arcreltco = max(abs(tco) - flatdim, 0.001);
+        float ocov = Helpers_rrmask(sampler0, uniforms, arcreltco, uniforms.oinvarcradii);
+        float icov = Helpers_rrmask(sampler0, uniforms, arcreltco, uniforms.iinvarcradii);
+        return ocov - icov;
+        }
+        float4 Helpers_paint(sampler sampler0, device Helpers_Uniforms& uniforms,
+        float2 tco) {
+        return Helpers_SampleTexture(sampler0, uniforms.img, tco);
+        }
+
+        [[fragment]] float4 Helpers(VS_OUTPUT in [[ stage_in ]],
+            device Helpers_Uniforms& uniforms [[ buffer(0) ]],
+            sampler sampler0 [[ sampler(0) ]]) {
+
+        float4 outFragColor;
+        float4 paintColor = Helpers_paint(sampler0, uniforms, in.texCoord0);
+        float coverage = Helpers_mask(sampler0, uniforms, in.texCoord0, in.texCoord1);
+        outFragColor = paintColor * coverage + Helpers_SampleTexture(sampler0, uniforms.img, in.texCoord1);
+        return outFragColor;
+
+        }
         """;
 }

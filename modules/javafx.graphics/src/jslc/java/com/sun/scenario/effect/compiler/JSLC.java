@@ -169,32 +169,20 @@ public class JSLC {
         return parser;
     }
 
-    /**
-     * The program of one compile, parsed at most once: by the first output that is out of date, or by the Metal
-     * header entry of a shader whose outputs are all up to date.
-     */
-    private static final class Source {
-        private final InputStream stream;
-        private ParserInfo pinfo;
-
-        Source(InputStream stream) {
-            this.stream = stream;
-        }
-
-        ParserInfo parse() throws Exception {
-            if (pinfo == null) {
-                pinfo = getParserInfo(stream);
-            }
-            return pinfo;
-        }
-    }
-
     private static ParserInfo compile(JSLCInfo jslcinfo,
                                       InputStream stream,
                                       long sourceTime)
         throws Exception
     {
-        Source source = new Source(stream);
+        return compile(jslcinfo, stream, sourceTime, null);
+    }
+
+    private static ParserInfo compile(JSLCInfo jslcinfo,
+                                      InputStream stream,
+                                      long sourceTime,
+                                      ParserInfo pinfo)
+        throws Exception
+    {
         int outTypes = jslcinfo.outTypes;
         String genericsName = jslcinfo.genericsName;
         String interfaceName = jslcinfo.interfaceName;
@@ -206,7 +194,7 @@ public class JSLC {
         if ((outTypes & OUT_D3D) != 0) {
             File outFile = jslcinfo.getOutputFile(OUT_D3D);
             if (jslcinfo.force || outOfDate(outFile, sourceTime)) {
-                ParserInfo pinfo = source.parse();
+                if (pinfo == null) pinfo = getParserInfo(stream);
                 HLSLBackend hlslBackend = new HLSLBackend(pinfo.parser, pinfo.visitor);
                 hlslBackend.scan(pinfo.program);
                 write(hlslBackend.getShader(), outFile);
@@ -216,7 +204,7 @@ public class JSLC {
         if ((outTypes & OUT_ES2) != 0) {
             File outFile = jslcinfo.getOutputFile(OUT_ES2);
             if (jslcinfo.force || outOfDate(outFile, sourceTime)) {
-                ParserInfo pinfo = source.parse();
+                if (pinfo == null) pinfo = getParserInfo(stream);
                 ES2Backend es2Backend = new ES2Backend(pinfo.parser, pinfo.visitor);
                 es2Backend.scan(pinfo.program);
                 write(es2Backend.getShader(), outFile);
@@ -229,21 +217,19 @@ public class JSLC {
             MetalHeaders metalHeaders = jslcinfo.metalHeaders;
             metalHeaders.target(jslcinfo.getMetalHeaderDir(), jslcinfo.metalHeaderKind);
             if (jslcinfo.force || outOfDate(outFile, sourceTime)) {
-                ParserInfo pinfo = source.parse();
+                if (pinfo == null) pinfo = getParserInfo(stream);
                 MSLBackend mslBackend = new MSLBackend(pinfo.parser, pinfo.visitor, shaderFileName);
                 mslBackend.scan(pinfo.program);
                 String shader = mslBackend.getShader();
                 write(shader, outFile);
-                metalHeaders.addCompiled(shaderFileName, mslBackend.getObjCHeaderEntry());
-            } else {
-                metalHeaders.addUpToDate(shaderFileName, () -> getObjCHeaderEntry(source.parse(), shaderFileName));
             }
+            metalHeaders.add(shaderFileName, outFile);
         }
 
         if ((outTypes & OUT_JAVA) != 0) {
             File outFile = jslcinfo.getOutputFile(OUT_JAVA);
             if (jslcinfo.force || outOfDate(outFile, sourceTime)) {
-                ParserInfo pinfo = source.parse();
+                if (pinfo == null) pinfo = getParserInfo(stream);
                 JSWBackend javaBackend = new JSWBackend(pinfo.parser, pinfo.visitor, pinfo.program);
                 String genCode = javaBackend.getGenCode(shaderName, peerName, genericsName, interfaceName);
                 write(genCode, outFile);
@@ -253,20 +239,14 @@ public class JSLC {
         if ((outTypes & OUT_PRISM) != 0) {
             File outFile = jslcinfo.getOutputFile(OUT_PRISM);
             if (jslcinfo.force || outOfDate(outFile, sourceTime)) {
-                ParserInfo pinfo = source.parse();
+                if (pinfo == null) pinfo = getParserInfo(stream);
                 PrismBackend prismBackend = new PrismBackend(pinfo.parser, pinfo.visitor, pinfo.program);
                 String genCode = prismBackend.getGlueCode(shaderName, peerName, genericsName, interfaceName);
                 write(genCode, outFile);
             }
         }
 
-        return source.pinfo;
-    }
-
-    private static String getObjCHeaderEntry(ParserInfo pinfo, String shaderFileName) {
-        MSLBackend mslBackend = new MSLBackend(pinfo.parser, pinfo.visitor, shaderFileName);
-        mslBackend.scan(pinfo.program);
-        return mslBackend.getObjCHeaderEntry();
+        return pinfo;
     }
 
     public static boolean outOfDate(File outFile, long sourceTime) {

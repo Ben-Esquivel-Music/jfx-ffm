@@ -25,22 +25,32 @@
 
 package com.sun.scenario.effect.compiler.backend.hw;
 
+import com.sun.scenario.effect.compiler.model.Precision;
+
 import java.io.File;
+import java.io.FileInputStream;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
-import java.util.concurrent.Callable;
 
 import static java.nio.charset.StandardCharsets.UTF_8;
 
 /**
  * The Metal headers of one generator run: {@code FragmentShaderCommon.h} and the Objective-C header through
  * which {@code MetalShader.m} looks up the uniforms of every fragment shader, so it lists every Metal shader
- * of the run, up to date or not, in the order the run compiled them. {@code JSLC.compile} adds the shaders;
+ * of the run, up to date or not, in the order the run added them. {@code JSLC.compile} adds the shaders;
  * {@link #write} writes the headers after the run's last compile.
+ * <p>
+ * A shader's entry in the Objective-C header is read from the uniform struct in its {@code .metal} file, which
+ * the Metal library is built from, rather than computed from its program. So the program of a shader whose
+ * output is up to date is not parsed, and the header holds exactly the entries of the run's {@code .metal}
+ * files: an entry that another output root or a run that stopped before {@link #write} left in the file is
+ * replaced.
  */
 public final class MetalHeaders {
 
@@ -78,73 +88,187 @@ public final class MetalHeaders {
         #endif
         """;
 
-    private final Map<String, Callable<String>> entries = new LinkedHashMap<>();
+    private final Map<String, String> entries = new LinkedHashMap<>();
     private Path dir;
     private Kind kind;
-    private boolean shaderCompiled;
 
-    public void target(File headerDir, Kind headerKind) {
-        Path headerPath = headerDir.toPath().toAbsolutePath().normalize();
+    /**
+     * Sets the directory and kind of the run's headers. Every Metal shader of the run must give the same kind and a
+     * path to the same directory: the one the file system resolves the path to, as for every other output of JSLC.
+     * The path is not normalized, which would drop a {@code link/..} as text where the file system goes to the
+     * parent of the link's target.
+     */
+    public void target(File headerDir, Kind headerKind) throws IOException {
+        Path headerPath = headerDir.toPath().toAbsolutePath();
         if (dir == null) {
             dir = headerPath;
             kind = headerKind;
-        } else if (!dir.equals(headerPath) || kind != headerKind) {
+        } else if (!namesDir(headerPath) || kind != headerKind) {
             throw new IllegalStateException("This run writes the " + kind.fileName + " in " + dir
                     + ", not the " + headerKind.fileName + " in " + headerPath);
         }
     }
 
-    public void addCompiled(String shaderName, String entry) {
-        add(shaderName, () -> entry);
-        shaderCompiled = true;
+    // Only a path that differs as text is resolved, because every Metal shader of the run gives one, 212 in each
+    // Prism JVM, and resolving a path costs file system lookups.
+    private boolean namesDir(Path headerPath) throws IOException {
+        return dir.equals(headerPath)
+                || dir.toFile().getCanonicalFile().equals(headerPath.toFile().getCanonicalFile());
     }
 
-    /** Adds a shader whose Metal output is up to date; its entry is computed only if the header is assembled. */
-    public void addUpToDate(String shaderName, Callable<String> entry) {
-        add(shaderName, entry);
-    }
-
-    private void add(String shaderName, Callable<String> entry) {
-        if (entries.putIfAbsent(shaderName, entry) != null) {
-            throw new IllegalStateException("Shader " + shaderName + " was compiled twice in one run");
+    /** Adds a shader of the run, compiled or up to date, whose Metal output is {@code metalFile}. */
+    public void add(String shaderName, File metalFile) throws IOException {
+        if (entries.putIfAbsent(shaderName, objCHeaderEntry(shaderName, metalFile)) != null) {
+            throw new IllegalStateException("Shader " + shaderName + " was added twice in one run");
         }
     }
 
-    /**
-     * Writes each header whose bytes differ from the file. The Objective-C header is assembled again only if a
-     * shader of the run was compiled, or if the file does not start and end as this run's header does.
-     */
-    public void write() throws Exception {
+    /** Writes each header whose bytes differ from the file. */
+    public void write() throws IOException {
         if (entries.isEmpty()) {
             return;
         }
-        Path objCHeader = dir.resolve(kind.fileName);
-        String prologue = prologue();
-        String epilogue = shaderDictFunction() + "#endif\n";
-        boolean current = !shaderCompiled && listsThisRun(objCHeader, prologue, epilogue);
-        String content = current ? null : prologue + assembleEntries() + epilogue;
         createDirectory();
         writeIfChanged(dir.resolve(FRAGMENT_SHADER_HEADER_FILE_NAME), FRAGMENT_SHADER_HEADER);
-        if (content != null) {
-            writeIfChanged(objCHeader, content);
+        writeIfChanged(dir.resolve(kind.fileName),
+                prologue() + String.join("", entries.values()) + shaderDictFunction() + "#endif\n");
+    }
+
+    /**
+     * Returns the shader's argument IDs, its uniform struct with the Objective-C types and its uniform
+     * dictionary function, from the uniform struct that {@code MSLBackend} wrote into its Metal source.
+     * A member line in another form than {@code MSLBackend} writes, which a hand edit can give, makes the shader
+     * unreadable instead of getting a guessed entry, because {@code MetalShader.m} sets each uniform through the
+     * argument buffer ID that the entry gives it.
+     */
+    private static String objCHeaderEntry(String shaderName, File metalFile) throws IOException {
+        String uniformStructName = shaderName + "_Uniforms";
+        String structStart = "typedef struct " + uniformStructName + " {\n";
+        String shader = readShader(metalFile);
+        int start = shader.indexOf(structStart);
+        int end = start < 0 ? -1 : shader.indexOf("} " + uniformStructName + ";\n", start);
+        if (end < 0) {
+            throw cannotReadUniforms(uniformStructName, metalFile);
+        }
+        String uniforms = shader.substring(start + structStart.length(), end);
+
+        List<String> uniformNames = new ArrayList<>();
+        StringBuilder uniformIDs = new StringBuilder();
+        int uniformIDCount = 0;
+        for (String member : uniforms.split("\n")) {
+            Uniform uniform = uniform(member);
+            if (uniform == null) {
+                throw cannotReadUniforms(uniformStructName, metalFile);
+            }
+            uniformNames.add(uniform.name());
+            uniformIDs.append("    " + shaderName + "_" + uniform.name() + "_ID = " + uniformIDCount + ",\n");
+            uniformIDCount += uniform.idCount();
+        }
+        // The Objective-C types the header had when its entries were computed from the programs: float2 and
+        // float4 packed, float3 left as the vector_float3 that MSLBackend writes. As in MSLBackend, the space after
+        // the type leaves a name like vector_float2x alone.
+        String uniformsForObjCFiles = uniforms.replace("texture2d<float>", "id<MTLTexture>")
+                .replace(" vector_float2 ", " packed_float2 ")
+                .replace(" vector_float4 ", " packed_float4 ");
+
+        StringBuilder objCHeader = new StringBuilder();
+        objCHeader.append("typedef enum " + shaderName + "_ArgumentBufferID {\n" + uniformIDs + "\n} "
+                + shaderName + "ArgumentBufferID;\n\n");
+        objCHeader.append("typedef struct " + uniformStructName + " {\n" + uniformsForObjCFiles + "} "
+                + uniformStructName + ";\n\n");
+        objCHeader.append("NSDictionary* get" + shaderName + "_Uniform_VarID_Dict() {\n");
+        objCHeader.append("    id ids[] = {\n");
+        for (String uniformName : uniformNames) {
+            objCHeader.append("        [NSNumber numberWithInt:" + shaderName + "_" + uniformName + "_ID],\n");
+        }
+        objCHeader.append("    };\n\n");
+        objCHeader.append("    NSUInteger count = sizeof(ids) / sizeof(id);\n");
+        objCHeader.append("    NSArray *idArray = [NSArray arrayWithObjects:ids count:count];\n");
+        objCHeader.append("    id uniforms[] = {\n");
+        for (String uniformName : uniformNames) {
+            objCHeader.append("        @\"" + uniformName + "\",\n");
+        }
+        objCHeader.append("    };\n\n");
+        objCHeader.append("    NSArray *uniformArray = [NSArray arrayWithObjects:uniforms count:count];\n");
+        objCHeader.append("    return [NSDictionary dictionaryWithObjects:idArray forKeys:uniformArray];\n");
+        objCHeader.append("}\n\n\n");
+        return objCHeader.toString();
+    }
+
+    private record Uniform(String name, int idCount) {
+    }
+
+    /**
+     * Returns the uniform that a member line of the struct declares, or null unless the line has the form
+     * {@code MSLBackend} writes: four spaces, an optional precision, a type, a name with an optional array size,
+     * and a semicolon.
+     */
+    private static Uniform uniform(String member) {
+        if (!member.startsWith("    ") || !member.endsWith(";")) {
+            return null;
+        }
+        int typeStart = 4;
+        for (Precision precision : Precision.values()) {
+            if (member.startsWith(precision.name() + " ", typeStart)) {
+                typeStart += precision.name().length() + 1;
+                break;
+            }
+        }
+        int typeEnd = member.indexOf(' ', typeStart);
+        int declaratorEnd = member.length() - 1;
+        int arrayStart = member.indexOf('[', typeEnd + 1);
+        int nameEnd = arrayStart < 0 ? declaratorEnd : arrayStart;
+        // The name is the uniform's JSL identifier, which may also contain '$'.
+        if (typeEnd < 0 || !isWord(member, typeStart, typeEnd, "<>") || !isWord(member, typeEnd + 1, nameEnd, "$")) {
+            return null;
+        }
+        String name = member.substring(typeEnd + 1, nameEnd);
+        if (arrayStart < 0) {
+            return new Uniform(name, 1);
+        }
+        if (member.charAt(declaratorEnd - 1) != ']') {
+            return null;
+        }
+        // An array takes one argument buffer ID per element. The size must read back unchanged, because MSL
+        // reads a leading 0 as octal.
+        String size = member.substring(arrayStart + 1, declaratorEnd - 1);
+        try {
+            int idCount = Integer.parseInt(size);
+            return idCount > 0 && size.equals(Integer.toString(idCount)) ? new Uniform(name, idCount) : null;
+        } catch (NumberFormatException e) {
+            return null;
         }
     }
 
-    private static boolean listsThisRun(Path objCHeader, String prologue, String epilogue) throws IOException {
-        byte[] bytes = readIfRegularFile(objCHeader);
-        if (bytes == null) {
+    /** Returns whether {@code text[start, end)} is an ASCII identifier that may also contain the other chars. */
+    private static boolean isWord(String text, int start, int end, String otherChars) {
+        if (start >= end || isDigit(text.charAt(start))) {
             return false;
         }
-        String text = new String(bytes, UTF_8);
-        return text.startsWith(prologue) && text.endsWith(epilogue);
+        for (int i = start; i < end; i++) {
+            char c = text.charAt(i);
+            if (!(c == '_' || (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || isDigit(c)
+                    || otherChars.indexOf(c) >= 0)) {
+                return false;
+            }
+        }
+        return true;
     }
 
-    private String assembleEntries() throws Exception {
-        StringBuilder assembled = new StringBuilder();
-        for (Callable<String> entry : entries.values()) {
-            assembled.append(entry.call());
+    private static boolean isDigit(char c) {
+        return c >= '0' && c <= '9';
+    }
+
+    // Every run reads all of its .metal files, 212 in each Prism JVM, and a fresh JVM reads them about twice
+    // as fast through FileInputStream as through Files.readString.
+    private static String readShader(File metalFile) throws IOException {
+        try (FileInputStream in = new FileInputStream(metalFile)) {
+            return new String(in.readAllBytes(), UTF_8);
         }
-        return assembled.toString();
+    }
+
+    private static IOException cannotReadUniforms(String uniformStructName, File metalFile) {
+        return new IOException("Cannot read " + uniformStructName + " from the Metal shader " + metalFile);
     }
 
     private void createDirectory() throws IOException {

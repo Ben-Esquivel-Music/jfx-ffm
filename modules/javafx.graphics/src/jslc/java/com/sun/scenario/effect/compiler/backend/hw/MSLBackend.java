@@ -56,12 +56,7 @@ public class MSLBackend extends SLBackend {
     private final String shaderFunctionName;
     private final String sampleTexFuncName;
     private final String uniformStructName;
-    private final List<String> uniformNames = new ArrayList<>();
-    private final String uniformIDsEnumName;
-    private String uniformIDs = "";
-    private int uniformIDCount;
     private String uniformsForShaderFile = ""; // visitVarDecl() accumulates all the Uniforms in this string.
-    private String uniformsForObjCFiles = "";
 
     // MTLArguemntEncoder requires the argument struct buffer to contain atleast one variable
     // of type: buffers, textures, samplers, or any element with the [[id]] attribute’
@@ -168,7 +163,6 @@ public class MSLBackend extends SLBackend {
         super(parser, visitor);
         this.shaderFunctionName = shaderFunctionName;
         uniformStructName = shaderFunctionName + "_Uniforms";
-        uniformIDsEnumName = shaderFunctionName + "_ArgumentBufferID";
         sampleTexFuncName = shaderFunctionName + "_SampleTexture";
     }
 
@@ -277,25 +271,13 @@ public class MSLBackend extends SLBackend {
                     hasTextureVar = true;
                     texSamplerMap.put(var.getName(), "sampler" + texSamplerMap.size());
                 }
-                uniformNames.add(var.getName());
                 aUniform += getType(var.getType()) + " " + var.getName();
                 if (var.isArray()) {
                     aUniform += "[" + var.getArraySize() + "]";
                 }
 
-                if (!uniformIDs.contains(var.getName())) {
-                    uniformIDs += "    " + shaderFunctionName + "_" + var.getName() + "_ID = " + uniformIDCount + ",\n";
-                    if (var.isArray()) {
-                        uniformIDCount += var.getArraySize();
-                    } else {
-                        uniformIDCount++;
-                    }
-                }
                 if (!uniformsForShaderFile.contains(var.getName())) {
                     uniformsForShaderFile += "    " + aUniform + ";\n";
-                }
-                if (!uniformsForObjCFiles.contains(var.getName())) {
-                    uniformsForObjCFiles += "    " + aUniform + ";\n";
                 }
             }
             case null -> super.visitVarDecl(d);
@@ -305,61 +287,6 @@ public class MSLBackend extends SLBackend {
     @Override
     public void visitDiscardStmt(DiscardStmt s) {
         output(" discard_fragment();\n");
-    }
-
-    /**
-     * Returns this shader's part of the Objective-C header: its argument IDs, uniform struct and uniform
-     * dictionary function.
-     */
-    public String getObjCHeaderEntry() {
-        List<String> uniformNames = new ArrayList<>(this.uniformNames);
-        String uniformIDs = this.uniformIDs;
-        String uniformsForObjCFiles = this.uniformsForObjCFiles;
-        StringBuilder objCHeader = new StringBuilder();
-
-        if (!hasTextureVar) {
-            String unusedUniform = "UNUSED";
-            uniformNames.add(unusedUniform);
-            uniformsForObjCFiles  += "    texture2d<float> " + unusedUniform + ";\n";
-            uniformIDs += "    " + shaderFunctionName + "_" + unusedUniform + "_ID = " + uniformIDCount + ",\n";
-        }
-
-        uniformsForObjCFiles = uniformsForObjCFiles.replace("texture2d<float>", "id<MTLTexture>");
-        uniformsForObjCFiles = uniformsForObjCFiles.replace(" float2", " packed_float2");
-        uniformsForObjCFiles = uniformsForObjCFiles.replace(" float3", " vector_float3");
-        uniformsForObjCFiles = uniformsForObjCFiles.replace(" float4", " packed_float4");
-
-        if (uniformIDs != "") {
-            objCHeader.append("typedef enum " + uniformIDsEnumName +
-                " {\n" + uniformIDs + "\n} " + shaderFunctionName + "ArgumentBufferID;\n\n");
-
-            objCHeader.append("typedef struct " + uniformStructName + " {\n"
-                + uniformsForObjCFiles + "} " + uniformStructName + ";\n\n");
-
-            objCHeader.append("NSDictionary* get" + shaderFunctionName + "_Uniform_VarID_Dict() {\n");
-            objCHeader.append("    id ids[] = {\n");
-            for (String aUniformName : uniformNames) {
-                objCHeader.append("        [NSNumber numberWithInt:" + shaderFunctionName + "_" +
-                    aUniformName + "_ID" + "],\n");
-            }
-            objCHeader.append("    };\n\n");
-            objCHeader.append("    NSUInteger count = sizeof(ids) / sizeof(id);\n");
-            objCHeader.append("    NSArray *idArray = [NSArray arrayWithObjects:ids count:count];\n");
-
-            objCHeader.append("    id uniforms[] = {\n");
-            for (String aUniformName : uniformNames) {
-                objCHeader.append("        @\"" + aUniformName + "\",\n");
-            }
-            objCHeader.append("    };\n\n");
-            objCHeader.append("    NSArray *uniformArray = [NSArray arrayWithObjects:uniforms count:count];\n");
-            objCHeader.append("    return [NSDictionary dictionaryWithObjects:idArray forKeys:uniformArray];\n");
-            objCHeader.append("}\n\n\n");
-        } else {
-            objCHeader.append("NSDictionary* get" + shaderFunctionName + "_Uniform_VarID_Dict() {\n");
-            objCHeader.append("    return nil;\n");
-            objCHeader.append("}\n\n\n");
-        }
-        return objCHeader.toString();
     }
 
     @Override
@@ -373,9 +300,13 @@ public class MSLBackend extends SLBackend {
             uniformsForShaderFile += "    texture2d<float> " + unusedUniform + ";\n";
         }
 
-        uniformsForShaderFile = uniformsForShaderFile.replace(" float2", " vector_float2");
-        uniformsForShaderFile = uniformsForShaderFile.replace(" float3", " vector_float3");
-        uniformsForShaderFile = uniformsForShaderFile.replace(" float4", " vector_float4");
+        // MetalHeaders builds the shader's Objective-C header entry from this struct, reading its members only in
+        // the form that visitVarDecl, the UNUSED member above and these lines give them, and keys each uniform by its
+        // name here. So the names stay the JSL names that the Java peer sets: the space after each type leaves a name
+        // like float2x alone.
+        uniformsForShaderFile = uniformsForShaderFile.replace(" float2 ", " vector_float2 ");
+        uniformsForShaderFile = uniformsForShaderFile.replace(" float3 ", " vector_float3 ");
+        uniformsForShaderFile = uniformsForShaderFile.replace(" float4 ", " vector_float4 ");
         header.append("typedef struct " + uniformStructName + " {\n" + uniformsForShaderFile + "} " + uniformStructName + ";\n\n");
 
         if (hasTextureVar) {
@@ -405,11 +336,13 @@ public class MSLBackend extends SLBackend {
         shader = shader.substring(0, indexOfClosingBraceOfMain) + "return outFragColor;\n\n" +
                 shader.substring(indexOfClosingBraceOfMain, shader.length());
 
+        // A function is renamed only where it is called or defined, so that a uniform named like it keeps its JSL
+        // name in the uniform struct.
         for (String helperFunction : helperFunctions) {
-            shader = shader.replaceAll("\\b" + helperFunction + "\\b", shaderFunctionName + "_" + helperFunction);
+            shader = shader.replaceAll("\\b" + helperFunction + "(?=\\()", shaderFunctionName + "_" + helperFunction);
         }
         if (hasTextureVar) {
-            shader = shader.replaceAll("\\bsampleTex\\b", sampleTexFuncName);
+            shader = shader.replaceAll("\\bsampleTex(?=\\()", sampleTexFuncName);
             for (Map.Entry<String,String> entry : texSamplerMap.entrySet()) {
                 shader = shader.replaceAll("\\b" + sampleTexFuncName + "\\(uniforms." + entry.getKey() + "\\b",
                     sampleTexFuncName + "(" + entry.getValue() + ", uniforms." + entry.getKey());

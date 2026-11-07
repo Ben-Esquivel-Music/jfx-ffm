@@ -95,10 +95,11 @@ meanwhile; ranges are over 2 to 6 runs (Measured has the setup).
 - Clean build: the first JVM wrote complete headers (`PrismShaderCommon.h` with 212 entries) and the others none.
   After the two edits above both variants left 16 and 66 entries, US-018's truncation; with the future time stamp
   every JVM rewrote the header with the same 28. So the loop neither caused nor hid US-018.
-- With US-018's fix, the run of each Prism JVM lists all 212 shaders: it computes an up-to-date shader's entry only
-  when the header has to be assembled and writes a header only when its bytes change, so the later JVMs no longer
-  overwrite the headers with fewer entries. A rerun with nothing changed takes about 5 ms more per generator JVM. A
-  run that compiles all 212 shaders, as `-force` makes it, takes 78.6 s through the loop and 2.8 s in one JVM.
+- With US-018's fix, the run of each Prism JVM lists all 212 shaders: it reads every shader's entry, compiled or up to
+  date, from the uniform struct in its `.metal` file and writes a header only when its bytes change, so the later JVMs
+  no longer overwrite the headers with fewer entries. A rerun with nothing changed takes 12.74 ms more per generator
+  JVM than before US-018 (on macOS, the median of 9 repetitions: 394.9 ms over the 31 JVMs). A run that compiles all 212
+  shaders, as `-force` makes it, takes 78.6 s through the loop and 2.8 s in one JVM.
 
 ### Why one JVM per file
 - JDK-8101343 (fixed in 2011 for fx2.0) made the JSL tools write only out-of-date outputs; the first open-source JSLC
@@ -231,7 +232,7 @@ it is part of the story.
   - `target/gensrc/{jsl-decora,jsl-prism,headers,mtl-headers}` is identical by name and md5 before and after. In the
     US-008 gate these held 108, 424, 46 and 0 files on each system; `mtl-headers` is empty there, so the Metal output
     is covered only by the `-d3d -es2 -mtl` regeneration above.
-  - `javafx.graphics` has the same test counts per class as before, and `javafx-jslc` runs its 182 tests with no
+  - `javafx.graphics` has the same test counts per class as before, and `javafx-jslc` runs its 190 tests with no
     failure.
 - **Upstream.** Repeat the JBS search when the story is picked up and decide whether to propose the change upstream. A
   draft stays outside the repository.
