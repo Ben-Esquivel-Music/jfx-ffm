@@ -6,16 +6,36 @@ This codebase is a fork of the OpenJFX mainline development branch (version 28-e
 
 - Switch all JNI code over to FFM API
 - Reduce native code as much as (safely) possible in favor of pure java
-- Extend the media API to support more formats (.wav, .cdg, etc..)
+- Extend the media API to support more formats (.wav, .cdg, etc..) and low-latency, mixed sound effects for games ([plan](backlog/README.md#media-formats))
+- Add a [game toolkit](#game-toolkit) for JavaFX
 
 # Long Term Project Goals
 
 - Port native code to Rust
 - Serve as a prototype for OpenJFX project to use as a blueprint for making similar improvements
+- Own and grow the game toolkit's built-in 3D physics engine beyond its Godot origin
 
 # Non Goals
 
-- It is not the goal of this project to make any logic changes outside of the media module
+- Logic changes, or new or changed public API, in the existing `javafx.*` modules outside javafx.media, unless a
+  backlog story names the change. The game toolkit lives in new modules of the fork's own.
+- Mobile platforms. "Cross-platform" means the five desktop targets CI builds: Windows x64, macOS x64 and aarch64,
+  Linux x64 and aarch64.
+- For the game toolkit: an editor, an asset build pipeline, ECS, networking or scripting; a Java port of Jolt; soft
+  bodies; swapping physics engines at run time; a native physics engine in the SDK; bundling an engine under a
+  GPL-incompatible licence; bit-for-bit parity with stock Godot builds.
+
+# Game toolkit
+
+The game toolkit is planned in the [backlog](backlog/README.md#game-toolkit) (US-075 to US-095). It will provide:
+
+- a fixed-step game loop with render interpolation and per-tick input, including gamepads;
+- a built-in physics engine in pure Java, ported faithfully from Godot's built-in physics and proven equal to a pinned
+  Godot build: 2D first, then 3D rigid bodies;
+- a contract that lets applications bring their own physics engine, Java or native, checked by a conformance kit.
+
+The built-in engine is to give bit-identical results on all five desktop targets. Rendering is always JavaFX; only the
+physics engine can be swapped. The toolkit is the fork's own work and not part of the OpenJFX blueprint goal.
 
 # Building
 

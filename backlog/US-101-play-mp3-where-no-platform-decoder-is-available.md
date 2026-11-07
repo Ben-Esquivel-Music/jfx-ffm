@@ -1,0 +1,113 @@
+# US-101 — Play MP3 where no platform decoder is available
+
+**Status:** 📋 Ready (filed 2026-11-07 from the media-format survey) · **Epic:** Media formats ·
+**Blocked by:** US-096 (a fallback that plays must raise no error), US-100 (the Java playback path) ·
+**Blocks:** none
+
+## Story
+As the developer of a JavaFX application that plays MP3,
+I want MP3 to play on hosts where no platform decoder can play it,
+so that MP3 works on every desktop without changing what plays on hosts where a platform decoder works.
+
+## Problem
+Paths that start with `jfxmediaimpl/` or `jfxmedia/` are under `modules/javafx.media/src/main/java/com/sun/media/`,
+and `javafx/scene/media/` is under `modules/javafx.media/src/main/java/`. `GstPipelineFactory.cpp` is
+`modules/javafx.media/src/main/native/jfxmedia/platform/gstreamer/GstPipelineFactory.cpp`.
+- **The platform decodes MP3.** GStreamer decodes it with dshowwrapper on Windows and with avplugin's
+  `avaudiodecoder` on Linux, and returns `ERROR_PLATFORM_UNSUPPORTED` on macOS (`GstPipelineFactory.cpp:581-589`).
+  On macOS GStreamer claims only AIFF and WAV (`jfxmediaimpl/platform/gstreamer/GSTPlatform.java:62-65`,
+  `:110-116`), and AVFoundation plays MP3 (`jfxmediaimpl/platform/osx/OSXPlatform.java:46-54`).
+- **Linux needs ffmpeg.** avplugin is optional: it is built only when pkg-config finds libavcodec, libavformat and
+  libswscale (`modules/javafx.media/native/linux.cmake:69-72`, `:389-415`), and at run time gstreamer-lite looks for
+  libavcodec 57 to 62 and a few older names
+  (`modules/javafx.media/src/main/native/gstreamer/gstreamer-lite/gstreamer/gst/gstregistry.c:145-149`). Without a
+  usable one, `new Media` succeeds and the player fails: `avaudiodecoder` cannot be created
+  (`GstPipelineFactory.cpp:917-919`), and the `MediaPlayer` constructor throws "Could not create player!"
+  (`jfxmediaimpl/NativeMediaManager.java:294-297`). US-096 makes that failure clear; US-099 widens the ffmpeg
+  versions that play natively.
+- **macOS needs AVFoundation.** If `jfxmedia_avf` does not load there is no OSXPlatform (`OSXPlatform.java:83-91`),
+  no platform claims MP3, and `new Media` fails with `MEDIA_UNSUPPORTED` (`jfxmedia/locator/Locator.java:473-474`,
+  `javafx/scene/media/Media.java:409-410`) (inferred chain).
+- **Java is asked first.** `JavaPlatform` comes before the native platforms
+  (`jfxmediaimpl/platform/PlatformManager.java:82-110`, `:226-240`), so a Java decoder that simply claimed MP3 would
+  replace every OS decoder (inferred). It already parses MP3's ID3 tags
+  (`jfxmediaimpl/platform/java/JavaPlatform.java:57-66`).
+- **What MP3 means here.** The public format table promises "Raw MPEG-1, 2, and 2.5 audio; layers I, II, and III;
+  all supported combinations of sampling frequencies and bit rates" (`javafx/scene/media/package-info.java:62-64`).
+  MPEG-2.5 is an extension of layer III only (knowledge).
+- **Free to decode.** MP3's patents have expired and its licensing programme ended in April 2017
+  (https://gigazine.net/gsc_news/en/20170502-mp3-licensing-program-finished).
+- **No exact reference.** MP3 is lossy, and decoders legitimately differ in the last bits; MPEG audio conformance
+  (ISO/IEC 11172-4) is judged by an error bound against a reference decoder (knowledge).
+- **WebView.** WebView advertises `MediaManager.getSupportedContentTypes()`
+  (`modules/javafx.web/src/main/java/com/sun/javafx/webkit/prism/PrismGraphicsManager.java:154-155`), so on macOS
+  without AVFoundation its `canPlayType` answer for MP3 changes with this story (inferred).
+
+## Constraints
+- **Fill gaps only** (owner ruling, `backlog/README.md`, "Media formats"). Wherever an OS decoder plays MP3, it still
+  does, its output stays bit-for-bit as it is, and the Java decoder is not used.
+- **Licences** (owner ruling, `backlog/README.md`, "Media formats"). Third-party Java code inside the jars is MIT, BSD,
+  zlib, CC0, BSL-1.0 or similarly permissive; no LGPL and no Apache-2.0 Java code. Where no permissive library exists,
+  the
+  decoder is written in-house from the specification. Native code keeps port rule P8 (`backlog/README.md`, "Port
+  rules"). Every notice ships through US-075.
+- **Native code.** Any native change keeps the fork's FFM rules: plain C ABIs bound through FFM, no JNI. If it
+  touches gstreamer-lite or `GstPipelineFactory.cpp`, it lands after US-040. Either way, the content of US-036's
+  slice-0 "unsupported content" scenario (`backlog/US-036-port-the-jfxmedia-gstreamer-pipeline-core-to-rust.md:99`)
+  stays unsupported.
+- **Java.** Java 27 final features only (no preview, no incubator such as the Vector API, no `var`). Production Java
+  files this story adds are at most 900 lines (`wc -l`), and files already over that do not grow; tests and shims are
+  exempt. Comments only for a non-obvious "why". GPLv2+CPE headers; ported permissive code also keeps its notice in
+  the second header block (`.claude/skills/openjfx-conventions/SKILL.md:86-89`).
+- **Tests.** Test media is generated by a command recorded next to it; nothing downloaded is committed
+  (`backlog/README.md`, "Port rules"). Reference outputs are captured as the house captures goldens
+  (`.claude/skills/jfx-ffm-testing/SKILL.md:268-286`). Agents never run `USE_ROBOT` or `tests/system` runs; listening
+  checks are the owner's.
+
+## Out of scope
+- Replacing an OS decoder anywhere it plays MP3. Retiring Windows' dshowwrapper is US-050, with its own parity ruling.
+- Making more ffmpeg versions play natively (US-099).
+- MP3 inside other containers (WAV, MP4, HLS).
+
+## Acceptance criteria
+1. **Gaps filled.** MP3 plays through `MediaPlayer` and `AudioClip` wherever no OS decoder can play it, and at least
+   on Linux with no ffmpeg, on Linux with an ffmpeg the module cannot use, and on macOS when AVFoundation playback is
+   unavailable (for example when `jfxmedia_avf` does not load). Tests on the Linux and macOS CI legs show each case.
+2. **No spurious error.** When the Java decoder plays an MP3, no error is set on the `Media` or the `MediaPlayer`, no
+   `onError` handler runs, and an `AudioClip` of it plays.
+3. **OS decoders untouched.** Wherever an OS decoder plays MP3 (Windows, macOS with AVFoundation, Linux with a usable
+   ffmpeg), the same decoder plays it with the same output as before. A test shows on each CI leg which decoder
+   played the corpus, and it was never the Java decoder.
+4. **What it decodes.** The Java decoder decodes what the public format table promises: MPEG-1 and MPEG-2 layers I,
+   II and III and MPEG-2.5 layer III, at every sampling rate and bit rate they define. A stream it cannot decode
+   fails with US-096's error naming the cause.
+5. **Accuracy agreed first.** A reference decoder and a tolerance against it are chosen and recorded here before any
+   comparison. The Java decoder stays within that tolerance over a generated corpus that covers every version and
+   layer of criterion 4, CBR and VBR, mono, stereo, joint stereo and dual channel, ID3v1 and ID3v2 tags, Xing and
+   LAME headers, and corrupt and truncated frames. The story records whether the decoder trims encoder delay and
+   padding (gapless playback); if it does, the corpus covers that too.
+6. **Damaged input.** Corrupt or truncated input never hangs, crashes or throws to the application: damaged frames
+   are skipped or concealed, and a file with no decodable frame fails with US-096's error.
+7. **Same on five targets.** The Java decoder's PCM is identical on Windows x64, macOS x64 and aarch64, and Linux
+   x64 and aarch64, shown by hashes compared against a committed golden on each leg.
+8. **The player contract.** Seek, rate, start and stop time, cycle count, volume, balance, mute, equalizer, spectrum
+   and events behave as US-100 requires, and `Media.getMetadata()` holds the same ID3 entries it holds where an OS
+   decoder plays the file.
+9. **WebView.** Where this story makes MP3 play, `audio/mpeg` is in WebView's `canPlayType` answer; a test checks it.
+10. **Nothing else broken.** The media module's tests pass with the counts of a run before the change, plus the new
+    tests, and all five CI legs are green.
+
+## Definition of Done
+- All acceptance criteria met, with the evidence (logs, counts, goldens, tables) kept with the change.
+- An independent review by `media-format-reviewer` signed off, and by `ffm-reviewer` if native or FFM code changed.
+- Status set to ✅ Done with the date and the PR, and the row moved to the done table of `backlog/README.md`.
+- Changes left in the working tree / a review branch — **no commits, merges or PRs without explicit approval from
+  the repository owner.**
+- The owner listens to the corpus through the Java decoder on Linux and macOS and records the result.
+
+## Notes
+- Owner ruling, 2026-11-07: a pure-Java MP3 decoder fills gaps only; wherever an OS decoder plays MP3 today, the
+  output stays bit-for-bit as it is (`backlog/README.md`, "Media formats").
+- Related: US-050 (Windows MP3 through Media Foundation needs its own parity ruling, which this story does not make);
+  US-099 (once more ffmpeg versions play natively, fewer Linux hosts need the Java decoder); US-102 (MP3+G on Linux
+  without ffmpeg plays once this story lands).

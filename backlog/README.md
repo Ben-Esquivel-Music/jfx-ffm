@@ -9,6 +9,15 @@ that has to stay native. Its stories, and the defects and Java routes the survey
 A review of US-034 added US-051, the PR review of US-039 added US-052 and US-053, that of US-044 added US-054, and
 the review of the US-039 branch on 2026-10-26 added US-068. See "Rust port" below.
 
+A third epic, the **game toolkit** (README "Game toolkit"), was planned on 2026-11-07 from a design review of Godot's
+physics and of this fork. It covers a fixed-step game loop with per-tick input, a built-in pure-Java physics engine
+ported from Godot and proven equal to a pinned Godot build, and a contract for bring-your-own physics engines. Its
+stories are US-075 to US-095. See "Game toolkit" below.
+
+A fourth epic, **media formats** (the README's goal "Extend the media API to support more formats"), was planned the
+same day from a survey of javafx.media, of the owner's jKaraoke player and of the format and licence landscape. Its
+stories are US-092 and US-096 to US-107. See "Media formats" below.
+
 This directory holds the epic's user stories, **open and done**, so they are tracked in source
 control. A done story stays here for the record: its status is set to "✅ Done" with the date and
 the PR that finished it, and its row moves from the open table to the done table below. Numbers are
@@ -70,6 +79,39 @@ of the tree.
 | [US-072](US-072-keep-the-gtk-display-harness-from-connecting-inside-xvfbs-reset-window.md) | Keep the GTK display harness from connecting inside Xvfb's reset window | 📋 Ready (filed 2026-11-01 from the diagnosis of CI run 41307952109 on the US-065 branch); Low, possible, **not reproduced**. Xvfb runs without `-noreset`, so it resets when its last client closes, and a connection it accepts in the same wake-up is closed before its setup is read (`XOpenDisplay` returns NULL); PR #46 fixes that race in the scripted WM's start. The sweep found the same close-then-connect pattern in the openbox startup of `run-gtk-display-tests.sh`: the readiness `xdpyinfo`, then the 0.2 s `xprop` poll, can be the last client to close just before openbox connects, a gap of milliseconds (that run's openbox-pass `xvfb.log` shows 3 server generations, one more than the start and the `xdpyinfo` reset). The two Java spots (`GtkLibraryLoader.displayOpens`, child JVMs started as a pair) are covered by ES2's open connection unless `prism.order=sw`, which no suite sets | Pick up when scheduled, in WSL: reproduce first (at least 500 rounds under load); if none fails, close it as a note in US-016 |
 | [US-073](US-073-make-the-system-menu-bar-click-test-pass-with-a-non-auto-hide-context-menu.md) | Make the system menu bar click test pass with a non-auto-hide context menu | 📋 Ready (filed 2026-11-05 from the US-001b robot run); Low, pre-existing. `SystemMenuBarClickEventsTest.testSystemMenuBarProcessesClickEvent` (upstream, JDK-8372398) finds no context menu showing right after the right-click (line 136, auto-hide off) in the FFM build (3 of 3 runs) and the JNI build at `1a6788cc4d` (2 of 2) on macOS 27.0.1; the same right-click with auto-hide on passes. Whether the menu shows late or never is not known | Pick up when scheduled, on the macOS host: check upstream first; robot runs by the owner or with the owner's explicit authorization |
 | [US-074](US-074-remove-the-last-of-jni-from-the-fork.md) | Remove the last of JNI from the fork | 📋 Ready (filed 2026-11-05 from a JNI audit of `aacabbced7`); no shipped code uses JNI, but Windows glass.dll still compiles against `jni.h` through `javac -h` constants headers, every native library is loaded by the JDK's JNI loader (`NativeLibLoader`, `System.load*`), the unbuilt iOS/Android skins declare 8 `native` methods, `CodeGeneratorJava.pm` still emits JNI, `JniStringOracleShim` calls JNI in a test, and some names and comments claim JNI where there is none. A build or CI guard keeps it out | Pick up when scheduled; the glass.dll part needs the Windows host |
+| [US-075](US-075-ship-every-modules-legal-notices-in-its-jar-and-the-sdk.md) | Ship every module's legal notices in its jar and the SDK | 📋 Ready (filed 2026-11-07 from the game-toolkit design review); the 13 notices under `modules/*/src/main/legal` reach no jar and not the SDK. The game toolkit's ported Godot code adds Expat, Zlib and BSD-3 notices that must ship with it | Ready to start; it gates every ported physics file |
+| [US-076](US-076-capture-per-step-physics-goldens-from-a-pinned-godot-build.md) | Capture per-step physics goldens from a pinned Godot build | 📋 Ready (filed 2026-11-07 from the game-toolkit design review); no Godot test steps physics, so the port's oracle is a fork-owned capture of per-step state from a pinned Godot build whose transcendental functions match `StrictMath`, with a negative control and a recapture on a second host | The owner installs SCons ≥ 4.4 and Python ≥ 3.10 on the capture host |
+| [US-077](US-077-measure-the-physics-ports-speed-against-godot-before-the-port-is-written.md) | Measure the physics port's speed against Godot before the port is written | 📋 Ready (filed 2026-11-07 from the game-toolkit design review); JDK 27 has no final value classes or Vector API, so the port's speed is unknown. Two ported 2D kernels are timed against the C++: at or below 2× passes, one adjustment round above that, and above 3× the port route stops and the 3D route is chosen again | After US-076 |
+| [US-078](US-078-add-a-fixed-step-game-loop-with-interpolation-and-per-tick-input.md) | Add a fixed-step game loop with interpolation and per-tick input | 📋 Ready (filed 2026-11-07 from the game-toolkit design review); Windows, GTK, Monocle and Headless pulse every 16 ms against 60 ticks/s, so about one pulse in 25 runs no tick, and `AnimationTimer` ignores exceptions after 100 failures | Ready to start |
+| [US-079](US-079-port-godots-2d-physics-engine-to-pure-java-bit-exact.md) | Port Godot's 2D physics engine to pure Java, bit-exact | 📋 Ready (filed 2026-11-07 from the game-toolkit design review); `godot_physics_2d` (11,246 lines) and the core code it needs, bit-exact against US-076's goldens, identical on the five CI targets for 1, 2 and 8 workers, no allocation per step, within US-077's gate | After US-075, US-076 and US-077's gate |
+| [US-080](US-080-let-applications-bring-their-own-2d-physics-engine.md) | Let applications bring their own 2D physics engine | 📋 Ready (filed 2026-11-07 from the game-toolkit design review); one public 2D physics API on `java.base`, engines found at run time, declared capabilities, no silent fallback, and a conformance kit with exact, invariant and tolerance modes and a per-engine difference table | After US-079, or with two independent engines if US-077 stops the port |
+| [US-081](US-081-port-godots-2d-character-controller-and-collider-tools-above-the-engine-contract.md) | Port Godot's 2D character controller and collider tools above the engine contract | 📋 Ready (filed 2026-11-07 from the game-toolkit design review); Godot's move-and-slide, polygon decomposition and seam-free tile colliders in Java, above the engine contract, bit-exact on the built-in engine | After US-079 and US-080 |
+| [US-082](US-082-ship-a-playable-2d-game-preview.md) | Ship a playable 2D game preview | 📋 Ready (filed 2026-11-07 from the game-toolkit design review); node binding with interpolation, a debug view for any engine, sprites, a large tile layer, a 2D camera and a platformer sample that runs headless in CI | After US-078, US-080 and US-081 |
+| [US-083](US-083-prove-a-native-2d-physics-engine-plugs-in-through-ffm.md) | Prove a native 2D physics engine plugs in through FFM | 📋 Ready (filed 2026-11-07 from the game-toolkit design review); a native 2D engine bound through FFM passes the conformance kit for what it declares, never ships in the SDK and gives the toolkit's modules no native access; the 2D contract then leaves draft | After US-080 |
+| [US-084](US-084-ship-a-game-as-a-jlink-image-and-a-jpackage-installer.md) | Ship a game as a jlink image and a jpackage installer | 📋 Ready (filed 2026-11-07 from the game-toolkit design review); a game ships as a jlink image and a jpackage installer with its engine, the JavaFX natives and every notice; the SDK makes no jmods today | After US-075 and US-082 |
+| [US-085](US-085-let-a-native-3d-physics-engine-plug-into-a-3d-engine-contract.md) | Let a native 3D physics engine plug into a 3D engine contract | 📋 Ready (filed 2026-11-07 from the game-toolkit design review); a 3D contract and conformance kit passed by a native 3D engine bound through FFM, so 3D games can start before the built-in port; Godot itself sets Jolt for new 3D projects | After US-080 |
+| [US-086](US-086-port-godots-3d-rigid-body-physics-to-pure-java-bit-exact.md) | Port Godot's 3D rigid-body physics to pure Java, bit-exact | 📋 Ready (filed 2026-11-07 from the game-toolkit design review); `godot_physics_3d` without soft bodies, bit-exact against US-076's goldens and identical on the five CI targets; the Bullet-derived (Zlib) and ODE-derived (BSD-3) files keep their notices | After US-077's gate, US-079 and US-085 |
+| [US-087](US-087-ship-a-playable-3d-game-preview.md) | Ship a playable 3D game preview | 📋 Ready (filed 2026-11-07 from the game-toolkit design review); bodies drive JavaFX 3D nodes with interpolation, the 3D character controller is ported bit-exact, picking and 3D debug drawing work on any 3D engine, and samples state the JavaFX 3D limits they hit | After US-078, US-085 and US-086 |
+| [US-088](US-088-read-gamepads-into-the-per-tick-input-snapshot.md) | Read gamepads into the per-tick input snapshot | 📋 Ready (filed 2026-11-07 from the game-toolkit design review); no gamepad support exists anywhere in the tree; standard-layout pads join the per-tick snapshot on all three desktops, with hot-plug and stable player slots | After US-078 |
+| [US-089](US-089-capture-the-pointer-and-report-layout-independent-physical-keys.md) | Capture the pointer and report layout-independent physical keys | 📋 Ready (filed 2026-11-07 from the game-toolkit design review); JavaFX has no pointer capture or relative mouse motion, and key events carry no layout-independent key; a Glass change that names its public API | Ready to start |
+| [US-090](US-090-give-javafx-3d-the-rendering-a-3d-game-needs.md) | Give JavaFX 3D the rendering a 3D game needs | 📋 Ready (filed 2026-11-07 from the game-toolkit design review); JavaFX 3D has one material (Phong), at most three lights per shape (the first three found), no shadows, no GPU skinning and no instancing. Today's ceiling is measured first; likely to split | Ready to start with the measurement |
+| [US-091](US-091-load-gltf-models-into-javafx-nodes-and-collision-shapes.md) | Load glTF 2.0 models into JavaFX nodes and collision shapes | 📋 Ready (filed 2026-11-07 from the game-toolkit design review); static and skinned glTF 2.0 models into JavaFX nodes and collision shapes, with untrusted input fuzzed | After US-085; skinned meshes after US-090 |
+| [US-092](US-092-play-low-latency-mixed-sound-effects-through-javafx-media.md) | Play low-latency mixed sound effects through javafx.media | 📋 Ready (filed 2026-11-07 from the game-toolkit design review, for the media refactor); each `AudioClip` play builds a player and a pipeline, voices cap at 16, loops are not gapless and raw-PCM clips throw | With the planned media refactor |
+| [US-093](US-093-step-physics-off-the-fx-thread-and-restore-snapshots-bit-exactly.md) | Step physics off the FX thread and restore snapshots bit-exactly | 📋 Ready (filed 2026-11-07 from the game-toolkit design review); a physics thread whose poses reach the FX thread without tearing, and snapshots that restore bit-exactly, also in a fresh JVM | After US-078, US-079 and US-080 |
+| [US-094](US-094-re-pin-the-built-in-physics-engine-to-a-new-godot-release.md) | Re-pin the built-in physics engine to a new Godot release | 📋 Ready (filed 2026-11-07 from the game-toolkit design review); move the Godot pin to a newer stable release by a documented procedure, with every moved golden traced to an upstream commit | After US-079 (2D) and US-086 (3D) |
+| [US-095](US-095-grow-the-built-in-3d-engine-past-its-godot-origin.md) | Grow the built-in 3D engine past its Godot origin | 📋 Ready (filed 2026-11-07 from the game-toolkit design review); after Godot parity, improve the 3D engine against measured gaps to the native 3D engine of US-085, each change a recorded behaviour change | After US-085 and US-086 |
+| [US-096](US-096-tell-applications-why-media-will-not-play-and-keep-audioclip-working-after-a-failed-play.md) | Tell applications why media won't play, and keep AudioClip working after a failed play | 📋 Ready (filed 2026-11-07 from the media-format survey); one cause gives two error types today (`Media.error` MEDIA_UNSUPPORTED later, the `MediaPlayer` constructor UNKNOWN), and one failed `AudioClip` play kills the clip scheduler for the rest of the JVM, as on any machine with no audio device | Ready to start; land it before the format stories |
+| [US-097](US-097-play-every-wav-and-aiff-the-bundled-parsers-already-decode.md) | Play every WAV and AIFF the bundled parsers already decode | 📋 Ready (filed 2026-11-07 from the media-format survey); the 22-byte signature check rejects WAVE_FORMAT_EXTENSIBLE and RF64 and misses AIFC, although the bundled parsers read them; measure every PCM and float form per OS first | Ready to start |
+| [US-098](US-098-play-a-law-mu-law-and-adpcm-audio-in-wav-and-aifc.md) | Play A-law, µ-law and ADPCM audio in WAV and AIFC | 📋 Ready (filed 2026-11-07 from the media-format survey); nothing in gstreamer-lite decodes G.711 or ADPCM; output exact to the specifications on all five targets | After US-097 |
+| [US-099](US-099-keep-mp3-aac-and-h264-playing-on-linux-whatever-ffmpeg-is-installed.md) | Keep MP3, AAC and H.264 playing on Linux whatever ffmpeg is installed | 📋 Ready (filed 2026-11-07 from the media-format survey); one unversioned avplugin is linked against the build machine's libavcodec (inferred, to reproduce first) | Ready to start with the reproduction |
+| [US-100](US-100-let-media-decoded-in-java-play-through-javafx-media.md) | Let media decoded in Java play through javafx.media | 📋 Ready (filed 2026-11-07 from the media-format survey); `JavaPlatform` plays nothing today; Java-decoded media must keep the whole `MediaPlayer` contract and share one audio output with US-092 | After US-096 |
+| [US-101](US-101-play-mp3-where-no-platform-decoder-is-available.md) | Play MP3 where no platform decoder is available | 📋 Ready (filed 2026-11-07 from the media-format survey); MP3 needs ffmpeg on Linux and AVFoundation on macOS; a Java decoder fills those gaps only, and output stays bit-for-bit wherever an OS decoder plays it | After US-096 and US-100 |
+| [US-102](US-102-play-cd-g-karaoke-with-its-paired-audio.md) | Play CD+G karaoke with its paired audio | 📋 Ready (filed 2026-11-07 from the media-format survey); `.cdg` is not a known type, so jKaraoke decodes it itself on a free-running timer beside a `MediaView`; graphics locked to the audio clock, all nine instructions to the specification | After US-096 and US-100 |
+| [US-103](US-103-play-flac-audio.md) | Play FLAC audio | 📋 Ready (filed 2026-11-07 from the media-format survey); no FLAC support; decoded PCM must match each file's STREAMINFO MD5 | After US-100 |
+| [US-104](US-104-play-ogg-opus-and-ogg-vorbis-audio.md) | Play Ogg Opus and Ogg Vorbis audio | 📋 Ready (filed 2026-11-07 from the media-format survey); no Ogg support; output within bounds of the reference decoders agreed before comparison | After US-100 |
+| [US-105](US-105-play-midi-files-and-kar-karaoke.md) | Play MIDI files and KAR karaoke | 📋 Ready (filed 2026-11-07 from the media-format survey); MIDI and KAR do not play, and KAR lyrics need a timed-event API named in the story | After US-100 |
+| [US-106](US-106-show-srt-and-webvtt-subtitles-with-media.md) | Show SRT and WebVTT subtitles with media | 📋 Ready (filed 2026-11-07 from the media-format survey); javafx.media has no subtitle or text-track API; sidecar SRT and WebVTT cues follow the player | Ready to start |
+| [US-107](US-107-play-matroska-and-webm-video.md) | Play Matroska and WebM video | 📋 Ready (filed 2026-11-07 from the media-format survey); no Matroska demuxer or VP8/VP9 decoder; a native addition under the native licence rule | After US-040 |
 
 Not in this directory yet: US-063, *Blend a partly covered box edge under `SRC` by its coverage in the software
 compositor* (📋 Ready, filed 2026-10-18 from US-062). It was filed on the US-062 branch and reaches `master` with it.
@@ -211,6 +253,104 @@ note. No downloaded or third-party media is committed.
 4. **After the maintainer's rulings:** US-045 (forking IJG), US-048 (vs the ES2 audit), US-049 part 1 (vs the ABI
    header's "stays native"), US-050 (AAC/MP3 parity).
    US-054 part 2 follows slice 1 of US-045.
+
+## Game toolkit
+
+The README's game-toolkit goal, planned on 2026-11-07. Every story keeps these owner rulings:
+- 3D physics is a firm goal: "I do want to have a 3D engine, even if we build it ourselves over time". A failed gate
+  changes how 3D is reached, never whether.
+- "Bring your own engine" means physics engines only. The renderer stays JavaFX.
+- Game audio is a set of requirements on the planned javafx.media refactor (US-092), not a toolkit module.
+
+The stories state requirements only. How to meet them is in three skills:
+- `.claude/skills/jfx-game-physics-port/SKILL.md`: the port, the parity oracle, the speed gate and upstream tracking.
+- `.claude/skills/jfx-game-toolkit/SKILL.md`: the modules, the engine contract, the loop and input.
+- `.claude/skills/jfx-game-testing/SKILL.md`: goldens, determinism and allocation gates, the conformance kit, loop
+  tests and what only the owner runs.
+
+The agents are:
+- `physics-oracle-engineer`, `godot-physics-porter` and `godot-physics-port-reviewer` for the port;
+- `game-toolkit-engineer` and `game-toolkit-reviewer` for the toolkit;
+- `game-tester` for its tests;
+- `game-developer`, who builds the samples and reports on the API from a game's point of view.
+
+| ID | Story | Blocked by |
+| --- | --- | --- |
+| US-075 | Legal notices in every jar and the SDK | — |
+| US-076 | Per-step goldens from a pinned Godot build (the parity oracle) | — |
+| US-077 | The port's speed against Godot, measured before the port is written | US-076 |
+| US-078 | Fixed-step loop, interpolation, per-tick input | — |
+| US-079 | Built-in 2D engine, ported from Godot, bit-exact | US-075, US-076, US-077 |
+| US-080 | 2D engine contract and conformance kit | US-079 |
+| US-081 | 2D character controller and collider tools | US-075, US-076, US-079, US-080 |
+| US-082 | Playable 2D preview | US-078, US-080, US-081 |
+| US-083 | A native 2D engine through FFM | US-080 |
+| US-084 | jlink image and jpackage installer | US-075, US-082 |
+| US-085 | 3D engine contract and a native 3D engine | US-080 |
+| US-086 | Built-in 3D rigid-body engine, ported from Godot, bit-exact | US-075, US-076, US-077, US-079, US-085 |
+| US-087 | Playable 3D preview | US-076, US-078, US-085, US-086 |
+| US-088 | Gamepads | US-078 |
+| US-089 | Pointer capture and physical keys (Glass) | — |
+| US-090 | 3D rendering a game needs (Prism) | — |
+| US-091 | glTF 2.0 models | US-085; US-090 for skinned meshes |
+| US-092 | Low-latency mixed sound effects (media refactor) | — |
+| US-093 | Physics thread and bit-exact snapshots | US-078, US-079, US-080 |
+| US-094 | Re-pin to a new Godot release | US-079; US-086 for 3D |
+| US-095 | Grow the 3D engine past its Godot origin | US-085, US-086 |
+
+### Order
+
+1. **Free to start:**
+   - US-075, which also ships the 13 notices that reach no jar today;
+   - US-076 and US-078;
+   - US-089, US-090 and US-092, which belong to Glass, Prism and media.
+2. **The 2D route:** US-076 → US-077 (the speed gate) → US-079 → US-080 → US-081 → US-082, then US-083 and US-084.
+3. **3D:**
+   - US-085 starts once the 2D contract exists.
+   - US-086 starts after US-077's gate has passed and US-079 matches exactly.
+   - US-087 and US-095 follow.
+4. **After their blockers:** US-088, US-091, US-093 and US-094.
+
+## Media formats
+
+The README's goal "Extend the media API to support more formats", planned on 2026-11-07. Every story keeps these owner
+rulings:
+- **MP3 in Java fills gaps only.** A pure-Java MP3 decoder plays MP3 only where no OS decoder works. Wherever an OS
+  decoder plays MP3 today, the output stays bit-for-bit as it is.
+- **MP3+G opens from the karaoke file.** It plays when the `.cdg` or the `.zip` is opened. Opening the `.mp3` alone
+  behaves as today.
+- **Permissive licences only in the jars.** Third-party Java code inside the jars is MIT, BSD, zlib, CC0, BSL-1.0 or
+  similar; anything else is written in-house from the specification. Native code keeps port rule P8.
+- **One audio output.** US-092, the game toolkit's sound effects, belongs to this epic. Java-decoded audio shares one
+  output path with it.
+
+How to meet them is in `.claude/skills/jfx-media-formats/SKILL.md`, with the agents `media-format-engineer` and
+`media-format-reviewer`.
+
+| ID | Story | Blocked by |
+| --- | --- | --- |
+| US-092 | Low-latency mixed sound effects | — |
+| US-096 | Clear errors for unplayable media; AudioClip survives a failed play | — |
+| US-097 | Every WAV and AIFF the bundled parsers decode | — |
+| US-098 | A-law, µ-law and ADPCM | US-097 |
+| US-099 | MP3, AAC and H.264 on Linux with any supported ffmpeg | — |
+| US-100 | Media decoded in Java | US-096 |
+| US-101 | MP3 where no OS decoder works | US-096, US-100 |
+| US-102 | CD+G karaoke (MP3+G) | US-096, US-100 |
+| US-103 | FLAC | US-100 |
+| US-104 | Ogg Opus and Ogg Vorbis | US-100 |
+| US-105 | MIDI and KAR | US-100 |
+| US-106 | SRT and WebVTT subtitles | — |
+| US-107 | Matroska and WebM | US-040 |
+
+### Order
+
+1. **US-096 first,** because every new format makes its failures more common. Then US-097 and US-099. US-106 is free
+   to start.
+2. **The Java path:** US-100 lands with its first format. US-101, US-102, US-103, US-104 and US-105 follow.
+3. **Native additions** (US-098 if it is done natively, and US-107) land after US-040. They keep US-036's "unsupported
+   content" scenario on content that stays unsupported.
+4. **US-092 and US-100 settle the one audio output together.**
 
 ## US-009 evidence
 
