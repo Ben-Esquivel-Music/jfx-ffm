@@ -11,7 +11,10 @@ of their own.
 
 ## Problem
 Paths are relative to `modules/javafx.graphics` unless they start with `backlog/`. A bare line number (`:NN`) refers
-to the file named in the same sentence, else to the one named in the lead-in of its list.
+to the file named in the same sentence, else to the one named in the lead-in of its list. Line numbers are those of
+`b5b00d4416`, the commit that filed the story, except in [A limit of the Java peer is an `InternalError`, thrown after
+the shaders are written](#a-limit-of-the-java-peer-is-an-internalerror-thrown-after-the-shaders-are-written), which
+uses the tree of US-018 at `ba2b68e991`, the fix for the first PR 50 review round.
 
 ### Most programs are assembled
 The build runs the Decora and Prism generators (`pom.xml:156-216`). Every program goes through `JSLC.compile`, which
@@ -98,16 +101,21 @@ programs, 52 Decora and 212 Prism (US-019 counted them). For line N of a `.jsl` 
   `main`, and `sign(halve(luminance))` in place of `sign(luminance)` (line 46 of the edited file). The Decora
   `CompileJSL`, with the output types `GenAllDecoraShaders` passes (`-java -hw`) and `-d3d -es2 -mtl`, exits 1 with
   `Exception in thread "main" java.lang.InternalError: Nested function calls not yet supported` at
-  `JSWCallScanner.visitCallExpr(JSWCallScanner.java:149)`, called from `JSLC.compile` (`JSLC.java:230`).
-  - Before it, 5 of the 7 files were written: the `.hlsl`, `.frag` and `.metal` and both Metal headers. They are
-    right: identical to those of a run with shader outputs only, which exits 0, with the nested call in all three
-    (`sign(halve(luminance))`; in Metal `sign(Brightpass_halve(sampler0, uniforms, luminance))`). Only the Java
-    software peer (`-java`) cannot express it. The Prism peer, which comes after it (`JSLC.java:226-244`), is not
-    written.
+  `JSWCallScanner.visitCallExpr(JSWCallScanner.java:149)`, called from `JSLC.compile` (`JSLC.java:233`).
+  - Before it, 3 of the 7 files were written: the `.hlsl`, `.frag` and `.metal`. They are right: identical to those
+    of a run with shader outputs only, which exits 0, with the nested call in all three (`sign(halve(luminance))`; in
+    Metal `sign(Brightpass_halve(sampler0, uniforms, luminance))`). Only the Java software peer (`-java`) cannot
+    express it. The Prism peer, which comes after it (`JSLC.java:229-247`), is not written, and neither are the two
+    Metal headers, which the generator writes only after the compile returns
+    (`src/main/jsl-decora/CompileJSL.java:70-71`).
+  - The file counts in this section are from a rerun on 2026-11-06, on macOS with JDK 27.0.1, with the compiler of
+    US-018 at `ba2b68e991` (the fix for the first PR 50 review round) and the Decora `CompileJSL` given
+    `-mtlheaders` as the pom gives it. Before US-018 the compiler wrote both Metal headers during the compile, so the
+    run of 2026-09-27 wrote them before the error too.
   - `InternalError` is the `java.lang.Error` documented for an unexpected internal error of the JVM. This one has no
     location, and its "not yet" has been there since the compiler was open-sourced (`d0a313da5d`, 2012).
 - 7 of the 12 `InternalError` sites (above) can be reached from a `.jsl` file. Each was reached with a small change to
-  a copy of `Brightpass.jsl`, run as above: exit 1 after writing the same 5 kinds of file, each set identical to that
+  a copy of `Brightpass.jsl`, run as above: exit 1 after writing the same 3 shaders, each set identical to the shaders
   of a run with shader outputs only, which exits 0. Under
   `src/jslc/java/com/sun/scenario/effect/compiler/backend/sw/java`:
   - `JSWCallScanner.java:149`: the case above, and `sign(abs(luminance))`, a built-in function inside another;
@@ -127,18 +135,19 @@ programs, 52 Decora and 212 Prism (US-019 counted them). For line N of a `.jsl` 
     tables of built-in functions, in static initialisers (`JSWFuncImpls.java:52`, `CoreSymbols.java:60`) that run
     the same way for every input.
 
-  The generators have one more, `src/main/jsl-decora/CompilePhong.java:104`, the `default` of a switch over the
-  three light types it iterates (`:82`).
-- The build passes `-java` for 8 of the 10 Decora shaders (`src/main/jsl-decora/GenAllDecoraShaders.java:52`,
-  `:64-71`), so an edit to any of them can meet these limits. The programs compiled without `-java` (the Prism
+  The generators have one more, `src/main/jsl-decora/CompilePhong.java:112`, the `default` of a switch over the
+  three light types it iterates (`:90`).
+- The build passes `-java` for 8 of the 10 Decora shaders (`src/main/jsl-decora/GenAllDecoraShaders.java:56`,
+  `:68-75`), so an edit to any of them can meet these limits. The programs compiled without `-java` (the Prism
   generator's and `LinearConvolve*`) never reach these sites.
-- The 5 files written before the error do not hide it. Measured with one output directory reused without `clean`, as
-  `target/gensrc` is, after a successful build of the original file:
-  - the edited file: exit 1, the 3 shaders and 2 headers rewritten, the 2 peers of the earlier build kept;
+- The 3 shaders written before the error do not hide it. Measured with one output directory reused without `clean`,
+  as `target/gensrc` is, after a successful build of the original file:
+  - the edited file: exit 1, the 3 shaders rewritten, the 2 headers and the 2 peers of the earlier build kept;
   - again, unchanged: exit 1, no file rewritten. The shaders are newer than the source, but the Java peer is older
-    (or missing, after a failed clean build, also measured), so it is out of date (`JSLC.java:249-251`), the program
+    (or missing, after a failed clean build, also measured), so it is out of date (`JSLC.java:252-254`), the program
     is parsed and the backend fails again;
-  - fixed by an edit (`float h = halve(luminance);` and `sign(h)`): exit 0, all 7 files rewritten;
+  - fixed by an edit (`float h = halve(luminance);` and `sign(h)`): exit 0, the 3 shaders and the 2 peers rewritten;
+    the 2 headers keep their bytes and times, since the uniforms did not change;
   - only a fix that leaves the file older than the outputs goes unnoticed: the original restored with `cp -p` gives
     exit 0 with no file rewritten, so the shaders of the rejected program, which call `halve`, stay beside the peers
     of the earlier build. The up-to-date check treats any file restored with an older time that way, with or without
@@ -198,7 +207,10 @@ programs, 52 Decora and 212 Prism (US-019 counted them). For line N of a `.jsl` 
   (`buildtools/jslc/target/classes`, `target/jsl-compilers/decora`). The `InternalError` cases ran the Decora
   `CompileJSL` as the pom runs it, with the gate's `javafx.base` and `javafx.graphics` classes on the module path.
   The open-file probe called `JSLC.compile(JSLCInfo, File)` directly, on Windows and on Linux (WSL, no display).
-- Not run for these two additions: a fixed compiler (nothing was prototyped), Maven, macOS.
+- On 2026-11-06 the `InternalError` cases and the reused-output sequence were rerun on macOS (JDK 27.0.1) with the
+  compiler of US-018 at `ba2b68e991` (the fix for the first PR 50 review round), the Decora `CompileJSL` given
+  `-mtlheaders`; the file counts of that section are from the rerun.
+- Not run for these two additions: a fixed compiler (nothing was prototyped), Maven; macOS only in the rerun above.
 
 ## Proposed fix
 Two parts, both about where an error points.
@@ -320,7 +332,7 @@ Two parts, both about where an error points.
     US-008 gate these held 108, 424, 46 and 0 files on each system, so the Metal output is covered only by the
     `-d3d -es2 -mtl` regeneration above.
   - `javafx.graphics` has the same test counts per class as before.
-  - `javafx-jslc` runs its 159 tests plus the new ones, with no failure.
+  - `javafx-jslc` runs its 196 tests plus the new ones, with no failure.
 - **Upstream.** Repeat the JBS search when the story is picked up. Draft an upstream issue with the measured cases
   and the chosen option. The draft says that upstream runs no jslc test (JDK-8226635), so the fix's test needs that
   port too.

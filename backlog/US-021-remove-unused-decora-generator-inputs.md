@@ -232,7 +232,7 @@ they could serve does not work without them.
     is covered only by the `-d3d -es2 -mtl` regeneration above.
   - `target/classes` has the same file names before and after. With (B1) it has exactly two fewer,
     `com/sun/scenario/effect/ZoomRadialBlur.class` and `com/sun/scenario/effect/impl/state/ZoomRadialBlurState.class`.
-  - `javafx.graphics` has the same test counts per class as before, and `javafx-jslc` runs its 159 tests with no
+  - `javafx.graphics` has the same test counts per class as before, and `javafx-jslc` runs its 196 tests with no
     failure.
 - **With (B1), no compiled reference.** After the gate, a byte search for `ZoomRadialBlur` in
   `modules/javafx.graphics/target/{classes,mods,shims,test-classes}` finds nothing. The same search in the build

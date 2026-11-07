@@ -23,14 +23,15 @@
  * questions.
  */
 
+import com.sun.scenario.effect.compiler.backend.hw.MetalHeaders;
 import java.lang.reflect.Method;
 import java.util.Arrays;
 
 /**
  * This class is used as a common entry point for generating Decora shaders.
  * <p>
- * The build passes the JSLC options every shader shares (input and output
- * directories, package, hardware shader backends) followed by the two placeholder
+ * The build passes the JSLC options every shader shares (input, output and Metal
+ * header directories, package, hardware shader backends) followed by the two placeholder
  * arguments {@code -all} and {@code GenAllDecoraShaders}. The placeholders are
  * checked and dropped, and each shader is compiled with the shared options, its
  * own output types and its JSL name.
@@ -44,6 +45,9 @@ import java.util.Arrays;
  * {@code OUT_SW_PEERS}, which held the SSE software peers in those older
  * compilers, so the generated files would depend on which JSL compiler is on
  * the classpath.
+ * <p>
+ * All shaders share one {@code MetalHeaders}, so {@code DecoraShaderCommon.h}
+ * lists every Decora shader; it is written after the last compile.
  */
 
 public class GenAllDecoraShaders {
@@ -81,14 +85,16 @@ public class GenAllDecoraShaders {
                     + " arguments " + Arrays.toString(PLACEHOLDERS) + ", got " + Arrays.toString(args));
         }
         String[] shared = Arrays.copyOf(args, sharedCount);
+        MetalHeaders metalHeaders = new MetalHeaders();
         for (Shader shader : SHADERS) {
             String[] types = shader.outputTypes();
             String[] shaderArgs = Arrays.copyOf(shared, shared.length + types.length + 1);
             System.arraycopy(types, 0, shaderArgs, shared.length, types.length);
             shaderArgs[shaderArgs.length - 1] = shader.name();
             Class<?> cls = Class.forName(shader.compiler());
-            Method meth = cls.getMethod("main", String[].class);
-            meth.invoke(null, (Object) shaderArgs);
+            Method meth = cls.getMethod("compile", String[].class, MetalHeaders.class);
+            meth.invoke(null, shaderArgs, metalHeaders);
         }
+        metalHeaders.write();
     }
 }
