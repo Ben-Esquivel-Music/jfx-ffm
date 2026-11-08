@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2018, 2024, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2018, 2026, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -79,6 +79,7 @@ public class RobotTest {
     // of the display.
     private static final double TOLERANCE = 0.07;
     private static final int SIZE = 400;
+    private static final long MOUSE_MOVE_TIMEOUT_NANOS = 2_000_000_000L;
     private static final int WIDTH = 400;
     private static final int HEIGHT = 300;
 
@@ -254,10 +255,20 @@ public class RobotTest {
             } else {
                 robot.mouseMove(new Point2D(x, y));
             }
-            mousePosition.set(robot.getMousePosition());
+            // Robot.mouseMove is asynchronous on Windows: SendInput only queues the move, and the cursor
+            // moves when the system input thread processes it (JDK-8213573, JDK-8296554). Poll, as
+            // MouseLocationOnScreenTest.validate does, instead of reading the position once.
+            long deadline = System.nanoTime() + MOUSE_MOVE_TIMEOUT_NANOS;
+            Point2D position = robot.getMousePosition();
+            while (((int) position.getX() != x || (int) position.getY() != y)
+                    && System.nanoTime() - deadline < 0) {
+                Util.sleep(2);
+                position = robot.getMousePosition();
+            }
+            mousePosition.set(position);
         });
-        Assertions.assertEquals(x, (int) mousePosition.get().getX());
-        Assertions.assertEquals(y, (int) mousePosition.get().getY());
+        Assertions.assertEquals(x, (int) mousePosition.get().getX(), "cursor at " + mousePosition.get());
+        Assertions.assertEquals(y, (int) mousePosition.get().getY(), "cursor at " + mousePosition.get());
     }
 
     @Test
