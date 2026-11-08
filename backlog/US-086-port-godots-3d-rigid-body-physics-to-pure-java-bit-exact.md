@@ -84,9 +84,10 @@ in `godot/modules/godot_physics_3d`.
 5. **No allocation.** No bytes are allocated per step in steady state, summed over every thread that steps.
 6. **Speed.** The Java/C++ ratio of the 3D step is measured as US-077 measures 2D: same scenario and host, one
    worker, steady state after warm-up. It is measured when the 3D narrowphase is complete and when the full step
-   runs, and the full-step figure binds. At most 2x passes. Between 2x and 3x, one adjustment round within the
-   faithful-port rules is followed by a re-measurement. Above 3x after that round, the port route stops and the
-   route to 3D physics is chosen again; 3D physics stays a goal. The figures are recorded in this story.
+   runs, and the full-step figure binds. The gate is US-077's: at or below 2x it passes; above 2x, however
+   high, one adjustment round within the faithful-port rules is followed by a re-measurement, and at or below 3x
+   after that round it passes; above 3x after that round, the port route stops and the route to 3D physics is
+   chosen again; 3D physics stays a goal. The figures are recorded in this story.
 7. **Conformance.** The engine passes the 3D conformance kit of US-085 in exact mode, and the 3D contract leaves
    draft.
 8. **Provenance.** The provenance test passes, and the notices of every ported file ship through US-075.

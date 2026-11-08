@@ -57,12 +57,21 @@ so that my application can show subtitles and captions in step with any media `j
 1. **Attach.** SRT and WebVTT files from any URI scheme `Media` accepts can be attached to a `Media`, before or after
    a `MediaPlayer` exists for it. Several files can be attached to one `Media`, each with a language. Attaching works
    for every `Media` that plays, audio or video, whichever back end plays it.
-2. **Active cues.** At any moment the application can get each attached file's active cues: exactly the cues whose
-   start ≤ t < end, where t is what `getCurrentTime()` returns, in file order when they overlap. Listeners hear of
-   every change on the FX thread, at most 40 ms after the media time at which it happens.
-3. **Follows the player.** Cues follow media time through pause, stall, rate changes, seek, cycle-count repeats and
-   start and stop times. A cue that a seek jumps over is never reported as active, and outside the start and stop
-   times none is active.
+2. **Active cues, per player.** The attached files belong to the `Media` and are shared by every `MediaPlayer` created
+   for it (`modules/javafx.media/src/main/java/javafx/scene/media/Media.java:67-71`), but active-cue state belongs to a
+   `MediaPlayer`. At any moment the application can get, for a given player, each attached file's active cues: exactly
+   the cues whose start ≤ t < end, where t is that player's `getCurrentTime()` read at that moment, not a cached value,
+   in file order when they overlap. Listeners are registered per player and hear of every change of that player's active
+   cues on the FX thread: the change is detected and posted to the FX thread within 40 ms of wall-clock time after the
+   player's current time first satisfies or stops satisfying start ≤ t < end, after a seek included, and the listeners
+   run on the FX thread's next turn. Tests assert the order of changes and a stated tolerance on timing, not the 40 ms
+   bound itself. A file attached while players exist takes part in each player's active cues from its next check, and
+   listeners hear of the resulting change. After `dispose()` a player reports no active cues and its cue listeners are
+   released; the `Media` and its attached files stay usable by other players. A test runs two players of one `Media`
+   seeked to different times and shows each reports only its own active cues.
+3. **Follows the player.** Each player's active cues follow that player's media time through pause, stall, rate
+   changes, seek, cycle-count repeats and start and stop times. A cue that a seek jumps over is never reported as
+   active, and outside the start and stop times none is active.
 4. **WebVTT.** Files are parsed by the specification's parsing rules (§6). Each cue reports its identifier, times,
    text with its spans (`b`, `i`, `u`, `c` with classes, `v` with voice, `lang`, `ruby` with `rt`) and inner
    timestamps, and its settings (`vertical`, `line`, `position`, `size`, `align`, `region`). `REGION` definitions are

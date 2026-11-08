@@ -106,7 +106,7 @@ of the tree.
 | [US-099](US-099-keep-mp3-aac-and-h264-playing-on-linux-whatever-ffmpeg-is-installed.md) | Keep MP3, AAC and H.264 playing on Linux whatever ffmpeg is installed | 📋 Ready (filed 2026-11-07 from the media-format survey); one unversioned avplugin is linked against the build machine's libavcodec (inferred, to reproduce first) | Ready to start with the reproduction |
 | [US-100](US-100-let-media-decoded-in-java-play-through-javafx-media.md) | Let media decoded in Java play through javafx.media | 📋 Ready (filed 2026-11-07 from the media-format survey); `JavaPlatform` plays nothing today; Java-decoded media must keep the whole `MediaPlayer` contract and share one audio output with US-092 | After US-096 |
 | [US-101](US-101-play-mp3-where-no-platform-decoder-is-available.md) | Play MP3 where no platform decoder is available | 📋 Ready (filed 2026-11-07 from the media-format survey); MP3 needs ffmpeg on Linux and AVFoundation on macOS; a Java decoder fills those gaps only, and output stays bit-for-bit wherever an OS decoder plays it | After US-096 and US-100 |
-| [US-102](US-102-play-cd-g-karaoke-with-its-paired-audio.md) | Play CD+G karaoke with its paired audio | 📋 Ready (filed 2026-11-07 from the media-format survey); `.cdg` is not a known type, so jKaraoke decodes it itself on a free-running timer beside a `MediaView`; graphics locked to the audio clock, all nine instructions to the specification | After US-096 and US-100 |
+| [US-102](US-102-play-cd-g-karaoke-with-its-paired-audio.md) | Play CD+G karaoke with its paired audio | 📋 Ready (filed 2026-11-07 from the media-format survey); `.cdg` is not a known type, so jKaraoke decodes it itself on a free-running timer beside a `MediaView`; graphics locked to the audio clock, all nine instructions to the specification; the pair is named explicitly (`videoUri` + `audioUri` record), no companion scan | After US-096 and US-100 |
 | [US-103](US-103-play-flac-audio.md) | Play FLAC audio | 📋 Ready (filed 2026-11-07 from the media-format survey); no FLAC support; decoded PCM must match each file's STREAMINFO MD5 | After US-100 |
 | [US-104](US-104-play-ogg-opus-and-ogg-vorbis-audio.md) | Play Ogg Opus and Ogg Vorbis audio | 📋 Ready (filed 2026-11-07 from the media-format survey); no Ogg support; output within bounds of the reference decoders agreed before comparison | After US-100 |
 | [US-105](US-105-play-midi-files-and-kar-karaoke.md) | Play MIDI files and KAR karaoke | 📋 Ready (filed 2026-11-07 from the media-format survey); MIDI and KAR do not play, and KAR lyrics need a timed-event API named in the story | After US-100 |
@@ -317,8 +317,10 @@ The README's goal "Extend the media API to support more formats", planned on 202
 rulings:
 - **MP3 in Java fills gaps only.** A pure-Java MP3 decoder plays MP3 only where no OS decoder works. Wherever an OS
   decoder plays MP3 today, the output stays bit-for-bit as it is.
-- **MP3+G opens from the karaoke file.** It plays when the `.cdg` or the `.zip` is opened. Opening the `.mp3` alone
-  behaves as today.
+- **MP3+G opens from an explicit pair.** The application creates the `Media` from a `videoUri` (the `.cdg`) and an
+  `audioUri`, carried by one public record; the module never scans a directory or an archive for a companion. An
+  MP3+G `.zip` is reached through two `jar:` URIs. Opening the `.mp3` alone behaves as today. (Revised 2026-11-07;
+  the earlier ruling opened MP3+G from the `.cdg` or the `.zip` alone.)
 - **Permissive licences only in the jars.** Third-party Java code inside the jars is MIT, BSD, zlib, CC0, BSL-1.0 or
   similar; anything else is written in-house from the specification. Native code keeps port rule P8.
 - **One audio output.** US-092, the game toolkit's sound effects, belongs to this epic. Java-decoded audio shares one

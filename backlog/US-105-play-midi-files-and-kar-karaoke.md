@@ -27,6 +27,12 @@ so that MIDI music and KAR karaoke play the same on every desktop OS without a s
   `~/.gervill/soundbank-emg.sf2`, else a soundbank it generates and saves there (`jdk/SoftSynthesizer.java:640-810`).
   The same file therefore sounds different from host to host, and a first use can write into the user's home
   directory.
+- **The JDK synthesizer is not bit-reproducible across targets.** Its filters, oscillators, resamplers and effects
+  compute with `Math.pow`, `Math.sin`, `Math.cos` and `Math.exp` (JDK 27 `java.desktop`,
+  `com/sun/media/sound/SoftFilter.java:306-310`, `SoftLowFrequencyOscillator.java:95-114`, and the resamplers,
+  `SoftVoice`, `SoftChannel`, `SoftReverb` and `SoftChorus` likewise), which are intrinsics that may differ in the
+  last unit between x64 and aarch64 and between OS builds. The fork controls none of that code, so a rendering made
+  with it cannot promise the identical PCM criterion 4 requires.
 - **KAR.** A KAR (Soft Karaoke) file is a Standard MIDI File whose lyrics sit in text meta events. A leading `\`
   clears the screen and a leading `/` starts a new line, and `@` events carry the header: `@K` file type, `@V`
   version, `@I` information, `@L` language, `@T` title and artist
@@ -59,8 +65,8 @@ so that MIDI music and KAR karaoke play the same on every desktop OS without a s
 - **Sequencing.** A change to gstreamer-lite or `GstPipelineFactory.cpp` lands after US-040. US-036's slice-0
   "unsupported content" scenario (`backlog/US-036-port-the-jfxmedia-gstreamer-pipeline-core-to-rust.md:99`) uses
   content that stays unsupported after this story, so not MIDI.
-- **Bounds first.** Any tolerance is recorded in this story before the first comparison runs, never chosen
-  afterwards.
+- **Bounds first.** Every tolerance against a reference rendering is recorded in this story before the first
+  comparison runs, never chosen afterwards; none applies between CI targets.
 - **Java.** Java 27 final features only (no preview, no incubator such as the Vector API, no `var`). Production Java
   files are at most 900 lines (`wc -l`); tests and shims are exempt. Comments only for a non-obvious "why". GPLv2+CPE
   headers; ported permissive code keeps its notice in the second header block
@@ -88,8 +94,12 @@ so that MIDI music and KAR karaoke play the same on every desktop OS without a s
    last event.
 4. **Same output everywhere.** For a corpus covering tempo and time-signature changes, SMPTE division, running status,
    system-exclusive messages, all 16 channels with percussion on channel 10, program changes, controllers and pitch
-   bend, the rendered PCM is identical on the five CI targets. Where it is not, the differences stay within a bound
-   recorded here before the comparison runs.
+   bend, the rendered PCM is identical on the five CI targets, shown as US-100 criterion 5 shows it: an exact hash
+   match against one committed golden on every leg. The rendering's sample rate, channel count and sample format are
+   fixed, stated beside the soundbank in the public format documentation, and independent of the host's output
+   device. No tolerance applies between targets. A tolerance may apply only to a comparison against a rendering by a
+   synthesizer other than this story's, named in this story with its bound recorded before that comparison runs,
+   and such a comparison never stands in for the cross-target identity check.
 5. **Seek chases state.** After a seek, each channel's program, controllers and pitch bend equal those of an
    uninterrupted play to that point.
 6. **Lyrics reach the application.** KAR text events and Standard MIDI File Lyric events reach the application through
@@ -118,5 +128,10 @@ so that MIDI music and KAR karaoke play the same on every desktop OS without a s
 
 ## Notes
 - Owner ruling, 2026-11-07: MIDI and KAR are in scope now.
+- Decision needed before this story starts (raised 2026-11-07 by `media-format-reviewer`): criterion 4 requires
+  identical PCM on the five targets, and the JDK synthesizer cannot promise it (Problem). Either the rendering uses
+  a synthesizer whose arithmetic is the same on every target, which the fork then ships or writes under the licence
+  rule, or the owner grants US-105 an exception to US-100 criterion 5 with per-target goldens and a cross-target
+  bound recorded before comparison. The story keeps the identity requirement until the owner rules.
 - Related: US-102 (CD+G karaoke, the other karaoke format); US-106 (timed text from subtitle files); US-100 lands with
   its first format, which may be this one.

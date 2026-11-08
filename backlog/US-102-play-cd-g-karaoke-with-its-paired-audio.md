@@ -1,14 +1,16 @@
 # US-102 — Play CD+G karaoke with its paired audio
 
-**Status:** 📋 Ready (filed 2026-11-07 from the media-format survey) · **Epic:** Media formats ·
+**Status:** 📋 Ready (filed 2026-11-07 from the media-format survey; pairing revised 2026-11-07 to an explicit URI
+pair) · **Epic:** Media formats ·
 **Blocked by:** US-096 (clear errors for the new failure cases), US-100 (frames decoded in Java reach `MediaView`) ·
 **Blocks:** none
 
 ## Story
 As the developer of a karaoke application,
-I want `new Media` on a `.cdg` file or an MP3+G `.zip` to play the song's audio with its CD+G graphics in a
-`MediaView`, in step with the audio,
-so that karaoke plays through the JavaFX media API without a decoder, a clock and a viewer of my own.
+I want to create a `Media` from the URI of a `.cdg` graphics file and the URI of its audio, named explicitly, and have
+it play the audio with the CD+G graphics in a `MediaView`, in step with the audio,
+so that karaoke plays through the JavaFX media API without a decoder, a clock and a viewer of my own, and without the
+media module guessing which files belong together.
 
 ## Problem
 Paths that start with `jfxmediaimpl/` are under `modules/javafx.media/src/main/java/com/sun/media/`,
@@ -17,10 +19,16 @@ Paths that start with `jfxmediaimpl/` are under `modules/javafx.media/src/main/j
 (https://github.com/Ben-Esquivel-Music/jKaraoke) at commit `18f6f58cbb`, licensed CC0 (`jkaraoke/LICENSE:1-3`);
 `CdgImageReader.java` and `CdgImageViewer.java` are in `jkaraoke/application/src/main/java/karaoke/media/`.
 "CD+G Revealed" is https://jbum.com/cdg_revealed.html.
-- **No CD+G type.** The extension map knows neither `cdg` nor `zip` (`jfxmediaimpl/MediaUtils.java:190-227`), so a
-  `.cdg` falls to the byte sniffer, which throws "Unrecognized file signature!" (`:179`), and `Media` turns that into
+- **One source string.** `Media` has one constructor, taking one source URI string
+  (`javafx/scene/media/Media.java:376`), and `getSource()` returns it (`:433`). Nothing in the API lets an
+  application name a second file that belongs to the same media, so an audio file and a graphics file can only be
+  paired by convention: a scan of the directory or archive beside one of them.
+- **No CD+G type.** The extension map does not know `cdg` (`jfxmediaimpl/MediaUtils.java:190-227`), so a `.cdg`
+  falls to the byte sniffer, which throws "Unrecognized file signature!" (`:179`), and `Media` turns that into
   `MEDIA_UNSUPPORTED` (`javafx/scene/media/Media.java:409-410`). Extensions are already compared in lower case
-  (`MediaUtils.java:198`).
+  (`MediaUtils.java:198`). `jar:` URIs are accepted and checked against their inner scheme
+  (`jfxmedia/locator/Locator.java:215-223`), so an entry of a `.zip` is addressable as
+  `jar:file:/path/song.zip!/song.cdg`.
 - **MediaView shows its player's frames only.** They come from the renderer listener the scene player registers on
   its internal player (`javafx/scene/media/MediaPlayer.java:448`).
 - **The clock is fine-grained.** `getCurrentTime()` asks the player for the presentation time on demand
@@ -60,14 +68,26 @@ Paths that start with `jfxmediaimpl/` are under `modules/javafx.media/src/main/j
   Metal (inferred). 4:2:2 shares chroma between horizontal pixel pairs (knowledge). A palette raster cannot reach the
   screen exactly through a YCbCr format (inferred).
 - **WebView.** WebView advertises `MediaManager.getSupportedContentTypes()`
-  (`modules/javafx.web/src/main/java/com/sun/javafx/webkit/prism/PrismGraphicsManager.java:154-155`), so the types
-  this story adds change its `canPlayType` answer (inferred).
+  (`modules/javafx.web/src/main/java/com/sun/javafx/webkit/prism/PrismGraphicsManager.java:154-155`), so any type
+  this story put there would be advertised to WebView (inferred), which can hand over only one URI.
 
 ## Constraints
-- **The karaoke file opens the song** (owner ruling, `backlog/README.md`, "Media formats"). Opening the audio file alone
-  behaves exactly as today.
-- **The audio plays as it does alone.** The companion audio plays through the back end and decoder that play it on
-  its own, with the same output (for MP3, the fill-gaps ruling, `backlog/README.md`, "Media formats").
+- **The application names the pair** (owner ruling, 2026-11-07, `backlog/README.md`, "Media formats"). A CD+G
+  `Media` is created from two URI strings, `videoUri` for the `.cdg` and `audioUri` for the audio, carried by one
+  public record type. The media module never scans a directory or an archive for a companion: a `.cdg` given alone as
+  a plain source string is not CD+G media. An MP3+G `.zip` plays through two `jar:` URIs into it; the module does not
+  open a `.zip` by itself.
+- **Opening the audio alone behaves exactly as today** (owner ruling, `backlog/README.md`, "Media formats").
+- **The audio plays as it does alone.** The paired audio plays through the back end and decoder that play it on its
+  own, with the same output (for MP3, the fill-gaps ruling, `backlog/README.md`, "Media formats").
+- **The CD+G implementation sits on a separate audio-and-video input facade** (owner direction, 2026-11-07). The part of
+  the module that takes the pair, keeps the audio and the separately-sourced video stream in step and presents one
+  `Media` is a facade that knows nothing of CD+G; the CD+G decoder sits behind it as one video-stream kind. No platform
+  claims a CD+G content type (criterion 13). A later format whose graphics come as a separate file reuses the facade's
+  pairing, clock and error handling and adds only its decoder. The names of the record and its components, and of any
+  other public API this adds, are listed here with `@since` when the story lands (javafx.media may add public API only
+  where its story names it, `README.md:20-21`). How the facade and the player layer behind it are shaped in Java is the
+  implementer's.
 - **jKaraoke.** Its code may be ported (CC0). A ported file keeps its notice in the second header block
   (`.claude/skills/openjfx-conventions/SKILL.md:86-89`), the notice ships through US-075, and none of the defects
   listed under "Problem" is carried over.
@@ -78,9 +98,8 @@ Paths that start with `jfxmediaimpl/` are under `modules/javafx.media/src/main/j
 - **Threads.** No scene-graph object changes off the FX thread.
 - **Licences** (owner ruling, `backlog/README.md`, "Media formats"). Third-party Java code inside the jars is MIT, BSD,
   zlib, CC0, BSL-1.0 or similarly permissive; no LGPL and no Apache-2.0 Java code; otherwise the code is written
-  in-house
-  from the specification. Native code keeps port rule P8 (`backlog/README.md`, "Port rules"). Every notice ships through
-  US-075.
+  in-house from the specification. Native code keeps port rule P8 (`backlog/README.md`, "Port rules"). Every notice
+  ships through US-075.
 - **Native code.** Any native change keeps the fork's FFM rules: plain C ABIs bound through FFM, no JNI. If it
   touches gstreamer-lite or `GstPipelineFactory.cpp`, it lands after US-040. Either way, the content of US-036's
   slice-0 "unsupported content" scenario (`backlog/US-036-port-the-jfxmedia-gstreamer-pipeline-core-to-rust.md:99`)
@@ -96,25 +115,35 @@ Paths that start with `jfxmediaimpl/` are under `modules/javafx.media/src/main/j
 ## Out of scope
 - CD+EG (extended graphics), KAR karaoke (US-105), and video karaoke beyond what plays today.
 - Graphics for an audio file opened on its own.
-- Finding a companion over the other schemes `Media` accepts (http, https, jrt, resource). A `.cdg` opened over them
-  fails with the no-companion error.
-- `AudioClip` given a `.cdg` or an MP3+G `.zip`. It keeps failing with `MEDIA_UNSUPPORTED`, as today
-  (`modules/javafx.media/src/main/java/javafx/scene/media/AudioClip.java:91`).
+- Finding a companion for a `.cdg`, a `.zip` or an audio file by scanning a directory or an archive, over any
+  scheme. The application names both URIs.
+- A `.cdg` or a `.zip` given as the one source string of `new Media(String)`. Each keeps failing with
+  `MEDIA_UNSUPPORTED`, as today, and the public format table says so (criterion 13).
+- `AudioClip` with the pair, a `.cdg` or a `.zip`. It takes one source string and keeps failing with
+  `MEDIA_UNSUPPORTED`, as today (`modules/javafx.media/src/main/java/javafx/scene/media/AudioClip.java:91`).
+- A second shipped video-stream kind behind the facade. This story lands the facade with CD+G only; the stub of
+  criterion 12 is test code.
 
 ## Acceptance criteria
-1. **Opening a `.cdg`.** `new Media(uri)` succeeds for the `file:` or `jar:` URI of a `.cdg` whose directory holds
-   exactly one file with the same base name that the media module can play as audio. Extensions match in any case
-   (`.CDG`, `.Mp3`).
-2. **Opening an MP3+G `.zip`.** `new Media(uri)` succeeds for the `file:` URI of a `.zip` that holds exactly one
-   `.cdg` and exactly one playable audio entry with the same base name.
-3. **The audio alone is unchanged.** Opening the companion audio on its own gives the same content type, tracks,
-   metadata, events and output as before, and no graphics.
-4. **Clear failures.** `new Media` throws a `MediaException` whose type and message name the cause for: no
-   companion; several companions; a `.zip` with no `.cdg`, no audio entry or several of either; and a `.cdg` too short
-   to hold one whole packet. A read error during playback reaches `MediaPlayer.onError` with a type and message that
-   name it. Each cause has one type, as US-096 requires, and the type of each is listed here when the story lands.
+1. **Creating paired media.** A `Media` is created from a public record holding a `videoUri` string and an `audioUri`
+   string; `new Media(String)` is unchanged. The record rejects a null or blank component at construction and is
+   readable back from the `Media`. `videoUri` names a `.cdg` over any scheme `Media` accepts, extensions matching in
+   any case (`.CDG`); `audioUri` names anything the media module plays as audio over any scheme `Media` accepts.
+2. **MP3+G archives.** The pair works with two `jar:` URIs into one `.zip` (`jar:file:/path/song.zip!/song.cdg` and
+   `jar:file:/path/song.zip!/song.mp3`), with bounded entry reads and nothing extracted beside the user's files.
+3. **The audio alone is unchanged.** Opening the audio URI on its own gives the same content type, platform,
+   pipeline, tracks, metadata, events and output as before, and no graphics.
+4. **Clear failures.** A `MediaException` whose type and message name the cause, and which of the two inputs, is
+   raised for: a `videoUri` that is not a `.cdg`; a `.cdg` too short to hold one whole packet; an `audioUri` the
+   module cannot play; and a URI that cannot be opened. Each arrives where US-096 criterion 4 says: thrown from the
+   `Media` constructor when neither URI's locator blocks, set on `Media.error` when either does, and a cause found at
+   player creation arrives exactly where it arrives for the audio alone. Every `.cdg` fault is reported before the
+   player reaches `READY`. A read error on the audio during playback reaches `MediaPlayer.onError` with a type and
+   message that name it and the input. Each cause has one type, as US-096 requires, and the type of each is listed
+   here when the story lands.
 5. **What `Media` reports.** Width 300 and height 216; the audio's duration; the audio's metadata, entries that
-   arrive late included; a video track and the audio's track; and `getSource()` equal to the URI given.
+   arrive late included; a video track and the audio's track; `getSource()` equal to `videoUri`, and the record
+   equal to the one given.
 6. **Display.** `MediaView` shows the CD+G raster and honours `fitWidth`, `fitHeight`, `preserveRatio`, `smooth` and
    `viewport` as it does for video. Shown at its own size, every pixel has exactly the colour the decoder gives it,
    with a 4-bit component c shown as the 8-bit value 17 × c, on the D3D, ES2, Metal and SW pipelines. Owner-run robot
@@ -131,15 +160,23 @@ Paths that start with `jfxmediaimpl/` are under `modules/javafx.media/src/main/j
    decoder independent of this implementation and of jKaraoke, chosen before comparison, decides, and each ruling is
    recorded here.
 9. **The audio's behaviour.** Equalizer, spectrum, volume, balance and mute act on the audio as when it plays alone,
-   and every `MediaPlayer` event fires as it does for the audio alone, once each. A test runs one script against the
-   audio alone and against the CD+G media and compares the event logs.
-10. **FX thread.** A test shows that no scene-graph object changes off the FX thread while CD+G media plays, seeks
+   and every `MediaPlayer` event fires as it does for the audio alone, once each, apart from the events of the added
+   video track. A test runs one script against the audio alone and against the paired media and compares the event
+   logs.
+10. **FX thread.** A test shows that no scene-graph object changes off the FX thread while paired media plays, seeks
     and stops.
 11. **Same on five targets.** Decoded frames are identical on Windows x64, macOS x64 and aarch64, and Linux x64 and
     aarch64, shown by hashes of a generated corpus compared against a committed golden on each leg.
-12. **Documented and advertised.** The public format tables (`javafx/scene/media/package-info.java:43-109`) list CD+G
-    with its pairing rules. A test checks WebView's `canPlayType` answer for the content types this story adds.
-13. **Nothing else broken.** The media module's tests pass with the counts of a run before the change, plus the new
+12. **The facade stands apart from CD+G.** A test creates paired media through the facade with a stub video-stream
+    kind in place of CD+G and shows the clock, seek, error and event behaviour of criteria 4, 7, 9 and 10 hold
+    without the CD+G decoder.
+13. **Documented and advertised.** The public format tables (`javafx/scene/media/package-info.java:43-109`) list CD+G
+    with the pair it needs and the MP3+G `jar:` form, and state that a `.cdg` or a `.zip` given alone does not play.
+    This story adds nothing to `MediaManager.getSupportedContentTypes()`, so US-100 criterion 7 has nothing to list
+    and WebView, which can pass only one URI, is not offered CD+G. A test checks that `getSupportedContentTypes()` is
+    unchanged by this story; that `<video>` of a `.cdg` in WebView still fails is an owner-run check with the
+    javafx.web tests enabled (`-Djfx.web.skipTests=false`), since CI does not run them.
+14. **Nothing else broken.** The media module's tests pass with the counts of a run before the change, plus the new
     tests; if javafx.graphics changes, so do its tests; all five CI legs are green.
 
 ## Definition of Done
@@ -152,5 +189,12 @@ Paths that start with `jfxmediaimpl/` are under `modules/javafx.media/src/main/j
 
 ## Notes
 - Owner rulings, 2026-11-07: jKaraoke's CD+G code may be ported freely, but its decoder defects are not inherited;
-  MP3+G plays when the `.cdg` or the `.zip` is opened, and opening the `.mp3` alone behaves as today.
+  opening the `.mp3` alone behaves as today.
+- Owner ruling, 2026-11-07 (revised the same day): MP3+G is opened from an explicit `videoUri` and `audioUri` pair,
+  not by scanning beside a `.cdg` or inside a `.zip`. The earlier form, `new Media(".../song.cdg")` finding its audio
+  by base name, is withdrawn: it needed a directory scan, worked only for `file:` and `jar:`, and had to fail on
+  "several companions". A `.zip` is reached through two `jar:` URIs, which `Media` already accepts.
+- Owner direction, 2026-11-07: the CD+G implementation sits on a more abstract separate audio-and-video input pair
+  facade; that is the facade constraint and criterion 12. A sealed interface was floated for it and is not a
+  requirement; the Java shape is the implementer's.
 - Related: US-101 (MP3+G on Linux without ffmpeg plays once it lands); US-105 (KAR, the other karaoke format).

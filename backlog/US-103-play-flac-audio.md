@@ -19,10 +19,11 @@ so that an application plays lossless audio as it is, without converting it firs
   everywhere and AAC on Linux (`modules/javafx.media/native/linux.cmake:314-316`, `mac.cmake:533-534`,
   `win.cmake:635-636`). The Java platform plays nothing (`impl/platform/java/JavaPlatform.java:68-76`).
 - **Exactness is checkable.** RFC 9639 (https://www.rfc-editor.org/rfc/rfc9639) puts an MD5 of the unencoded audio in
-  STREAMINFO, where 0 means unknown (§8.2). It allows 4 to 32 bits per sample and 1 to 8 channels (§8.2), with a
-  defined order for 3 to 8 channels (§9.1.3); blocks of 16 to 65,535 samples (§4.1); constant, verbatim, fixed and
-  LPC subframes (§9.2.1); Rice-coded residuals with 4- or 5-bit parameters and escapes (§9.2.7); seek table, Vorbis
-  comment and picture blocks (§8.5, §8.6, §8.8); and a mapping into Ogg (§10.1).
+  STREAMINFO, where 0 means unknown, and a 36-bit total sample count where 0 also means unknown (§8.2). It allows 4 to
+  32 bits per sample and 1 to 8 channels (§8.2), with a defined order for 3 to 8 channels (§9.1.3); blocks of 16 to
+  65,535 samples (§4.1); constant, verbatim, fixed and LPC subframes (§9.2.1); Rice-coded residuals with 4- or 5-bit
+  parameters and escapes (§9.2.7); seek table, Vorbis comment and picture blocks (§8.5, §8.6, §8.8); and a mapping
+  into Ogg (§10.1).
 - **Stereo out today.** On macOS and Linux the native chain passes through a balance element that takes 1 or 2
   channels and outputs 2 (`native/gstreamer/gstreamer-lite/gst-plugins-good/gst/audiofx/audiopanorama.c:87-101`,
   `native/jfxmedia/platform/gstreamer/GstPipelineFactory.cpp:953-958`).
@@ -71,8 +72,16 @@ so that an application plays lossless audio as it is, without converting it firs
 3. **Channels.** How 1 to 8 channels reach the output, including the coefficients of each downmix to fewer channels,
    is documented in the public format table and checked by tests.
 4. **Sample-accurate seek.** After `seek(t)` the first sample played is sample ⌊t × rate⌋, with and without a seek
-   table, and the same holds where playback restarts at a start time or a cycle repeat. `Media.getDuration()` is
-   STREAMINFO's total samples divided by the sample rate.
+   table, and the same holds where playback restarts at a start time or a cycle repeat. When STREAMINFO's total sample
+   count is non-zero, `Media.getDuration()` is that count divided by the sample rate. A zero count means the length is
+   unknown, not empty (RFC 9639 §8.2). The duration is then the number of samples the stream holds divided by the sample
+   rate: for a `file:`, `jar:`, `jrt:` or `resource:` source, or an HTTP source whose server honours range requests, it
+   is known before the player reaches `READY`; for any other source `Media.durationProperty()` is `Duration.UNKNOWN`
+   until the end of the stream is reached and then changes to that value. While the duration is unknown, a seek past the
+   last sample ends playback at the last whole frame, as criterion 6 does for a truncated end. A stream with a zero
+   count and no audio frames reports `Duration.ZERO`. A test on a corpus file whose count a recorded command zeroes
+   asserts the duration before `READY` for a `file:` source, the `UNKNOWN`-then-exact sequence for a streamed source,
+   and never zero.
 5. **Metadata.** Vorbis comments reach `Media.getMetadata()` under the keys the public metadata table documents
    (title, artist, album, album artist, composer, genre, year, track and disc number and count, comments), and the
    front-cover picture reaches `image`. The mapping is documented in that table.
