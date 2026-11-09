@@ -68,7 +68,7 @@ and checked instead of written by hand.
 - A per-class `QueryInterface` sweep (the IIDs answered, and a set that is refused) is captured from the C and must
   match.
 - If a shim-only test hook is needed to drive an object, it is added to the header in C++ first. Shim-only hooks
-  never bump the ABI (`glass_win_api.h:199-201`).
+  never bump the ABI (`glass_win_api.h:221-223`).
 
 ### Slices
 1. **Goldens from the C**:
@@ -94,8 +94,9 @@ and checked instead of written by hand.
 
 ## Acceptance criteria
 - `dumpbin /exports glass.dll` is identical before and after, and `gwin_abi_version()` is unchanged by this story.
-  At commit `200192cfd8` that is 106 exports and ABI 6. US-039's shim-only test hooks add exports and US-049 part 1
-  removes one and bumps to ABI 7; both move the starting point, not this story.
+  At commit `200192cfd8` that is 106 exports and ABI 6. US-039's shim-only test hooks add exports, US-068 takes every
+  `gwin_test_*` hook out of the release glass.dll and bumps to ABI 7 (both builds: release 97 exports, test build
+  123), and US-049 part 1 removes one and bumps to ABI 8; all move the starting point, not this story.
 - The 46 module `@Test` methods and `WinTextRangeProviderTest` pass unchanged; the slice-1 goldens and traces are exact.
 - `QueryInterface` answers the same IIDs per class. `accessible_disposed` and `range_disposed` fire at the same
   points, on the same kind of thread, as in the C trace.

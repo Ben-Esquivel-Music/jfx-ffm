@@ -1868,7 +1868,22 @@ public final class WinGlassNativeShim {
      * which check the thread.
      */
     public static long fireCallback(int slot, long viewId) {
-        return asEventThread(() -> WinViewCallbacks.testFireCallback(slot, viewId));
+        return asEventThread(() -> testFireCallback(slot, viewId));
+    }
+
+    /**
+     * {@code gwin_test_fire_callback}: drives slot {@code slot} of the installed table with the header's fixed
+     * pattern and returns what the slot returned - 0 for a void slot, {@code GWIN_ERR_INVALID_ARG} for an unknown
+     * slot or an uninstalled table. The only automated check of the fifteen descriptors: the {@code sizeof} probes
+     * cannot see a parameter list, a table stores only pointers, and neither touch hardware nor an IME exists in a
+     * build.
+     */
+    private static long testFireCallback(int slot, long viewId) {
+        try {
+            return (long) FireHooks.require(FireHooks.FIRE_VIEW, "gwin_test_fire_callback").invokeExact(slot, viewId);
+        } catch (Throwable t) {
+            throw hookFailure("gwin_test_fire_callback", t);
+        }
     }
 
     /**
@@ -2081,7 +2096,7 @@ public final class WinGlassNativeShim {
             if (viewStatus != WinCallSupport.GWIN_OK || gestureStatus != WinCallSupport.GWIN_OK) {
                 throw new AssertionError("gwin_*_set_callbacks answered " + viewStatus + " / " + gestureStatus);
             }
-            long returned = WinViewCallbacks.testFireCallback(slot, viewId);
+            long returned = testFireCallback(slot, viewId);
             return new RecordedCall(returned, List.copyOf(Recording.ARGUMENTS));
         } catch (Throwable t) {
             throw new AssertionError("the recording table could not be installed or fired", t);
@@ -3656,7 +3671,36 @@ public final class WinGlassNativeShim {
 
     /** {@code gwin_test_fire_clipboard_callback} through the production table, as the event thread. */
     public static long fireClipboardCallback(int slot, long clipboardId) {
-        return asEventThread(() -> WinClipboardCalls.testFireClipboardCallback(slot, clipboardId));
+        return asEventThread(() -> testFireClipboardCallback(slot, clipboardId));
+    }
+
+    /**
+     * {@code gwin_test_fire_clipboard_callback}: drives slot {@code slot} of the installed clipboard table with the
+     * header's fixed pattern and returns what the hook reports - a status slot's status, 0 for a void slot,
+     * {@code fos_serialize}'s {@code *out_len} (or -100 for a NULL block), {@code GWIN_ERR_INVALID_ARG} for an
+     * unknown slot or an uninstalled table. The only automated check of the seven descriptors, as
+     * {@code gwin_test_fire_callback} is for the view table; frees the {@code fos_serialize} block itself.
+     */
+    private static long testFireClipboardCallback(int slot, long clipboardId) {
+        try {
+            return (long) FireHooks.require(FireHooks.FIRE_CLIPBOARD, "gwin_test_fire_clipboard_callback")
+                    .invokeExact(slot, clipboardId);
+        } catch (Throwable t) {
+            throw hookFailure("gwin_test_fire_clipboard_callback", t);
+        }
+    }
+
+    /**
+     * {@code gwin_test_fire_dnd_callback}: the drag-table twin; {@code out} is handed unchanged to the slots with an
+     * out-parameter (8 bytes, 8-aligned, or {@code NULL} for the others).
+     */
+    private static long testFireDndCallback(int slot, long viewId, MemorySegment out) {
+        try {
+            return (long) FireHooks.require(FireHooks.FIRE_DND, "gwin_test_fire_dnd_callback")
+                    .invokeExact(slot, viewId, out);
+        } catch (Throwable t) {
+            throw hookFailure("gwin_test_fire_dnd_callback", t);
+        }
     }
 
     /** What the drag hook returned and what its {@code out} block held afterwards, read as an int and as a long. */
@@ -3673,7 +3717,7 @@ public final class WinGlassNativeShim {
             if (withOut) {
                 out.set(java.lang.foreign.ValueLayout.JAVA_LONG, 0, UNTOUCHED_OUT);
             }
-            long returned = asEventThread(() -> WinClipboardCalls.testFireDndCallback(slot, viewId, out));
+            long returned = asEventThread(() -> testFireDndCallback(slot, viewId, out));
             return withOut
                     ? new DndFire(returned, out.get(JAVA_INT, 0), out.get(java.lang.foreign.ValueLayout.JAVA_LONG, 0))
                     : new DndFire(returned, 0, 0L);
@@ -3761,7 +3805,7 @@ public final class WinGlassNativeShim {
             if (status != WinCallSupport.GWIN_OK) {
                 throw new AssertionError("gwin_clipboard_set_callbacks answered " + status);
             }
-            long returned = WinClipboardCalls.testFireClipboardCallback(slot, clipboardId);
+            long returned = testFireClipboardCallback(slot, clipboardId);
             return new RecordedCall(returned, List.copyOf(SliceNineRecording.ARGUMENTS));
         } catch (Throwable t) {
             throw new AssertionError("the recording clipboard table could not be installed or fired", t);
@@ -3788,7 +3832,7 @@ public final class WinGlassNativeShim {
             if (withOut) {
                 out.set(java.lang.foreign.ValueLayout.JAVA_LONG, 0, UNTOUCHED_OUT);
             }
-            long returned = WinClipboardCalls.testFireDndCallback(slot, viewId, out);
+            long returned = testFireDndCallback(slot, viewId, out);
             List<Object> arguments = List.copyOf(SliceNineRecording.ARGUMENTS);
             return withOut
                     ? new RecordedDndCall(returned, arguments, out.get(JAVA_INT, 0),
@@ -3805,8 +3849,8 @@ public final class WinGlassNativeShim {
      * The recording targets of the clipboard and drag tables, each with exactly the method type the facade's
      * descriptor yields; stubs and installer binds built once in {@link Arena#global()}, as
      * {@link Recording} does for the view tables. Also binds {@code gwin_test_string_block}, the
-     * section's third hook, here rather than in the facade so that {@code boundSymbols()} stays the
-     * product's own list, as {@link WindowRecording} does for the window hook.
+     * section's third hook (the other two are {@link FireHooks}'), here rather than in the facade so that
+     * {@code boundSymbols()} stays the product's own list, as {@link WindowRecording} does for the window hook.
      */
     private static final class SliceNineRecording {
 
@@ -4689,9 +4733,10 @@ public final class WinGlassNativeShim {
     }
 
     /**
-     * The hooks of {@link #TOOLKIT_HOOK_NAMES} this {@code glass.dll} does not export, in that order: none for a
-     * build that has them, all seventeen for one built before they existed. Loads the library. A test that calls
-     * none of them runs on either build; calling a missing one throws {@link UnsatisfiedLinkError}.
+     * The hooks of {@link #TOOLKIT_HOOK_NAMES} this {@code glass.dll} does not export, in that order: none for the
+     * test build, all seventeen for the release build, which has had no {@code gwin_test_*} export since ABI 7
+     * (US-068), and for a library built before they existed. Loads the library. A test that calls none of them runs
+     * on either build; calling a missing one throws {@link UnsatisfiedLinkError} ({@link #testBuildRequired}).
      */
     public static List<String> missingToolkitHooks() {
         return ToolkitHooks.MISSING;
@@ -5133,8 +5178,80 @@ public final class WinGlassNativeShim {
     }
 
     /**
+     * Why the {@code gwin_test_*} hook {@code name} is missing and what to do about it: since ABI 7 (US-068) the
+     * hooks are compiled only into the test build of {@code glass.dll}, which the javafx.graphics native build
+     * writes to {@code target/native/test-bin}, and that directory has to come before {@code target/native/bin}
+     * (the release build) on {@code java.library.path}, as the javafx.graphics surefire configuration puts it. Names
+     * the {@code glass.dll} this JVM loaded and its {@code java.library.path}.
+     */
+    static String testBuildRequired(String name) {
+        String loaded;
+        try {
+            loaded = loadedModulePath(System.mapLibraryName(WinGlassNative.LIBRARY_NAME));
+        } catch (Throwable t) {
+            loaded = "(unknown: " + t + ")";
+        }
+        return "missing native symbol: " + name + " in glass: the gwin_test_* hooks are compiled only into the test"
+                + " build of glass.dll, which the javafx.graphics native build writes to target/native/test-bin, and"
+                + " that directory must come before target/native/bin on java.library.path; this JVM loaded "
+                + loaded + " with java.library.path=" + System.getProperty("java.library.path");
+    }
+
+    /**
+     * The three hooks that drive the production view, clipboard and drag tables with the header's fixed patterns.
+     * {@code WinViewCallbacks} and {@code WinClipboardCalls} bound them eagerly until ABI 7 (US-068), when every
+     * {@code gwin_test_*} hook left the release {@code glass.dll}; they are bound here instead, on first use and
+     * each on its own, so that {@code WinGlassNative} initializes against the release library and
+     * {@code boundSymbols()} stays the product's own list. A {@code glass.dll} without them leaves a handle
+     * {@code null}, and every call through it then fails the calling test with the {@link AssertionError} of
+     * {@link #require} - never a skip.
+     */
+    private static final class FireHooks {
+
+        static {
+            WinGlassNative.ensureLoaded();
+        }
+
+        private static final Linker LINKER = Linker.nativeLinker();
+
+        /**
+         * {@code int64_t gwin_test_fire_callback(int32_t slot, int64_t view_id)}: {@code int64_t}, not
+         * {@code int32_t}, so that slot 9's {@code get_accessible} value round-trips untruncated; binding it as
+         * {@code JAVA_INT} would read half a return register and never notice.
+         */
+        static final MethodHandle FIRE_VIEW = bind("gwin_test_fire_callback",
+                FunctionDescriptor.of(JAVA_LONG, JAVA_INT, JAVA_LONG));
+
+        /** {@code int64_t gwin_test_fire_clipboard_callback(int32_t slot, int64_t clipboard_id)}. */
+        static final MethodHandle FIRE_CLIPBOARD = bind("gwin_test_fire_clipboard_callback",
+                FunctionDescriptor.of(JAVA_LONG, JAVA_INT, JAVA_LONG));
+
+        /** {@code int64_t gwin_test_fire_dnd_callback(int32_t slot, int64_t view_id, void* out)}. */
+        static final MethodHandle FIRE_DND = bind("gwin_test_fire_dnd_callback",
+                FunctionDescriptor.of(JAVA_LONG, JAVA_INT, JAVA_LONG, ADDRESS));
+
+        private FireHooks() {
+        }
+
+        /** {@code handle}, or an {@link AssertionError} saying that {@code name} needs the test build. */
+        static MethodHandle require(MethodHandle handle, String name) {
+            if (handle == null) {
+                throw new AssertionError(testBuildRequired(name));
+            }
+            return handle;
+        }
+
+        @SuppressWarnings("restricted")
+        private static MethodHandle bind(String name, FunctionDescriptor fd) {
+            MemorySegment symbol = WinGlassNative.GLASS.find(name).orElse(null);
+            return symbol == null ? null : LINKER.downcallHandle(symbol, fd);
+        }
+    }
+
+    /**
      * The seventeen hooks, each bound on its own: a symbol the library does not export leaves its handle
-     * {@code null} and its name in {@link #MISSING}, so this holder initializes on a build without them.
+     * {@code null} and its name in {@link #MISSING}, so this holder initializes on a build without them - the
+     * release build among them since ABI 7 (US-068).
      */
     private static final class ToolkitHooks {
 
@@ -5186,8 +5303,7 @@ public final class WinGlassNativeShim {
 
         static MethodHandle require(MethodHandle handle, String name) {
             if (handle == null) {
-                throw new UnsatisfiedLinkError("missing native symbol: " + name + " in glass, a build without the"
-                        + " shim-only test hooks");
+                throw new UnsatisfiedLinkError(testBuildRequired(name));
             }
             return handle;
         }

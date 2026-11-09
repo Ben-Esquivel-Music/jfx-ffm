@@ -51,8 +51,8 @@ generated projections instead of hand-written HSTRING/activation code.
 
 ## Current state
 - `PlatformSupport.cpp/.h` 421 + `RoActivationSupport.cpp/.h` 334 = 755 lines (`wc -l`).
-- Five exports under `GLASS_WIN_ABI_VERSION 6`: `gwin_sizeof_ui_settings`, `gwin_sizeof_network_info`,
-  `gwin_prefs_set_callbacks`, `gwin_prefs_query_ui_settings`, `gwin_prefs_query_network`.
+- Five exports under `GLASS_WIN_ABI_VERSION 7` (6 before US-068): `gwin_sizeof_ui_settings`,
+  `gwin_sizeof_network_info`, `gwin_prefs_set_callbacks`, `gwin_prefs_query_ui_settings`, `gwin_prefs_query_network`.
 - One table, `GwinPrefsCallbacks`, with one slot `preferences_changed(void* user, int32_t types)`. Its Java stub lives
   in `Arena.global()` because no call guarantees that native code can no longer reach it: the sinks are never
   unregistered, and clearing the table does not wait for a sink already running (`glass_win_api.h:514-520`).
@@ -87,16 +87,18 @@ generated projections instead of hand-written HSTRING/activation code.
 2. **Queries**: `gwin_sizeof_*`, `gwin_prefs_query_ui_settings` and `gwin_prefs_query_network`. Gate: slice-1
    structs exact; `WinPreferencesNativeTest` and `WinPreferencesParityTest` green.
 3. **Activation, sinks, installer**: `gwin_prefs_set_callbacks`, the activation called from `gwin_app_create`, the two
-   sinks, the settings-change seam, and US-039 part 2's shim-only hook that invokes the registered delegates (a
-   glass.dll export, which the crate takes over). Delete `RoActivationSupport.cpp/.h`. Gate: slice-1 traces, a sink
+   sinks, the settings-change seam, and US-039 part 2's shim-only hook that invokes the registered delegates (since
+   US-068 an export of the test build of glass.dll only; the crate takes it over and keeps it out of the release
+   build). Delete `RoActivationSupport.cpp/.h`. Gate: slice-1 traces, a sink
    event from a second thread that reaches `preferences_changed` on the toolkit thread with the same `types`, and
    US-039 part 2's teardown tests run against the Rust slice.
 4. **Delete** `PlatformSupport.cpp/.h` and the slice's CMake option, in their own commit.
 
 ## Acceptance criteria
 - `dumpbin /exports glass.dll` is identical before and after, and `gwin_abi_version()` is unchanged by this story.
-  At commit `200192cfd8` that is 106 exports and ABI 6. US-039's shim-only test hooks add exports and US-049 part 1
-  removes one and bumps to ABI 7; both move the starting point, not this story.
+  At commit `200192cfd8` that is 106 exports and ABI 6. US-039's shim-only test hooks add exports, US-068 takes every
+  `gwin_test_*` hook out of the release glass.dll and bumps to ABI 7 (both builds: release 97 exports, test build
+  123), and US-049 part 1 removes one and bumps to ABI 8; all move the starting point, not this story.
 - `WinPreferencesNativeTest` (28) and `WinPreferencesParityTest` (7) are unchanged and pass; slice-1 goldens exact.
 - US-039 part 2's teardown tests (delegates invoked from a second thread across teardown, `preferences_changed` only
   on the toolkit thread, `Platform.exit()` from a listener, the release before `RoUninitialize`) pass unchanged

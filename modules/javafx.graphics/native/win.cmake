@@ -98,6 +98,10 @@ set(JFX_RC_COMMON_DEFINITIONS
 # ---------------------------------------------------------------------------
 # add_jfx_library(<name>
 #     OUTPUT_NAME <dll base name>
+#     OUTPUT_DIR <dir>               # where the DLL and its .map go; defaults to BIN_DIR. When
+#                                    # given, the import library gets a directory of its own too,
+#                                    # so a second target with the same OUTPUT_NAME (glass_test)
+#                                    # writes no file another target writes
 #     SOURCE_DIRS <dirs...>          # globbed non-recursively, like Gradle listFiles()
 #     EXTRA_SOURCES <files...>
 #     COMPILE_OPTIONS <opts...>
@@ -111,7 +115,7 @@ set(JFX_RC_COMMON_DEFINITIONS
 # )
 # ---------------------------------------------------------------------------
 function(add_jfx_library name)
-    cmake_parse_arguments(JFX "NO_UNICODE;JNI" "OUTPUT_NAME;RC_SOURCE"
+    cmake_parse_arguments(JFX "NO_UNICODE;JNI" "OUTPUT_NAME;OUTPUT_DIR;RC_SOURCE"
         "SOURCE_DIRS;EXTRA_SOURCES;COMPILE_OPTIONS;LINK_LIBS;LINK_OPTIONS;RC_INCLUDE_DIRS" ${ARGN})
 
     set(sources)
@@ -120,6 +124,11 @@ function(add_jfx_library name)
         list(APPEND sources ${dir_sources})
     endforeach()
     list(APPEND sources ${JFX_EXTRA_SOURCES})
+
+    set(out_dir "${BIN_DIR}")
+    if(JFX_OUTPUT_DIR)
+        set(out_dir "${JFX_OUTPUT_DIR}")
+    endif()
 
     # Each target compiles its own copy of the version resource with its own defines
     if(NOT JFX_RC_SOURCE)
@@ -138,12 +147,18 @@ function(add_jfx_library name)
     set_target_properties(${name} PROPERTIES
         OUTPUT_NAME "${JFX_OUTPUT_NAME}"
         PREFIX ""
-        RUNTIME_OUTPUT_DIRECTORY "${BIN_DIR}"
-        RUNTIME_OUTPUT_DIRECTORY_RELEASE "${BIN_DIR}"
-        RUNTIME_OUTPUT_DIRECTORY_DEBUG "${BIN_DIR}"
-        PDB_OUTPUT_DIRECTORY "${BIN_DIR}"
-        PDB_OUTPUT_DIRECTORY_RELEASE "${BIN_DIR}"
-        PDB_OUTPUT_DIRECTORY_DEBUG "${BIN_DIR}")
+        RUNTIME_OUTPUT_DIRECTORY "${out_dir}"
+        RUNTIME_OUTPUT_DIRECTORY_RELEASE "${out_dir}"
+        RUNTIME_OUTPUT_DIRECTORY_DEBUG "${out_dir}"
+        PDB_OUTPUT_DIRECTORY "${out_dir}"
+        PDB_OUTPUT_DIRECTORY_RELEASE "${out_dir}"
+        PDB_OUTPUT_DIRECTORY_DEBUG "${out_dir}")
+    if(JFX_OUTPUT_DIR)
+        # The import library and .exp otherwise land in the build tree's per-config directory, which
+        # every target shares: two targets with one OUTPUT_NAME would both write <name>.lib there.
+        set_target_properties(${name} PROPERTIES
+            ARCHIVE_OUTPUT_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/lib/${name}")
+    endif()
 
     target_compile_options(${name} PRIVATE ${JFX_COMMON_COMPILE_OPTIONS})
     if(NOT JFX_NO_UNICODE)
@@ -167,9 +182,34 @@ function(add_jfx_library name)
 endfunction()
 
 # ---------------------------------------------------------------------------
-# glass.dll
+# glass.dll, and the test build of glass.dll
 # ---------------------------------------------------------------------------
-add_jfx_library(glass
+# The glass target is the release glass.dll: the gwin_test_* hooks of glass_win_api.h are not compiled
+# and the probes of glass_win_test.h are empty inlines. GLASS_WIN_TEST_HOOKS=ON adds the target
+# glass_test, the test build the javafx.graphics tests load (US-068): the same sources compiled with
+# GLASS_WIN_TEST_HOOKS defined, linked as a second glass.dll (OUTPUT_NAME glass, the name Java loads)
+# into GLASS_TEST_BIN_DIR. That directory is never BIN_DIR, where it would replace the release library
+# every other module, the SDK and tests/system load. glass_test globs the source directory itself, so
+# a new source file lands in both builds.
+option(GLASS_WIN_TEST_HOOKS
+    "Also build the test build of glass.dll (target glass_test) into GLASS_TEST_BIN_DIR" OFF)
+set(GLASS_TEST_BIN_DIR "" CACHE PATH "Output directory of the test build of glass.dll; never BIN_DIR")
+
+if(GLASS_TEST_BIN_DIR)
+    get_filename_component(glass_test_bin_dir "${GLASS_TEST_BIN_DIR}" REALPATH)
+    get_filename_component(glass_bin_dir "${BIN_DIR}" REALPATH)
+    string(TOLOWER "${glass_test_bin_dir}" glass_test_bin_dir)
+    string(TOLOWER "${glass_bin_dir}" glass_bin_dir)
+    if(glass_test_bin_dir STREQUAL glass_bin_dir)
+        message(FATAL_ERROR "GLASS_TEST_BIN_DIR must not be BIN_DIR (${BIN_DIR}): "
+            "the test build of glass.dll would replace the release glass.dll")
+    endif()
+elseif(GLASS_WIN_TEST_HOOKS)
+    message(FATAL_ERROR "GLASS_WIN_TEST_HOOKS=ON needs GLASS_TEST_BIN_DIR, "
+        "the output directory of the test build of glass.dll")
+endif()
+
+set(GLASS_LIBRARY_ARGS
     OUTPUT_NAME glass
     JNI
     SOURCE_DIRS "${GRAPHICS_SRC}/native-glass/win"
@@ -180,6 +220,14 @@ add_jfx_library(glass
     LINK_OPTIONS /DELAYLOAD:user32.dll /DELAYLOAD:urlmon.dll
         /DELAYLOAD:shell32.dll /DELAYLOAD:Uiautomationcore.dll /DELAYLOAD:dwmapi.dll
         /DELAYLOAD:version.dll)
+
+add_jfx_library(glass ${GLASS_LIBRARY_ARGS})
+
+if(GLASS_WIN_TEST_HOOKS)
+    add_jfx_library(glass_test ${GLASS_LIBRARY_ARGS}
+        OUTPUT_DIR "${GLASS_TEST_BIN_DIR}"
+        COMPILE_OPTIONS /DGLASS_WIN_TEST_HOOKS=1)
+endif()
 
 # ---------------------------------------------------------------------------
 # prism_d3d.dll (needs fxc-generated shader headers)

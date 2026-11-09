@@ -62,13 +62,16 @@ static_assert((int)PlatformSupport::PT_SYSTEM_COLORS == GWIN_PT_SYSTEM_COLORS
         "GwinPreferenceType must mirror PlatformSupport::PreferenceType");
 
 /*
- * gwin_test_prefs_capture / gwin_test_prefs_invoke (glass_win_api.h): while capture is on, the extra
- * reference to each delegate InitializeWinRT registers, as an event source holds it. Only those two
- * hooks write or read these.
+ * gwin_test_prefs_capture / gwin_test_prefs_invoke (glass_win_api.h), compiled only into the test build of
+ * glass.dll (GLASS_WIN_TEST_HOOKS, US-068): while capture is on, the extra reference to each delegate
+ * InitializeWinRT registers, as an event source holds it. Only those two hooks write or read these. In the
+ * release build KeepDelegate, which InitializeWinRT calls for each delegate it registered, does nothing.
  */
 namespace {
 
 typedef ITypedEventHandler<UISettings*, UISettingsAutoHideScrollBarsChangedEventArgs*> AutoHideHandler;
+
+#ifdef GLASS_WIN_TEST_HOOKS
 
 volatile LONG s_captureDelegates = 0;
 AutoHideHandler* volatile s_keptAutoHide = NULL;
@@ -95,6 +98,22 @@ void DropDelegate(T* volatile* slot)
         old->Release();
     }
 }
+
+void KeepDelegate(AutoHideHandler* handler)
+{
+    KeepDelegate(&s_keptAutoHide, handler);
+}
+
+void KeepDelegate(INetworkStatusChangedEventHandler* handler)
+{
+    KeepDelegate(&s_keptNetwork, handler);
+}
+
+#else
+
+inline void KeepDelegate(IUnknown*) {}
+
+#endif /* GLASS_WIN_TEST_HOOKS */
 
 } // namespace
 
@@ -133,7 +152,7 @@ void PlatformSupport::InitializeWinRT()
             });
         if (SUCCEEDED(settings5->add_AutoHideScrollBarsChanged(autoHideHandler.Get(), &autoHideToken))) {
             autoHideRegistered = true;
-            KeepDelegate(&s_keptAutoHide, autoHideHandler.Get());
+            KeepDelegate(autoHideHandler.Get());
         }
     } catch (RoException const&) {
         // If an activation exception occurs, it probably means that we're on a Windows system
@@ -158,7 +177,7 @@ void PlatformSupport::InitializeWinRT()
             });
         if (SUCCEEDED(networkInformation->add_NetworkStatusChanged(networkHandler.Get(), &networkToken))) {
             networkRegistered = true;
-            KeepDelegate(&s_keptNetwork, networkHandler.Get());
+            KeepDelegate(networkHandler.Get());
         }
     } catch (RoException const&) {
         // If an activation exception occurs, it probably means that we're on a Windows system
@@ -475,6 +494,7 @@ int32_t gwin_prefs_query_network(GwinNetworkInfo* out)
     return GWIN_OK;
 }
 
+#ifdef GLASS_WIN_TEST_HOOKS
 int32_t gwin_test_prefs_capture(int32_t on)
 {
     ::InterlockedExchange(&s_captureDelegates, on != 0 ? 1 : 0);
@@ -497,5 +517,6 @@ int32_t gwin_test_prefs_invoke(int32_t which)
     }
     return GWIN_ERR_INVALID_ARG;
 }
+#endif /* GLASS_WIN_TEST_HOOKS */
 
 } // extern "C"

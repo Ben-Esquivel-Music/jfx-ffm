@@ -30,7 +30,12 @@
  * peek, the decoy windows and the IME composition driver. The preference-sink hooks that need the
  * delegates live in PlatformSupport.cpp. The probes production code carries (glass_win_test.h) read only
  * the flags written here, and nothing here runs unless a test calls a gwin_test_* export.
+ *
+ * Compiled only into the test build of glass.dll (GLASS_WIN_TEST_HOOKS, US-068): in the release build
+ * this translation unit is empty.
  */
+
+#ifdef GLASS_WIN_TEST_HOOKS
 
 #include "common.h"
 
@@ -736,3 +741,5 @@ int32_t gwin_test_ime_composition(void* hwnd, int64_t view_id, int64_t lparam, i
 }
 
 } // extern "C"
+
+#endif /* GLASS_WIN_TEST_HOOKS */

@@ -651,7 +651,7 @@ Windows, and reaches the library path as a prebuilt binary (section 3). So:
 2. **Done on Windows x64 for the module suite; the rest is left.**
    `mvn -pl modules/javafx.web test -Djfx.web.skipTests=false` against that library is recorded
    in section 3 for Windows x64. Left: the same run on Linux and macOS, and
-   `mvn -pl tests/system test -DFULL_TEST=true -DUSE_ROBOT=true -Djfx.web.skipTests=false -Dsurefire.includes='test/robot/javafx/web/**/*.java'`
+   `mvn -pl tests/system -am test -DFULL_TEST=true -DUSE_ROBOT=true -Djfx.web.skipTests=false '-Dtest=test/robot/javafx/web/**' -Dsurefire.failIfNoSpecifiedTests=false`
    with a display, which no record here covers. Those robot tests cover the pointer, editor and
    chrome upcall paths.
 3. **Not done.** A DumpRenderTree `LayoutTests` run, diffed against the expected results.

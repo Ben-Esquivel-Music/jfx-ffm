@@ -342,7 +342,7 @@
                         @${project.basedir}/src/test/addExports
                         @${jfx.root}/buildtools/addExports
                         --enable-native-access=javafx.graphics
-                        -Djava.library.path=${project.build.directory}/native/bin
+                        -Djava.library.path=${project.build.directory}/native/test-bin${path.separator}${project.build.directory}/native/bin
                         ${jfx.headless.args}
                     </argLine>
                     <systemPropertyVariables>
@@ -712,6 +712,8 @@
                                         <argument>-DGENSRC_DIR=${jfx.graphics.gensrc}</argument>
                                         <argument>-DHEADERS_DIR=${jfx.graphics.gensrc}/headers/javafx.graphics</argument>
                                         <argument>-DBIN_DIR=${project.build.directory}/native/bin</argument>
+                                        <argument>-DGLASS_WIN_TEST_HOOKS=ON</argument>
+                                        <argument>-DGLASS_TEST_BIN_DIR=${project.build.directory}/native/test-bin</argument>
                                         <argument>-DSHADER_OBJ_DIR=${project.build.directory}/native/shader-obj</argument>
                                         <argument>-DINCLUDE_ES2=${INCLUDE_ES2}</argument>
                                         <argument>-DJFX_VER=${jfx.release.version}</argument>

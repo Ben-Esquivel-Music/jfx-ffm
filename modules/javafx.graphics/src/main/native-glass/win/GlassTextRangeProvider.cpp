@@ -460,6 +460,9 @@ void gwin_a11y_text_range_destroy(gwin_text_range_t range)
     reinterpret_cast<GlassTextRangeProvider*>(range)->Release();
 }
 
+/* The test hook of this half: compiled only into the test build of glass.dll (GLASS_WIN_TEST_HOOKS, US-068). */
+#ifdef GLASS_WIN_TEST_HOOKS
+
 namespace {
 
 /* The GwinTextRangeCallbacks slots that write nothing through `out`. */
@@ -518,3 +521,5 @@ int64_t gwin_test_fire_text_range_callback(int32_t slot, int64_t range_id, void*
         return GWIN_ERR_INVALID_ARG;
     }
 }
+
+#endif /* GLASS_WIN_TEST_HOOKS */

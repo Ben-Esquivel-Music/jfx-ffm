@@ -138,8 +138,9 @@ records as undefined behaviour live in checked code, and glass.dll's remaining C
    `WinGlassNativeTest` (`:643-713`).
 3. **Toolkit window**: `GlassApplication` and the loop/invoke exports, on a Rust window class, including the
    clipboard-viewer arms the COM story left behind a seam, and US-039 part 1's guarded publication with its
-   shim-only hooks (glass.dll exports, which the crate takes over), plus those of US-052 and US-053 if they have
-   landed. Gate: `WinApplicationNativeTest`, `WinDowncallExceptionReportingTest`, `WinApplicationStartupTest`,
+   shim-only hooks (since US-068 exports of the test build of glass.dll only; the crate takes them over and keeps
+   them out of the release build), plus those of US-052 and US-053 if they have landed. Gate:
+   `WinApplicationNativeTest`, `WinDowncallExceptionReportingTest`, `WinApplicationStartupTest`,
    invoke traces, and the teardown tests of US-039 part 1, and of US-052 and US-053 if landed, run against the
    Rust slice.
 4. **Input handlers**: `ViewContainer`'s key, mouse, IME and touch handlers, `GlassInputTextInfo` and
@@ -151,9 +152,10 @@ records as undefined behaviour live in checked code, and glass.dll's remaining C
 
 ## Acceptance criteria
 - `dumpbin /exports glass.dll` is identical before and after, and `gwin_abi_version()` is unchanged by this story.
-  At commit `200192cfd8` that is 106 exports and ABI 6. US-039's shim-only test hooks add exports. US-049 part 1,
-  once landed, removes one and bumps to ABI 7; if it was ruled out, the count keeps that export and the ABI stays 6.
-  Either way they move the starting point, not this story.
+  At commit `200192cfd8` that is 106 exports and ABI 6. US-039's shim-only test hooks add exports. US-068 takes every
+  `gwin_test_*` hook out of the release glass.dll and bumps to ABI 7 (both builds: release 97 exports, test build
+  123). US-049 part 1, once landed, removes one and bumps to ABI 8; if it was ruled out, the count keeps that export
+  and the ABI stays 7. Either way they move the starting point, not this story.
 - The 131 + 11 `@Test` methods above pass unchanged, and the slice-1 traces are exact on the capture machine, as is the
   slice-2 robot pixel golden if US-049 part 1 is ruled no.
   If US-049 part 1 has landed, recount `WinGlassNativeTest` first: its capture tests (`:643-713`) change with
