@@ -70,6 +70,10 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * ({@code gdi32!CreateDCW}, {@code GetDeviceCaps}, {@code DeleteDC}, in the lazy {@code gdi32} block) and a
  * fourth lazy holder for {@code shcore}'s three DPI functions, asserted in {@code WinScreenNativeTest},
  * {@code WinScreenLayoutParityTest} and {@code WinScreenParityTest}.
+ * ABI 7 (US-068) took the three test hooks the facade bound - the view section's and the clipboard section's two -
+ * out of the release library and out of {@link #BOUND_SYMBOLS}: the shim binds them from the test build of
+ * {@code glass.dll}, and {@code WinReleaseGlassLibraryTest} asserts that the release build exports no
+ * {@code gwin_test_*} name.
  * <p>
  * Nothing here calls {@code SendInput} or {@code mouse_event}: injecting input would move the cursor
  * and type into whatever window has focus on the machine running the build. That half of the binding
@@ -115,7 +119,7 @@ public class WinGlassNativeTest {
             "user32!SetMenuItemInfoW", "user32!InsertMenuItemW", "user32!InsertMenuW", "user32!RemoveMenu",
             "user32!EnableMenuItem", "user32!CheckMenuItem",
             "glass!gwin_sizeof_view_callbacks", "glass!gwin_sizeof_gesture_callbacks", "glass!gwin_view_set_callbacks",
-            "glass!gwin_gesture_set_callbacks", "glass!gwin_test_fire_callback",
+            "glass!gwin_gesture_set_callbacks",
             "glass!gwin_view_create", "glass!gwin_view_close", "glass!gwin_view_get_native_view",
             "glass!gwin_view_set_parent", "glass!gwin_view_get_x", "glass!gwin_view_get_y",
             "glass!gwin_view_schedule_repaint", "glass!gwin_view_upload_pixels", "glass!gwin_view_enter_fullscreen",
@@ -134,8 +138,7 @@ public class WinGlassNativeTest {
             "user32!IsWindow", "user32!GetCapture", "user32!GetWindowRect",
             "glass!gwin_sizeof_screen_callbacks", "glass!gwin_screen_set_callbacks", "user32!EnumDisplayMonitors",
             "user32!GetMonitorInfoW", "user32!SetProcessDPIAware", "kernel32!GetSystemDirectoryW",
-            "glass!gwin_sizeof_clipboard_callbacks", "glass!gwin_sizeof_dnd_callbacks",
-            "glass!gwin_test_fire_clipboard_callback", "glass!gwin_test_fire_dnd_callback", "glass!gwin_alloc",
+            "glass!gwin_sizeof_clipboard_callbacks", "glass!gwin_sizeof_dnd_callbacks", "glass!gwin_alloc",
             "glass!gwin_free", "glass!gwin_clipboard_register_viewer", "glass!gwin_clipboard_dispose",
             "glass!gwin_clipboard_push", "glass!gwin_clipboard_pop", "glass!gwin_clipboard_pop_bytes",
             "glass!gwin_clipboard_pop_mimes", "glass!gwin_clipboard_push_target_action",
@@ -317,8 +320,11 @@ public class WinGlassNativeTest {
         // deleted, without a bump. 6 since the accessibility flip: the thirteen exports of the header's
         // accessibility section landed additively under 5, and the bump 5 -> 6 is the change set in which
         // WinAccessible and WinTextRangeProvider are flipped onto the two callback tables and the nine
-        // Java_* bodies and this library's JNI_OnLoad are deleted.
-        assertEquals(6, WinGlassNativeShim.expectedAbiVersion());
+        // Java_* bodies and this library's JNI_OnLoad are deleted. 7 since US-068: every gwin_test_* hook left the
+        // release glass.dll for its test build, and with them the three the facade bound eagerly
+        // (gwin_test_fire_callback, gwin_test_fire_clipboard_callback, gwin_test_fire_dnd_callback), which the shim
+        // binds from then on - a removal in what WinGlassNative binds.
+        assertEquals(7, WinGlassNativeShim.expectedAbiVersion());
         assertEquals(WinGlassNativeShim.expectedAbiVersion(), WinGlassNativeShim.abiVersion());
     }
 

@@ -93,16 +93,6 @@ final class WinClipboardCalls {
     private static final MethodHandle GWIN_SIZEOF_DND_CALLBACKS =
             bindGlass("gwin_sizeof_dnd_callbacks", FunctionDescriptor.of(JAVA_INT));
 
-    /**
-     * {@code gwin_test_fire_clipboard_callback}: the only automated check of the seven descriptors, as
-     * {@code gwin_test_fire_callback} is for the view table. Frees the {@code fos_serialize} block itself.
-     */
-    private static final MethodHandle GWIN_TEST_FIRE_CLIPBOARD_CALLBACK =
-            bindGlass("gwin_test_fire_clipboard_callback", FunctionDescriptor.of(JAVA_LONG, JAVA_INT, JAVA_LONG));
-
-    private static final MethodHandle GWIN_TEST_FIRE_DND_CALLBACK = bindGlass("gwin_test_fire_dnd_callback",
-            FunctionDescriptor.of(JAVA_LONG, JAVA_INT, JAVA_LONG, ADDRESS));
-
     private static final MethodHandle GWIN_ALLOC = bindGlass("gwin_alloc",
             FunctionDescriptor.of(ADDRESS, JAVA_LONG));
 
@@ -209,32 +199,6 @@ final class WinClipboardCalls {
     static int sizeOfFileFilter() {
         try {
             return (int) GWIN_SIZEOF_FILE_FILTER.invokeExact();
-        } catch (Throwable t) {
-            throw unexpected(t);
-        }
-    }
-
-    /**
-     * {@code gwin_test_fire_clipboard_callback}: drives slot {@code slot} of the installed clipboard
-     * table with the header's fixed pattern and returns what the hook reports - a status slot's
-     * status, 0 for a void slot, {@code fos_serialize}'s {@code *out_len} (or -100 for a NULL block),
-     * {@link WinCallSupport#GWIN_ERR_INVALID_ARG} for an unknown slot or an uninstalled table. A test hook.
-     */
-    static long testFireClipboardCallback(int slot, long clipboardId) {
-        try {
-            return (long) GWIN_TEST_FIRE_CLIPBOARD_CALLBACK.invokeExact(slot, clipboardId);
-        } catch (Throwable t) {
-            throw unexpected(t);
-        }
-    }
-
-    /**
-     * {@code gwin_test_fire_dnd_callback}: the drag-table twin; {@code out} is handed unchanged to
-     * the slots with an out-parameter (8 bytes, 8-aligned, or {@code NULL} for the others).
-     */
-    static long testFireDndCallback(int slot, long viewId, MemorySegment out) {
-        try {
-            return (long) GWIN_TEST_FIRE_DND_CALLBACK.invokeExact(slot, viewId, out);
         } catch (Throwable t) {
             throw unexpected(t);
         }

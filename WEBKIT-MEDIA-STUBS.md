@@ -134,7 +134,7 @@ default (`jfx.web.skipTests=true`). To run the web module tests, pass:
 
 To run only the WebKit-dependent Robot tests, use:
 
-    mvn -pl tests/system test -DFULL_TEST=true -DUSE_ROBOT=true -Djfx.web.skipTests=false -Dsurefire.includes='test/robot/javafx/web/**/*.java'
+    mvn -pl tests/system -am test -DFULL_TEST=true -DUSE_ROBOT=true -Djfx.web.skipTests=false '-Dtest=test/robot/javafx/web/**' -Dsurefire.failIfNoSpecifiedTests=false
 
 Setting `jfx.web.skipTests=false` requires an ABI-compatible `jfxwebkit` rebuilt for the current
 source tree. A released binary from another JavaFX revision may load but still have an incompatible

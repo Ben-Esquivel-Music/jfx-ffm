@@ -54,8 +54,11 @@ and runs the headless unit test suite. Useful flags:
 - `-DskipTests` — skip the test suite
 - `-DskipNative=true` — skip the native build (tests that need natives will fail)
 - `-pl modules/javafx.base -am` — build a single module (plus its dependencies)
-- `-DFULL_TEST=true -DUSE_ROBOT=true` — also run the eligible system/robot tests; add
-  `-Dsurefire.includes='test/robot/**/*.java'` to select only Robot tests
+- `-DFULL_TEST=true -DUSE_ROBOT=true` — also run the eligible system/robot tests; to select only
+  Robot tests, build `-pl tests/system -am` and add `-Dsurefire.failIfNoSpecifiedTests=false`
+  `'-Dtest=test/robot/**,!test/robot/com/sun/glass/ui/monocle/**,!test/robot/javafx/web/**'`
+  (`-Dtest` replaces the pom's excludes, hence the `!` patterns; `-Dsurefire.includes` has no
+  effect because the root pom sets Surefire `<includes>`)
 - `-DHEADLESS_TEST=true` — force headless mode for the system tests
 - `-Djfx.web.skipTests=false` — run the web module tests and enable the WebKit-dependent system
   Robot tests (see

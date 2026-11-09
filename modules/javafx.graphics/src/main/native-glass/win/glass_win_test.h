@@ -27,12 +27,16 @@
 #define GLASS_WIN_TEST_H
 
 /*
- * glass_win_test.h - the production-side probes of the shim-only test hooks that glass_win_api.h lists in
- * its SHIM-ONLY TEST HOOKS block. Internal to this library: nothing declared here is exported.
+ * glass_win_test.h - the production-side probes of the test hooks that glass_win_api.h lists in its TEST
+ * HOOKS block. Internal to this library: nothing declared here is exported.
  *
- * Every probe below is an inline test of one flag that only a gwin_test_* export writes. While no test has
- * armed that hook the probe does nothing else, so production behaviour does not depend on this file. The
- * slow halves live in glass_win_test.cpp.
+ * Only the test build of glass.dll - the glass_test target of native/win.cmake, configured with
+ * GLASS_WIN_TEST_HOOKS=ON (US-068) - defines GLASS_WIN_TEST_HOOKS. There every probe below is an inline
+ * test of one flag that only a gwin_test_* export writes; while no test has armed that hook the probe
+ * does nothing else, and the slow halves live in glass_win_test.cpp. In the release build (the glass
+ * target) every probe is an empty inline, GwinImmGetCompositionString forwards straight to
+ * ImmGetCompositionStringW, no test global is referenced and glass_win_test.cpp compiles to nothing, so
+ * production behaviour does not depend on this file.
  */
 
 #include <windows.h>
@@ -40,6 +44,8 @@
 #include <stdint.h>
 
 #include "glass_win_api.h"
+
+#ifdef GLASS_WIN_TEST_HOOKS
 
 /* gwin_test_observe: nonzero while the counters and logs record. */
 extern volatile LONG g_gwinTestObserving;
@@ -146,5 +152,24 @@ inline void GwinTestImeBackstop()
         GwinTestImeBackstopSlow();
     }
 }
+
+#else /* !GLASS_WIN_TEST_HOOKS: the release build. The probes compile to nothing. */
+
+inline void GwinTestCount(int32_t) {}
+inline void GwinTestCountCall(int32_t, HWND) {}
+inline void GwinTestParkPoint() {}
+inline void GwinTestLogEvent(int32_t) {}
+inline void GwinTestRecordDelegateCall(int32_t) {}
+
+inline LONG GwinImmGetCompositionString(HIMC hIMC, DWORD index, LPVOID buf, DWORD len)
+{
+    return ::ImmGetCompositionStringW(hIMC, index, buf, len);
+}
+
+inline void GwinTestImeAllocPoint() {}
+inline void GwinTestImeHelperFailure() {}
+inline void GwinTestImeBackstop() {}
+
+#endif /* GLASS_WIN_TEST_HOOKS */
 
 #endif /* GLASS_WIN_TEST_H */

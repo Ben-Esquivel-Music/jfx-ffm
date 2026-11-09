@@ -109,14 +109,6 @@ final class WinViewCallbacks {
     private static final MethodHandle GWIN_GESTURE_SET_CALLBACKS = bindGlass("gwin_gesture_set_callbacks",
             FunctionDescriptor.of(JAVA_INT, ADDRESS));
 
-    /**
-     * {@code gwin_test_fire_callback} returns {@code int64_t}, not {@code int32_t}, so that slot 9's
-     * {@code get_accessible} value round-trips untruncated; binding it as {@code JAVA_INT} would read half a
-     * return register and never notice.
-     */
-    private static final MethodHandle GWIN_TEST_FIRE_CALLBACK = bindGlass("gwin_test_fire_callback",
-            FunctionDescriptor.of(JAVA_LONG, JAVA_INT, JAVA_LONG));
-
     private WinViewCallbacks() {
     }
 
@@ -299,22 +291,6 @@ final class WinViewCallbacks {
             fillCallbackTable(gestureTable, GWIN_GESTURE_CALLBACKS_LAYOUT, GESTURE_SLOT_NAMES,
                     gestureCallbackStubs);
             requireOk((int) GWIN_GESTURE_SET_CALLBACKS.invokeExact(gestureTable), "gwin_gesture_set_callbacks");
-        } catch (Throwable t) {
-            throw unexpected(t);
-        }
-    }
-
-    /**
-     * {@code gwin_test_fire_callback}: drives slot {@code slot} of the installed table with the
-     * header's fixed pattern and returns what the slot returned - 0 for a void slot,
-     * {@link WinCallSupport#GWIN_ERR_INVALID_ARG} for an unknown slot or an uninstalled table. A test hook, and the
-     * only automated check of the fifteen descriptors: the {@code sizeof} probes cannot see a
-     * parameter list, a table stores only pointers, and neither touch hardware nor an IME exists in a
-     * build.
-     */
-    static long testFireCallback(int slot, long viewId) {
-        try {
-            return (long) GWIN_TEST_FIRE_CALLBACK.invokeExact(slot, viewId);
         } catch (Throwable t) {
             throw unexpected(t);
         }

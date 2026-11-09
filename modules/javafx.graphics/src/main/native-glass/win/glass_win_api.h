@@ -152,7 +152,18 @@
  * WinTextRangeProvider.java ONTO THE TABLES, together with WinGlassNative.ABI_VERSION. THE JAVA SIDE
  * AND THAT BUMP TRAVELLED TOGETHER, for the reason every bump before it did: the facade compares
  * gwin_abi_version() with its own ABI_VERSION for exact equality in both directions, so a C-only bump
- * makes every Windows glass test fail with UnsatisfiedLinkError. BOTH SIDES NOW READ 6.
+ * makes every Windows glass test fail with UnsatisfiedLinkError. BOTH SIDES READ 6 UNTIL THE BUMP BELOW.
+ *
+ * The test hooks then left the release library (US-068). Every gwin_test_* hook of this header, and the
+ * probes of glass_win_test.h that serve them, are compiled only into the test build of glass.dll: the
+ * glass_test target of native/win.cmake, configured with GLASS_WIN_TEST_HOOKS=ON, which defines
+ * GLASS_WIN_TEST_HOOKS and writes its glass.dll to GLASS_TEST_BIN_DIR, never to BIN_DIR. The release
+ * glass.dll - the glass target - exports no gwin_test_* name and carries every probe as an empty inline,
+ * and the hooks are declared below only under #ifdef GLASS_WIN_TEST_HOOKS, so production code that
+ * called one would not compile. Three of them, gwin_test_fire_callback, gwin_test_fire_clipboard_callback
+ * and gwin_test_fire_dnd_callback, had been bound by the facade; taking them out of what WinGlassNative
+ * binds moved GLASS_WIN_ABI_VERSION 6 -> 7 TOGETHER WITH WinGlassNative.ABI_VERSION, and
+ * WinGlassNativeShim binds them now. BOTH SIDES NOW READ 7, and both builds of glass.dll answer 7.
  *
  * Threading is a PER-FUNCTION rule, not a blanket one, and the per-function comment below is the
  * authority. Most functions declared here run on the JavaFX application thread, which on Windows is
@@ -211,7 +222,7 @@ extern "C" {
  * WinGlassNative binds. An export added together with its Java binding rides the current version, and
  * shim-only test hooks never bump it. Java binds gwin_abi_version first, then every symbol it uses, eagerly.
  */
-#define GLASS_WIN_ABI_VERSION 6
+#define GLASS_WIN_ABI_VERSION 7
 /* ABI 4 = the WinView / WinGestureSupport and WinWindow exports, flipped together; the clipboard / DnD /
  * dialog exports ride the same version - they are additive under it, as are the four test hooks
  * gwin_test_fire_window_callback / gwin_test_fire_clipboard_callback / gwin_test_fire_dnd_callback /
@@ -234,17 +245,23 @@ extern "C" {
  * taken in the change set that flipped WinAccessible.java and WinTextRangeProvider.java onto the two
  * tables, deleted the nine Java_* arms and this library's JNI_OnLoad, and moved
  * WinGlassNative.ABI_VERSION 5 -> 6 with it.
- * SHIM-ONLY TEST HOOKS - exported, bound by WinGlassNativeShim and NOWHERE in WinGlassNative:
- * gwin_test_fire_window_callback, gwin_test_string_block, gwin_test_fire_screen_callback,
+ * ABI 7 = no new export: the three facade-bound test hooks gwin_test_fire_callback,
+ * gwin_test_fire_clipboard_callback and gwin_test_fire_dnd_callback left the facade and the release
+ * library, and every gwin_test_* hook is now compiled only into the test build of glass.dll (US-068) - a
+ * removal from what WinGlassNative bound, so the bump 6 -> 7 travelled with WinGlassNative.ABI_VERSION
+ * 6 -> 7. The release glass.dll exports none of the twenty-six; both builds answer 7.
+ * TEST HOOKS - since ABI 7 compiled only into the test build of glass.dll and declared here only under
+ * #ifdef GLASS_WIN_TEST_HOOKS; bound by WinGlassNativeShim and NOWHERE in WinGlassNative:
+ * gwin_test_fire_callback, gwin_test_fire_window_callback, gwin_test_fire_clipboard_callback,
+ * gwin_test_fire_dnd_callback, gwin_test_string_block, gwin_test_fire_screen_callback,
  * gwin_test_fire_accessible_callback, gwin_test_fire_text_range_callback,
  * gwin_test_variant_offsets, and the seventeen of the section at the end of this header:
  * gwin_test_observe, gwin_test_counter, gwin_test_publication, gwin_test_event_log,
  * gwin_test_park_arm, gwin_test_park_wait, gwin_test_park_release, gwin_test_send_action_notify,
  * gwin_test_peek_private_messages, gwin_test_decoy_start, gwin_test_decoy_hunt,
  * gwin_test_decoy_messages, gwin_test_decoy_stop, gwin_test_prefs_capture, gwin_test_prefs_invoke,
- * gwin_test_prefs_delegate_calls and gwin_test_ime_composition. Adding or changing those never moves
- * the version. The other three hooks are bound by
- * the facade, so a removal or a prototype change of theirs bumps the version. */
+ * gwin_test_prefs_delegate_calls and gwin_test_ime_composition. Adding, changing or removing those never
+ * moves the version. */
 
 GLASS_WIN_EXPORT int32_t gwin_abi_version(void);
 
@@ -1122,8 +1139,9 @@ GLASS_WIN_EXPORT int32_t gwin_sizeof_gesture_callbacks(void);   /* ==  5 * sizeo
 GLASS_WIN_EXPORT int32_t gwin_view_set_callbacks(const GwinViewCallbacks* cb);
 GLASS_WIN_EXPORT int32_t gwin_gesture_set_callbacks(const GwinGestureCallbacks* cb);
 
+#ifdef GLASS_WIN_TEST_HOOKS
 /*
- * TEST HOOK, unconditionally exported, never called by production code. Fires slot `slot` of the
+ * TEST HOOK, only in the test build, never called by production code. Fires slot `slot` of the
  * installed table with a fixed argument pattern and returns what the slot returned - 0 for the void
  * slots and for a slot that was installed as NULL, GWIN_ERR_INVALID_ARG for an unknown slot or when
  * the table that owns it is not installed. It exists because the sizeof probes cannot catch a
@@ -1153,6 +1171,7 @@ GLASS_WIN_EXPORT int32_t gwin_gesture_set_callbacks(const GwinGestureCallbacks* 
  *   104 notify_end_touch_event(view_id)
  */
 GLASS_WIN_EXPORT int64_t gwin_test_fire_callback(int32_t slot, int64_t view_id);
+#endif /* GLASS_WIN_TEST_HOOKS */
 
 /*
  * new GlassView(view_id): the body of the former Java_com_sun_glass_ui_win_WinView__1create (deleted
@@ -1460,8 +1479,9 @@ GLASS_WIN_EXPORT int32_t gwin_sizeof_window_callbacks(void);    /* == 12 * sizeo
  */
 GLASS_WIN_EXPORT int32_t gwin_window_set_callbacks(const GwinWindowCallbacks* cb);
 
+#ifdef GLASS_WIN_TEST_HOOKS
 /*
- * TEST HOOK, unconditionally exported, never called by production code - gwin_test_fire_callback for
+ * TEST HOOK, only in the test build, never called by production code - gwin_test_fire_callback for
  * the window table. Fires slot `slot` of the installed table with a fixed argument pattern and returns
  * what the slot returned: 0 for the void slots and for a slot that was installed as NULL, the int32
  * answer of slots 2 and 10; GWIN_ERR_INVALID_ARG for an unknown slot, when no table is installed, or
@@ -1496,6 +1516,7 @@ GLASS_WIN_EXPORT int32_t gwin_window_set_callbacks(const GwinWindowCallbacks* cb
  * recording table.
  */
 GLASS_WIN_EXPORT int64_t gwin_test_fire_window_callback(int32_t slot, int64_t window_id, int32_t* out_bounds);
+#endif /* GLASS_WIN_TEST_HOOKS */
 
 /*
  * new GlassWindow + BaseWnd::Create, marshalled to the toolkit thread by SendMessage(WM_DO_ACTION)
@@ -1764,8 +1785,10 @@ typedef char gwin_screen_callbacks_size_check[(sizeof(GwinScreenCallbacks) == 1 
 
 GLASS_WIN_EXPORT int32_t gwin_sizeof_screen_callbacks(void);                          /* == sizeof(void*) today */
 GLASS_WIN_EXPORT int32_t gwin_screen_set_callbacks(const GwinScreenCallbacks* cb);    /* NULL clears; always GWIN_OK */
+#ifdef GLASS_WIN_TEST_HOOKS
 /* TEST HOOK: slot 0 fires settings_changed() and returns 0; another slot or no table -> GWIN_ERR_INVALID_ARG. */
 GLASS_WIN_EXPORT int64_t gwin_test_fire_screen_callback(int32_t slot);
+#endif /* GLASS_WIN_TEST_HOOKS */
 
 /*
  * ---- Clipboard, drag-and-drop and the common dialogs (ABI 4) ----
@@ -2076,8 +2099,9 @@ GLASS_WIN_EXPORT int32_t gwin_sizeof_dnd_callbacks(void);         /* == 9 * size
 GLASS_WIN_EXPORT int32_t gwin_clipboard_set_callbacks(const GwinClipboardCallbacks* cb);
 GLASS_WIN_EXPORT int32_t gwin_dnd_set_callbacks(const GwinDndCallbacks* cb);
 
+#ifdef GLASS_WIN_TEST_HOOKS
 /*
- * TEST HOOKS, unconditionally exported, never called by production code - gwin_test_fire_callback for
+ * TEST HOOKS, only in the test build, never called by production code - gwin_test_fire_callback for
  * the two tables of this section. Each fires slot `slot` of ITS installed table with a fixed argument
  * pattern and returns what the slot returned: 0 for the void slots and for a slot that was installed
  * as NULL, the int32 status of the status slots; GWIN_ERR_INVALID_ARG for an unknown slot, when that
@@ -2127,7 +2151,7 @@ GLASS_WIN_EXPORT int64_t gwin_test_fire_clipboard_callback(int32_t slot, int64_t
 GLASS_WIN_EXPORT int64_t gwin_test_fire_dnd_callback(int32_t slot, int64_t view_id, void* out);
 
 /*
- * TEST HOOK, unconditionally exported, never called by production code - a string block BUILT BY THIS
+ * TEST HOOK, only in the test build, never called by production code - a string block BUILT BY THIS
  * LIBRARY (GwinMakeStringBlock, the builder behind gwin_clipboard_pop_mimes and gwin_dialog_file) for
  * Java's readStringBlock to parse against a C-built block. Writes a fixed three-string block and its
  * count, in this order:
@@ -2142,6 +2166,7 @@ GLASS_WIN_EXPORT int64_t gwin_test_fire_dnd_callback(int32_t slot, int64_t view_
  * written) or when the heap is exhausted (*out_block NULL, *out_count 0).
  */
 GLASS_WIN_EXPORT int32_t gwin_test_string_block(uint16_t** out_block, int32_t* out_count);
+#endif /* GLASS_WIN_TEST_HOOKS */
 
 /*
  * The library's allocator, exposed so that a block can cross the boundary in either direction with
@@ -2987,15 +3012,16 @@ GLASS_WIN_EXPORT void gwin_a11y_text_range_destroy(gwin_text_range_t range);
  *
  * Both VARIANTs are VariantClear-ed before it returns, on every path, so the BSTR, SAFEARRAY or AddRef a
  * conversion made is released - also the first one's when the second conversion fails. The JNI body
- * cleared neither, so each VT_BSTR property change leaked its BSTR. gwin_test_counter's
+ * cleared neither, so each VT_BSTR property change leaked its BSTR. In the test build gwin_test_counter's
  * GWIN_TEST_COUNTER_BSTR_ALLOC / _BSTR_FREE observe the BSTR half.
  */
 GLASS_WIN_EXPORT int64_t gwin_a11y_raise_property_changed(gwin_accessible_t acc, int32_t property_id,
                                                           const GwinVariant* old_value,
                                                           const GwinVariant* new_value);
 
+#ifdef GLASS_WIN_TEST_HOOKS
 /*
- * TEST HOOKS, unconditionally exported, never called by production code and never bound by
+ * TEST HOOKS, only in the test build, never called by production code and never bound by
  * WinGlassNative - gwin_test_fire_callback for the two tables of this section. With 89 slots they are
  * the only automated check that a FunctionDescriptor agrees with its prototype: the sizeof probes see
  * only pointers, and a descriptor with one parameter too many silently shifts every following argument
@@ -3030,7 +3056,7 @@ GLASS_WIN_EXPORT int64_t gwin_test_fire_text_range_callback(int32_t slot, int64_
                                                             void* out);
 
 /*
- * TEST HOOK, unconditionally exported, never called by production code. Writes the offsetof of the
+ * TEST HOOK, only in the test build, never called by production code. Writes the offsetof of the
  * ELEVEN GwinVariant fields, in declaration order (vt, i_val, l_val, flt_val, dbl_val, bool_val,
  * punk_val, bstr_val, bstr_len, p_dbl_val, p_dbl_count), so that a Java StructLayout is asserted
  * against the compiler's real layout instead of against a comment. Eleven, not the nine WinVariant
@@ -3038,14 +3064,17 @@ GLASS_WIN_EXPORT int64_t gwin_test_fire_text_range_callback(int32_t slot, int64_
  * not pin it. Returns GWIN_OK, or GWIN_ERR_INVALID_ARG when out11 is NULL (nothing written).
  */
 GLASS_WIN_EXPORT int32_t gwin_test_variant_offsets(int32_t* out11);
+#endif /* GLASS_WIN_TEST_HOOKS */
 
 /*
  * ---- Shim-only test hooks: counters, the toolkit window, the preference sinks and the IME path ----
  *
- * Unconditionally exported, never called by production code, bound by WinGlassNativeShim only. Each does
- * nothing until a test calls or arms it: the probes they place in production code (glass_win_test.h) test
- * one flag and fall through while it is clear. They change no prototype, layout or value WinGlassNative
- * binds, so GLASS_WIN_ABI_VERSION does not move for them.
+ * Only in the test build of glass.dll (GLASS_WIN_TEST_HOOKS), never called by production code, bound by
+ * WinGlassNativeShim only. Each does nothing until a test calls or arms it: the probes they place in
+ * production code (glass_win_test.h) test one flag and fall through while it is clear, and are empty
+ * inlines in the release build. The three enums of this section stay visible in both builds, because
+ * production code passes their constants to those probes. They change no prototype, layout or value
+ * WinGlassNative binds, so GLASS_WIN_ABI_VERSION does not move for them.
  */
 
 /* gwin_test_counter indices. Each counts only while gwin_test_observe is on. */
@@ -3075,6 +3104,7 @@ enum GwinTestCounter {
 };
 #define GWIN_TEST_COUNTER_COUNT 13
 
+#ifdef GLASS_WIN_TEST_HOOKS
 /*
  * TEST HOOK. on != 0 zeroes every counter and log of these hooks and starts recording; on == 0 stops
  * recording and keeps the values. Zeroing is per value, not one snapshot: call it while nothing the test
@@ -3092,6 +3122,7 @@ GLASS_WIN_EXPORT int64_t gwin_test_counter(int32_t which);
  * when out2 is NULL.
  */
 GLASS_WIN_EXPORT int32_t gwin_test_publication(int64_t* out2);
+#endif /* GLASS_WIN_TEST_HOOKS */
 
 /* gwin_test_event_log codes: the teardown steps of PlatformSupport and RoActivationSupport. */
 enum GwinTestEvent {
@@ -3103,6 +3134,7 @@ enum GwinTestEvent {
     GWIN_TEST_EVENT_RO_UNINITIALIZE          = 6   /* immediately before RoUninitialize                    */
 };
 
+#ifdef GLASS_WIN_TEST_HOOKS
 /*
  * TEST HOOK. The number of events recorded since gwin_test_observe(1) - at most 64 are kept - with the
  * first min(total, capacity) codes (enum GwinTestEvent) written to out in order. Any thread.
@@ -3166,6 +3198,7 @@ GLASS_WIN_EXPORT int32_t gwin_test_decoy_start(void);
 GLASS_WIN_EXPORT int32_t gwin_test_decoy_hunt(void* target, int64_t max_creations, int64_t* out2);
 GLASS_WIN_EXPORT int32_t gwin_test_decoy_messages(int64_t* out3, int32_t capacity);
 GLASS_WIN_EXPORT int32_t gwin_test_decoy_stop(void);
+#endif /* GLASS_WIN_TEST_HOOKS */
 
 /* gwin_test_prefs_invoke / gwin_test_prefs_delegate_calls: which of PlatformSupport's two delegates. */
 enum GwinTestDelegate {
@@ -3173,6 +3206,7 @@ enum GwinTestDelegate {
     GWIN_TEST_DELEGATE_NETWORK   = 1    /* INetworkInformationStatics::NetworkStatusChanged    */
 };
 
+#ifdef GLASS_WIN_TEST_HOOKS
 /*
  * TEST HOOK. on != 0: from now on PlatformSupport keeps one extra reference to each delegate it registers -
  * the reference an event source takes at registration - releasing any it kept before. on == 0: stops and
@@ -3221,6 +3255,7 @@ GLASS_WIN_EXPORT int32_t gwin_test_prefs_delegate_calls(int32_t* out5, int32_t c
  */
 GLASS_WIN_EXPORT int32_t gwin_test_ime_composition(void* hwnd, int64_t view_id, int64_t lparam,
                                                    int32_t fault_at, int32_t* out4);
+#endif /* GLASS_WIN_TEST_HOOKS */
 
 #ifdef __cplusplus
 }

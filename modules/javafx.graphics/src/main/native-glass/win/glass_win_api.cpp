@@ -71,6 +71,11 @@
  * CheckAndClearException fix, moved with CheckAndClearException into GlassAccessibleJni.cpp and went
  * with that file when the accessibility JNI was deleted, so no export here calls into the JVM.
  *
+ * Since ABI 7 every test hook of this file - gwin_test_fire_callback, gwin_test_fire_window_callback,
+ * gwin_test_fire_screen_callback, gwin_test_fire_clipboard_callback, gwin_test_fire_dnd_callback and
+ * gwin_test_string_block - is compiled only into the test build of glass.dll (GLASS_WIN_TEST_HOOKS,
+ * US-068); the release build has none of them.
+ *
  * No local header this file includes spells a JNI type any more, and common.h no longer includes jni.h. It
  * still reaches this TU through line 2 of the javac -h constants headers below (Window_Level, Clipboard,
  * CommonDialogs_Type); nothing in this file uses it.
@@ -457,10 +462,12 @@ static inline GlassView* ToGlassView(gwin_view_t view)
     LEAVE_MAIN_THREAD;  \
     ARG(hWnd) = (HWND) win;
 
+#ifdef GLASS_WIN_TEST_HOOKS
 // The pointer the three test hooks below (gwin_test_fire_window_callback, _clipboard_callback,
 // _dnd_callback) hand to a void* slot: bits above 32 set so a descriptor that truncates it shows,
 // never dereferenced by this library. The Java tests transcribe the value from glass_win_api.h.
 #define GWIN_TEST_HOOK_POINTER ((void*) (uintptr_t) 0x00007FFE12345678ULL)
+#endif
 
 extern "C" {
 
@@ -688,6 +695,7 @@ int32_t gwin_gesture_set_callbacks(const GwinGestureCallbacks* cb)
     return GWIN_OK;
 }
 
+#ifdef GLASS_WIN_TEST_HOOKS
 int64_t gwin_test_fire_callback(int32_t slot, int64_t view_id)
 {
     static const uint16_t chars[2] = { 0x0041, 0x0042 };
@@ -737,6 +745,7 @@ int64_t gwin_test_fire_callback(int32_t slot, int64_t view_id)
         return GWIN_ERR_INVALID_ARG;
     }
 }
+#endif /* GLASS_WIN_TEST_HOOKS */
 
 /*
  * The statement of the former Java_com_sun_glass_ui_win_WinView__1create (GlassView.cpp; deleted under
@@ -964,6 +973,7 @@ int32_t gwin_window_set_callbacks(const GwinWindowCallbacks* cb)
     return GWIN_OK;
 }
 
+#ifdef GLASS_WIN_TEST_HOOKS
 int64_t gwin_test_fire_window_callback(int32_t slot, int64_t window_id, int32_t* out_bounds)
 {
     try {
@@ -995,6 +1005,7 @@ int64_t gwin_test_fire_window_callback(int32_t slot, int64_t window_id, int32_t*
         return GWIN_ERR_INVALID_ARG;
     }
 }
+#endif /* GLASS_WIN_TEST_HOOKS */
 
 gwin_window_t gwin_window_create(void* owner_hwnd, void* monitor, int32_t mask, int64_t window_id)
 {
@@ -1572,6 +1583,7 @@ int32_t gwin_screen_set_callbacks(const GwinScreenCallbacks* cb)
     return GWIN_OK;
 }
 
+#ifdef GLASS_WIN_TEST_HOOKS
 int64_t gwin_test_fire_screen_callback(int32_t slot)
 {
     try {
@@ -1587,6 +1599,7 @@ int64_t gwin_test_fire_screen_callback(int32_t slot)
         return GWIN_ERR_INVALID_ARG;
     }
 }
+#endif /* GLASS_WIN_TEST_HOOKS */
 
 /*
  * ---- Clipboard, drag-and-drop, common dialogs (glass_win_api.h) ----
@@ -1622,6 +1635,7 @@ int32_t gwin_dnd_set_callbacks(const GwinDndCallbacks* cb)
     return GWIN_OK;
 }
 
+#ifdef GLASS_WIN_TEST_HOOKS
 int64_t gwin_test_fire_clipboard_callback(int32_t slot, int64_t clipboard_id)
 {
     static const uint16_t mime[3] = { 0x0041, 0x0042, 0 };
@@ -1707,6 +1721,7 @@ int32_t gwin_test_string_block(uint16_t** out_block, int32_t* out_count)
         return GWIN_ERR_INVALID_ARG;
     }
 }
+#endif /* GLASS_WIN_TEST_HOOKS */
 
 void* gwin_alloc(int64_t size)
 {

@@ -271,7 +271,7 @@ Paths are relative to `modules/javafx.graphics/src/main/native-glass/win`.
 - US-039 part 1's teardown tests, `WinApplicationNativeTest` and `WinApplicationStartupTest` are unchanged and
   pass.
 - No export that `WinGlassNative` binds is added or removed, and no prototype, layout or enum value changes, so
-  `GLASS_WIN_ABI_VERSION` stays under the header's rule (`glass_win_api.h:199-201`).
+  `GLASS_WIN_ABI_VERSION` stays under the header's rule (`glass_win_api.h:221-223`).
 
 ## Definition of Done
 Merged and verified on Windows. `backlog/README.md` is updated. For each part, the PR checks whether upstream

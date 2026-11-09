@@ -1217,6 +1217,9 @@ int64_t gwin_a11y_raise_property_changed(gwin_accessible_t acc, int32_t property
     return (int64_t)hr;
 }
 
+/* The test hooks of this section: compiled only into the test build of glass.dll (GLASS_WIN_TEST_HOOKS, US-068). */
+#ifdef GLASS_WIN_TEST_HOOKS
+
 int32_t gwin_test_variant_offsets(int32_t* out11)
 {
     if (out11 == NULL) return GWIN_ERR_INVALID_ARG;
@@ -1355,3 +1358,5 @@ int64_t gwin_test_fire_accessible_callback(int32_t slot, int64_t accessible_id, 
         return GWIN_ERR_INVALID_ARG;
     }
 }
+
+#endif /* GLASS_WIN_TEST_HOOKS */

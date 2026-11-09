@@ -75,8 +75,16 @@ final class WinGlassNative {
      * a Java side that installs no tables, and that shape first existed when those arms were deleted. The
      * bump therefore travelled with that deletion: this literal and {@code GLASS_WIN_ABI_VERSION} moved in
      * one change set, because the check below is an exact equality in both directions.
+     * <p>
+     * 7 is US-068: every {@code gwin_test_*} hook left the release {@code glass.dll} and is compiled only into
+     * its test build (CMake option {@code GLASS_WIN_TEST_HOOKS}, written to {@code target/native/test-bin}).
+     * Three of them - {@code gwin_test_fire_callback}, {@code gwin_test_fire_clipboard_callback} and
+     * {@code gwin_test_fire_dnd_callback} - were bound eagerly by {@code WinViewCallbacks} and
+     * {@code WinClipboardCalls}, so that removal is a removal in what this class binds, and those three bindings
+     * moved to {@code WinGlassNativeShim} in the same change set. Without the bump a Java side still binding them
+     * would pass the check below against the release library and then fail on the first of them by name.
      */
-    static final int ABI_VERSION = 6;
+    static final int ABI_VERSION = 7;
 
     static final String LIBRARY_NAME = "glass";
     static final String USER32_NAME = "user32";

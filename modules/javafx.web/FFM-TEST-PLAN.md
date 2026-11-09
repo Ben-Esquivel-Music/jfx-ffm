@@ -700,7 +700,7 @@ since a recording stub renders nothing.
   forcing function, and a developer who passes all three has asked for the real thing.
 * They must be run, on a machine with a display, once `jfxwebkit` is rebuilt, on **each** of
   Windows, Linux and macOS, and the result recorded in the PR:
-  `mvn -pl tests/system test -DFULL_TEST=true -DUSE_ROBOT=true -Djfx.web.skipTests=false -Dsurefire.includes='test/robot/javafx/web/**/*.java'`.
+  `mvn -pl tests/system -am test -DFULL_TEST=true -DUSE_ROBOT=true -Djfx.web.skipTests=false '-Dtest=test/robot/javafx/web/**' -Dsurefire.failIfNoSpecifiedTests=false`.
   They cover the paths `wkjstub` structurally cannot: pointer-event delivery through
   `WebPage`'s upcalls into `WebView`, text selection through the editor client, and tooltips
   through the chrome client - three of the host-table groups that are still `reserved`

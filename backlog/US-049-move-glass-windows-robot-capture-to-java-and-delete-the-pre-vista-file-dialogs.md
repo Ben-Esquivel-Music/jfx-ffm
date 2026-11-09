@@ -27,7 +27,7 @@ Paths are relative to `modules/javafx.graphics/src/main/native-glass/win`.
 ## Proposed fix
 1. Capture a pixel golden from `gwin_robot_capture` over a fixed on-screen scene (an undecorated stage with known
    content). Bind the same GDI sequence from Java in `WinRobot`, and compare in one run while the C export still
-   exists. Then delete the export under the header's bump rules (`GLASS_WIN_ABI_VERSION` 6 → 7).
+   exists. Then delete the export under the header's bump rules (`GLASS_WIN_ABI_VERSION` 7 → 8; US-068 took 7).
 2. Confirm that the folder dialog never reaches `CommonDialogs_Standard`. Then delete the two files, their dispatch
    branch and their CMake lines.
 

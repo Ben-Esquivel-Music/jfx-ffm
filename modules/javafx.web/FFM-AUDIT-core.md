@@ -1050,7 +1050,7 @@ WebKit-dependent system Robot tests. Explicitly setting it to `false` requires a
 rebuilt `jfxwebkit`. Run with:
 
     mvn -pl modules/javafx.web test -Djfx.web.skipTests=false
-    mvn -pl tests/system test -DFULL_TEST=true -DUSE_ROBOT=true -Djfx.web.skipTests=false -Dsurefire.includes='test/robot/javafx/web/**/*.java'
+    mvn -pl tests/system -am test -DFULL_TEST=true -DUSE_ROBOT=true -Djfx.web.skipTests=false '-Dtest=test/robot/javafx/web/**' -Dsurefire.failIfNoSpecifiedTests=false
 
 CI (`.github/workflows/submit.yml`, plain `mvn -B -ntp -fae install`) runs neither and does not build
 WebKit. Every migration PR in this slice must state which local WebKit build and which prebuilt

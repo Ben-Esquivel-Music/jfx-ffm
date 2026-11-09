@@ -13,15 +13,16 @@ No shipped code uses JNI. No compiled class declares a `native` method, and no l
 `Java_*` or `JNI_OnLoad` or calls the JNI API. This was checked with `nm` on the macOS libraries and the prebuilt
 `libjfxwebkit.dylib`, and by reading the CMake files and sources for Windows and Linux. What is left:
 
-1. **Windows glass.dll compiles against `jni.h`.** `native/win.cmake:174` gives `glass` the `JNI` flag. That flag
-   puts `${JDK_HOME}/include`, `include/win32` and `HEADERS_DIR` on its include path (`win.cmake:156-159`).
+1. **Windows glass.dll compiles against `jni.h`.** `native/win.cmake:214` gives `glass` the `JNI` flag (in
+   `GLASS_LIBRARY_ARGS`, which the test build `glass_test` shares). That flag puts `${JDK_HOME}/include`,
+   `include/win32` and `HEADERS_DIR` on its include path (`win.cmake:171-174`).
    11 files of `native-glass/win` include 10 `javac -h` headers, for example `com_sun_glass_events_KeyEvent.h`, and
    use only their `#define` constants. Each of those headers begins `#include <jni.h>`. GTK and mac glass include the
    same header names from JNI-free copies in `native-glass/{gtk,mac}/constants`.
 2. **The build still generates JNI headers.** `modules/javafx.graphics/pom.xml:218` runs `javac -h` for the
    `@Native` constants of javafx.graphics (322 in 17 files). `native/CMakeLists.txt:59` stops the configure step
    on every platform unless `HEADERS_DIR` is set. The Linux and mac profiles pass `JDK_HOME` and `HEADERS_DIR`
-   (`pom.xml:777-779` and `839-841`), but nothing reads them. javafx.media (21 in 4 files) and javafx.web
+   (`pom.xml:779-781` and `841-843`), but nothing reads them. javafx.media (21 in 4 files) and javafx.web
    (277 in 17 files) carry `@Native` constants with no `javac -h` behind them.
 3. **Every native library is loaded by the JDK's JNI library loader.** `NativeLibLoader` calls `System.load` at
    lines 147, 192 and 402 and `System.loadLibrary` at 159. It loads glass, prism, iio, media and WebKit, and
