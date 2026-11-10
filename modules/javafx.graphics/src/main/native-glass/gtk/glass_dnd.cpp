@@ -67,6 +67,9 @@ static GdkAtom TARGET_MIME_JPEG_ATOM;
 static GdkAtom TARGET_MIME_TIFF_ATOM;
 static GdkAtom TARGET_MIME_BMP_ATOM;
 
+// The property gdk_selection_convert asks the owner to write the data to (_gdk_x11_display_convert_selection)
+static GdkAtom SELECTION_PROPERTY_ATOM;
+
 static void init_target_atoms()
 {
     if (target_atoms_initialized) {
@@ -83,6 +86,8 @@ static void init_target_atoms()
     TARGET_MIME_JPEG_ATOM = gdk_atom_intern_static_string("image/jpeg");
     TARGET_MIME_TIFF_ATOM = gdk_atom_intern_static_string("image/tiff");
     TARGET_MIME_BMP_ATOM = gdk_atom_intern_static_string("image/bmp");
+
+    SELECTION_PROPERTY_ATOM = gdk_atom_intern_static_string("GDK_SELECTION");
 
     target_atoms_initialized = TRUE;
 }
@@ -122,8 +127,11 @@ struct selection_data_ctx {
     GdkAtom type;
     gint format;
     gint length;
-    // The requestor window dnd_target_receive_data passed to gdk_selection_convert
+    // The conversion dnd_target_receive_data asked for: the requestor window, selection and target it passed to
+    // gdk_selection_convert
     GdkWindow *requestor;
+    GdkAtom selection;
+    GdkAtom target;
 };
 
 static gboolean dnd_target_receive_data(GdkAtom target, selection_data_ctx *selection_ctx, int32_t *oom_reports);
@@ -134,7 +142,9 @@ static struct {
     gboolean dropped;
     gint dx, dy;
     // The mimes of this drag as ggtk_dnd_target_get_mimes answers them (NULL until the first call): every
-    // string the JNI added to its HashSet, in order, NUL-terminated back to back
+    // string the JNI added to its HashSet, in order, NUL-terminated back to back, except that a text/uri-list the
+    // source refuses adds no mime, where commit 033187ad90 derived file-list / uri-list mimes from what an earlier
+    // conversion had left in GDK_SELECTION (wait_for_selection_data_hook)
     GString *mime_adds;
     int32_t mime_add_count;
     int64_t mimes_generation;
@@ -359,13 +369,33 @@ extern "C" int32_t ggtk_dnd_target_get_supported_actions(int32_t* out_actions)
     return GGTK_OK;
 }
 
+// Ends the wait of dnd_target_receive_data at the SELECTION_NOTIFY that answers its conversion, and reads the data
+// only from a reply. Commit 033187ad90 took any SELECTION_NOTIFY on the requestor window and read the property unless
+// the event named property 0, its test for a refusal, which GDK never delivers: the owner refuses with property None,
+// and gdk_x11_display_translate_event turns that into property == target. A refusal was thus read like a reply, and
+// gdk_selection_property_get reads the requestor's GDK_SELECTION property whatever the event names, a property that
+// neither GDK nor Glass deletes: the refused conversion answered what the last answered conversion on that window had
+// left there, in this drag or an earlier one. Now the event must name the requestor window, selection and target that
+// dnd_target_receive_data passed to gdk_selection_convert, so that the answer to a conversion of another selection or
+// target neither ends this wait nor hands it its data (two pending conversions of one selection and target cannot be
+// told apart: an event carries no more than these, a property and the request's GDK_CURRENT_TIME, so the first reply
+// ends both waits); and the property is read only when the event names GDK_SELECTION, the property that
+// gdk_selection_convert asks the owner to write to, which is what a reply names. A refusal ends the wait with no data,
+// and dnd_target_receive_data answers FALSE. Only the first matching event counts: a nested read of the same mime
+// can deliver a second one while this hook is still installed, and commit 033187ad90 then read again, overwriting
+// ctx->data and leaking the first block. A limit remains: gdk_selection_convert offers no property but GDK_SELECTION,
+// read here only when the reply is dispatched, so with a second conversion pending on the window (a read nested in
+// this wait) the owner may already have overwritten it with that conversion's data, which this read answers.
 static void wait_for_selection_data_hook(GdkEvent * event, void * data)
 {
     selection_data_ctx *ctx = (selection_data_ctx*)data;
     GdkWindow *dest = ctx->requestor;
-    if (event->type == GDK_SELECTION_NOTIFY &&
-            event->selection.window == dest) {
-        if (event->selection.property) { // if 0, that we received negative response
+    if (!ctx->received &&
+            event->type == GDK_SELECTION_NOTIFY &&
+            event->selection.window == dest &&
+            event->selection.selection == ctx->selection &&
+            event->selection.target == ctx->target) {
+        if (event->selection.property == SELECTION_PROPERTY_ATOM) {
             ctx->length = gdk_selection_property_get(dest, &(ctx->data), &(ctx->type), &(ctx->format));
         }
         ctx->received = TRUE;
@@ -394,8 +424,10 @@ static gboolean dnd_target_receive_data(GdkAtom target, selection_data_ctx *sele
     // enter_ctx.ctx at every event. That is the same window unless a drag enters or drops during the wait; after
     // such a drop it would be NULL and never match the SELECTION_NOTIFY this conversion is answered with.
     selection_ctx->requestor = glass_gdk_drag_context_get_dest_window(enter_ctx.ctx);
-    gdk_selection_convert(selection_ctx->requestor, gdk_drag_get_selection(enter_ctx.ctx), target,
-                          GDK_CURRENT_TIME);
+    selection_ctx->selection = gdk_drag_get_selection(enter_ctx.ctx);
+    selection_ctx->target = target;
+    init_target_atoms(); // SELECTION_PROPERTY_ATOM, for wait_for_selection_data_hook
+    gdk_selection_convert(selection_ctx->requestor, selection_ctx->selection, target, GDK_CURRENT_TIME);
 
     hookReg =
             glass_evloop_hook_add(

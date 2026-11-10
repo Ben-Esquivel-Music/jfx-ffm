@@ -988,8 +988,10 @@ GGTK_EXPORT int32_t ggtk_dnd_target_get_supported_actions(int32_t* out_actions);
  * GtkDnDClipboard.mimesFromSystem (Java_com_sun_glass_ui_gtk_GtkDnDClipboard_mimesFromSystem,
  * glass_dnd.cpp dnd_target_get_mimes): the mime types of the drag that last entered a Glass window.
  * GGTK_ERR_NOT_IN_DRAG when none has (Java throws the IllegalStateException; the outputs are zeroed).
- * Otherwise *out_strings holds every string the JNI added to its HashSet, IN ORDER and WITH REPEATS - Java
- * adds them in this order to a new HashSet and returns set.toArray(new String[set.size()]), the array the JNI
+ * Otherwise *out_strings holds every string the JNI added to its HashSet, IN ORDER and WITH REPEATS (except
+ * that a text/uri-list the source refuses adds no mime, where commit 033187ad90 derived file-list / uri-list
+ * mimes from what an earlier conversion had left in GDK_SELECTION: glass_dnd.cpp wait_for_selection_data_hook)
+ * - Java adds them in this order to a new HashSet and returns set.toArray(new String[set.size()]), the array the JNI
  * built - as *out_count NUL-terminated strings back to back, the bytes the JNI handed to NewStringUTF (decode
  * each with JniStringCodec.fromNewStringUtf), in a g_malloc'd block of at least one byte that the caller
  * releases with g_free. The list is computed once per drag enter: the first call walks the drag's targets
@@ -1056,7 +1058,9 @@ GGTK_EXPORT int32_t ggtk_sizeof_dnd_target_value(void);   /* == 32 on LP64 today
  * it (JniStringCodec.toModifiedUtf8), NUL-terminated, borrowed (a null String has no representation: the JNI
  * crashed on it). *out is zero-filled first. GGTK_ERR_NOT_IN_DRAG when no drag has entered a Glass window
  * (Java throws the IllegalStateException). Otherwise fetches the data through nested main loops (BLOCKS and
- * UPCALLS) exactly as the JNI did and fills *out:
+ * UPCALLS) as the JNI did, except that a conversion the source refuses yields no data, where commit
+ * 033187ad90 read what an earlier conversion had left in GDK_SELECTION (glass_dnd.cpp
+ * wait_for_selection_data_hook), and fills *out:
  *   "text/plain": UTF8_STRING, else text/plain, else STRING converted from ISO-8859-1 -> STRING or NONE;
  *   "text/uri-list": the non-file uris of text/uri-list, CRLF-separated -> STRING, NONE without any;
  *   any other "text/..." type: that target as text -> STRING or NONE;
