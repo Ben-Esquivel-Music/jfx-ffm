@@ -1,8 +1,8 @@
 # US-069 — Stop GTK drop targets reading a refused conversion's stale data
 
-**Status:** ✅ Done (2026-11-09, uncommitted, PR pending; filed 2026-10-27 from the US-001a review; see "Done"
-below) · **Priority:** Low-Medium (wrong data, no crash; needs a refused conversion after an earlier drag to the
-same window) · **Estimate:** S ·
+**Status:** ✅ Done (2026-11-09; committed as `7ae305cb2a`, PR #54, whose review fixes of 2026-11-10 are uncommitted;
+filed 2026-10-27 from the US-001a review; see "Done" and "PR #54 review" below) · **Priority:** Low-Medium (wrong
+data, no crash; needs a refused conversion after an earlier drag to the same window) · **Estimate:** S ·
 **Found:** 2026-10-27, US-001a reentrant-drop regression test (the C of commit 033187ad90, kept unchanged by the
 behaviour-neutral migration)
 
@@ -175,3 +175,77 @@ On master's C, `GtkDnDTraceTest` fails on exactly the 8 `text/html` golden lines
   `None` becomes the target).
 - An independent review (C semantics, test validity, comment truth) found no behaviour or test defect; its six
   comment and documentation items are fixed.
+
+## PR #54 review (2026-11-10)
+
+Uncommitted, on top of `7ae305cb2a`. Copilot (review 5848901687 of `7ae305cb2a`, on the
+`event->selection.property == SELECTION_PROPERTY_ATOM` test of `wait_for_selection_data_hook`): a refused read of the
+mime `GDK_SELECTION` still read leftover bytes. `ggtk_dnd_target_get_data` converts a mime it has no rule for as the
+target of that name, so that read converts the target `GDK_SELECTION`, whose refusal GDK hands on with property =
+target = `GDK_SELECTION`, the property a reply names. After an answered conversion on the same window the read
+answered what that one had left there: on `7ae305cb2a`'s C the new refused read below answers `ByteBuffer [1, 2, 3]`.
+
+### What changed
+- **Native** (`glass_dnd.cpp`). `dnd_target_receive_data` deletes the requestor's `GDK_SELECTION` property
+  (`gdk_property_delete`) right before `gdk_selection_convert` when the target is `GDK_SELECTION` itself
+  (`SELECTION_PROPERTY_ATOM`), and for no other target. For that target the property's absence is what tells a
+  refusal from a reply: a refusal reads no property (`gdk_selection_property_get` answers `NULL`), a reply reads what
+  the owner wrote. The delete and the conversion go out in order on the one X connection, so the server runs the
+  delete before the owner gets the `SelectionRequest`. "Nothing deletes `GDK_SELECTION`" and the decision "No
+  `gdk_property_delete`" in "Done" above describe `7ae305cb2a`. The hook comment gives the reason and, in its limit
+  sentence, what the delete leaves: a nested conversion of that target deletes the property under an outer reply not
+  yet read, which then reads nothing unless the owner has already written the nested reply; and a refusal of that
+  target reads whatever was written after its delete, a nested conversion's reply or the next piece of an earlier INCR
+  answer that Glass neither reads nor finishes. `glass_gtk_api.h` is unchanged: its "a conversion the source refuses
+  yields no data" now holds for that target too. One new import (`gdk_property_delete`), exports unchanged (64
+  `ggtk_*`), no diagnostic under `-Werror`.
+- **Tests** (`GtkDnDRefusedConversionTest`, 10 → 12 tests). Drag 1's source also offers the mime `GDK_SELECTION`
+  (bytes `[7, 8, 9]`), and its drop reads it before `text/plain`, so the window's `GDK_SELECTION` still holds the
+  text for drag 2's first refused read. New: `anAnsweredConversionOfTheTargetGdkSelectionAnswersTheSourcesData`
+  (drag 1's read answers `ByteBuffer [7, 8, 9]`: the delete does not reject an answered conversion of that format)
+  and `aRefusedConversionOfTheTargetGdkSelectionAnswersNoData` (drag 2's fourth read, after its answered custom-mime
+  read left `[1, 2, 3]`, answers `null`). Both drags' mimes stay pinned exactly, so drag 1 offers the target
+  `GDK_SELECTION` and drag 2 does not. `TEXT_MIMES` became `FIRST_MIMES`
+  (`GDK_SELECTION|STRING|UTF8_STRING|text/plain`), `theFirstDragsReadAnswersItsText` checks the drop's second read,
+  and the class javadoc describes the new reads.
+
+Not chosen: deleting the property after every read, which would change every conversion and still read what a reply
+nobody read left behind (the second of two pending conversions of one selection and target); refusing the target
+`GDK_SELECTION` outright, which rejects answered conversions of that format.
+
+### Measured (2026-11-10, WSL x64, Temurin 27+35, Maven 3.10.0, GTK 3.24.52, as above)
+The gate ran on a fresh clone of `7ae305cb2a` with the tree's whole diff, natives built from source
+(`libglassgtk3.so` imports `gdk_property_delete`), on a private Xvfb without a window manager and under openbox
+(`_NET_SUPPORTING_WM_CHECK` present before and after each run). The comment and javadoc fixes of the review below
+came after it: the C was rebuilt with no diagnostic, and the test class compiled.
+
+| class | no window manager | openbox |
+| --- | --- | --- |
+| `GtkDnDRefusedConversionTest` | 12 / 0 / 0 / 0, 3 of 3 runs | 12 / 0 / 0 / 0, 3 of 3 runs |
+| `GtkDnDTargetTest` | 8 / 0 / 0 / 0 | 0 run (needs no window manager, by design) |
+| `GtkDnDReentrantDropTest` | 5 / 0 / 0 / 0 | 5 / 0 / 0 / 0 |
+| `GtkDnDTraceTest` | 6 / 0 / 0 / 0 (goldens unchanged) | 0 run (as `GtkDnDTargetTest`) |
+
+Run / failures / errors / skipped; no `hs_err_pid`. With `7ae305cb2a`'s tests the fix also passed the four classes
+(29 of 29, no window manager). The module gate and the whole GTK display suite were not run again. Mutants, with the
+final test, no window manager:
+
+| C | runs | failing tests of `GtkDnDRefusedConversionTest` |
+| --- | --- | --- |
+| `7ae305cb2a`'s C (no delete) | 2 of 2 fail | only `aRefusedConversionOfTheTargetGdkSelectionAnswersNoData`: `expected: <null> but was: <ByteBuffer [1, 2, 3]>` |
+| the fix, but the target `GDK_SELECTION` is never read | 1 of 1 fails | only `anAnsweredConversionOfTheTargetGdkSelectionAnswersTheSourcesData`: `expected: <ByteBuffer [7, 8, 9]> but was: <null>` |
+
+The test's author saw the first row's failure on `7ae305cb2a`'s C too, once without a window manager and once under
+openbox. The fix without the delete is `7ae305cb2a`'s code, so it has no row of its own.
+
+### Review
+An independent review (the C against GTK 3.24.52, the test's validity, the comments' truth) found the Copilot item
+resolved and four more items:
+- Pre-existing since 033187ad90, outside this item: `dnd_target_get_raw` and `dnd_target_get_image` read a 16- or
+  32-bit-format reply past its block. Filed as US-109.
+- The hook's limit sentence named too narrow a case for a nested conversion of the target `GDK_SELECTION` (only the
+  owner's refusal of it) and left out the reverse case. Reworded, as above.
+- The same sentence left out an owner still sending an earlier answer by INCR, which answers the delete with its next
+  piece. Added, as above.
+- The `FIRST_MIMES` javadoc spoke of any mime and any target; it now speaks of this drag's mimes.
+No code changed after the gate.

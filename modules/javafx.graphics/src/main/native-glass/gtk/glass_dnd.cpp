@@ -374,7 +374,7 @@ extern "C" int32_t ggtk_dnd_target_get_supported_actions(int32_t* out_actions)
 // the event named property 0, its test for a refusal, which GDK never delivers: the owner refuses with property None,
 // and gdk_x11_display_translate_event turns that into property == target. A refusal was thus read like a reply, and
 // gdk_selection_property_get reads the requestor's GDK_SELECTION property whatever the event names, a property that
-// neither GDK nor Glass deletes: the refused conversion answered what the last answered conversion on that window had
+// neither GDK nor that commit deleted: the refused read answered what the last answered conversion on that window had
 // left there, in this drag or an earlier one. Now the event must name the requestor window, selection and target that
 // dnd_target_receive_data passed to gdk_selection_convert, so that the answer to a conversion of another selection or
 // target neither ends this wait nor hands it its data (two pending conversions of one selection and target cannot be
@@ -383,9 +383,16 @@ extern "C" int32_t ggtk_dnd_target_get_supported_actions(int32_t* out_actions)
 // gdk_selection_convert asks the owner to write to, which is what a reply names. A refusal ends the wait with no data,
 // and dnd_target_receive_data answers FALSE. Only the first matching event counts: a nested read of the same mime
 // can deliver a second one while this hook is still installed, and commit 033187ad90 then read again, overwriting
-// ctx->data and leaking the first block. A limit remains: gdk_selection_convert offers no property but GDK_SELECTION,
-// read here only when the reply is dispatched, so with a second conversion pending on the window (a read nested in
-// this wait) the owner may already have overwritten it with that conversion's data, which this read answers.
+// ctx->data and leaking the first block. The one target that is GDK_SELECTION itself (ggtk_dnd_target_get_data
+// converts a mime it has no rule for as the target of that name) is refused with property == target, the property a
+// reply names, so dnd_target_receive_data deletes GDK_SELECTION before it converts that target, and only that one: a
+// refusal then reads no property (gdk_selection_property_get answers NULL), a reply what the owner wrote. A limit
+// remains: gdk_selection_convert offers no property but GDK_SELECTION, read here only when the reply is dispatched,
+// so with a second conversion pending on the window (a read nested in this wait) the owner may already have
+// overwritten it with that conversion's data, which this read answers; a nested conversion of the target GDK_SELECTION
+// deletes the property, which leaves this read none unless the owner has already written that one's reply; and a
+// refusal of that target reads what was written after the delete: a nested conversion's reply, or the next piece with
+// which an owner still sending an earlier answer by INCR (Glass neither reads nor finishes one) answers the delete.
 static void wait_for_selection_data_hook(GdkEvent * event, void * data)
 {
     selection_data_ctx *ctx = (selection_data_ctx*)data;
@@ -426,7 +433,12 @@ static gboolean dnd_target_receive_data(GdkAtom target, selection_data_ctx *sele
     selection_ctx->requestor = glass_gdk_drag_context_get_dest_window(enter_ctx.ctx);
     selection_ctx->selection = gdk_drag_get_selection(enter_ctx.ctx);
     selection_ctx->target = target;
-    init_target_atoms(); // SELECTION_PROPERTY_ATOM, for wait_for_selection_data_hook
+    init_target_atoms(); // SELECTION_PROPERTY_ATOM, for the test below and wait_for_selection_data_hook
+    if (target == SELECTION_PROPERTY_ATOM) {
+        // A refusal of this target names GDK_SELECTION as a reply does, so only the property's absence tells them
+        // apart (wait_for_selection_data_hook). One X connection: the server runs the delete before the conversion.
+        gdk_property_delete(selection_ctx->requestor, SELECTION_PROPERTY_ATOM);
+    }
     gdk_selection_convert(selection_ctx->requestor, selection_ctx->selection, target, GDK_CURRENT_TIME);
 
     hookReg =

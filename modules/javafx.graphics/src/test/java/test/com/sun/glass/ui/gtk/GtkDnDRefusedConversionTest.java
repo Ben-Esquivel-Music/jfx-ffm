@@ -71,17 +71,20 @@ import static test.com.sun.glass.ui.gtk.GtkDnDTargetTest.TOP;
  * ({@code gdk_x11_display_translate_event}). Commit {@code 033187ad90} tested the property for 0, which GDK never
  * delivers, so it read the property after a refusal as after an answer, and answered the data an earlier conversion
  * had left there; and it took any {@code SELECTION_NOTIFY} on the requestor window, so the answer to one conversion
- * also ended the wait of another one pending on that window.
+ * also ended the wait of another one pending on that window. A read of a mime Glass has no conversion of its own for
+ * converts the target of that name ({@code ggtk_dnd_target_get_data}), so a read of the mime {@code GDK_SELECTION}
+ * converts the one target whose refusal GDK hands on with the property a reply names, {@code GDK_SELECTION}.
  * <p>
  * One target window takes three drags:
  * <ul>
- * <li>the first source offers {@code text/plain}, and a read at the drop answers its text, which the conversion left
- * in the window's {@code GDK_SELECTION} property;</li>
+ * <li>the first source offers {@code text/plain} and the mime {@code GDK_SELECTION}. At the drop a read of that mime
+ * answers the source's bytes, so a conversion of that target is read when the source answers it; a {@code text/plain}
+ * read then answers the source's text, which the conversion left in the window's {@code GDK_SELECTION} property;</li>
  * <li>the second source offers {@link GtkDnDTargetTest#CUSTOM_MIME} alone. At the drop a {@code text/plain} read -
  * the {@code UTF8_STRING}, {@code text/plain} and {@code STRING} conversions of {@code dnd_target_get_string}, each
  * refused - answers {@code null}, not the first drag's text; a read of that mime then answers the source's bytes, so
  * a refusal does not stop a later conversion on the same window from answering; a second {@code text/plain} read
- * answers {@code null} again, not those bytes;</li>
+ * answers {@code null} again, not those bytes, and so does a read of the mime {@code GDK_SELECTION};</li>
  * <li>the third source offers that mime alone, with other bytes. The target releases the button inside its
  * {@code dragOver} and reads {@code text/plain} there, so the drop is dispatched inside that read's wait, as in
  * {@link GtkDnDReentrantDropTest}, and reads the mime: a wait nested in the other. The target's queue holds the
@@ -92,8 +95,9 @@ import static test.com.sun.glass.ui.gtk.GtkDnDTargetTest.TOP;
  * when the hook sees it, and dispatched inside the nested wait it would race the source's answer to the nested
  * conversion, which rewrites that property.</li>
  * </ul>
- * The tests also pin what makes the others meaningful: every drop reached the same native window, the first drag's
- * read answered its text, the second and third drags offer no text type, and only the third drop ran inside a read.
+ * The tests also pin what makes the others meaningful: every drop reached the same native window, the first drag
+ * offers text and the mime {@code GDK_SELECTION} and its text read answered its text, the second and third drags
+ * offer neither, and only the third drop ran inside a read.
  * <p>
  * Source and target run in two child JVMs and take turns through marker files, with the drag source
  * ({@link GtkDnDReentrantDropTest#dragSource}), the marker handshake and the window placement of
@@ -116,18 +120,28 @@ public class GtkDnDRefusedConversionTest {
     /** How long the target waits for the reads of a drop, which answer well within a second. */
     static final long DROP_MILLIS = 20_000;
 
+    /**
+     * The mime named as the property {@code gdk_selection_convert} converts into. A read of it converts the target
+     * {@code GDK_SELECTION}, whose refusal GDK hands on with the property {@code GDK_SELECTION}, as a reply.
+     */
+    static final String SELECTION_MIME = "GDK_SELECTION";
+
     /** What the target reads at the drop of each drag, in this order. */
     static final Map<Integer, List<String>> READS = Map.of(
-            1, List.of("text/plain"),
-            2, List.of("text/plain", CUSTOM_MIME, "text/plain"),
+            1, List.of(SELECTION_MIME, "text/plain"),
+            2, List.of("text/plain", CUSTOM_MIME, "text/plain", SELECTION_MIME),
             3, List.of(CUSTOM_MIME));
 
     /**
      * The mimes of the first drag as the target sees them, sorted: Glass offers {@code text/plain} as
-     * {@code UTF8_STRING}, {@code text/plain} and {@code STRING} ({@code add_gtk_target_for_mime}), and the target
-     * lists a text target as {@code text/plain} and by its name.
+     * {@code UTF8_STRING}, {@code text/plain} and {@code STRING} and the mime {@code GDK_SELECTION} as the target of
+     * that name ({@code add_gtk_target_for_mime}), and the target lists a text target as {@code text/plain} and by
+     * its name, the target {@code GDK_SELECTION} by its name.
      */
-    static final String TEXT_MIMES = "STRING|UTF8_STRING|text/plain";
+    static final String FIRST_MIMES = SELECTION_MIME + "|STRING|UTF8_STRING|text/plain";
+
+    /** The bytes the first drag's source offers as {@link #SELECTION_MIME}, as {@link #describe} writes them. */
+    static final String SELECTION_READ = "ByteBuffer [7, 8, 9]";
 
     /** The first drag's text as {@link #describe} writes it. */
     static final String TEXT_READ = "String " + TEXT;
@@ -197,14 +211,26 @@ public class GtkDnDRefusedConversionTest {
         }
     }
 
-    /** The first drag offers text, and its read answers it: the window's {@code GDK_SELECTION} now holds that text. */
+    /**
+     * The first drag offers text and {@link #SELECTION_MIME}, and its text read, its last, answers that text: the
+     * window's {@code GDK_SELECTION} now holds it.
+     */
     @Test
     public void theFirstDragsReadAnswersItsText() {
-        assertEquals(TEXT_MIMES, value(target, "drag1.drop.mimes"), "drag1.drop.mimes");
-        assertEquals(TEXT_READ, read(1, 1, "text/plain"));
+        assertEquals(FIRST_MIMES, value(target, "drag1.drop.mimes"), "drag1.drop.mimes");
+        assertEquals(TEXT_READ, read(1, 2, "text/plain"));
     }
 
-    /** The second and third drags offer the custom mime alone, so their sources refuse every text conversion. */
+    /** A read of {@link #SELECTION_MIME}, a conversion the source answers, answers the source's bytes. */
+    @Test
+    public void anAnsweredConversionOfTheTargetGdkSelectionAnswersTheSourcesData() {
+        assertEquals(SELECTION_READ, read(1, 1, SELECTION_MIME));
+    }
+
+    /**
+     * The second and third drags offer the custom mime alone, so their sources refuse every text conversion and a
+     * conversion of {@code GDK_SELECTION}.
+     */
     @Test
     public void theSecondAndThirdDragsOfferNoText() {
         assertEquals(CUSTOM_MIME, value(target, "drag2.drop.mimes"), "drag2.drop.mimes");
@@ -227,6 +253,15 @@ public class GtkDnDRefusedConversionTest {
     @Test
     public void aRefusedConversionAfterAnAnsweredOneAnswersNoData() {
         assertEquals(NO_DATA, read(2, 3, "text/plain"));
+    }
+
+    /**
+     * A refused read of {@link #SELECTION_MIME} after that answer answers no data either, not the bytes it left
+     * behind, although its refusal names the property a reply names.
+     */
+    @Test
+    public void aRefusedConversionOfTheTargetGdkSelectionAnswersNoData() {
+        assertEquals(NO_DATA, read(2, 4, SELECTION_MIME));
     }
 
     /**
@@ -356,7 +391,7 @@ public class GtkDnDRefusedConversionTest {
     /** What the source of drag {@code drag} offers. */
     private static Map<String, Object> content(int drag) {
         return switch (drag) {
-            case 1 -> Map.of("text/plain", TEXT);
+            case 1 -> Map.of("text/plain", TEXT, SELECTION_MIME, ByteBuffer.wrap(new byte[] {7, 8, 9}));
             case 2 -> Map.of(CUSTOM_MIME, ByteBuffer.wrap(new byte[] {1, 2, 3}));
             case 3 -> Map.of(CUSTOM_MIME, ByteBuffer.wrap(new byte[] {4, 5, 6}));
             default -> throw new IllegalArgumentException("drag " + drag);
