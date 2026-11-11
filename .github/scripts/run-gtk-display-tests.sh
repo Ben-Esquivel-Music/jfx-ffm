@@ -101,7 +101,7 @@ expected_zero_classes() {
     local class reason
     case "$1" in
         nowm)
-            # Every class runs without a window manager, the six robot classes included (-DUSE_ROBOT=true).
+            # Every class runs without a window manager, the robot classes included (-DUSE_ROBOT=true).
             ;;
         openbox)
             reason="GtkTraceGolden.requireNoWindowManager: it scripts window positions, stacking and focus for an"

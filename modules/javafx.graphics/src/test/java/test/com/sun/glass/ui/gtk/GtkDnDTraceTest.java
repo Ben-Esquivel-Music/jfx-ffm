@@ -73,6 +73,9 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * scenario drives the exception paths of the target upcalls: a {@code dragEnter} that throws leaves the drag
  * without a status reply, and a {@code dragDrop} that throws still finishes the drop; its source offers no drag
  * image, so {@code DragView::get_drag_image} makes one from the raw image.
+ * <p>
+ * One deviation from that commit is deliberate: a conversion the source refuses answers nothing, where it answered the
+ * data the transfer before it had left on the drop window ({@link #nativeHtmlReadsAnswerNothing}).
  */
 @EnabledOnOs(OS.LINUX)
 @Timeout(600)
@@ -179,6 +182,48 @@ public class GtkDnDTraceTest {
     static final List<GtkTraceGolden.Rule> IN_PROCESS_RULES = List.of(GtkTraceGolden.SORT_NESTED_READS,
             GtkTraceGolden.REPAINT_LAST_IN_STEP, ENTER_AFTER_THE_DROP);
 
+    /**
+     * A rule for the goldens only, never applied to a run's trace: rewrites the value of every {@code text/html} data
+     * line that {@code reader} ({@code peer} or {@code target}) recorded inside a nested read to {@code null}. The
+     * source offers {@code text/html} but cannot serve it - {@code dnd_source_set_raw} hands it to
+     * {@code gtk_selection_data_set_text}, which takes text targets only - so it refuses the conversion, and a read
+     * through the drop-target natives answers nothing. The goldens were captured from the JNI build of commit
+     * {@code 033187ad90}, whose {@code wait_for_selection_data_hook} read a refused conversion as it read an answered
+     * one, from the requestor's {@code GDK_SELECTION} property, which still held the data of the transfer before it.
+     * A golden is never captured again (capture is refused on any other build), so this one deliberate deviation is
+     * applied to the golden, and the run's trace is compared as recorded. Only the reads through the natives are
+     * rewritten: the {@code target} reads between two processes, and the {@code peer} reads in one, where the
+     * target's {@code ClipboardAssistance} answers from the source's own data, the fragment itself
+     * ({@code # target data}). Idempotent: a rewritten line matches again and is rewritten to itself.
+     */
+    static GtkTraceGolden.Rule nativeHtmlReadsAnswerNothing(String reader) {
+        String prefix = GtkEventTrace.NESTED_MARK + "# " + reader + " data ";
+        Pattern read = Pattern.compile(Pattern.quote(prefix) + "([0-9]+) text/html = .*");
+        return trace -> {
+            List<String> result = new ArrayList<>();
+            for (String line : trace) {
+                Matcher html = read.matcher(line);
+                result.add(html.matches() ? prefix + html.group(1) + " text/html = null" : line);
+            }
+            return result;
+        };
+    }
+
+    /**
+     * What the in-process golden is compared through: {@link #nativeHtmlReadsAnswerNothing} for the peer reads, then
+     * {@link #IN_PROCESS_RULES}, which sort the rewritten lines as they sort the run's.
+     */
+    static final List<GtkTraceGolden.Rule> IN_PROCESS_GOLDEN_RULES = List.of(nativeHtmlReadsAnswerNothing("peer"),
+            GtkTraceGolden.SORT_NESTED_READS, GtkTraceGolden.REPAINT_LAST_IN_STEP, ENTER_AFTER_THE_DROP);
+
+    /**
+     * What the between-processes golden is compared through: {@link #nativeHtmlReadsAnswerNothing} for the target
+     * reads, which go through the natives there, then {@link #RULES}.
+     */
+    static final List<GtkTraceGolden.Rule> BETWEEN_PROCESSES_GOLDEN_RULES = List.of(
+            nativeHtmlReadsAnswerNothing("target"), GtkTraceGolden.SORT_NESTED_READS,
+            GtkTraceGolden.REPAINT_LAST_IN_STEP);
+
     static final List<String> LEGEND = List.of(
             "Lines as in the event trace; '# source ...' is what the drag source did around",
             "ClipboardAssistance.flush, '# target ...' what the drop target read through its ClipboardAssistance,",
@@ -188,8 +233,9 @@ public class GtkDnDTraceTest {
     /**
      * The mimes the target reads at the drop, in this order. {@code text/html} is read before and after
      * {@code text/plain}: a {@code text/*} mime other than {@code text/plain} is served by
-     * {@code dnd_source_set_raw} through {@code gtk_selection_data_set_text}, which only takes text targets, and what
-     * the target then reads depends on the transfer before it.
+     * {@code dnd_source_set_raw} through {@code gtk_selection_data_set_text}, which only takes text targets, so the
+     * source refuses the conversion, and a read through the drop-target natives answers nothing, whatever the transfer
+     * before it left on the drop window ({@link #nativeHtmlReadsAnswerNothing}).
      */
     static final List<String> MIMES = List.of("text/html", "text/plain", "text/html", "text/uri-list",
             "application/x-java-file-list", "application/x-jfx-dnd-test", "application/x-java-rawimage");
@@ -271,14 +317,14 @@ public class GtkDnDTraceTest {
     public void inProcessTraceMatchesTheJniGolden() {
         List<String> raw = GtkTraceGolden.rawTrace(inProcess);
         GtkTraceGolden.verify(GtkDnDTraceTest.class, IN_PROCESS, inProcess, raw,
-                GtkTraceGolden.normalise(raw, IN_PROCESS_RULES), LEGEND, IN_PROCESS_RULES);
+                GtkTraceGolden.normalise(raw, IN_PROCESS_RULES), LEGEND, IN_PROCESS_GOLDEN_RULES);
     }
 
     @Test
     public void betweenProcessesTraceMatchesTheJniGolden() {
         List<String> raw = combined(betweenProcesses);
         GtkTraceGolden.verify(GtkDnDTraceTest.class, BETWEEN_PROCESSES, betweenProcesses.get(0), raw,
-                GtkTraceGolden.normalise(raw, RULES), LEGEND);
+                GtkTraceGolden.normalise(raw, RULES), LEGEND, BETWEEN_PROCESSES_GOLDEN_RULES);
     }
 
     @Test
@@ -291,8 +337,8 @@ public class GtkDnDTraceTest {
     /**
      * The target of the other process read what the source offered, in both directions: modified UTF-8 text through
      * {@code UTF8_STRING}, the URL and the files through {@code text/uri-list}, the whole backing array of the
-     * {@code ByteBuffer}, and the image as a {@code GtkPixels} of the same size - and, for the HTML fragment, not the
-     * fragment but whatever the transfer before it left behind.
+     * {@code ByteBuffer}, and the image as a {@code GtkPixels} of the same size - and nothing for the HTML fragment,
+     * which the source cannot serve.
      */
     @Test
     public void theOtherProcessReadsWhatTheSourceOffered() {
@@ -301,13 +347,13 @@ public class GtkDnDTraceTest {
             String source = i == 0 ? "Q" : "P";
             Map<String, String> values = target.values();
             // text/html is never served: dnd_source_set_raw hands it to gtk_selection_data_set_text, which refuses a
-            // target that is not a text target, and dnd_target_get_raw then reads the GDK_SELECTION property the
-            // previous transfer left on the drop window - the URI list mimesFromSystem fetched at dragEnter, then
-            // the text read just before (commit 033187ad90 behaviour, kept)
-            assertEquals(escaped("file:///tmp/jfx-dnd-a.txt\r\nfile:///tmp/jfx%20dnd%20b.txt\r\n" + URL + "\r\n\r\n"),
-                    values.get("drop.0.text/html"), target.describe());
+            // target that is not a text target, so the source refuses the conversion and the read answers nothing.
+            // Commit 033187ad90 read the GDK_SELECTION property the previous transfer had left on the drop window
+            // instead - the URI list mimesFromSystem fetched at dragEnter, then the text read just before - which
+            // the goldens captured from it still show (nativeHtmlReadsAnswerNothing)
+            assertEquals("null", values.get("drop.0.text/html"), target.describe());
             assertEquals(escaped(text(source)), values.get("drop.1.text/plain"), target.describe());
-            assertEquals(escaped(text(source)), values.get("drop.2.text/html"));
+            assertEquals("null", values.get("drop.2.text/html"));
             assertEquals(escaped(URL), values.get("drop.3.text/uri-list"));
             assertEquals(String.join("|", FILES), values.get("drop.4.application/x-java-file-list"));
             assertEquals(HexFormat.of().formatHex(CUSTOM_BYTES), values.get("drop.5.application/x-jfx-dnd-test"));

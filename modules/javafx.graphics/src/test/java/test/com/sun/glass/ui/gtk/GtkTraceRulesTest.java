@@ -39,7 +39,8 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * is idempotent on the golden it was captured with, and {@link GtkDnDTraceTest#ENTER_AFTER_THE_DROP} makes the
  * in-process golden equal to the trace the gate recorded under load - the pointer {@code ENTER} of each drop
  * dispatched after the drag source's loop instead of inside the drop target's reads - while an {@code ENTER} that is
- * missing, or another line that moved, still differs.
+ * missing, or another line that moved, still differs. The golden-only rule
+ * {@link GtkDnDTraceTest#nativeHtmlReadsAnswerNothing} changes exactly the golden lines it is meant to.
  */
 public class GtkTraceRulesTest {
 
@@ -71,6 +72,61 @@ public class GtkTraceRulesTest {
     public void theInProcessRulesAreIdempotent() {
         List<String> once = GtkTraceGolden.normalise(golden(IN_PROCESS_GOLDEN), GtkDnDTraceTest.IN_PROCESS_RULES);
         assertEquals(once, GtkTraceGolden.normalise(once, GtkDnDTraceTest.IN_PROCESS_RULES));
+    }
+
+    /**
+     * What the golden rules of the in-process and between-processes scenarios change in what their goldens are
+     * compared as, against the rules they were compared through before: exactly the four {@code text/html} reads
+     * through the drop-target natives, each from the data the transfer before it left on the drop window to
+     * {@code null}, and no other line - the in-process target's own {@code text/html} reads keep the fragment.
+     * Applied again, they change nothing; the throwing target's golden has no such line.
+     */
+    @Test
+    public void theGoldenRulesRewriteExactlyTheRefusedHtmlReads() {
+        String uriList = GtkDnDTraceTest.escaped("file:///tmp/jfx-dnd-a.txt\r\nfile:///tmp/jfx%20dnd%20b.txt\r\n"
+                + GtkDnDTraceTest.URL + "\r\n\r\n");
+        assertRewritesHtml(IN_PROCESS_GOLDEN, GtkDnDTraceTest.IN_PROCESS_RULES, GtkDnDTraceTest.IN_PROCESS_GOLDEN_RULES,
+                "peer", List.of(uriList, GtkDnDTraceTest.escaped(GtkDnDTraceTest.text("left")), uriList,
+                        GtkDnDTraceTest.escaped(GtkDnDTraceTest.text("right"))));
+        assertRewritesHtml(GtkTraceGolden.fileName(GtkDnDTraceTest.BETWEEN_PROCESSES, "1"), List.of(),
+                GtkDnDTraceTest.BETWEEN_PROCESSES_GOLDEN_RULES, "target",
+                List.of(uriList, GtkDnDTraceTest.escaped(GtkDnDTraceTest.text("Q")), uriList,
+                        GtkDnDTraceTest.escaped(GtkDnDTraceTest.text("P"))));
+        List<String> golden = golden(IN_PROCESS_GOLDEN);
+        String fragment = "~ # target data %d text/html = " + GtkDnDTraceTest.escaped(GtkDnDTraceTest.HTML);
+        List<String> rewritten = GtkTraceGolden.normalise(golden, GtkDnDTraceTest.IN_PROCESS_GOLDEN_RULES);
+        for (int read : List.of(0, 2)) {
+            String line = String.format(fragment, read);
+            assertEquals(2, golden.stream().filter(line::equals).count(), line);
+            assertEquals(2, rewritten.stream().filter(line::equals).count(), line);
+        }
+        List<String> throwing = golden(GtkTraceGolden.fileName(GtkDnDTraceTest.THROWING_TARGET, "1"));
+        assertTrue(throwing.stream().noneMatch(line -> line.matches(".*# (peer|target) data [0-9]+ text/html = .*")));
+    }
+
+    /**
+     * The golden {@code file} through {@code rules} differs from the golden through {@code before}, the rules it was
+     * compared through before, in exactly the {@code text/html} data lines of {@code reader}, from {@code values} in
+     * this order to {@code null}; and through {@code rules} twice it is what it is through them once.
+     */
+    private static void assertRewritesHtml(String file, List<GtkTraceGolden.Rule> before,
+                                           List<GtkTraceGolden.Rule> rules, String reader, List<String> values) {
+        List<String> golden = GtkTraceGolden.normalise(golden(file), before);
+        List<String> rewritten = GtkTraceGolden.normalise(golden(file), rules);
+        assertEquals(golden.size(), rewritten.size(), file);
+        List<String> expected = new ArrayList<>();
+        for (int i = 0; i < values.size(); i++) {
+            String read = "~ # " + reader + " data " + (i % 2 == 0 ? 0 : 2) + " text/html = ";
+            expected.add(read + values.get(i) + " -> " + read + "null");
+        }
+        List<String> changes = new ArrayList<>();
+        for (int i = 0; i < golden.size(); i++) {
+            if (!golden.get(i).equals(rewritten.get(i))) {
+                changes.add(golden.get(i) + " -> " + rewritten.get(i));
+            }
+        }
+        assertEquals(expected, changes, file);
+        assertEquals(rewritten, GtkTraceGolden.normalise(rewritten, rules), file + ": not idempotent");
     }
 
     /**

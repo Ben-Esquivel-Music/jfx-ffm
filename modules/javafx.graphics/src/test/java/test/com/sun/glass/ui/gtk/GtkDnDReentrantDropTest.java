@@ -40,6 +40,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.concurrent.Callable;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.function.IntFunction;
 import java.util.stream.Stream;
 import javafx.application.Platform;
 import javafx.scene.input.MouseButton;
@@ -100,13 +101,11 @@ import static test.com.sun.glass.ui.gtk.GtkDnDTargetTest.WIDTH;
  * drop did run inside the read, so a GTK that ordered them otherwise fails these tests instead of passing them
  * vacuously.
  * <p>
- * Each drag has a target window of its own. {@code wait_for_selection_data_hook} reads a refused conversion from
- * the requestor's {@code GDK_SELECTION} property as it reads an answered one - GDK translates a
- * {@code SELECTION_NOTIFY} without a property into one that names the target ({@code gdk_x11_display_translate_event}),
- * so the hook's check for property 0 does not see the refusal - and neither that read
- * ({@code gdk_selection_property_get}) nor the hook deletes the property. On the window the first drag's text was
- * read on, the second drag's refused {@code UTF8_STRING} would answer that text again; on a window no conversion has
- * been answered on, it answers nothing.
+ * Each drag has a target window of its own, as it had when commit {@code 033187ad90}'s
+ * {@code wait_for_selection_data_hook} read a refused conversion from the requestor's {@code GDK_SELECTION} property
+ * as it read an answered one: on the window the first drag's text was read on, the second drag's refused
+ * {@code UTF8_STRING} answered that text again. {@link GtkDnDRefusedConversionTest} pins a refused conversion on
+ * such a window.
  * <p>
  * The windows are moved to their places once shown and the robot aims at points their content covers there, so the
  * class runs with and without a window manager.
@@ -151,7 +150,7 @@ public class GtkDnDReentrantDropTest {
     @Timeout(2 * GtkGlassChildJvm.BEFORE_ALL_SECONDS)
     static void runScenario() {
         GtkGlassChildJvm.requireRobot();
-        Path exchange = exchangeDirectory();
+        Path exchange = exchangeDirectory("dnd-reentrant-exchange");
         List<String> options = List.of("-DUSE_ROBOT=true", "-D" + EXCHANGE_PROPERTY + "=" + exchange);
         GtkGlassChildJvm.Pending sourceChild = GtkGlassChildJvm.start(GtkDnDReentrantDropTest.class,
                 "sourceScenario", options);
@@ -167,15 +166,16 @@ public class GtkDnDReentrantDropTest {
     }
 
     /** Kills {@code child} if it still runs, which it does only when the wait for the other child failed. */
-    private static void destroy(GtkGlassChildJvm.Pending child) {
+    static void destroy(GtkGlassChildJvm.Pending child) {
         if (child != null && child.process().isAlive()) {
             child.process().destroyForcibly();
         }
     }
 
-    private static Path exchangeDirectory() {
+    /** An empty directory {@code name} under {@code target/gtk-glass-child} for the children's marker files. */
+    static Path exchangeDirectory(String name) {
         try {
-            Path exchange = Path.of("target", "gtk-glass-child", "dnd-reentrant-exchange").toAbsolutePath();
+            Path exchange = Path.of("target", "gtk-glass-child", name).toAbsolutePath();
             if (Files.isDirectory(exchange)) {
                 try (Stream<Path> files = Files.list(exchange)) {
                     for (Path file : files.toList()) {
@@ -190,7 +190,7 @@ public class GtkDnDReentrantDropTest {
         }
     }
 
-    private static String value(GtkGlassChildJvm.Run run, String key) {
+    static String value(GtkGlassChildJvm.Run run, String key) {
         String value = run.values().get(key);
         if (value == null) {
             throw new AssertionError("the child recorded no " + key + ": " + run.describe());
@@ -250,8 +250,9 @@ public class GtkDnDReentrantDropTest {
     /**
      * The drop target: answers {@code COPY} everywhere; its enter reads nothing, its armed {@code dragOver} releases
      * the button and reads {@code text/plain}, and its drop records only whether it ran inside that read. A read at
-     * the drop would start a wait of its own, and the outer read's {@code SELECTION_NOTIFY}, queued first, would end
-     * both waits before the drop had cleared the context: the case under test would not arise.
+     * the drop would start a wait of its own, and the outer read's {@code SELECTION_NOTIFY}, queued first, would be
+     * dispatched inside it and end the outer wait before the drop had cleared the context: the case under test would
+     * not arise.
      */
     static final class ReentrantTargetHooks extends GtkEventTrace.ViewHooks {
 
@@ -317,11 +318,18 @@ public class GtkDnDReentrantDropTest {
         };
     }
 
-    /**
-     * Runs in {@link GtkGlassChild}: the drag source, w1. For each drag it presses, starts the drag and moves into
-     * the target; the target does the rest. Stops early when the target says it failed.
-     */
+    /** Runs in {@link GtkGlassChild}: the drag source of this class's drags ({@link #dragSource}). */
     static void sourceScenario(Map<String, String> out) throws Exception {
+        dragSource(out, DRAGS, GtkDnDReentrantDropTest::content);
+    }
+
+    /**
+     * The drag source, w1, of a scenario whose drop target is the other child JVM: for each of {@code drags} drags it
+     * offers that drag's {@code content}, presses, starts the drag and moves into the target; the target does the
+     * rest. Stops early when the target says it failed.
+     */
+    static void dragSource(Map<String, String> out, int drags, IntFunction<Map<String, Object>> content)
+            throws Exception {
         Path exchange = Path.of(System.getProperty(EXCHANGE_PROPERTY));
         GtkEventTrace t = new GtkEventTrace();
         GtkDnDTargetTest.SourceHooks source = new GtkDnDTargetTest.SourceHooks();
@@ -329,9 +337,9 @@ public class GtkDnDReentrantDropTest {
         try {
             signal(exchange, "source.ready");
             await(exchange, "target.ready");
-            for (int drag = 1; drag <= DRAGS; drag++) {
+            for (int drag = 1; drag <= drags; drag++) {
                 String prefix = "drag" + drag + ".";
-                source.content = content(drag);
+                source.content = content.apply(drag);
                 source.flushReturned = false;
                 await(exchange, prefix + "target.armed");
                 t.mouseMove(LEFT_X + 100, TOP + 100);
@@ -414,8 +422,8 @@ public class GtkDnDReentrantDropTest {
      * {@link #PLACEMENT_SLACK} pixels right of and below that point (the frame's insets). Throws, naming the origin,
      * when it does not get there.
      */
-    private static GtkTraceWindow window(GtkEventTrace t, String name, String viewName, int x,
-                                         GtkEventTrace.ViewHooks hooks) throws Exception {
+    static GtkTraceWindow window(GtkEventTrace t, String name, String viewName, int x,
+                                 GtkEventTrace.ViewHooks hooks) throws Exception {
         GtkTraceWindow window = GtkGlassChild.onFx(() -> t.window(name, null, Window.TITLED | Window.CLOSABLE,
                 viewName, hooks));
         t.act(() -> window.setBounds(x, TOP, true, true, -1, -1, WIDTH, HEIGHT, 0, 0));
@@ -444,12 +452,12 @@ public class GtkDnDReentrantDropTest {
     }
 
     /** Creates {@code marker} in the exchange directory, for the other child. */
-    private static void signal(Path exchange, String marker) throws IOException {
+    static void signal(Path exchange, String marker) throws IOException {
         Files.writeString(exchange.resolve(marker), "1");
     }
 
     /** Waits up to {@link #MARKER_MILLIS} for the other child to create {@code marker}. */
-    private static void await(Path exchange, String marker) throws Exception {
+    static void await(Path exchange, String marker) throws Exception {
         if (!GtkGlassChild.waitFor(MARKER_MILLIS, () -> Files.isRegularFile(exchange.resolve(marker)))) {
             throw new IllegalStateException("the other child JVM did not create " + marker + " within 60 s");
         }
