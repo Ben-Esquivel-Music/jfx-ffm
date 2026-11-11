@@ -91,6 +91,7 @@ read -r -a RUNS <<< "${GTK_TEST_RUNS:-nowm openbox}"
 EXTRA_MAVEN_ARGS=("$@")
 
 XVFB_PID=
+HOLDER_PID=
 OPENBOX_PID=
 FAILED_RUNS=()
 
@@ -142,6 +143,7 @@ minutes() {
 
 cleanup() {
     stop_process "$OPENBOX_PID"
+    stop_process "$HOLDER_PID"
     stop_process "$XVFB_PID"
 }
 
@@ -159,6 +161,15 @@ root_property() {
 # Starts Xvfb and waits until it answers. No -dpi: the 96 dpi of CAPTURE_ENVIRONMENT is GDK's resolution
 # (env.resolution), which is 96 whatever physical size the X server reports, and the expectations were captured on
 # an Xvfb with its default size (100 dpi).
+# Xvfb runs without -noreset, so it resets when its last client closes, and the reset also closes a connection that
+# reached it before it saw that close: that client's XOpenDisplay returns NULL. So the first client is one that
+# stays, the xprop -spy of HOLDER_PID: once connected, it writes the root window's RESOURCE_MANAGER to xvfb-holder.txt
+# (a predefined atom that Xvfb leaves unset, so its line is "not found." and nothing is interned) and then waits for
+# changes to it until it is stopped. An attempt made before Xvfb listens exits without having connected, and the
+# next poll makes another. While the holder is connected, the xdpyinfo below and the polls of start_openbox close
+# without a reset, and openbox connects to a server that is not resetting. run_tests stops the holder before Maven,
+# after start_openbox in the openbox run, so that no client of this script but openbox is connected during the tests:
+# without a window manager, the server resets whenever the last child closes.
 start_xvfb() {
     if xdpyinfo -display "$DISPLAY_NAME" > /dev/null 2>&1; then
         error "display $DISPLAY_NAME already answers; the GTK display tests need an X server of their own"
@@ -167,13 +178,23 @@ start_xvfb() {
     "${XVFB_COMMAND[@]}" "$DISPLAY_NAME" -screen 0 "${SCREEN}x${DEPTH}" -nolisten tcp \
         > "$RUN_DIR/xvfb.log" 2>&1 < /dev/null &
     XVFB_PID=$!
+    : > "$RUN_DIR/xvfb-holder.txt"
     local i
     for ((i = 0; i < 150; i++)); do
-        if xdpyinfo -display "$DISPLAY_NAME" > "$RUN_DIR/xdpyinfo.txt" 2>&1; then
-            echo "Xvfb $DISPLAY_NAME is up (pid $XVFB_PID):" \
-                "$(grep -E '^ *(dimensions|resolution|depth of root window):' "$RUN_DIR/xdpyinfo.txt" \
-                    | tr -s ' ' | paste -sd ';' -)"
-            return 0
+        if [ -s "$RUN_DIR/xvfb-holder.txt" ]; then
+            if kill -0 "$HOLDER_PID" 2> /dev/null \
+                    && xdpyinfo -display "$DISPLAY_NAME" > "$RUN_DIR/xdpyinfo.txt" 2>&1; then
+                echo "Xvfb $DISPLAY_NAME is up (pid $XVFB_PID):" \
+                    "$(grep -E '^ *(dimensions|resolution|depth of root window):' "$RUN_DIR/xdpyinfo.txt" \
+                        | tr -s ' ' | paste -sd ';' -)"
+                return 0
+            fi
+            break
+        fi
+        if [ -z "$HOLDER_PID" ] || ! kill -0 "$HOLDER_PID" 2> /dev/null; then
+            xprop -display "$DISPLAY_NAME" -root -spy RESOURCE_MANAGER > "$RUN_DIR/xvfb-holder.txt" 2> /dev/null \
+                < /dev/null &
+            HOLDER_PID=$!
         fi
         if ! kill -0 "$XVFB_PID" 2> /dev/null; then
             break
@@ -186,6 +207,7 @@ start_xvfb() {
 
 # Starts openbox in a session of its own and waits until it has set both _NET_SUPPORTING_WM_CHECK and
 # _NET_WORKAREA on the root window: a test that starts once only the first is there can still race openbox.
+# The polls close while the holder of start_xvfb is connected, so none of them resets the server under openbox.
 start_openbox() {
     setsid "${OPENBOX_COMMAND[@]}" > "$RUN_DIR/openbox.log" 2>&1 < /dev/null &
     OPENBOX_PID=$!
@@ -381,6 +403,10 @@ run_tests() {
     unset WAYLAND_DISPLAY
     start=$SECONDS
     if start_xvfb && { [ "$run" != openbox ] || start_openbox; }; then
+        # The holder of start_xvfb closes before Maven. Openbox, if this run has it, stays connected, so only the
+        # run without a window manager resets the server here.
+        stop_process "$HOLDER_PID"
+        HOLDER_PID=
         touch "$RUN_DIR/.started"
         (cd "$ROOT" && env -u DISPLAY dbus-run-session -- env "DISPLAY=$DISPLAY_NAME" \
             mvn -B -ntp -pl modules/javafx.graphics test -DskipNative=true "-Dtest=$TEST_PATTERN" \
@@ -407,6 +433,8 @@ run_tests() {
     seconds=$((SECONDS - start))
     stop_process "$OPENBOX_PID"
     OPENBOX_PID=
+    stop_process "$HOLDER_PID"
+    HOLDER_PID=
     stop_process "$XVFB_PID"
     XVFB_PID=
     for file in surefire-reports gtk-glass-child; do
