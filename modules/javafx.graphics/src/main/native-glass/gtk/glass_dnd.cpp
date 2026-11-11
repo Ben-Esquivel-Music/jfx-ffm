@@ -597,15 +597,15 @@ static void dnd_target_get_image(GgtkDndTargetValue *out, int32_t *oom_reports)
 
     for (; *cur_target != 0 && out->kind == GGTK_DND_VALUE_NONE; ++cur_target) {
         if (dnd_target_receive_data(*cur_target, &ctx, oom_reports)) {
-            const gint fmtDiv8 = ctx.format / 8;
-            if (ctx.length <= 0 || fmtDiv8 <= 0 || ctx.length >= INT_MAX / fmtDiv8) {
+            if (ctx.length <= 0) {
                 // g_memory_input_stream_new_from_data below is what takes ownership of ctx.data (g_free as
                 // its GDestroyNotify), so on this path the block has no owner. Commit 033187ad90 leaked it
                 // here; free it, as the same check in dnd_target_get_raw does.
                 g_free(ctx.data);
                 continue;
             }
-            stream = g_memory_input_stream_new_from_data(ctx.data, ctx.length * fmtDiv8,
+            // ctx.length is the byte count, as in dnd_target_get_raw (commit 033187ad90 multiplied it by format / 8)
+            stream = g_memory_input_stream_new_from_data(ctx.data, ctx.length,
                     (GDestroyNotify)g_free);
             buf = gdk_pixbuf_new_from_stream(stream, NULL, NULL);
             if (buf) {
@@ -666,14 +666,16 @@ static void dnd_target_get_raw(GdkAtom target, gboolean string_data, GgtkDndTarg
                 ctx.data = NULL;
             }
         } else {
-            const gint fmtDiv8 = ctx.format / 8;
-            if (ctx.length <= 0 || fmtDiv8 <= 0 || ctx.length >= INT_MAX / fmtDiv8) {
+            // gdk_selection_property_get answers a byte count (_gdk_x11_display_get_selection_property counts a
+            // 16-bit item as a short and a 32-bit one as a long). Commit 033187ad90 multiplied it by format / 8,
+            // which read a 16- or 32-bit reply at 2 or 4 times its size, past the end of its block.
+            if (ctx.length <= 0) {
                 g_free(ctx.data);
                 return;
             }
-            // ByteBuffer.wrap(the first ctx.length * fmtDiv8 bytes of ctx.data)
+            // ByteBuffer.wrap(the ctx.length bytes of ctx.data)
             out->kind = GGTK_DND_VALUE_BYTES;
-            out->count = ctx.length * fmtDiv8;
+            out->count = ctx.length;
             out->data = ctx.data;
             ctx.data = NULL;
         }
