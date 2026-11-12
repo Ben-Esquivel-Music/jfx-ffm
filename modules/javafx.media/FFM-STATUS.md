@@ -11,6 +11,8 @@ It exits non-zero while anything remains, and prints "javafx.media is free of JN
 reaches zero. The baseline column below was measured by running the same script against a
 `git archive` of `master`, so the two columns are directly comparable.
 
+US-074 removed `verify-no-jni.pl` (git history has it); `java buildtools/CheckNoJni.java` now checks the whole tree for JNI.
+
 ## 1. The scoreboard
 
 | Check | On `master` | Now |
@@ -477,3 +479,4 @@ repository rather than from memory:
 `buildtools/ffm-media/verify-no-jni.pl` is the natural home and already has the shape for it (it
 walks the module, has a `--json` mode, and exits non-zero on a discrepancy). The scoreboard in §1 is
 already generated this way, and it is the one part of this document that never went stale.
+US-074 removed `verify-no-jni.pl`; its JNI checks now run tree-wide in `buildtools/CheckNoJni.java`, which computes none of these counts, so they need a check of their own.

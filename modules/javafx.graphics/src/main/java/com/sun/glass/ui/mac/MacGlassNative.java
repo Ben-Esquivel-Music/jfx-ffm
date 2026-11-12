@@ -26,6 +26,7 @@
 package com.sun.glass.ui.mac;
 
 import com.sun.glass.ui.Application;
+import com.sun.glass.utils.NativeLibLoader;
 import com.sun.javafx.font.JniStringCodec;
 import java.lang.foreign.Arena;
 import java.lang.foreign.FunctionDescriptor;
@@ -508,11 +509,12 @@ final class MacGlassNative {
     private static SymbolLookup loadGlass() {
         try {
             GlassLibrary.load();
-            return SymbolLookup.loaderLookup();
+            return NativeLibLoader.loadedLibrariesLookup();
         } catch (UnsatisfiedLinkError e) {
             recordFailure(e);
         } catch (RuntimeException e) {
-            // System.load is restricted too: without native access the loader throws IllegalCallerException.
+            // NativeLibLoader checks native access (MemorySegment::reinterpret) before it looks for a file, as
+            // System.load did: without native access the loader throws IllegalCallerException.
             recordFailure(initializationFailed(e));
         }
         return null;

@@ -242,14 +242,15 @@ final class D3DNative {
     static {
         SymbolLookup lookup = null;
         try {
-            // The library has to be loaded by this class loader before loaderLookup() can see it.
+            // The library has to be loaded before NativeLibLoader.loadedLibrariesLookup() can see it.
             NativeLibLoader.loadLibrary(LIBRARY_NAME);
-            lookup = SymbolLookup.loaderLookup();
+            lookup = NativeLibLoader.loadedLibrariesLookup();
         } catch (UnsatisfiedLinkError e) {
             initFailure = e;
         } catch (RuntimeException e) {
-            // System::load is a restricted method too: a module left out of --enable-native-access sees
-            // an IllegalCallerException from the loader before this class binds anything.
+            // NativeLibLoader checks native access (MemorySegment::reinterpret) before it looks for a file, as
+            // System.load did: a module left out of --enable-native-access sees an IllegalCallerException from the
+            // loader before this class binds anything.
             initFailure = initializationFailed(e);
         }
         LOOKUP = lookup;

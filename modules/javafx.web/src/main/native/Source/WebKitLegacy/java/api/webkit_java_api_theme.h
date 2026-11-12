@@ -48,8 +48,8 @@
  * The shared constants this slice uses are NOT here: they live in the generated
  * wkj_constants.h, which replaces all 23 com_sun_webkit_*.h headers and keeps their mangled
  * names, so each call site changed only its include. RenderThemeJava.cpp in particular
- * composes them with the token-pasting macros JNI_EXPAND and JNI_EXPAND_MEDIA, and the
- * composed names are unchanged.
+ * composes them with the token-pasting macros RENDER_THEME_CONSTANT and
+ * RENDER_MEDIA_CONTROLS_CONSTANT, and the composed names are unchanged.
  *
  * ------------------------------------------------------------------------------------------
  * WHY THE STRUCT IS CALLED "theme" WHEN IT COVERS MORE THAN THE THEME

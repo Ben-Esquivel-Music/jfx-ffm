@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2010, 2016, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2010, 2026, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -25,7 +25,6 @@
 
 package com.sun.media.jfxmedia.track;
 
-import java.lang.annotation.Native;
 import java.util.Locale;
 import com.sun.media.jfxmedia.Media;
 
@@ -39,37 +38,37 @@ public class AudioTrack extends Track {
     /**
      * Channel mask bit indicating the absence of any channel
      */
-    @Native public static final int UNKNOWN         = 0;
+    public static final int UNKNOWN         = 0;
 
     /**
      * Channel mask bit indicating the presence of a front left channel.
      */
-    @Native public static final int FRONT_LEFT      = 0x01;
+    public static final int FRONT_LEFT      = 0x01;
 
     /**
      * Channel mask bit indicating the presence of a front right channel.
      */
-    @Native public static final int FRONT_RIGHT     = 0x02;
+    public static final int FRONT_RIGHT     = 0x02;
 
     /**
      * Channel mask bit indicating the presence of a front center channel.
      */
-    @Native public static final int FRONT_CENTER    = 0x04;
+    public static final int FRONT_CENTER    = 0x04;
 
     /**
      * Channel mask bit indicating the presence of a rear left channel.
      */
-    @Native public static final int REAR_LEFT       = 0x08;
+    public static final int REAR_LEFT       = 0x08;
 
     /**
      * Channel mask bit indicating the presence of a rear right channel.
      */
-    @Native public static final int REAR_RIGHT      = 0x10;
+    public static final int REAR_RIGHT      = 0x10;
 
     /**
      * Channel mask bit indicating the presence of a rear center channel.
      */
-    @Native public static final int REAR_CENTER     = 0x20;
+    public static final int REAR_CENTER     = 0x20;
 
     private int    numChannels;
     private int    channelMask;

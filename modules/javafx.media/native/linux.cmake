@@ -421,7 +421,7 @@ endif()
 add_media_library(jfxmedia
     OUTPUT_NAME jfxmedia
     SOURCES
-        "${JFXMEDIA_SRC}/jni/Logger.cpp"
+        "${JFXMEDIA_SRC}/Utils/Logger.cpp"
         "${JFXMEDIA_SRC}/PipelineManagement/AudioTrack.cpp"
         "${JFXMEDIA_SRC}/PipelineManagement/Pipeline.cpp"
         "${JFXMEDIA_SRC}/PipelineManagement/PipelineFactory.cpp"

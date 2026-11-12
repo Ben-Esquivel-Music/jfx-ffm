@@ -7,6 +7,8 @@ written but **cannot** be verified in this repository. Regenerate the scoreboard
 perl buildtools/ffm-web/verify-no-jni.pl [--verbose]
 ```
 
+US-074 removed `verify-no-jni.pl`, `extract-jni.pl` and `dom-cpp-to-ffm.pl` (git history has them); `java buildtools/CheckNoJni.java` now checks the whole tree for JNI.
+
 ## 1. The scoreboard
 
 | Check | At start | Now |
@@ -93,7 +95,7 @@ test run against those libraries is recorded here.
 from the C++ of commit 26ce75d02f. Four code changes made since are unbuilt until the next
 `build-webkit.yml` run, so the module run above does not exercise them:
 
-* `javaUndefinedObject()` in `Source/WebCore/bridge/jni/JNIUtility.cpp` and `scratchContext()` in
+* `javaUndefinedObject()` in `Source/WebCore/bridge/java/JavaBridgeUtility.cpp` and `scratchContext()` in
   `Source/WebCore/platform/graphics/java/PathJava.cpp` keep their statics in `NeverDestroyed`, so
   no exit-time destructor reaches a host-table slot on the VM thread ("Exit-time destructors" in
   `Source/WebKitLegacy/java/api/README.md`).
@@ -273,7 +275,7 @@ Two things this turned up:
 
 * **The generator's first design was wrong and its own cross-check caught it.** Emitting only the
   constants literally spelled in the C++ missed **19** of them, because `RenderThemeJava.cpp`
-  reaches its constants through token-pasting macros (`#define JNI_EXPAND(n)
+  reaches its constants through token-pasting macros (`#define RENDER_THEME_CONSTANT(n)
   com_sun_webkit_graphics_RenderTheme_##n`) — the full names exist only after preprocessing, so no
   scan of the source text can see them. It now emits every constant, which is also what `javac -h`
   did. A spare `#define` costs nothing; a missing one is a build break in a build this repository
@@ -591,6 +593,7 @@ check I ran was narrower than the claim I made from it, and the right check was 
 eleven checks. The `JNIEXPORT` and `JNIEnv` matches left in C and C++ are prose in comments that
 say what each `wkj_*` function replaced, plus string literals in the `CodeGeneratorJava.pm`
 template, which no build step invokes.
+US-074 removed `CodeGeneratorJava.pm` (git history has it).
 
 * **0 Java `native` declarations**, `EventListenerImpl` and `WebPage` included, and none in the
   generated DOM facades.
@@ -609,6 +612,7 @@ What is left is housekeeping, not JNI: five uncompiled, JNI-free C++ files
 `PlatformContextSkiaJava.cpp`, `FrameJava.cpp`) and `CodeGeneratorJava.pm` are still on disk,
 though no source list compiles them and none of their symbols is in the library. The dead
 `src/android` and `src/ios` trees, which no pom compiled, have been deleted.
+US-074 removed `CodeGeneratorJava.pm` (git history has it).
 
 ## 21. Done — and what is deliberately not done
 

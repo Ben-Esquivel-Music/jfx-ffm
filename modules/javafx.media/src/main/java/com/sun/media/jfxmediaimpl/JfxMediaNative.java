@@ -325,9 +325,9 @@ public final class JfxMediaNative {
             // class initializer, so an escape turns every getDefaultInstance() into a
             // NoClassDefFoundError instead of the "media is unavailable" degradation the stack is
             // written for. The one that actually happens is IllegalCallerException, from a restricted
-            // call (Linker::upcallStub here, System::load inside NativeLibLoader) made by a module that
-            // --enable-native-access does not name; anything else is recorded the same way rather than
-            // left to take the class down.
+            // call (Linker::upcallStub here, the native-access check NativeLibLoader makes before any load)
+            // made by a module that --enable-native-access does not name; anything else is recorded the
+            // same way rather than left to take the class down.
             initFailure = initializationFailed(e);
         }
         LOOKUP = lookup;
@@ -487,9 +487,9 @@ public final class JfxMediaNative {
         try {
             loadNativeLibraries();
         } catch (IllegalCallerException e) {
-            // System::load is restricted too, so a denied grant can surface from the loader rather than
-            // from the facade's own stubs. Report it as this method documents, not as a RuntimeException
-            // the media stack has no handler for.
+            // NativeLibLoader checks native access before it looks for a file, as System.load did, so a
+            // denied grant can surface from the loader rather than from the facade's own stubs. Report it
+            // as this method documents, not as a RuntimeException the media stack has no handler for.
             throw initFailure != null ? initFailure : initializationFailed(e);
         }
         if (initFailure != null) {
@@ -529,7 +529,7 @@ public final class JfxMediaNative {
             dependencies.add("fxplugins");
             dependencies.add("glib-lite");
             // The dependency list is extracted, not loaded: NativeLibLoader unpacks each entry from the
-            // jar beside jfxmedia so the OS loader can find it on disk, and skips System.load for it. So
+            // jar beside jfxmedia so the OS loader can find it on disk, and does not load it. So
             // jfxmedia_avf is not loaded here - OSXPlatform's initializer does that later, before the
             // platform is asked to load itself. Nothing this facade binds needs it either way, since
             // jfxmedia_avf exports no jfxm_* symbol; it contributes the ObjC AVFMediaPlayer class that
@@ -548,16 +548,12 @@ public final class JfxMediaNative {
      * The lookup every {@code jfxm_*} symbol is bound through, once {@link #loadNativeLibraries()} has
      * run.
      * <p>
-     * {@link SymbolLookup#loaderLookup()} answers with the libraries loaded by classes of <em>this</em>
-     * class's loader, but the class that calls {@code System.load} is {@code NativeLibLoader}, which
-     * lives in {@code javafx.graphics}. Every standard launch - class path, module path, jlink image -
-     * gives the two modules the same defining loader, so the loader lookup is both correct and the
-     * cheapest answer there, and it stays the first thing tried. It is not correct where the two modules
-     * have different loaders (a hand-built {@link ModuleLayer}, an OSGi or plugin container, a launcher
-     * that isolates the modules): there every {@code find} comes back empty and the stack reports itself
-     * unavailable although {@code jfxmedia} loaded perfectly well. JNI had no such coupling - the JVM
-     * resolved {@code Java_*} entry points from a process-wide table - so the coupling would be a
-     * regression of the migration, not of the deployment.
+     * {@link NativeLibLoader#loadedLibrariesLookup()} answers with every library {@code NativeLibLoader}
+     * has loaded, whichever class loaders define this module and {@code javafx.graphics}, so it finds the
+     * {@code jfxmedia} loaded above in every deployment - also where the two modules have different
+     * loaders (a hand-built {@link ModuleLayer}, an OSGi or plugin container, a launcher that isolates
+     * the modules), where {@link SymbolLookup#loaderLookup()}, which this lookup replaced after commit
+     * {@code 0fd9cb0ef5}, came back empty. It is the first thing tried.
      * <p>
      * The fallback asks the OS loader for the library by its mapped file name, which is the same name
      * {@code NativeLibLoader} mapped, and it builds no path: guessing a directory is the surest way to
@@ -576,20 +572,20 @@ public final class JfxMediaNative {
      * independently initialised {@code jfxmedia} with its own statics beside the first.
      * </ul>
      * That is the residual risk of this fallback and it is not designed away here: the fallback runs only
-     * after the loader lookup has already come back empty, i.e. only in the split-loader deployments
-     * described above, where the alternative is no media at all. When even the fallback fails - iOS,
-     * where the library is linked statically, or a loader that will not match by leaf name - the loader
-     * lookup is returned unchanged and the caller sees exactly the "missing native symbol" degradation it
-     * saw before.
+     * after the first lookup has already come back empty, which it now does only when the library
+     * {@code NativeLibLoader} loaded exports no {@code jfxm_abi_version} - a JNI-era {@code jfxmedia} -
+     * as the loader lookup did then too. When even the fallback fails - a loader that will not match by
+     * leaf name - the first lookup is returned unchanged and the caller sees exactly the "missing native
+     * symbol" degradation it saw before.
      */
     @SuppressWarnings("restricted")
     private static SymbolLookup resolveLookup() {
-        SymbolLookup loaderLookup = SymbolLookup.loaderLookup();
-        if (loaderLookup.find(ABI_VERSION_SYMBOL).isPresent()) {
-            return loaderLookup;
+        SymbolLookup loadedLibraries = NativeLibLoader.loadedLibrariesLookup();
+        if (loadedLibraries.find(ABI_VERSION_SYMBOL).isPresent()) {
+            return loadedLibraries;
         }
         try {
-            // Arena.global(): the library is loaded for the life of the process, as System.load leaves
+            // Arena.global(): the library is loaded for the life of the process, as NativeLibLoader leaves
             // it. An arena that could be closed would dlclose a library the pipeline is still running in.
             SymbolLookup libraryLookup = SymbolLookup.libraryLookup(
                     System.mapLibraryName(JFXMEDIA_LIBRARY), Arena.global());
@@ -597,10 +593,10 @@ public final class JfxMediaNative {
                 return libraryLookup;
             }
         } catch (IllegalArgumentException e) {
-            // The OS loader has nothing of that name to hand back. Fall through to the loader lookup,
+            // The OS loader has nothing of that name to hand back. Fall through to the first lookup,
             // whose failure is the one bind() already knows how to report.
         }
-        return loaderLookup;
+        return loadedLibraries;
     }
 
     /**
@@ -637,9 +633,10 @@ public final class JfxMediaNative {
     /**
      * Restates a failure to bring the library up as the {@link UnsatisfiedLinkError} that
      * {@code NativeMediaManager} and the rest of the facade already handle, with the original attached.
-     * An {@link IllegalCallerException} - what a restricted {@code java.lang.foreign} or
-     * {@code System::load} call raises when this module is not named in {@code --enable-native-access} -
-     * gets a message an application can act on; it is the one case worth naming.
+     * An {@link IllegalCallerException} - what a restricted {@code java.lang.foreign} call, or the
+     * native-access check {@code NativeLibLoader} makes before any load, raises when the calling module is
+     * not named in {@code --enable-native-access} - gets a message an application can act on; it is the
+     * one case worth naming.
      */
     private static UnsatisfiedLinkError initializationFailed(RuntimeException e) {
         UnsatisfiedLinkError error = new UnsatisfiedLinkError(e instanceof IllegalCallerException

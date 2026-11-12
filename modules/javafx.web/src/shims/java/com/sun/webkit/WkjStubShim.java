@@ -92,7 +92,7 @@ public final class WkjStubShim {
         attempted = true;
         try {
             NativeLibLoader.loadLibrary(LIBRARY_NAME);
-            lookup = SymbolLookup.loaderLookup();
+            lookup = NativeLibLoader.loadedLibrariesLookup();
             if (lookup.find("wkjstub_stub_version").isEmpty()) {
                 loadFailure = LIBRARY_NAME + " loaded but exports no wkjstub_* query ABI";
                 return false;
@@ -115,7 +115,7 @@ public final class WkjStubShim {
     }
 
     /**
-     * Reports whether the libraries loaded by this class loader export a symbol. The symbol
+     * Reports whether the libraries NativeLibLoader has loaded export a symbol. The symbol
      * resolution test needs this without binding a handle.
      *
      * @param name the symbol name

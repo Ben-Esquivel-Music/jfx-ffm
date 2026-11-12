@@ -26,13 +26,11 @@
 /*
  * GENERATED FILE -- do not edit.
  *
- * Produced by buildtools/ffm-web/spec-to-header.pl from the ABI spec that
- * buildtools/ffm-web/dom-cpp-to-ffm.pl derives from the DOM binding sources.
- * Regenerate rather than editing:
+ * Produced by buildtools/ffm-web/spec-to-header.pl from the ABI spec
+ * buildtools/ffm-web/dom-abi.tsv. dom-abi.tsv is the spec; it was first extracted
+ * from the JNI-era DOM bindings by dom-cpp-to-ffm.pl, which US-074 removed (see git
+ * history). Regenerate rather than editing:
  *
- *   perl buildtools/ffm-web/dom-cpp-to-ffm.pl \
- *        --dir modules/javafx.web/src/main/native/Source/WebKitLegacy/java/DOM \
- *        --spec buildtools/ffm-web/dom-abi.tsv
  *   perl buildtools/ffm-web/spec-to-header.pl --spec buildtools/ffm-web/dom-abi.tsv \
  *        --header <this file>
  *

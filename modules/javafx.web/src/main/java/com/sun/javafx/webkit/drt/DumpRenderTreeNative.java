@@ -25,6 +25,7 @@
 
 package com.sun.javafx.webkit.drt;
 
+import com.sun.glass.utils.NativeLibLoader;
 import com.sun.webkit.WKJStringCodec;
 import com.sun.webkit.WebKitNative;
 import java.lang.foreign.Arena;
@@ -54,10 +55,10 @@ import static java.lang.foreign.ValueLayout.JAVA_LONG;
  * {@link WebKitNative#upcallStub}.
  * <p>
  * Ordering matters and is preserved: {@link DumpRenderTree} calls
- * {@code System.loadLibrary("DumpRenderTreeJava")} before the first entry point below, so that
- * {@link SymbolLookup#loaderLookup()} can see the library. The static initializer then installs the
- * host table with {@code drt_init} exactly once, which is what this library's deleted
- * {@code JNI_OnLoad} used to do.
+ * {@code NativeLibLoader.loadLibraryFromSystemPaths("DumpRenderTreeJava")} before the first entry point
+ * below, so that {@link NativeLibLoader#loadedLibrariesLookup()} can see the library. The static
+ * initializer then installs the host table with {@code drt_init} exactly once, which is what this
+ * library's deleted {@code JNI_OnLoad} used to do.
  * <p>
  * No downcall here uses {@code Linker.Option.critical(true)}: {@code drt_did_finish_load} drains the
  * work queue and upcalls, and {@code drt_did_clear_window_object} installs JavaScript objects that
@@ -77,12 +78,12 @@ final class DumpRenderTreeNative {
     private static final int EVENT_SENDER_SLOTS = 22;
 
     /*
-     * The library is loaded by DumpRenderTree before anything here runs, so loaderLookup sees it.
+     * The library is loaded by DumpRenderTree before anything here runs, so this lookup sees it.
      * Resolving it here rather than in WebKitNative is deliberate: the two libraries are versioned
      * and rebuilt separately, and mixing their lookups would let a jfxwebkit failure be reported as
      * a DumpRenderTreeJava one.
      */
-    private static final SymbolLookup LOOKUP = SymbolLookup.loaderLookup();
+    private static final SymbolLookup LOOKUP = NativeLibLoader.loadedLibrariesLookup();
 
     /*
      * The host table outlives everything and is created exactly once, which is the case the

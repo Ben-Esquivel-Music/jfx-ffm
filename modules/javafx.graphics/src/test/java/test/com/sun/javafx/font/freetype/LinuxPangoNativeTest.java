@@ -66,7 +66,7 @@ import static org.junit.jupiter.api.Assumptions.assumeTrue;
  * last three change the process's fontconfig state, its library set or need a quiet heap, so they run in child
  * JVMs. Every shaping value of the binding is pinned by {@code test.com.sun.javafx.font.LinuxPangoGoldenTest}
  * against the capture of that JNI build; its string conversions by
- * {@code test.com.sun.javafx.font.JniStringCodecTest} and {@code JniStringOracleTest}.
+ * {@code test.com.sun.javafx.font.JniStringCodecTest} and {@code JniStringCodecGoldenTest}.
  */
 @EnabledOnOs(OS.LINUX)
 public class LinuxPangoNativeTest {

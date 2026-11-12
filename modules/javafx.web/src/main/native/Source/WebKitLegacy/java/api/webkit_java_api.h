@@ -297,9 +297,9 @@ typedef struct WKJHostCore {
      * keep the object reachable; is_live reports whether it is still there, and retain on
      * a weak id returns a strong id or 0 if the object has gone.
      *
-     * This exists because Source/WebCore/bridge/jni/JobjectWrapper.cpp deliberately takes
-     * NewWeakGlobalRef by default (useGlobalRef defaults to false) and its destructor
-     * branches on GetObjectRefType. Modelling every id as strong would keep LiveConnect
+     * This exists because the JNI version of Source/WebCore/bridge/java/JavaObjectWrapper.cpp
+     * deliberately took NewWeakGlobalRef by default (useGlobalRef defaults to false) and its
+     * destructor branched on GetObjectRefType. Modelling every id as strong would keep LiveConnect
      * peers alive that are collectable today, which is a behaviour change, not a cleanup.
      * Default when NULL: return 0.
      */
@@ -329,7 +329,7 @@ typedef struct WKJHostCore {
      * Provisioned rather than required: both C functions are declared and defined there
      * but called from nowhere in the tree today, so nothing is ported to use these yet.
      * They are here because identity questions become unavoidable once one object can have
-     * many ids, and the LiveConnect phase (JobjectWrapper) is where that lands.
+     * many ids, and the LiveConnect phase (JavaObjectWrapper) is where that lands.
      * Defaults when NULL: hash_code returns 0; equals returns (a == b).
      */
     int32_t (*hash_code)(wkj_ref ref);

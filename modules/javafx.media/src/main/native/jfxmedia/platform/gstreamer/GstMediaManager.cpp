@@ -25,7 +25,7 @@
 
 #include "GstMediaManager.h"
 #include <jfxmedia_errors.h>
-#include <jni/Logger.h>
+#include <Utils/Logger.h>
 #include <Common/VSMemory.h>
 
 //*************************************************************************************************

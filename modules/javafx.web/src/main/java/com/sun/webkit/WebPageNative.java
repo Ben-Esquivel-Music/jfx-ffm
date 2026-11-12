@@ -64,11 +64,11 @@ import static java.lang.foreign.ValueLayout.JAVA_LONG;
  * them can synchronously run script, fire a load event or open modal UI, all of which re-enter the
  * JVM, and a critical downcall forbids that.
  * <p>
- * One entry point is deliberately absent because it still has a JNI form:
- * {@code twkExecuteScript}, which belongs to the LiveConnect slice. {@code twkGetIconURL} is absent
- * for a different reason: the native-necessity triage marked it for deletion rather than migration,
- * and {@link WebPage#getIcon} now answers null in Java, which is what the C body did for every
- * input.
+ * One entry point is deliberately absent because it belongs to the LiveConnect facade:
+ * {@code twkExecuteScript}, which {@link WebPage} calls through {@code JSObjectNative.executeScript}.
+ * {@code twkGetIconURL} is absent for a different reason: the native-necessity triage marked it for
+ * deletion rather than migration, and {@link WebPage#getIcon} now answers null in Java, which is what
+ * the C body did for every input.
  *
  * @see com.sun.webkit.WebKitNative
  */

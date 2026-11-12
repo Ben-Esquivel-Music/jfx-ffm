@@ -26,7 +26,7 @@
 #include "GstVideoFrame.h"
 #include "GstPipelineFactory.h"
 #include <cstring>
-#include <jni/Logger.h>
+#include <Utils/Logger.h>
 #include <Common/ProductFlags.h>
 #include <Common/VSMemory.h>
 #include <Utils/ColorConverter.h>

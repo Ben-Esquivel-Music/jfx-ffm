@@ -25,6 +25,7 @@
 
 package com.sun.glass.ui.gtk;
 
+import com.sun.glass.utils.NativeLibLoader;
 import java.lang.foreign.AddressLayout;
 import java.lang.foreign.Arena;
 import java.lang.foreign.FunctionDescriptor;
@@ -288,7 +289,7 @@ final class GtkCallbackTables {
     private static List<MemorySegment[]> callbackStubs;
 
     /**
-     * The exports of {@code glass_gtk_api.h} the binding calls, in {@code libglassgtk3.so} as the class loader loaded
+     * The exports of {@code glass_gtk_api.h} the binding calls, in {@code libglassgtk3.so} as NativeLibLoader loaded
      * it ({@code NativeLibLoader.loadLibrary("glassgtk3")} in {@code GtkApplication}, or - {@code QUERY_USE_CURRENT}
      * - a {@code glassgtk3} build loaded as the {@code glass} library itself). A holder of its own: the
      * rest of the binding binds system libraries only and initializes before, or without, {@code glassgtk3} (a
@@ -296,7 +297,7 @@ final class GtkCallbackTables {
      */
     static final class Glass {
 
-        private static final SymbolLookup LOOKUP = SymbolLookup.loaderLookup();
+        private static final SymbolLookup LOOKUP = NativeLibLoader.loadedLibrariesLookup();
 
         static final MethodHandle ABI = bind(LOOKUP, LIB_GLASS, "ggtk_abi_version", FunctionDescriptor.of(JAVA_INT));
 

@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2011, 2022, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2011, 2026, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -25,7 +25,6 @@
 
 package com.sun.webkit.graphics;
 
-import java.lang.annotation.Native;
 import com.sun.javafx.logging.PlatformLogger;
 import com.sun.javafx.logging.PlatformLogger.Level;
 import com.sun.webkit.Invoker;
@@ -38,7 +37,7 @@ public abstract class WCRenderQueue extends Ref {
     private final static AtomicInteger idCountObj = new AtomicInteger(0);
     private final static PlatformLogger log =
             PlatformLogger.getLogger(WCRenderQueue.class.getName());
-    @Native public final static int MAX_QUEUE_SIZE = 0x80000;
+    public final static int MAX_QUEUE_SIZE = 0x80000;
 
     private final LinkedList<BufferData> buffers = new LinkedList<>();
     private BufferData currentBuffer = new BufferData();

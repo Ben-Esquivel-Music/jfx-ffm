@@ -32,6 +32,7 @@ import com.sun.glass.ui.Cursor;
 import com.sun.glass.ui.Screen;
 import com.sun.glass.ui.View;
 import com.sun.glass.ui.Window;
+import com.sun.glass.utils.NativeLibLoader;
 import java.lang.foreign.Arena;
 import java.lang.foreign.FunctionDescriptor;
 import java.lang.foreign.Linker;
@@ -1775,7 +1776,7 @@ public final class GtkGlassShim {
                 "Java_com_sun_glass_ui_gtk_GtkDnDClipboard_pushToSystemImpl");
         int found = 0;
         for (String name : names) {
-            if (SymbolLookup.loaderLookup().find(name).isPresent()) {
+            if (NativeLibLoader.loadedLibrariesLookup().find(name).isPresent()) {
                 found++;
             }
         }
@@ -2671,7 +2672,7 @@ public final class GtkGlassShim {
 
         @SuppressWarnings("restricted")
         private static MethodHandle glass(String name, FunctionDescriptor descriptor) {
-            MemorySegment symbol = SymbolLookup.loaderLookup().find(name)
+            MemorySegment symbol = NativeLibLoader.loadedLibrariesLookup().find(name)
                     .orElseThrow(() -> new UnsatisfiedLinkError("libglassgtk3.so does not export " + name));
             return LINKER.downcallHandle(symbol, descriptor);
         }
@@ -2735,7 +2736,7 @@ public final class GtkGlassShim {
         static final MethodHandle UNSETENV = libc("unsetenv", FunctionDescriptor.of(JAVA_INT, ADDRESS));
 
         private static MemorySegment symbol(String name) {
-            return SymbolLookup.loaderLookup().find(name)
+            return NativeLibLoader.loadedLibrariesLookup().find(name)
                     .orElseThrow(() -> new UnsatisfiedLinkError("libglassgtk3.so does not export " + name));
         }
 

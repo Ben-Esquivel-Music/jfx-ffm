@@ -35,7 +35,7 @@ the first media test tree (`FFM-TEST-PLAN.md`).
 1. **One flat C ABI, one Java facade.** `jfxmedia_api.h` (at
    `src/main/native/jfxmedia/jfxmedia_api.h`) declares every exported `jfxm_*` function and every
    callback table. `com.sun.media.jfxmediaimpl.JfxMediaNative` is the only class in the module that
-   uses restricted `java.lang.foreign` methods (`nativeLinker`, `loaderLookup`, `libraryLookup`,
+   uses restricted `java.lang.foreign` methods (`nativeLinker`, `libraryLookup`,
    `downcallHandle`, `upcallStub`, `reinterpret`). Callers (`GSTMediaPlayer`, `GSTMedia`, `GSTPlatform`,
    `OSXMediaPlayer`, `OSXMedia`, `OSXPlatform`, `NativeVideoBuffer`, `NativeAudioEqualizer`,
    `NativeEqualizerBand`, `NativeAudioSpectrum`, `Logger`) call static methods on the facade and
@@ -69,7 +69,7 @@ the first media test tree (`FFM-TEST-PLAN.md`).
    allocation itself but not a throwing constructor or a throwing assignment, so `std::bad_alloc`
    can still escape `extern "C"` — at the two `CLocatorStream` constructions in `ffi/jfxmedia_api.cpp`
    and `platform/osx/OSXMediaPlayer.mm`, at the `location`/`content_type` `std::string` assignments
-   in `jfxm_media_create`'s AVF branch, and at the unchecked plain `new CLogger` in `jni/Logger.cpp`.
+   in `jfxm_media_create`'s AVF branch, and at the unchecked plain `new CLogger` in `Utils/Logger.cpp`.
    That is inherited from the pre-FFM code, not introduced by this ABI.
 6. **Native code never holds a Java reference.** Every former `jobject` global ref becomes a
    Java-assigned `int64_t` registry id passed as `void* user`; every former `jmethodID` becomes a
@@ -347,24 +347,27 @@ returns the library's own named constant, so the binding test fails if either si
 `jfxmedia_avf`. That sequence moves into `JfxMediaNative.loadLibraries()` (idempotent,
 `NativeLibLoader` is synchronized and remembers loaded libraries) which both `NativeMediaManager`
 and the facade's own static initializer call, so a binding test can touch the facade without
-constructing the manager. The facade binds symbols through `SymbolLookup.loaderLookup()` when that
-lookup can see the library, and falls back to
-`SymbolLookup.libraryLookup(System.mapLibraryName("jfxmedia"), Arena.global())` when it cannot
-(`JfxMediaNative.resolveLookup`, which probes `jfxm_abi_version` to decide); either way a missing
-symbol throws `UnsatisfiedLinkError("missing native symbol: <name>")` at class-init time, like JNI's
-lazy link failure but earlier and with a name. The fallback exists because the class that calls
-`System.load` is `NativeLibLoader` in `javafx.graphics`, while `loaderLookup` answers only with
-libraries loaded by classes of `JfxMediaNative`'s own defining loader: the same loader on every
-standard launch (class path, module path, jlink image), but not necessarily in a hand-built
-`ModuleLayer`, an OSGi bundle or a plugin container, where every `find` would come back empty
-although `jfxmedia` had loaded perfectly well. The POSIX caveat, stated rather than hidden: a
+constructing the manager. The facade binds symbols through `NativeLibLoader.loadedLibrariesLookup()`,
+which answers with every library `NativeLibLoader` has loaded, whatever the class loaders of
+`javafx.media` and `javafx.graphics`, and falls back to
+`SymbolLookup.libraryLookup(System.mapLibraryName("jfxmedia"), Arena.global())` when that lookup
+cannot find `jfxm_abi_version` (`JfxMediaNative.resolveLookup`, which probes that symbol to decide);
+either way a missing symbol throws `UnsatisfiedLinkError("missing native symbol: <name>")` at
+class-init time, like JNI's lazy link failure but earlier and with a name. `NativeLibLoader` calls no
+`System.load`: since US-074 it opens every library with `SymbolLookup.libraryLookup(Path,
+Arena.global())`, so the library stays loaded for the life of the process and no `JNI_OnLoad` runs.
+Until commit `0fd9cb0ef5` the first lookup was `SymbolLookup.loaderLookup()`, which answers only with
+libraries loaded by classes of `JfxMediaNative`'s own defining loader; the fallback was added then for
+a hand-built `ModuleLayer`, an OSGi bundle or a plugin container, where that loader is not
+`NativeLibLoader`'s. Now the fallback is reached only for a `jfxmedia` that exports no
+`jfxm_abi_version`, a JNI-era one. The POSIX caveat, stated rather than hidden: a
 bare-name `libraryLookup` ends in `dlopen("libjfxmedia.so")`, and although a loader answers a
 directory-free name from its already-loaded list first (`LoadLibrary` by module base name, `dlopen`
 by `DT_SONAME`), a name matching no loaded `DT_SONAME` sends `dlopen` on to `DT_RPATH`/`DT_RUNPATH`,
 `LD_LIBRARY_PATH` and `ld.so.cache`, where it could in principle map a *second* copy of the library
-beside the one already in the process. That is why `loaderLookup` stays the first thing tried, why
-no directory is ever guessed here, and why the fallback is reached only once the loader lookup has
-failed to find `jfxm_abi_version`.
+beside the one already in the process. That is why `loadedLibrariesLookup` stays the first thing
+tried, why no directory is ever guessed here, and why the fallback is reached only once that lookup
+has failed to find `jfxm_abi_version`.
 
 ```c
 /* Replaces JNI_OnLoad + Java_..._GSTPlatform_gstInitPlatform. Idempotent because the media manager
@@ -1098,6 +1101,7 @@ module `buildtools/ffm-media/verify-no-jni.pl` deliberately cannot see: it skips
 trees contain no JNI. The exclusion is right and the consequence is that **no automated control in
 this branch covers a change made in them**. This subsection is that control: it is the manifest of the
 local delta, and a future upstream GStreamer merge should start here rather than with `git log`.
+US-074 removed `verify-no-jni.pl` (git history has it); its successor `buildtools/CheckNoJni.java` reads these trees too, for JNI only.
 
 Measured at the merge base `939aa61ea`: seven files, `+500 / −71`. Per-file deltas are in
 `FFM-STATUS.md` section 1b.

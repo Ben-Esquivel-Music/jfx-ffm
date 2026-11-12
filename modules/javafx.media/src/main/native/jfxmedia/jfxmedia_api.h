@@ -35,8 +35,8 @@
  * not a throwing constructor or a throwing assignment, so std::bad_alloc can still escape
  * extern "C" - at the two CLocatorStream constructions in ffi/jfxmedia_api.cpp and
  * platform/osx/OSXMediaPlayer.mm, at the location/content_type std::string assignments in
- * jfxm_media_create's AVF branch, and at the unchecked plain new CLogger in jni/Logger.cpp. That is
- * inherited from the pre-FFM code, not introduced by this ABI.
+ * jfxm_media_create's AVF branch, and at the unchecked plain new CLogger in Utils/Logger.cpp. That
+ * is inherited from the pre-FFM code, not introduced by this ABI.
  *
  * The design contract is modules/javafx.media/FFM-ABI-CONTRACT.md; the symbol set is identical on
  * every platform (functions that only make sense on one backend return ERROR_NOT_IMPLEMENTED

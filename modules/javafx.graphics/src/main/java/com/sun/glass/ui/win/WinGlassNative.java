@@ -102,10 +102,10 @@ final class WinGlassNative {
     static final SymbolLookup GLASS;
 
     static {
-        // The library has to be loaded by this class loader before loaderLookup() can see it.
-        // WinApplication loads it too; NativeLibLoader and System.loadLibrary are both idempotent.
+        // The library has to be loaded before NativeLibLoader.loadedLibrariesLookup() can see it.
+        // WinApplication loads it too; NativeLibLoader.loadLibrary is idempotent.
         NativeLibLoader.loadLibrary(LIBRARY_NAME);
-        GLASS = SymbolLookup.loaderLookup();
+        GLASS = NativeLibLoader.loadedLibrariesLookup();
     }
 
     /** A system DLL the JDK does not load for us, looked up once for the life of the process. */

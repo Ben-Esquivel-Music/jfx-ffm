@@ -50,7 +50,7 @@ import static java.lang.foreign.ValueLayout.JAVA_LONG;
  * <p>
  * {@link JSObjectNative} is the other half of LiveConnect - the nine {@code wkj_js_*} entry points
  * that take a {@code JSObject} into JavaScript. This class is the way back: everything
- * {@code Source/WebCore/bridge/jni} does to a Java object once JavaScript holds one.
+ * {@code Source/WebCore/bridge/java} does to a Java object once JavaScript holds one.
  * {@code JavaClassJSC}, {@code JavaFieldJSC}, {@code JavaMethodJSC} and {@code JavaArrayJSC}
  * enumerate a class, read and write its fields, invoke its methods and index its arrays, and every
  * one of those operations used to be a JNI call. Without this table they have no path back to Java

@@ -144,9 +144,9 @@
  * its JNI arm and all nine JNI bodies kept running - and the nine Java_* bodies, the cached ids, the
  * two global refs, GlassAccessibleJni.cpp/.h and this library's JNI_OnLoad were then deleted. With
  * that deletion glass.dll exports no Java_* and no JNI_OnLoad and includes no javac -h header that
- * declares one; what remains of jni.h is the <jni.h> that the javac -h CONSTANTS headers pull in
- * (com_sun_glass_events_*.h, com_sun_glass_ui_*.h - eleven translation units include one), which is
- * why the glass target still asks win.cmake for the JDK include path. With no table installed the 87
+ * declares one; what remained of jni.h was the <jni.h> the javac -h CONSTANTS headers pulled in (eleven
+ * translation units include a com_sun_glass_*.h), until those includes resolved to the JNI-free copies in
+ * native-glass/win/constants and the glass target lost its JDK include path. With no table installed the 87
  * sites now answer the E_FAIL their JNI arm answered without a JNIEnv.
  * GLASS_WIN_ABI_VERSION WENT 5 -> 6 IN THE CHANGE SET THAT FLIPPED WinAccessible.java and
  * WinTextRangeProvider.java ONTO THE TABLES, together with WinGlassNative.ABI_VERSION. THE JAVA SIDE

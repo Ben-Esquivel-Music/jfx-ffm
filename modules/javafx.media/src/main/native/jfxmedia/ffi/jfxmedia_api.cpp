@@ -44,7 +44,7 @@
 #include <PipelineManagement/AudioSpectrum.h>
 #include <Locator/Locator.h>
 #include <Locator/LocatorStream.h>
-#include <jni/Logger.h>
+#include <Utils/Logger.h>
 #include <jfxmedia_errors.h>
 
 #include "JfxmMediaHandle.h"
@@ -97,7 +97,7 @@ int32_t jfxm_audio_track_channel(int32_t channel)
 
 int32_t jfxm_log_level(int32_t level)
 {
-    // The LOGGER_* macros of jni/Logger.h, which are what CLogger::logMsg filters on.
+    // The LOGGER_* macros of Utils/Logger.h, which are what CLogger::logMsg filters on.
     switch (level) {
     case 0:  return LOGGER_DEBUG;
     case 1:  return LOGGER_INFO;

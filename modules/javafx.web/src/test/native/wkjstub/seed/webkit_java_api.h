@@ -38,9 +38,10 @@
  * the owner of webkit_java_api.h defines.
  *
  * No DOM function is declared here, and none may be. The DOM half of the ABI
- * is never guessed: it comes from buildtools/ffm-web/dom-abi.tsv, which
- * dom-cpp-to-ffm.pl derives from the DOM binding sources, and the stub bodies
- * for it are generated from that spec.
+ * is never guessed: it comes from buildtools/ffm-web/dom-abi.tsv, and the stub
+ * bodies for it are generated from that spec. dom-abi.tsv is the spec; it was
+ * first extracted from the JNI-era DOM bindings by dom-cpp-to-ffm.pl, which
+ * US-074 removed (see git history).
  *
  * The CMake build prefers the real header and falls back to this one only when
  * the real header is absent, printing a warning when it does. Delete this file

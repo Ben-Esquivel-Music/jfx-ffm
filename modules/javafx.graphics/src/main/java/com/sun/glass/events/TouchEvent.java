@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2010, 2016, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2010, 2026, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -24,12 +24,10 @@
  */
 package com.sun.glass.events;
 
-import java.lang.annotation.Native;
-
 public class TouchEvent
 {
-    @Native public final static int TOUCH_PRESSED = 811;
-    @Native public final static int TOUCH_MOVED = 812;
-    @Native public final static int TOUCH_RELEASED = 813;
-    @Native public final static int TOUCH_STILL = 814;
+    public final static int TOUCH_PRESSED = 811;
+    public final static int TOUCH_MOVED = 812;
+    public final static int TOUCH_RELEASED = 813;
+    public final static int TOUCH_STILL = 814;
 }

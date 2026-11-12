@@ -27,11 +27,11 @@
  * webkit_java_api_bridge.h - the LiveConnect (netscape.javascript.JSObject) third of the
  * jfxwebkit C ABI.
  *
- * Scope, exactly: the Source/WebCore/bridge/jni directory. It is the JavaScript <-> Java
+ * Scope, exactly: the Source/WebCore/bridge/java directory. It is the JavaScript <-> Java
  * bridge: it turns a JS value into a Java object and back, it exposes an arbitrary Java
- * object to script as a JS object, and it carries the nine JNI entry points behind
- * com.sun.webkit.dom.JSObject. Its directory name is now a misnomer - there is no JNI in
- * it any more - but the name is kept so that upstream WebKit merges stay tractable.
+ * object to script as a JS object, and it carries the nine wkj_js_* entry points behind
+ * com.sun.webkit.dom.JSObject (its JNI natives until the FFM port). US-074 renamed it from
+ * bridge/jni; there is no JNI in it.
  *
  * ------------------------------------------------------------------------------------------
  * WHAT IS HERE AND WHAT IS ONLY PASSING THROUGH  (FFM-AUDIT-wtf-webcore.md section 9.1)
@@ -50,7 +50,7 @@
  *
  *   WRAPPER over java.lang.reflect, PARITY: unknown, so it stays for now
  *       JavaClassJSC, JavaFieldJSC, JavaMethodJSC, JavaArrayJSC and the reflective half of
- *       JNIUtility - about 1,400 lines whose entire job is to enumerate a Java class and
+ *       JavaBridgeUtility - about 1,400 lines whose entire job is to enumerate a Java class and
  *       invoke its methods, and which already round-trips through Java to do it
  *       (com.sun.webkit.Utilities.fwkInvokeWithContext performs the actual Method.invoke).
  *       The audit's recommendation is to delete it and do the reflection in Java, but it
@@ -129,14 +129,14 @@
  * ------------------------------------------------------------------------------------------
  * WEAK REFERENCES - read this before implementing retain on the Java side
  * ------------------------------------------------------------------------------------------
- * Source/WebCore/bridge/jni/JobjectWrapper.cpp takes a WEAK reference by default: its
+ * Source/WebCore/bridge/java/JavaObjectWrapper.cpp takes a WEAK reference by default: its
  * useGlobalRef parameter defaults to false, so every Java object exposed to script -
  * JavaInstance's target, JavaArray's array, JavaField's Field - was held by
  * NewWeakGlobalRef, and only the access-control context was held strongly. Its destructor
  * asked GetObjectRefType to decide which delete to use.
  *
  * That is why WKJHostCore has retain_weak and is_live and why WKJHandle has retainedWeak().
- * JobjectWrapper now calls WKJRetainWeak for the same objects and WKJRetain for the same one
+ * JavaObjectWrapper now calls WKJRetainWeak for the same objects and WKJRetain for the same one
  * strong case, and every dereference still goes through a liveness check first
  * (WKJHandle::retained on the weak id, which yields 0 once the object is gone) exactly where
  * the JNI code created a local reference from the weak global for the same purpose.
@@ -147,7 +147,7 @@
  * ------------------------------------------------------------------------------------------
  * THREE FAITHFULNESS NOTES, each of which is a place where "obvious" is wrong
  * ------------------------------------------------------------------------------------------
- * 1. A JS number converted to a Java boolean truncates to 8 bits. JNIUtilityPrivate.cpp
+ * 1. A JS number converted to a Java boolean truncates to 8 bits. The JNI-era C++
  *    wrote `result.z = (jboolean) value.toNumber(...)` and jboolean is unsigned char, so
  *    256 becomes false and 257 becomes true. The C++ now masks with 0xFF explicitly and
  *    says why. WKJ_JT_BOOLEAN values on this ABI are therefore 0 or 1 as produced by that
@@ -155,7 +155,7 @@
  *    real bug, it is recorded in FFM-ABI-CONTRACT.md section 13.1 finding 7, and it gets its
  *    own commit with its own JavaScriptBridgeTest case.
  *
- * 2. Java class names travel as UTF-16, not as modified UTF-8. JNIUtility.cpp read
+ * 2. Java class names travel as UTF-16, not as modified UTF-8. The JNI-era C++ read
  *    Class.getName() with GetStringUTFChars, which encodes a supplementary character as
  *    six CESU-8 bytes where standard UTF-8 uses four. The consumers - strcmp against ASCII
  *    literals in JavaClass, and array-descriptor parsing in BridgeUtils - agree for every
@@ -191,10 +191,10 @@ extern "C" {
 
 /*
  * The type of a Java value crossing this ABI. The values are those of the JavaType enum in
- * Source/WebCore/bridge/jni/JavaType.h, unchanged and in the same order, so that the C++
- * passes its existing JavaType through as an int32_t. JNIUtility.cpp carries a static_assert
- * per constant binding the two definitions together; if JavaType is ever reordered - its own
- * comment warns against it - the build stops there rather than here.
+ * Source/WebCore/bridge/java/JavaType.h, unchanged and in the same order, so that the C++
+ * passes its existing JavaType through as an int32_t. JavaBridgeUtility.cpp carries a
+ * static_assert per constant binding the two definitions together; if JavaType is ever
+ * reordered - its own comment warns against it - the build stops there rather than here.
  */
 #define WKJ_JT_INVALID  0
 #define WKJ_JT_VOID     1
@@ -259,7 +259,7 @@ typedef struct WKJJavaValue {
  * Boolean, String, JSObject or NodeImpl instances, it describes the value and Java builds
  * whatever it wants.
  *
- * OUTBOUND (library -> Java) these are the exact outcomes of convertValueToJValue for the
+ * OUTBOUND (library -> Java) these are the exact outcomes of convertValueToJavaValue for the
  * target type java.lang.Object, which is what all nine entry points used:
  *
  *   WKJ_JS_KIND_NULL         JS null, and every value the JNI code left as a zero reference
@@ -284,7 +284,7 @@ typedef struct WKJJavaValue {
  *
  * INBOUND (Java -> library) the kinds Java produces are NULL, BOOLEAN, DOUBLE, STRING,
  * JS_OBJECT and JAVA_OBJECT, chosen in that order by the instanceof chain that used to live
- * in Java_Object_to_JSValue:
+ * in javaObjectToJSValue:
  *
  *   null                  -> WKJ_JS_KIND_NULL
  *   com.sun.webkit.dom.JSObject, which NodeImpl extends
@@ -635,7 +635,7 @@ typedef struct WKJLiveConnectHost {
      * Describes one Java object as a WKJJSValue, using the INBOUND rules documented above:
      * null, JSObject (with its own peer and peer_type), String, Boolean, Number, or
      * anything else as WKJ_JS_KIND_JAVA_OBJECT. This is the instanceof chain that used to
-     * live in Java_Object_to_JSValue, and it is the same classification Java performs on the
+     * live in javaObjectToJSValue, and it is the same classification Java performs on the
      * arguments of wkj_js_set_member, wkj_js_set_slot and wkj_js_call - one implementation,
      * two callers, so a value cannot be classified one way as an argument and another way as
      * a field value.

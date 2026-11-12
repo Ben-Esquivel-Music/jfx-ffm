@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2010, 2022, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2010, 2026, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -24,8 +24,6 @@
  */
 package com.sun.glass.ui;
 
-import java.lang.annotation.Native;
-
 /**
  * A high-resolution timer.
  *
@@ -38,8 +36,8 @@ import java.lang.annotation.Native;
  */
 public abstract class Timer {
 
-    @Native private final static double UNSET_PERIOD = -1.0; // 0 is valid value, so can't use it here
-    @Native private final static double SET_PERIOD   = -2.0; // token value for vsync timer
+    private final static double UNSET_PERIOD = -1.0; // 0 is valid value, so can't use it here
+    private final static double SET_PERIOD   = -2.0; // token value for vsync timer
 
     private final Runnable runnable;
     private long ptr;

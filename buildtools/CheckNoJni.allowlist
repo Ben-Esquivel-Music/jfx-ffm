@@ -1,0 +1,90 @@
+#
+# Copyright (c) 2026, Oracle and/or its affiliates. All rights reserved.
+# DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
+#
+# This code is free software; you can redistribute it and/or modify it
+# under the terms of the GNU General Public License version 2 only, as
+# published by the Free Software Foundation.  Oracle designates this
+# particular file as subject to the "Classpath" exception as provided
+# by Oracle in the LICENSE file that accompanied this code.
+#
+# This code is distributed in the hope that it will be useful, but WITHOUT
+# ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
+# FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License
+# version 2 for more details (a copy is included in the LICENSE file that
+# accompanied this code).
+#
+# You should have received a copy of the GNU General Public License version
+# 2 along with this work; if not, write to the Free Software Foundation,
+# Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301 USA.
+#
+# Please contact Oracle, 500 Oracle Parkway, Redwood Shores, CA 94065 USA
+# or visit www.oracle.com if you need additional information or have any
+# questions.
+#
+# The hits of buildtools/CheckNoJni.java that US-074 puts out of scope, and nothing else.
+#
+# One entry per line: path | rule | text | reason
+#   path    the file, relative to the repository root, with / separators
+#   rule    the rule id the check reports (R-NATIVE, R-EXPORT, R-JNI, R-INCLUDE, R-JDKINC, R-JAVAC-H, R-LOAD)
+#   text    text of the source line that contains the whole matched token; an entry covers every hit of
+#           that rule in that file whose line has this text around the token
+#   reason  why it stays, naming the Out of scope item of US-074 it falls under
+# An entry that covers no hit fails the check (exit 2): remove it when its hit goes.
+
+# A runtime-visible message, which US-074 keeps unchanged.
+modules/javafx.graphics/src/main/native-glass/mac/GlassApplication.m | R-JNI | NewObjectArray failed in GlassApplication_application | runtime-visible message (Out of scope: the "NewObjectArray failed" message of GlassApplication.m)
+
+# Comments that record what the JNI code did, written into the C headers these generators emit.
+buildtools/ffm-web/gen-wkj-constants.pl | R-JAVAC-H | `javac -h`. Nothing in this repository runs `javac -h` | a comment of the generated wkj_constants.h that records where the constants came from (Out of scope: comments that record what the JNI code did)
+buildtools/ffm-web/spec-to-header.pl | R-JNI | String(JNIEnv*, jstring) | a comment of the generated webkit_java_api_dom.h that records what the JNI string conversion did (Out of scope: comments that record what the JNI code did)
+
+# Test code that reads JNI-era builds: golden captures refuse a library without the JNI exports they expect.
+modules/javafx.graphics/src/test/java/test/com/sun/prism/mtl/MTLGoldens.java | R-EXPORT | _Java_com_sun_prism_mtl_ symbols | golden capture from the JNI build of prism_mtl (Out of scope: the golden capture paths of MTLGoldens)
+modules/javafx.graphics/src/test/java/test/com/sun/prism/mtl/MTLGoldens.java | R-EXPORT | startsWith("_Java_com_sun_prism_mtl_") | golden capture from the JNI build of prism_mtl (Out of scope: the golden capture paths of MTLGoldens)
+modules/javafx.graphics/src/test/java/test/com/sun/javafx/font/MacFontBindings.java | R-EXPORT | "Java_com_sun_javafx_font_coretext_OS_CGColorSpaceRelease" | the JNI exports of the javafx_font build that MacFontGoldens captures from (Out of scope: the golden capture paths of MacFontGoldens)
+modules/javafx.graphics/src/test/java/test/com/sun/javafx/font/MacFontBindings.java | R-EXPORT | "Java_com_sun_javafx_font_coretext_OS_CTRunGetGlyphCount" | the JNI exports of the javafx_font build that MacFontGoldens captures from (Out of scope: the golden capture paths of MacFontGoldens)
+modules/javafx.graphics/src/test/java/test/com/sun/javafx/font/MacFontBindings.java | R-EXPORT | "Java_com_sun_javafx_font_MacFontFinder_getCascadeListRefs" | the JNI exports of the javafx_font build that MacFontGoldens captures from (Out of scope: the golden capture paths of MacFontGoldens)
+modules/javafx.graphics/src/test/java/test/com/sun/javafx/font/MacFontBindings.java | R-EXPORT | startsWith("_Java_") | reads the JNI exports of the javafx_font build that MacFontGoldens captures from (Out of scope: the golden capture paths of MacFontGoldens)
+modules/javafx.graphics/src/test/java/test/com/sun/javafx/font/MacFontBindings.java | R-EXPORT | "Java_" + jniMangle(owner) | mangles the JNI export names of the javafx_font build that MacFontGoldens captures from (Out of scope: the golden capture paths of MacFontGoldens)
+modules/javafx.graphics/src/test/java/test/com/sun/glass/ui/gtk/GtkLibraryQueryTest.java | R-EXPORT | Java_com_sun_glass_ui_gtk_GtkApplication__1queryLibrary of launcher.c | header of a golden captured from the JNI build (Out of scope: test code that reads JNI-era builds)
+modules/javafx.graphics/src/test/java/test/com/sun/glass/ui/gtk/GtkScreencastDebugTest.java | R-EXPORT | Java_com_sun_glass_ui_gtk_screencast_ScreencastHelper_loadPipewire was | header of a golden captured from the JNI build (Out of scope: test code that reads JNI-era builds)
+modules/javafx.graphics/src/test/java/test/com/sun/glass/ui/gtk/GtkScreencastDebugTest.java | R-EXPORT | the Java_* one | header of a golden captured from the JNI build (Out of scope: test code that reads JNI-era builds)
+
+# The jni* helpers of the glass shims and the guards: they count, or reject, what a JNI-era library exports.
+modules/javafx.graphics/src/shims/java/com/sun/glass/ui/gtk/GtkGlassShim.java | R-EXPORT | "Java_com_sun_glass_ui_gtk_GtkWindow__1createWindow" | eventJniEntryPoints counts the JNI exports a libglassgtk3 still has (Out of scope: the jni* helpers of the glass shims)
+modules/javafx.graphics/src/shims/java/com/sun/glass/ui/gtk/GtkGlassShim.java | R-EXPORT | "Java_com_sun_glass_ui_gtk_GtkWindow__1setBounds" | eventJniEntryPoints counts the JNI exports a libglassgtk3 still has (Out of scope: the jni* helpers of the glass shims)
+modules/javafx.graphics/src/shims/java/com/sun/glass/ui/gtk/GtkGlassShim.java | R-EXPORT | "Java_com_sun_glass_ui_gtk_GtkView__1create" | eventJniEntryPoints counts the JNI exports a libglassgtk3 still has (Out of scope: the jni* helpers of the glass shims)
+modules/javafx.graphics/src/shims/java/com/sun/glass/ui/gtk/GtkGlassShim.java | R-EXPORT | "Java_com_sun_glass_ui_gtk_GtkApplication__1init" | eventJniEntryPoints counts the JNI exports a libglassgtk3 still has (Out of scope: the jni* helpers of the glass shims)
+modules/javafx.graphics/src/shims/java/com/sun/glass/ui/gtk/GtkGlassShim.java | R-EXPORT | "Java_com_sun_glass_ui_gtk_GtkApplication__1runLoop" | eventJniEntryPoints counts the JNI exports a libglassgtk3 still has (Out of scope: the jni* helpers of the glass shims)
+modules/javafx.graphics/src/shims/java/com/sun/glass/ui/gtk/GtkGlassShim.java | R-EXPORT | "Java_com_sun_glass_ui_gtk_GtkDnDClipboard_pushToSystemImpl" | eventJniEntryPoints counts the JNI exports a libglassgtk3 still has (Out of scope: the jni* helpers of the glass shims)
+modules/javafx.web/src/test/java/test/com/sun/webkit/WebKitLibraryAbiTest.java | R-EXPORT | exports Java_* entry points | message of the guard that rejects a JNI-era jfxwebkit (Out of scope: test code that reads JNI-era builds)
+
+# The constants header tests: they check that each header keeps javac's spelling and no #include (so no jni.h).
+modules/javafx.graphics/src/test/java/test/com/sun/glass/ui/gtk/GtkConstantsHeaderTest.java | R-JAVAC-H | javac -h | the header keeps the names and literals javac -h wrote (Out of scope: constant names in javac's spelling)
+modules/javafx.graphics/src/test/java/test/com/sun/glass/ui/gtk/GtkConstantsHeaderTest.java | R-INCLUDE | it keeps jni.h out | guard: a constants header has no #include (Out of scope: test code that guards against JNI)
+modules/javafx.graphics/src/test/java/test/com/sun/glass/ui/mac/MacConstantsHeaderTest.java | R-JAVAC-H | javac -h | the header keeps the names and literals javac -h wrote (Out of scope: constant names in javac's spelling)
+modules/javafx.graphics/src/test/java/test/com/sun/glass/ui/mac/MacConstantsHeaderTest.java | R-INCLUDE | it keeps jni.h out | guard: a constants header has no #include (Out of scope: test code that guards against JNI)
+modules/javafx.graphics/src/test/java/test/com/sun/glass/ui/win/WinConstantsHeaderTest.java | R-JAVAC-H | javac -h | the header keeps the names and literals javac -h wrote (Out of scope: constant names in javac's spelling)
+modules/javafx.graphics/src/test/java/test/com/sun/glass/ui/win/WinConstantsHeaderTest.java | R-INCLUDE | it keeps jni.h out | guard: a constants header has no #include (Out of scope: test code that guards against JNI)
+
+# The JNI conversions JniStringCodec reproduces, named in the messages of its golden test.
+modules/javafx.graphics/src/test/java/test/com/sun/javafx/font/JniStringCodecGoldenTest.java | R-JNI | "NewStringUTF of row " | the JNI conversion the codec is proven equal to (Out of scope: JniStringCodec's name, it does reproduce JNI's conversions)
+modules/javafx.graphics/src/test/java/test/com/sun/javafx/font/JniStringCodecGoldenTest.java | R-JNI | ": NewStringUTF " | the JNI conversion the codec is proven equal to (Out of scope: JniStringCodec's name, it does reproduce JNI's conversions)
+modules/javafx.graphics/src/test/java/test/com/sun/javafx/font/JniStringCodecGoldenTest.java | R-JNI | ": GetStringUTFRegion " | the JNI conversion the codec is proven equal to (Out of scope: JniStringCodec's name, it does reproduce JNI's conversions)
+modules/javafx.graphics/src/test/java/test/com/sun/javafx/font/JniStringCodecGoldenTest.java | R-JNI | ": GetStringUTFLength " | the JNI conversion the codec is proven equal to (Out of scope: JniStringCodec's name, it does reproduce JNI's conversions)
+
+# Assertion messages that record what the JNI code did, the behaviour the FFM code keeps.
+modules/javafx.graphics/src/test/java/test/com/sun/glass/ui/monocle/LinuxSystemNativeTest.java | R-JNI | as ByteBuffer.allocateDirect and NewDirectByteBuffer | assertion message (Out of scope: comments that record what the JNI code did)
+modules/javafx.graphics/src/test/java/test/com/sun/glass/ui/monocle/LinuxSystemNativeTest.java | R-JNI | as NewStringUTF(NULL) was | assertion message (Out of scope: comments that record what the JNI code did)
+modules/javafx.graphics/src/test/java/test/com/sun/glass/ui/monocle/UdevHeaderFormatTest.java | R-JNI | zero-extended as the (jint) cast | assertion message (Out of scope: comments that record what the JNI code did)
+modules/javafx.graphics/src/test/java/test/com/sun/glass/ui/monocle/XLayoutTest.java | R-JNI | arrives as the (jint) of the C | assertion message (Out of scope: comments that record what the JNI code did)
+modules/javafx.graphics/src/test/java/test/com/sun/javafx/font/freetype/LinuxPangoNativeTest.java | R-JNI | "INT_MAX / sizeof(jint)" | assertion message (Out of scope: comments that record what the JNI code did)
+modules/javafx.graphics/src/test/java/test/com/sun/glass/ui/win/WinAccessibilityNativeTest.java | R-JNI | where DeleteGlobalRef stood | assertion message (Out of scope: comments that record what the JNI code did)
+modules/javafx.graphics/src/test/java/test/com/sun/glass/ui/win/WinDowncallExceptionReportingTest.java | R-JNI | the FindClass-inside-a-downcall regression | assertion message naming the JDK 26 regression it guards (Out of scope: comments that record what the JNI code did)
+modules/javafx.graphics/src/test/java/test/com/sun/glass/ui/win/WinGlassNativeTest.java | R-JNI | as GetStringRegion copied it | assertion message (Out of scope: comments that record what the JNI code did)
+modules/javafx.graphics/src/test/java/test/com/sun/glass/ui/win/WinViewNativeTest.java | R-JNI | as CallLongMethod did | assertion message (Out of scope: comments that record what the JNI code did)
+modules/javafx.graphics/src/test/java/test/com/sun/glass/ui/win/WinWindowNativeTest.java | R-JNI | as CallIntMethod's 0 became | assertion message (Out of scope: comments that record what the JNI code did)
+modules/javafx.graphics/src/test/java/test/com/sun/javafx/font/WinFontNativeTest.java | R-JNI | as GetStringChars copied it | assertion message (Out of scope: comments that record what the JNI code did)
+modules/javafx.graphics/src/test/java/test/com/sun/javafx/font/LinuxFontProcessGoldenTest.java | R-JNI | its UTF-8 decode (NewStringUTF) | assertion message (Out of scope: comments that record what the JNI code did)
+modules/javafx.web/src/test/java/test/com/sun/webkit/ffm/WebKitLiveConnectTest.java | R-JNI | as ToReflectedMethod produced it | assertion message (Out of scope: comments that record what the JNI code did)

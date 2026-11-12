@@ -25,9 +25,8 @@
 # compiler/linker flags previously defined by the retired Gradle native build
 # (buildSrc/mac.gradle). Included from CMakeLists.txt, which defines the
 # shared input variables; of those, this file reads GENSRC_DIR, BIN_DIR,
-# INCLUDE_ES2 and GRAPHICS_SRC. No macOS target reads JDK_HOME or
-# HEADERS_DIR: CMakeLists.txt still accepts JDK_HOME and requires HEADERS_DIR
-# because they are shared configure inputs that win.cmake uses.
+# INCLUDE_ES2 and GRAPHICS_SRC. No macOS target has a JDK include directory or
+# a javac -h header directory on its include path.
 #
 # Notes on Gradle parity:
 #   - Gradle compiled with clang and linked everything with clang++ (plus
@@ -156,8 +155,8 @@ endfunction()
 # libglass.dylib
 #
 # The glass sources declare no JNI function and include no jni.h, so this
-# target, like every other target of this file, has neither HEADERS_DIR nor
-# the JDK include directories on its include path. Their imports of javac -h
+# target, like every other target of this file, has neither a javac -h header
+# directory nor the JDK include directories on its include path. Their imports of javac -h
 # constant headers of com.sun.glass.* resolve in native-glass/mac/constants:
 # JNI-free headers of the same names, with javac's macro names and literals,
 # which test.com.sun.glass.ui.mac.MacConstantsHeaderTest checks against the

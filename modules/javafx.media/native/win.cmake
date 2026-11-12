@@ -794,7 +794,7 @@ add_media_library(fxplugins
 add_media_library(jfxmedia
     OUTPUT_NAME jfxmedia
     SOURCES
-        "${JFXMEDIA_SRC}/jni/Logger.cpp"
+        "${JFXMEDIA_SRC}/Utils/Logger.cpp"
         # FFM C ABI (jfxmedia_api.h)
         "${JFXMEDIA_SRC}/ffi/jfxmedia_api.cpp"
         "${JFXMEDIA_SRC}/ffi/FfiPlayerEventDispatcher.cpp"
@@ -824,7 +824,6 @@ add_media_library(jfxmedia
         "${JFXMEDIA_SRC}/Utils/ColorConverter.c"
     INCLUDE_DIRS
         "${JFXMEDIA_SRC}"
-        "${JFXMEDIA_SRC}/jni"
         "${JFXMEDIA_SRC}/ffi"
         "${HEADERS_DIR}"
         "${GLIB_SRC}" "${GLIB_SRC}/glib" "${GLIB_SRC}/gmodule" "${GLIB_VS100}"

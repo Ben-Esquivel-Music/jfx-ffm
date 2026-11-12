@@ -25,6 +25,7 @@
 
 package com.sun.glass.ui.gtk.screencast;
 
+import com.sun.glass.utils.NativeLibLoader;
 import com.sun.javafx.font.JniStringCodec;
 import java.lang.foreign.Arena;
 import java.lang.foreign.FunctionDescriptor;
@@ -60,11 +61,11 @@ import static java.lang.foreign.ValueLayout.JAVA_LONG;
  * and the string codec the JNI's {@code GetStringUTFChars} and {@code NewStringUTF} define.
  *
  * <h2>The library</h2>
- * The {@code sc_*} exports are resolved through {@link SymbolLookup#loaderLookup()} in {@link Lib}, a holder of
- * its own, so that this class can be loaded - and its token callback driven - without {@code libglassgtk3.so}:
- * initializing {@link Lib} needs the library, and {@code sc_abi_version} is checked before anything else of it is
- * bound. The library is in the process because {@code GtkApplication} loaded it at toolkit start, which is the
- * only way {@code ScreencastHelper}'s natives resolved at commit {@code 033187ad90} either.
+ * The {@code sc_*} exports are resolved through {@link NativeLibLoader#loadedLibrariesLookup()} in {@link Lib}, a
+ * holder of its own, so that this class can be loaded - and its token callback driven - without
+ * {@code libglassgtk3.so}: initializing {@link Lib} needs the library, and {@code sc_abi_version} is checked before
+ * anything else of it is bound. The library is in the process because {@code GtkApplication} loaded it at toolkit
+ * start, which is the only way {@code ScreencastHelper}'s natives resolved at commit {@code 033187ad90} either.
  *
  * <h2>Threads, blocking and {@code critical}</h2>
  * Every function of {@code screencast_api.h} but the version and {@code sizeof} probes talks D-Bus to the desktop
@@ -167,7 +168,7 @@ final class ScreencastNative {
     }
 
     /**
-     * The exports of {@code screencast_api.h}, in {@code libglassgtk3.so} as the class loader loaded it
+     * The exports of {@code screencast_api.h}, in {@code libglassgtk3.so} as NativeLibLoader loaded it
      * ({@code NativeLibLoader.loadLibrary("glassgtk3")} in {@code GtkApplication}, or a {@code glassgtk3} build
      * loaded as the {@code glass} library itself). A holder of its own: this class is loaded, and its token
      * callback can be driven, without the library. {@code sc_abi_version} is bound and checked before anything
@@ -175,7 +176,7 @@ final class ScreencastNative {
      */
     private static final class Lib {
 
-        private static final SymbolLookup LOOKUP = SymbolLookup.loaderLookup();
+        private static final SymbolLookup LOOKUP = NativeLibLoader.loadedLibrariesLookup();
 
         /** {@code int32_t sc_abi_version(void)}. */
         static final MethodHandle ABI = bind(LOOKUP, LIB_GLASS, "sc_abi_version",

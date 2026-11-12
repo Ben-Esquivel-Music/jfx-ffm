@@ -16,7 +16,7 @@ list(APPEND WebCore_INCLUDE_DIRECTORIES
     "${WEBCORE_DIR}/platform/video-codecs"
     "${WEBCORE_DIR}/bindings/java"
     "${WEBCORE_DIR}/page/java"
-    "${WEBCORE_DIR}/bridge/jni"
+    "${WEBCORE_DIR}/bridge/java"
     "${WEBKITLEGACY_DIR}"
     # FFM C ABI: webkit_java_api.h (WKJ_EXPORT, wkj_ref, WKJHost)
     "${WEBKITLEGACY_DIR}/java/api"
@@ -75,7 +75,7 @@ list(APPEND WebCore_PRIVATE_FRAMEWORK_HEADERS
     bindings/java/EventListenerManager.h
     bindings/java/WKJDOMUtils.h
     platform/graphics/java/WKJPlatformJava.h
-    bridge/jni/jsc/BridgeUtils.h
+    bridge/java/jsc/BridgeUtils.h
     dom/DOMStringList.h
     platform/graphics/java/ImageBufferJavaBackend.h
     platform/graphics/java/ImageJava.h

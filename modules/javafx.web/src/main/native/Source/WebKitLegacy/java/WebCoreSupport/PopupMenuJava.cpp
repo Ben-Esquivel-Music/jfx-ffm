@@ -132,7 +132,7 @@ void PopupMenuJava::show(const IntRect& r,  LocalFrameView& frameView, int selec
     if (!s_wkjPopupCallbacks || !s_wkjPopupCallbacks->show)
         return;
 
-    WKJHandle page = WebPage::jobjectFromPage(frameView.frame().page());
+    WKJHandle page = WebPage::handleFromPage(frameView.frame().page());
     s_wkjPopupCallbacks->show(
             m_popup.get(),
             page.get(),

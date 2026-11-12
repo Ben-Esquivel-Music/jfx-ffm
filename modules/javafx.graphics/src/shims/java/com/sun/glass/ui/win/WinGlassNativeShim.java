@@ -35,6 +35,7 @@ import com.sun.glass.ui.Size;
 import com.sun.glass.ui.SystemClipboard;
 import com.sun.glass.ui.View;
 import com.sun.glass.ui.Window;
+import com.sun.glass.utils.NativeLibLoader;
 import java.lang.foreign.Arena;
 import java.lang.foreign.FunctionDescriptor;
 import java.lang.foreign.Linker;
@@ -837,7 +838,7 @@ public final class WinGlassNativeShim {
 
         @SuppressWarnings("restricted")
         private static MethodHandle bindGlass(String name, FunctionDescriptor fd) {
-            MemorySegment symbol = SymbolLookup.loaderLookup().find(name).orElseThrow(
+            MemorySegment symbol = NativeLibLoader.loadedLibrariesLookup().find(name).orElseThrow(
                     () -> new UnsatisfiedLinkError("missing native symbol: " + name + " in glass"));
             return LINKER.downcallHandle(symbol, fd);
         }
@@ -2145,7 +2146,7 @@ public final class WinGlassNativeShim {
 
         @SuppressWarnings("restricted")
         private static MethodHandle bindGlass(String name, FunctionDescriptor fd) {
-            MemorySegment symbol = SymbolLookup.loaderLookup().find(name).orElseThrow(
+            MemorySegment symbol = NativeLibLoader.loadedLibrariesLookup().find(name).orElseThrow(
                     () -> new UnsatisfiedLinkError("missing native symbol: " + name + " in glass"));
             return LINKER.downcallHandle(symbol, fd);
         }
@@ -2685,7 +2686,7 @@ public final class WinGlassNativeShim {
 
         @SuppressWarnings("restricted")
         private static MethodHandle bindGlass(String name, FunctionDescriptor fd) {
-            MemorySegment symbol = SymbolLookup.loaderLookup().find(name).orElseThrow(
+            MemorySegment symbol = NativeLibLoader.loadedLibrariesLookup().find(name).orElseThrow(
                     () -> new UnsatisfiedLinkError("missing native symbol: " + name + " in glass"));
             return LINKER.downcallHandle(symbol, fd);
         }
@@ -3892,7 +3893,7 @@ public final class WinGlassNativeShim {
 
         @SuppressWarnings("restricted")
         private static MethodHandle bindGlass(String name, FunctionDescriptor fd) {
-            MemorySegment symbol = SymbolLookup.loaderLookup().find(name).orElseThrow(
+            MemorySegment symbol = NativeLibLoader.loadedLibrariesLookup().find(name).orElseThrow(
                     () -> new UnsatisfiedLinkError("missing native symbol: " + name + " in glass"));
             return LINKER.downcallHandle(symbol, fd);
         }
@@ -4407,7 +4408,7 @@ public final class WinGlassNativeShim {
 
         @SuppressWarnings("restricted")
         private static MethodHandle bindGlass(String name, FunctionDescriptor fd) {
-            MemorySegment symbol = SymbolLookup.loaderLookup().find(name).orElseThrow(
+            MemorySegment symbol = NativeLibLoader.loadedLibrariesLookup().find(name).orElseThrow(
                     () -> new UnsatisfiedLinkError("missing native symbol: " + name + " in glass"));
             return LINKER.downcallHandle(symbol, fd);
         }
@@ -5310,7 +5311,7 @@ public final class WinGlassNativeShim {
 
         @SuppressWarnings("restricted")
         private static MethodHandle bind(String name, FunctionDescriptor fd) {
-            MemorySegment symbol = SymbolLookup.loaderLookup().find(name).orElse(null);
+            MemorySegment symbol = NativeLibLoader.loadedLibrariesLookup().find(name).orElse(null);
             if (symbol == null) {
                 MISSING_NAMES.add(name);
                 return null;
@@ -5441,7 +5442,7 @@ public final class WinGlassNativeShim {
 
         @SuppressWarnings("restricted")
         private static MethodHandle bindGlass(String name, FunctionDescriptor fd) {
-            MemorySegment symbol = SymbolLookup.loaderLookup().find(name).orElseThrow(
+            MemorySegment symbol = NativeLibLoader.loadedLibrariesLookup().find(name).orElseThrow(
                     () -> new UnsatisfiedLinkError("missing native symbol: " + name + " in glass"));
             return LINKER.downcallHandle(symbol, fd);
         }

@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2010, 2023, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2010, 2026, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -42,7 +42,7 @@ public enum MediaError {
     ERROR_BASE_GSTREAMER(0x00000800),
     ERROR_BASE_SYSTEM(0x00000A00),
     ERROR_BASE_FUNCTION(0x00000B00),
-    ERROR_BASE_JNI(0x00000C00),       // JNI upcall from native into Java
+    ERROR_BASE_JNI(0x00000C00),       // upcall from native into Java (named when that was JNI)
     ERROR_BASE_OSX(0x00000D00),
 
     WARNING_BASE_JFXMEDIA(0x00100000),

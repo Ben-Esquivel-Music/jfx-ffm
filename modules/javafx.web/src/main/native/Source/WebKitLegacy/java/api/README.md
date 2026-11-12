@@ -271,7 +271,7 @@ So no object with static storage duration may own a `WKJHandle`, or anything els
 destructor can reach a host-table slot, unless it is a `NeverDestroyed` or
 `LazyNeverDestroyed`. A sweep of what `jfxwebkit` and `DumpRenderTreeJava` compile found two
 such objects, and both are now `NeverDestroyed`: the `JSObject.UNDEFINED` id cache in
-`javaUndefinedObject()` (`Source/WebCore/bridge/jni/JNIUtility.cpp`) and the scratch
+`javaUndefinedObject()` (`Source/WebCore/bridge/java/JavaBridgeUtility.cpp`) and the scratch
 `ImageBuffer` of `scratchContext()` (`Source/WebCore/platform/graphics/java/PathJava.cpp`),
 whose destruction disposes a Java render queue and releases its Java objects. Neither is
 released at exit, which is what the JNI code amounted to. The other statics found have no
@@ -312,9 +312,9 @@ its owner's id, where a `JGlobalRef` copy was an independent `NewGlobalRef`. A s
 the id dies early under a holder that did nothing wrong. A copy of a handle that holds a weak id
 goes through `retain`, so it gets a new strong id, or 0 once the object has been collected. And
 equal ids name the same object, but one object can have unequal ids, so identity questions go to
-`core.equals`. Note also that `retain_weak` exists because `bridge/jni/JobjectWrapper.cpp:45`
-takes `NewWeakGlobalRef` by default; weak ids must not keep the object reachable, and
-`core.is_live` is how C asks whether one is still valid.
+`core.equals`. Note also that `retain_weak` exists because `bridge/java/JavaObjectWrapper.cpp`
+holds a weak id by default, as its JNI version took `NewWeakGlobalRef`; weak ids must not keep
+the object reachable, and `core.is_live` is how C asks whether one is still valid.
 
 For the record, id equality was unobservable from C++ before the port: a sweep of all 101 files
 that named a `JLObject`/`JGObject`-family type found **no comparison of one handle with

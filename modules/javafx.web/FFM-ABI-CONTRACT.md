@@ -26,7 +26,7 @@ Baseline before any change (recorded on this branch): `mvn -pl modules/javafx.we
 
 ## 1. Shape taxonomy (measured, not assumed)
 
-Extracted with `buildtools/ffm-web/extract-jni.pl`.
+Extracted with `buildtools/ffm-web/extract-jni.pl`; US-074 removed it and `dom-cpp-to-ffm.pl` (git history has both).
 
 **The DOM layer contains no object types at all.** All 1833 functions are built from
 `jlong jstring jint jboolean jshort jfloat jdouble void` plus the leading `JNIEnv*, jclass`.
@@ -339,6 +339,7 @@ These mapfiles are also a Phase-F deletion target once the JNI entries are gone.
 Consequence: the checked-in files are transformed directly by script, and the generator is
 migrated in the same shape so it cannot silently re-emit JNI later. Whether the generator can
 reproduce the tree is being measured rather than assumed.
+US-074 removed `CodeGeneratorJava.pm`, which no `GENERATE_BINDINGS` call selected (git history has it).
 
 ### 10.3 Tests carry no JNI dependency
 
@@ -395,6 +396,8 @@ Three DOM functions carry `jlong` **values**: `EventImpl.getTimeStampImpl` (mill
 would compile and produce garbage dates.
 
 ### 11.4 The DOM code generator cannot regenerate this tree
+
+US-074 removed `CodeGeneratorJava.pm` (git history has it); this section records why it could not regenerate the tree.
 
 `CodeGeneratorJava.pm` produces both halves of the DOM bindings, and was the original source of the
 checked-in files, but regeneration is not a viable strategy. It was repaired far enough to run
@@ -553,7 +556,7 @@ truncates in practice, and the slot becomes self-contained.
 | 10 | The slot pointer is cached in a `ThreadLocal`, but `wkj_exception_slot()` returns the *carrier* thread's slot; a virtual thread that migrates reads the wrong one | **Open** - drop the cache or guard on `isVirtual()` |
 | 11 | `WebKitNative` loads `jfxwebkit` in `<clinit>`, so the ABI-guard message is seen once and every later touch gets a bare `NoClassDefFoundError`; and nothing loads `wkjstub` instead | **Open** - cache and rethrow the failure; make the library name overridable for tests |
 | 12 | 48 of the 124 `THROWS` functions return `void`; a missed check both swallows the exception and leaves the slot dirty, so the *next* unrelated call throws it | **Open** - C clears the slot on entry to every `wkj_*` function, and the facade checks on `void` too |
-| 15 | The `CodeGeneratorJava.pm` repair is unrelated to FFM | **Accepted** - it stays, but as its own commit |
+| 15 | The `CodeGeneratorJava.pm` repair is unrelated to FFM | **Accepted** - it stays, but as its own commit; US-074 removed the generator (git history has it) |
 
 ### 13.2 The reviewer's structural objection, recorded
 

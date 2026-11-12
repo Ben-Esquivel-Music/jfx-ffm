@@ -43,6 +43,10 @@
 # want of a display, on a private Xvfb: once without and once with a window
 # manager (.github/scripts/run-gtk-display-tests.sh).
 #
+# One more job, with no Maven and no native toolchain, fails when JNI comes back
+# anywhere in the tree (buildtools/CheckNoJni.java, US-074). It reads every
+# platform's sources, so the one Linux runner covers macOS and Windows too.
+#
 # NOTE: much of the build logic is duplicated for each platform. Keep this in
 # mind when making changes.
 #
@@ -65,6 +69,57 @@ permissions:
   contents: read
 
 jobs:
+  no_jni_check:
+    name: No JNI
+    runs-on: "ubuntu-24.04"
+
+    env:
+      BOOT_JDK_VERSION: "27+35"
+      BOOT_JDK_FILENAME: "OpenJDK27U-jdk_x64_linux_hotspot_27_35.tar.gz"
+      BOOT_JDK_URL: "https://github.com/adoptium/temurin27-binaries/releases/download/jdk-27%2B35/OpenJDK27U-jdk_x64_linux_hotspot_27_35.tar.gz"
+
+    steps:
+      - name: Checkout the source
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          path: jfx
+
+      - name: Download boot JDK
+        run: |
+          set -x
+          mkdir -p "${HOME}/bootjdk"
+          wget -O "${HOME}/bootjdk/${BOOT_JDK_FILENAME}" "${BOOT_JDK_URL}"
+          tar -xf "${HOME}/bootjdk/${BOOT_JDK_FILENAME}" -C "${HOME}/bootjdk"
+
+      - name: Setup environment
+        run: |
+          set -x
+          export JAVA_HOME="${HOME}/bootjdk/jdk-${BOOT_JDK_VERSION}"
+          echo "JAVA_HOME=${JAVA_HOME}" >> "${GITHUB_ENV}"
+          export PATH="$JAVA_HOME/bin:$PATH"
+          which java
+          java -version
+
+      - name: Prove the JNI check catches every rule
+        working-directory: jfx
+        run: |
+          set -x
+          export PATH="$JAVA_HOME/bin:$PATH"
+          # Plants each rule of US-074 acceptance criterion 7 in a temporary directory and fails
+          # unless the check reports it, and unless the same text in comments passes.
+          java buildtools/CheckNoJni.java --self-test
+
+      - name: Check that no JNI is in the tree
+        working-directory: jfx
+        run: |
+          set -x
+          export PATH="$JAVA_HOME/bin:$PATH"
+          # Every file git tracks, every platform: a native method or @Native, a Java_* or
+          # JNI_OnLoad export, a JNI type or call (in string literals too), jni.h, a JDK include
+          # directory, javac -h, or System.load*. Exit 1 lists the hits; exit 2 is a stale or
+          # malformed entry of buildtools/CheckNoJni.allowlist.
+          java buildtools/CheckNoJni.java .
+
   linux_x64_build:
     name: Linux x64
     runs-on: "ubuntu-24.04"

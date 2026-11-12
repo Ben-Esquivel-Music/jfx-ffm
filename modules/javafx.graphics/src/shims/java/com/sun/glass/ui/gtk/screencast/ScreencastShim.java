@@ -25,12 +25,12 @@
 
 package com.sun.glass.ui.gtk.screencast;
 
+import com.sun.glass.utils.NativeLibLoader;
 import java.lang.foreign.Arena;
 import java.lang.foreign.FunctionDescriptor;
 import java.lang.foreign.Linker;
 import java.lang.foreign.MemoryLayout;
 import java.lang.foreign.MemorySegment;
-import java.lang.foreign.SymbolLookup;
 import java.lang.invoke.MethodHandle;
 import java.lang.reflect.Field;
 import java.lang.reflect.InvocationTargetException;
@@ -230,7 +230,7 @@ public final class ScreencastShim {
 
     @SuppressWarnings("restricted")
     private static int probe(String symbol) {
-        MemorySegment address = SymbolLookup.loaderLookup().find(symbol).orElseThrow(
+        MemorySegment address = NativeLibLoader.loadedLibrariesLookup().find(symbol).orElseThrow(
                 () -> new UnsatisfiedLinkError("the glass GTK library does not export " + symbol));
         MethodHandle handle = Linker.nativeLinker().downcallHandle(address, FunctionDescriptor.of(JAVA_INT));
         try {

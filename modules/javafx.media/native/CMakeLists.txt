@@ -54,8 +54,7 @@ set(GENSRC_DIR "" CACHE PATH "modules/javafx.media/target/gensrc")
 # HEADERS_DIR holds the generated jfxmedia_errors.h (produced from
 # MediaError.java by the headergen tool). jfxmedia is JNI-free, so no JDK
 # include directory is needed by any target and modules/javafx.media/pom.xml
-# passes no JDK home in at all -- unlike modules/javafx.graphics, which still
-# hands one to add_jfx_library() for the libraries not yet migrated off JNI.
+# passes no JDK home in at all.
 set(HEADERS_DIR "" CACHE PATH "Directory containing the generated jfxmedia_errors.h")
 set(BIN_DIR "" CACHE PATH "Output directory for the built native libraries")
 

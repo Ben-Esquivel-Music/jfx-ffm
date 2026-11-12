@@ -66,6 +66,7 @@ Precisely three things, and no more:
    and `spec-to-header.pl`'s output has been compiled standalone with MSVC as both C and C++ at
    `/W4 /WX`. The stub compiles the same declarations. None of that is a substitute for building
    WebKit.
+   US-074 removed `dom-cpp-to-ffm.pl` (git history has it); `dom-abi.tsv` is the checked-in spec.
 2. **The C++ implementation behaves as the JNI did.** `wkjstub` proves the *shape* of every call;
    it says nothing about whether `wkj_dom_Node_getNodeName` returns the node's name. Only the 473
    module tests against a rebuilt `jfxwebkit` prove that, and they cannot run here.

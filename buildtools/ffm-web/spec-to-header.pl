@@ -23,7 +23,9 @@
 # or visit www.oracle.com if you need additional information or have any
 # questions.
 #
-# Emit, from the machine-readable ABI spec produced by dom-cpp-to-ffm.pl:
+# dom-abi.tsv is the spec of the DOM half of the ABI; it was first extracted from the
+# JNI-era DOM bindings by dom-cpp-to-ffm.pl, which US-074 removed (see git history).
+# Emit, from that machine-readable spec:
 #   --header  <path>   the generated C declarations for the DOM half of the ABI
 #   --mapfile <path>   linker version-script fragment (ELF, --version-script)
 #   --maposx  <path>   linker export list fragment (Mach-O, -exported_symbols_list)
@@ -106,13 +108,11 @@ if (defined $headerFile) {
 /*
  * GENERATED FILE -- do not edit.
  *
- * Produced by buildtools/ffm-web/spec-to-header.pl from the ABI spec that
- * buildtools/ffm-web/dom-cpp-to-ffm.pl derives from the DOM binding sources.
- * Regenerate rather than editing:
+ * Produced by buildtools/ffm-web/spec-to-header.pl from the ABI spec
+ * buildtools/ffm-web/dom-abi.tsv. dom-abi.tsv is the spec; it was first extracted
+ * from the JNI-era DOM bindings by dom-cpp-to-ffm.pl, which US-074 removed (see git
+ * history). Regenerate rather than editing:
  *
- *   perl buildtools/ffm-web/dom-cpp-to-ffm.pl \\
- *        --dir modules/javafx.web/src/main/native/Source/WebKitLegacy/java/DOM \\
- *        --spec buildtools/ffm-web/dom-abi.tsv
  *   perl buildtools/ffm-web/spec-to-header.pl --spec buildtools/ffm-web/dom-abi.tsv \\
  *        --header <this file>
  *

@@ -517,11 +517,12 @@ final class MTLNative {
     private static SymbolLookup loadPrismMtl() {
         try {
             NativeLibLoader.loadLibrary(LIBRARY_NAME);
-            return SymbolLookup.loaderLookup();
+            return NativeLibLoader.loadedLibrariesLookup();
         } catch (UnsatisfiedLinkError e) {
             recordFailure(e);
         } catch (RuntimeException e) {
-            // System.load is restricted too: without native access the loader throws IllegalCallerException.
+            // NativeLibLoader checks native access (MemorySegment::reinterpret) before it looks for a file, as
+            // System.load did: without native access the loader throws IllegalCallerException.
             recordFailure(initializationFailed(e));
         }
         return null;

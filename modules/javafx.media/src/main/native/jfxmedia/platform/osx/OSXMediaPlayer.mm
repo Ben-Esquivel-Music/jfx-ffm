@@ -26,7 +26,7 @@
 #import "OSXMediaPlayer.h"
 #import "OSXPlayerProtocol.h"
 #import <CoreAudio/CoreAudio.h>
-#import <jni/Logger.h>
+#import <Utils/Logger.h>
 #import <Locator/LocatorStream.h>
 #import <jfxmedia_errors.h>
 #import <jfxmedia_api.h>

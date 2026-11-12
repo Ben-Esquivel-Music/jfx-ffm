@@ -32,7 +32,6 @@ import com.sun.glass.ui.Pixels;
 import com.sun.glass.ui.Screen;
 import com.sun.glass.ui.View;
 import com.sun.glass.ui.Window;
-import java.lang.annotation.Native;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicLong;
@@ -62,14 +61,15 @@ import java.util.concurrent.atomic.AtomicLong;
  */
 class WinWindow extends Window {
     /*
-     * @Native, as Window's constants are, on the two GlassWindow.cpp still reads (RESIZE_DISABLE /
-     * RESIZE_AROUND_ANCHOR in HandleWindowPosChangingEvent, every WM_WINDOWPOSCHANGING) from the generated
-     * com_sun_glass_ui_win_WinWindow.h: with no native method left in this class the annotation is what
-     * keeps javac -h generating that header. RESIZE_TO_FX_ORIGIN and ANCHOR_NO_CAPTURE lost their only C
-     * reader when the _getAnchor JNI body, unreachable since its Java flip, was deleted.
+     * GlassWindow.cpp reads two of these (RESIZE_DISABLE / RESIZE_AROUND_ANCHOR in HandleWindowPosChangingEvent,
+     * every WM_WINDOWPOSCHANGING) from native-glass/win/constants/com_sun_glass_ui_win_WinWindow.h, the hand-kept
+     * copy of the header javac -h generated for this class up to commit 0fd9cb0ef5, which
+     * test.com.sun.glass.ui.win.WinConstantsHeaderTest checks against these fields. RESIZE_TO_FX_ORIGIN and
+     * ANCHOR_NO_CAPTURE lost their only C reader when the _getAnchor JNI body, unreachable since its Java flip, was
+     * deleted.
      */
-    @Native public static final int RESIZE_DISABLE = 0;
-    @Native public static final int RESIZE_AROUND_ANCHOR = 1;
+    public static final int RESIZE_DISABLE = 0;
+    public static final int RESIZE_AROUND_ANCHOR = 1;
     public static final int RESIZE_TO_FX_ORIGIN = 2;
 
     public static final long ANCHOR_NO_CAPTURE = (1L << 63);

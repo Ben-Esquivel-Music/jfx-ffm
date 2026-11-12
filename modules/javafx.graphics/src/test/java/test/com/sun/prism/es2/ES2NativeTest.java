@@ -25,6 +25,7 @@
 
 package test.com.sun.prism.es2;
 
+import com.sun.glass.utils.NativeLibLoader;
 import com.sun.prism.es2.ES2NativeShim;
 import java.lang.foreign.SymbolLookup;
 import java.util.List;
@@ -90,7 +91,7 @@ public class ES2NativeTest {
 
     @Test
     public void everyExportedSymbolResolvesInTheLoadedLibrary() {
-        SymbolLookup lookup = SymbolLookup.loaderLookup();
+        SymbolLookup lookup = NativeLibLoader.loadedLibrariesLookup();
         for (String name : EXPORTED_SYMBOLS) {
             assertTrue(lookup.find(name).isPresent(), "prism_es2 does not export " + name);
         }

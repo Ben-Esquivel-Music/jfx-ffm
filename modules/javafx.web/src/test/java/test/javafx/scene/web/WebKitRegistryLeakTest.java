@@ -91,7 +91,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * <ul>
  * <li>a burn-in of {@value #BURN_IN_CYCLES} cycles, not asserted, which absorbs the ids the first
  * pages take once for the process, such as the {@code JSObject.UNDEFINED} id that
- * {@code JNIUtility.cpp} caches on first use, and anything earlier tests in the same JVM left for
+ * {@code JavaBridgeUtility.cpp} caches on first use, and anything earlier tests in the same JVM left for
  * the {@code Disposer};
  * <li>a clean interval of {@value #MEASURED_CYCLES} cycles, asserted two-sided: the settled size
  * must end within {@value #TOLERANCE} of where it started, so that a registry still falling fails

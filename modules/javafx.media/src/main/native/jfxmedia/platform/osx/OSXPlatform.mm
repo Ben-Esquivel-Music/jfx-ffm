@@ -23,7 +23,7 @@
  * questions.
  */
 
-#import <jni/Logger.h>
+#import <Utils/Logger.h>
 #import "OSXMediaPlayer.h"
 #import <ffi/jfxmedia_avf.h>
 

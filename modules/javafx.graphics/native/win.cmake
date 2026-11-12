@@ -24,8 +24,7 @@
 # Windows-specific portion of the javafx.graphics native build. Replicates the
 # compiler/linker flags previously defined by the retired Gradle native build
 # (buildSrc/win.gradle). Included from CMakeLists.txt; shared input variables
-# (JDK_HOME, GENSRC_DIR, HEADERS_DIR, BIN_DIR, INCLUDE_ES2, GRAPHICS_SRC) are
-# defined there.
+# (GENSRC_DIR, BIN_DIR, INCLUDE_ES2, GRAPHICS_SRC) are defined there.
 
 enable_language(RC)
 
@@ -104,10 +103,9 @@ set(JFX_RC_COMMON_DEFINITIONS
 #                                    # writes no file another target writes
 #     SOURCE_DIRS <dirs...>          # globbed non-recursively, like Gradle listFiles()
 #     EXTRA_SOURCES <files...>
+#     INCLUDE_DIRS <dirs...>         # include directories after SOURCE_DIRS (headers only, not globbed)
 #     COMPILE_OPTIONS <opts...>
 #     NO_UNICODE                     # drop /DUNICODE /D_UNICODE (no target uses it now)
-#     JNI                            # the JDK headers + HEADERS_DIR (javac -h) on the include path:
-#                                    # only the targets that still contain JNI code
 #     LINK_LIBS <libs...>
 #     LINK_OPTIONS <opts...>
 #     RC_SOURCE <file>               # defaults to version.rc
@@ -115,8 +113,8 @@ set(JFX_RC_COMMON_DEFINITIONS
 # )
 # ---------------------------------------------------------------------------
 function(add_jfx_library name)
-    cmake_parse_arguments(JFX "NO_UNICODE;JNI" "OUTPUT_NAME;OUTPUT_DIR;RC_SOURCE"
-        "SOURCE_DIRS;EXTRA_SOURCES;COMPILE_OPTIONS;LINK_LIBS;LINK_OPTIONS;RC_INCLUDE_DIRS" ${ARGN})
+    cmake_parse_arguments(JFX "NO_UNICODE" "OUTPUT_NAME;OUTPUT_DIR;RC_SOURCE"
+        "SOURCE_DIRS;EXTRA_SOURCES;INCLUDE_DIRS;COMPILE_OPTIONS;LINK_LIBS;LINK_OPTIONS;RC_INCLUDE_DIRS" ${ARGN})
 
     set(sources)
     foreach(dir ${JFX_SOURCE_DIRS})
@@ -166,14 +164,9 @@ function(add_jfx_library name)
     endif()
     target_compile_options(${name} PRIVATE ${JFX_COMPILE_OPTIONS})
 
-    # JNI targets see jni.h / jni_md.h and the generated com_sun_*.h; the others compile with no
-    # JDK header at all, which is what proves them JNI-free.
-    if(JFX_JNI)
-        target_include_directories(${name} PRIVATE
-            "${JDK_HOME}/include" "${JDK_HOME}/include/win32"
-            "${HEADERS_DIR}")
-    endif()
-    target_include_directories(${name} PRIVATE ${JFX_SOURCE_DIRS})
+    # No target has a JDK include directory or a javac -h header directory on its include path:
+    # every one compiles with no JDK header at all, which is what proves them JNI-free.
+    target_include_directories(${name} PRIVATE ${JFX_SOURCE_DIRS} ${JFX_INCLUDE_DIRS})
 
     target_link_libraries(${name} PRIVATE ${JFX_LINK_LIBS})
     target_link_options(${name} PRIVATE
@@ -191,6 +184,15 @@ endfunction()
 # into GLASS_TEST_BIN_DIR. That directory is never BIN_DIR, where it would replace the release library
 # every other module, the SDK and tests/system load. glass_test globs the source directory itself, so
 # a new source file lands in both builds.
+#
+# The glass sources declare no JNI function and include no jni.h, so glass and glass_test, like every
+# other target of this file, have neither a javac -h header directory nor the JDK include directories
+# on their include path. Eleven of the sources include javac -h constant headers of
+# com.sun.glass.events.* and com.sun.glass.ui.* by name. native-glass/win/constants holds JNI-free
+# headers of the same names, with every constant macro javac wrote into them at commit 0fd9cb0ef5,
+# spelled as javac spelled it, so the includes resolve there and compile to the same code;
+# test.com.sun.glass.ui.win.WinConstantsHeaderTest checks them against the Java classes. The directory
+# holds headers only and is not in SOURCE_DIRS.
 option(GLASS_WIN_TEST_HOOKS
     "Also build the test build of glass.dll (target glass_test) into GLASS_TEST_BIN_DIR" OFF)
 set(GLASS_TEST_BIN_DIR "" CACHE PATH "Output directory of the test build of glass.dll; never BIN_DIR")
@@ -211,8 +213,8 @@ endif()
 
 set(GLASS_LIBRARY_ARGS
     OUTPUT_NAME glass
-    JNI
     SOURCE_DIRS "${GRAPHICS_SRC}/native-glass/win"
+    INCLUDE_DIRS "${GRAPHICS_SRC}/native-glass/win/constants"
     RC_SOURCE "${GRAPHICS_SRC}/native-glass/win/GlassResources.rc"
     RC_INCLUDE_DIRS "${GRAPHICS_SRC}/resources"
     LINK_LIBS delayimp.lib gdi32.lib urlmon.lib Comdlg32.lib imm32.lib
