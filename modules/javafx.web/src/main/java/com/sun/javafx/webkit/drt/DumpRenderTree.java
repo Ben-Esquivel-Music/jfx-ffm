@@ -25,6 +25,7 @@
 
 package com.sun.javafx.webkit.drt;
 
+import com.sun.glass.utils.NativeLibLoader;
 import com.sun.javafx.application.PlatformImpl;
 import com.sun.javafx.logging.PlatformLogger;
 import com.sun.javafx.logging.PlatformLogger.Level;
@@ -205,7 +206,7 @@ public final class DumpRenderTree {
                 Class.forName(WebPage.class.getName());
             } catch (Exception e) {}
 
-            System.loadLibrary("DumpRenderTreeJava");
+            NativeLibLoader.loadLibraryFromSystemPaths("DumpRenderTreeJava");
             initDRT();
             new WebEngine();
             drt = new DumpRenderTree();
@@ -388,7 +389,7 @@ public final class DumpRenderTree {
     // Everything below forwards to DumpRenderTreeNative, the FFM facade for the drt_* ABI declared
     // by Tools/DumpRenderTree/java/api/drt_java_api.h. DumpRenderTreeJava is a separate library
     // from jfxwebkit with its own ABI version and its own host table, which the facade installs
-    // once from its static initializer - which is why the System.loadLibrary call above has to keep
+    // once from its static initializer - which is why the library load above has to keep
     // running before the first of these.
 
     private static void initDRT() {

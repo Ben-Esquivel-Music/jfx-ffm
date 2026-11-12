@@ -25,9 +25,8 @@
 # compiler/linker flags previously defined by the retired Gradle native build
 # (buildSrc/linux.gradle). Included from CMakeLists.txt, which defines the
 # shared input variables; of those, this file reads BIN_DIR, INCLUDE_ES2,
-# INCLUDE_ES2_MONOCLE and GRAPHICS_SRC. No Linux target reads JDK_HOME,
-# GENSRC_DIR or HEADERS_DIR: CMakeLists.txt still accepts JDK_HOME and requires
-# GENSRC_DIR and HEADERS_DIR because they are shared configure inputs that
+# INCLUDE_ES2_MONOCLE and GRAPHICS_SRC. No Linux target reads GENSRC_DIR:
+# CMakeLists.txt still requires it because it is a shared configure input that
 # win.cmake and mac.cmake use.
 #
 # Notes on Gradle parity:
@@ -141,8 +140,8 @@ endfunction()
 # build renamed to libglass.so is found.
 #
 # The GTK glass sources declare no JNI function and include no jni.h, so this
-# target, like every other target of this file, has neither HEADERS_DIR nor
-# the JDK include directories on its include path. Nine of the sources include
+# target, like every other target of this file, has neither a javac -h header
+# directory nor the JDK include directories on its include path. Nine of the sources include
 # javac -h constant headers of com.sun.glass.events.* and com.sun.glass.ui.*
 # by name. native-glass/gtk/constants holds JNI-free headers of the same names,
 # with javac's macro names and literals, for the constants those sources use,

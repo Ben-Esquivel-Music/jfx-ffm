@@ -4,9 +4,9 @@ set(WTF_LIBRARY_TYPE STATIC)
 # load bearing for the JVM headers: _WEBKIT_TARGET_SETUP applies <target>_INCLUDE_DIRECTORIES
 # as PUBLIC, so this list propagates to PAL, JavaScriptCore, WebCore and WebKitLegacy, and the
 # equivalent entries in their own PlatformJava.cmake files were redundant. Nothing under Source
-# or Tools includes the JNI header now, so it comes out. The redundant copies in
-# WebCore/PlatformJava.cmake and JavaScriptCore/PlatformJava.cmake, and the JNI package lookup
-# in cmake/OptionsJava.cmake, are the remaining three and belong to those slices.
+# or Tools includes the JNI header, and no target of this build has a JDK include directory:
+# the copies in WebCore/PlatformJava.cmake and JavaScriptCore/PlatformJava.cmake and the JNI
+# package lookup in cmake/OptionsJava.cmake are gone as well.
 list(APPEND WTF_INCLUDE_DIRECTORIES
     "${WTF_DIR}/wtf/java"
     "${CMAKE_SOURCE_DIR}/Source"

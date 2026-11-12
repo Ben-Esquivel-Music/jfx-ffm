@@ -80,7 +80,7 @@ public:
      * local reference this used to return was. It comes from PageSupplementJava, which is
      * also where ScrollbarThemeJava, the URLLoader and the socket stream handle read it.
      */
-    static WKJHandle jobjectFromPage(Page* page);
+    static WKJHandle handleFromPage(Page* page);
 
     /*
      * The callback tables and the registry id of the Java WebPage, installed once by

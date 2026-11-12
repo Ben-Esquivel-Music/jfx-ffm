@@ -26,7 +26,6 @@
 package com.sun.media.jfxmedia.logging;
 
 import com.sun.media.jfxmediaimpl.JfxMediaNative;
-import java.lang.annotation.Native;
 
 /**
  * Logger class used for logging that can output to console or file.<br/>
@@ -72,27 +71,27 @@ public class Logger {
      * OFF is a special level that can be used to turn off logging.
      * This level is initialized to Integer.MAX_VALUE.
      */
-    @Native public static final int OFF = Integer.MAX_VALUE; // Maps to java.util.logging.Level.OFF
+    public static final int OFF = Integer.MAX_VALUE; // Maps to java.util.logging.Level.OFF
     /**
      * ERROR is a message level indicating a serious failure.
      * This level is initialized to 4.
      */
-    @Native public static final int ERROR = 4; // Maps to java.util.logging.Level.SEVERE
+    public static final int ERROR = 4; // Maps to java.util.logging.Level.SEVERE
     /**
      * WARNING is a message level indicating a potential problem.
      * This level is initialized to 3.
      */
-    @Native public static final int WARNING = 3; // Maps to java.util.logging.Level.WARNING
+    public static final int WARNING = 3; // Maps to java.util.logging.Level.WARNING
     /**
      * INFO is a message level for informational messages.
      * This level is initialized to 2.
      */
-    @Native public static final int INFO = 2; // Maps to java.util.logging.Level.INFO
+    public static final int INFO = 2; // Maps to java.util.logging.Level.INFO
     /**
      * DEBUG is a message level providing tracing information.
      * This level is initialized to 1.
      */
-    @Native public static final int DEBUG = 1; // Maps to java.util.logging.Level.FINE
+    public static final int DEBUG = 1; // Maps to java.util.logging.Level.FINE
     private static int currentLevel = OFF;
     /**
      * Set by {@link #initNative()} once {@link JfxMediaNative#logInit()} reports success: the native log

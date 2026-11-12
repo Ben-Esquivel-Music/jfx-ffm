@@ -53,7 +53,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * {@code UTF8::unicode_length} and {@code UTF8::next}, the modified UTF-8 encoding of {@code U+0000}, surrogate
  * pairs and unpaired surrogates, and the identity of decoding after encoding for arbitrary strings.
  * {@code DataOutputStream.writeUTF}, whose payload is the same modified UTF-8, is the JDK's own second opinion on
- * the encoder. {@link JniStringOracleTest} compares both directions with the running JVM.
+ * the encoder. {@link JniStringCodecGoldenTest} compares both directions with what the JVM returned.
  */
 public class JniStringCodecTest {
 
@@ -306,7 +306,7 @@ public class JniStringCodecTest {
     }
 
     // ---------------------------------------------------------------------------------------------
-    // Helpers shared with JniStringOracleTest
+    // Helpers shared with JniStringCodecGoldenTest
     // ---------------------------------------------------------------------------------------------
 
     static byte[] bytes(int... values) {

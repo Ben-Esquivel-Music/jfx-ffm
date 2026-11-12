@@ -54,7 +54,7 @@ import static org.junit.jupiter.api.Assumptions.assumeTrue;
 
 /**
  * {@code WKJLiveConnectHost}: the reflective half of LiveConnect, which is what
- * {@code Source/WebCore/bridge/jni} calls when page script touches a Java object.
+ * {@code Source/WebCore/bridge/java} calls when page script touches a Java object.
  * <p>
  * {@code JSObjectNative} takes a {@code JSObject} into JavaScript and was already bound. This is the
  * way back, and until it was installed there was none: {@code JavaClassJSC} could not enumerate a

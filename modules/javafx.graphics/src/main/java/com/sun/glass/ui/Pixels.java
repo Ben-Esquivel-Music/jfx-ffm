@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2010, 2022, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2010, 2026, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -24,7 +24,6 @@
  */
 package com.sun.glass.ui;
 
-import java.lang.annotation.Native;
 import java.nio.Buffer;
 import java.nio.ByteBuffer;
 import java.nio.IntBuffer;
@@ -52,8 +51,8 @@ public abstract class Pixels {
      * when passing image data as ints.
      */
     public static class Format {
-        @Native public static final int BYTE_BGRA_PRE = 1;
-        @Native public static final int BYTE_ARGB = 2;
+        public static final int BYTE_BGRA_PRE = 1;
+        public static final int BYTE_ARGB = 2;
     }
 
     public static int getNativeFormat() {

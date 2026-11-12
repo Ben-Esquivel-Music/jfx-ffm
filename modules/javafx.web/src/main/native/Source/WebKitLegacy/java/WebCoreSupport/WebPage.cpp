@@ -207,7 +207,7 @@ void WebPage::setCallbacks(const WKJPageCallbacks* callbacks, wkj_ref webPage)
     });
 }
 
-WKJHandle WebPage::jobjectFromPage(Page* page)
+WKJHandle WebPage::handleFromPage(Page* page)
 {
     if (!page)
         return WKJHandle();
@@ -284,7 +284,7 @@ void WebPage::prePaint() {
 RefPtr<RQRef> WebPage::jRenderTheme()
 {
     if (!m_jRenderTheme) {
-        WKJHandle theme = wkjRenderThemeForPage(jobjectFromPage(m_page.get()).get());
+        WKJHandle theme = wkjRenderThemeForPage(handleFromPage(m_page.get()).get());
         m_jRenderTheme = RQRef::create(theme.get());
     }
     return m_jRenderTheme;
@@ -1948,7 +1948,7 @@ WKJ_EXPORT int32_t wkj_page_mouse_event(int64_t pPage, int32_t id, int32_t butto
              * rather than from the `self` parameter twkProcessMouseEvent used to have.
              * Same object, same call.
              */
-            WKJHandle menuPage = WebPage::jobjectFromPage(page);
+            WKJHandle menuPage = WebPage::handleFromPage(page);
             ContextMenuJava(contextMenu->items()).show(&cmc, menuPage.get(), loc);
         }
         return 1;

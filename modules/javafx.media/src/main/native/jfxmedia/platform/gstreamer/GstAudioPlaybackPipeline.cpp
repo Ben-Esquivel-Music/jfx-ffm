@@ -30,7 +30,7 @@
 #include <PipelineManagement/PlayerEventDispatcher.h>
 #include <MediaManagement/Media.h>
 #include <Common/VSMemory.h>
-#include <jni/Logger.h>
+#include <Utils/Logger.h>
 #include <fxplugins_common.h>
 
 #include <string.h>

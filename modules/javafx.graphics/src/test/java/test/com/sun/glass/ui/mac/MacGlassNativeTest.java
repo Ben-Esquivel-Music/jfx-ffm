@@ -28,6 +28,7 @@ package test.com.sun.glass.ui.mac;
 import com.sun.glass.ui.mac.MacGlassNativeShim;
 import com.sun.glass.ui.mac.MacGlassNativeShim.Conversion;
 import com.sun.glass.ui.mac.MacGlassNativeShim.FrameworkBindings;
+import com.sun.glass.utils.NativeLibLoader;
 import java.io.IOException;
 import java.lang.classfile.ClassFile;
 import java.lang.classfile.ClassModel;
@@ -285,7 +286,7 @@ public class MacGlassNativeTest {
 
     @Test
     public void everyExportResolvesInTheLoadedLibrary() throws IOException {
-        SymbolLookup lookup = SymbolLookup.loaderLookup();
+        SymbolLookup lookup = NativeLibLoader.loadedLibrariesLookup();
         for (String name : headerPrototypes().keySet()) {
             assertTrue(lookup.find(name).isPresent(), "libglass does not export " + name);
         }

@@ -177,9 +177,9 @@ final class JPEGNative {
     private static final List<String> BOUND_SYMBOLS = new ArrayList<>();
 
     static {
-        // The library has to be loaded by this class loader before loaderLookup() can see it.
+        // The library has to be loaded before NativeLibLoader.loadedLibrariesLookup() can see it.
         NativeLibLoader.loadLibrary(LIBRARY_NAME);
-        LOOKUP = SymbolLookup.loaderLookup();
+        LOOKUP = NativeLibLoader.loadedLibrariesLookup();
     }
 
     /* Binding order matters: the ABI guard is bound and checked before any other symbol. */

@@ -34,6 +34,7 @@ import com.sun.glass.ui.Pixels;
 import com.sun.glass.ui.Screen;
 import com.sun.glass.ui.Size;
 import com.sun.glass.ui.View;
+import com.sun.glass.utils.NativeLibLoader;
 import java.io.File;
 import java.lang.foreign.Arena;
 import java.lang.foreign.FunctionDescriptor;
@@ -3571,7 +3572,7 @@ public final class MacGlassNativeShim {
 
         private static SymbolLookup glass() {
             MacGlassNative.ensureLoaded();
-            return SymbolLookup.loaderLookup();
+            return NativeLibLoader.loadedLibrariesLookup();
         }
 
         private static MethodHandle bind(String name, FunctionDescriptor descriptor) {

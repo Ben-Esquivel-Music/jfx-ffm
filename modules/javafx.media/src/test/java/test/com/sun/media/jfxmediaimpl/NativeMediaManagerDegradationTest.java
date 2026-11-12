@@ -73,7 +73,7 @@ public class NativeMediaManagerDegradationTest {
      * Several are listed so that a stripped or jlinked image missing any one of them cannot turn this
      * regression test into a skip; the skip stays only for the image that has none of them at all. Every
      * JDK ships all three, so the JDK's own {@code java} library is deliberately not among them: the child
-     * {@code System.load}s the copy it is given, and loading a second copy of that one into a live JVM is
+     * loads the copy it is given, and loading a second copy of that one into a live JVM is
      * not obviously safe.
      */
     private static final List<String> DONOR_LIBRARIES = List.of("zip", "net", "nio");
@@ -118,12 +118,13 @@ public class NativeMediaManagerDegradationTest {
     /**
      * The third door into the same wreckage, and the one the review found: the library is exactly where
      * it always is and loads, and the only thing missing is the native-access grant.
-     * {@code System::load}, {@code Linker::upcallStub} and {@code Linker::downcallHandle} are all
-     * restricted methods, so a JVM run with {@code --illegal-native-access=deny} and no grant for this
-     * code refuses them with an {@link IllegalCallerException} - a {@code RuntimeException}, which
-     * neither {@code JfxMediaNative}'s {@code catch (UnsatisfiedLinkError)} nor anything above it used to
-     * catch. Applications that grant only {@code javafx.graphics} are common enough that this is not a
-     * hypothetical; this repository's own {@code apps/samples/RichTextAreaDemo} is one.
+     * The native-access check {@code NativeLibLoader} makes before any load, {@code Linker::upcallStub} and
+     * {@code Linker::downcallHandle} are all restricted calls, so a JVM run with
+     * {@code --illegal-native-access=deny} and no grant for this code refuses them with an
+     * {@link IllegalCallerException} - a {@code RuntimeException}, which neither {@code JfxMediaNative}'s
+     * {@code catch (UnsatisfiedLinkError)} nor anything above it used to catch. Applications that grant
+     * only {@code javafx.graphics} are common enough that this is not a hypothetical; this repository's
+     * own {@code apps/samples/RichTextAreaDemo} is one.
      * <p>
      * Which restricted call is refused first differs between the child and a modular run: on the class
      * path the loader and the facade are both unnamed, so the library load goes first, while a modular

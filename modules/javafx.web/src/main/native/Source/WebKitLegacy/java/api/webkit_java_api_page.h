@@ -100,10 +100,9 @@
  *                             plain-C WebPage_doJSCGarbageCollection(), which Java binds
  *                             directly with FunctionDescriptor.ofVoid().
  *
- *   Those three keep their JNI form in WebPage.cpp and BackForwardList.cpp, and they are
- *   the only reason those two files still include jni.h. Deleting them is behaviour
- *   affecting - WebPage.getIcon() and BackForwardList.Entry.getIcon() become an
- *   unconditional null - so it needs the Java side and a commit of its own.
+ *   All three are deleted from WebPage.cpp and BackForwardList.cpp, which no longer
+ *   include jni.h: Java returns null for both icons itself, which is what the native
+ *   bodies returned for every input, and binds WebPage_doJSCGarbageCollection directly.
  *
  *   Two BackForwardList entry points are absent for a different reason: bflGet and
  *   bflItemGetChildren construct com.sun.webkit.BackForwardList$Entry objects and cache
@@ -632,7 +631,7 @@ WKJ_EXPORT void wkj_frame_clear_name(int64_t frame);
 /*
  * twkExecuteScript has no counterpart here: everything it did after finding the frame was
  * LiveConnect work, so it became wkj_frame_execute_script, declared in
- * webkit_java_api_bridge.h and implemented in Source/WebCore/bridge/jni/jsc/BridgeUtils.cpp.
+ * webkit_java_api_bridge.h and implemented in Source/WebCore/bridge/java/jsc/BridgeUtils.cpp.
  */
 
 /* ------------------------------------------------------------------------------------- */

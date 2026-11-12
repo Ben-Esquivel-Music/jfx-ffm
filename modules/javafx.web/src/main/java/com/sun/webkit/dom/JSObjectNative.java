@@ -65,10 +65,10 @@ import static java.lang.foreign.ValueLayout.JAVA_LONG;
  * <p>
  * <b>Java objects.</b> A {@code wkj_ref} parameter is borrowed for the duration of the call, so an
  * argument that is neither a string, a boxed primitive nor a {@link JSObject} is registered before
- * the call and released after it. The library retains what it keeps, exactly as
- * {@code JobjectWrapper} turned the {@code jobject} it was handed into a global or weak global
- * reference. A {@code wkj_ref} coming the other way is a new strong id that this class owns, so it
- * is looked up and released once.
+ * the call and released after it. The library retains what it keeps, strongly or weakly, exactly
+ * as {@code JavaObjectWrapper} does, where its JNI form turned the {@code jobject} it was handed into
+ * a global or weak global reference. A {@code wkj_ref} coming the other way is a new strong id that
+ * this class owns, so it is looked up and released once.
  * <p>
  * <b>Threading.</b> Everything here runs on the JavaFX application thread, which owns the
  * JavaScript context; {@link JSObject} asserts it with {@code Invoker.checkEventThread()} before
@@ -499,8 +499,8 @@ public final class JSObjectNative {
     }
 
     /**
-     * Describes one Java value for the library, in the order the {@code instanceof} chain of
-     * {@code Java_Object_to_JSValue} used. Every {@link Number}, {@link Integer} included, becomes a
+     * Describes one Java value for the library, in the order the {@code instanceof} chain of the JNI
+     * form of {@code javaObjectToJSValue} used. Every {@link Number}, {@link Integer} included, becomes a
      * double, which is why there is deliberately no inbound integer kind.
      *
      * @param arena the arena the string characters are allocated from
@@ -539,8 +539,7 @@ public final class JSObjectNative {
             }
             default -> {
                 // Borrowed for the duration of the call; the library retains it if it keeps it,
-                // exactly as JobjectWrapper turned the jobject it was handed into a global or weak
-                // global reference.
+                // strongly or weakly, exactly as JavaObjectWrapper does.
                 long ref = WebKitNative.register(value);
                 slot.set(JAVA_LONG, OFFSET_OBJECT, ref);
                 return ref;
@@ -550,7 +549,7 @@ public final class JSObjectNative {
 
     /**
      * Classifies one Java value as the {@code WKJ_JS_KIND_} it crosses the boundary as, in the order
-     * the {@code instanceof} chain of {@code Java_Object_to_JSValue} used.
+     * the {@code instanceof} chain of the JNI form of {@code javaObjectToJSValue} used.
      * <p>
      * There is one implementation and two callers - {@link #encode} for an argument and
      * {@code LiveConnectNative.describeObject} for a field value or an exposed object - which is

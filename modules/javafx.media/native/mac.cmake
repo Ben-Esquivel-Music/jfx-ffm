@@ -643,7 +643,7 @@ add_media_library(jfxmedia
         "${JFXMEDIA_SRC}/PipelineManagement/AudioTrack.cpp"
         "${JFXMEDIA_SRC}/PipelineManagement/VideoTrack.cpp"
         "${JFXMEDIA_SRC}/PipelineManagement/SubtitleTrack.cpp"
-        "${JFXMEDIA_SRC}/jni/Logger.cpp"
+        "${JFXMEDIA_SRC}/Utils/Logger.cpp"
         "${JFXMEDIA_SRC}/Utils/posix/posix_critical_section.cpp"
         "${JFXMEDIA_SRC}/platform/gstreamer/GstAudioEqualizer.cpp"
         "${JFXMEDIA_SRC}/platform/gstreamer/GstAudioPlaybackPipeline.cpp"
@@ -663,7 +663,6 @@ add_media_library(jfxmedia
         "${JFXMEDIA_SRC}/ffi/FfiBandsHolder.cpp"
     INCLUDE_DIRS
         "${JFXMEDIA_SRC}"
-        "${JFXMEDIA_SRC}/jni"
         "${JFXMEDIA_SRC}/ffi"
         "${HEADERS_DIR}"
         ${JFXM_GLIB_INCLUDE_DIRS}
@@ -694,7 +693,6 @@ add_media_library(jfxmediaAvf
         "${JFXMEDIA_SRC}/platform/osx/avf/AVFSoundLevelUnit.cpp"
     INCLUDE_DIRS
         "${JFXMEDIA_SRC}"
-        "${JFXMEDIA_SRC}/jni"
         "${HEADERS_DIR}"
         "${JFXMEDIA_SRC}/platform/osx"
         ${JFXM_GLIB_INCLUDE_DIRS}

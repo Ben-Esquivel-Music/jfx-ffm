@@ -323,7 +323,7 @@ public class JfxMediaNativeTest {
     }
 
     /**
-     * And for {@code Logger}'s levels, which {@code jni/Logger.h} carries its own copy of and stamps on
+     * And for {@code Logger}'s levels, which {@code Utils/Logger.h} carries its own copy of and stamps on
      * every message the native log sink delivers. A renumbering on either side would shift every native
      * log level - messages would still arrive, at the wrong severity - so C is compared against the
      * constants themselves.

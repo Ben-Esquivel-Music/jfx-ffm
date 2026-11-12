@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2010, 2018, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2010, 2026, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -24,7 +24,6 @@
  */
 package com.sun.glass.ui;
 
-import java.lang.annotation.Native;
 import java.nio.ByteBuffer;
 import java.nio.IntBuffer;
 import java.util.Objects;
@@ -41,11 +40,11 @@ import com.sun.javafx.image.PixelUtils;
 
 public abstract class GlassRobot {
 
-    @Native public static final int MOUSE_LEFT_BTN    = 1 << 0;
-    @Native public static final int MOUSE_RIGHT_BTN   = 1 << 1;
-    @Native public static final int MOUSE_MIDDLE_BTN  = 1 << 2;
-    @Native public static final int MOUSE_BACK_BTN    = 1 << 3;
-    @Native public static final int MOUSE_FORWARD_BTN = 1 << 4;
+    public static final int MOUSE_LEFT_BTN    = 1 << 0;
+    public static final int MOUSE_RIGHT_BTN   = 1 << 1;
+    public static final int MOUSE_MIDDLE_BTN  = 1 << 2;
+    public static final int MOUSE_BACK_BTN    = 1 << 3;
+    public static final int MOUSE_FORWARD_BTN = 1 << 4;
 
     /**
      * Initializes any state necessary for this {@code Robot}. Called by

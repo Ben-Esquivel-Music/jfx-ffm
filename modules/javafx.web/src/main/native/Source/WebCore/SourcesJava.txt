@@ -21,16 +21,16 @@
 // or visit www.oracle.com if you need additional information or have any
 // questions.
 
-bridge/jni/JNIUtility.cpp
-bridge/jni/JobjectWrapper.cpp
-bridge/jni/jsc/BridgeUtils.cpp
-bridge/jni/jsc/JNIUtilityPrivate.cpp
-bridge/jni/jsc/JavaArrayJSC.cpp
-bridge/jni/jsc/JavaClassJSC.cpp
-bridge/jni/jsc/JavaFieldJSC.cpp
-bridge/jni/jsc/JavaInstanceJSC.cpp
-bridge/jni/jsc/JavaMethodJSC.cpp
-bridge/jni/jsc/JavaRuntimeObject.cpp
+bridge/java/JavaBridgeUtility.cpp
+bridge/java/JavaObjectWrapper.cpp
+bridge/java/jsc/BridgeUtils.cpp
+bridge/java/jsc/JavaArrayJSC.cpp
+bridge/java/jsc/JavaBridgeUtilityJSC.cpp
+bridge/java/jsc/JavaClassJSC.cpp
+bridge/java/jsc/JavaFieldJSC.cpp
+bridge/java/jsc/JavaInstanceJSC.cpp
+bridge/java/jsc/JavaMethodJSC.cpp
+bridge/java/jsc/JavaRuntimeObject.cpp
 
 editing/java/EditorJava.cpp
 

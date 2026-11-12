@@ -2127,7 +2127,7 @@ Source/WebCore/accessibility/isolatedtree
 Source/WebCore/animation
 Source/WebCore/bindings
 Source/WebCore/bindings/js
-Source/WebCore/bridge/jni
+Source/WebCore/bridge/java
 Source/WebCore/contentextensions
 Source/WebCore/crypto
 Source/WebCore/crypto/algorithms
@@ -2361,8 +2361,8 @@ The below applies to some files in the following directories:
 Source/JavaScriptCore/API
 Source/JavaScriptCore/inspector/remote
 Source/WebCore/PAL/pal/system
-Source/WebCore/bridge/jni
-Source/WebCore/bridge/jni/jsc
+Source/WebCore/bridge/java
+Source/WebCore/bridge/java/jsc
 Source/WebCore/html
 Source/WebCore/html/track
 Source/WebCore/page
@@ -3959,8 +3959,8 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 ---------------------------------
 The below applies to some files in the following directories:
-Source/WebCore/bridge/jni
-Source/WebCore/bridge/jni/jsc
+Source/WebCore/bridge/java
+Source/WebCore/bridge/java/jsc
 Source/WebCore/dom
 Source/WebCore/platform/mock
 
@@ -3993,7 +3993,7 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 ---------------------------------
 The below applies to some files in the following directories:
-Source/WebCore/bridge/jni/jsc
+Source/WebCore/bridge/java/jsc
 
 Copyright (C) 2024 Igalia S.L.
 Copyright (C) 2010 Apple Inc. All rights reserved.

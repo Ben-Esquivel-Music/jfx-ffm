@@ -76,9 +76,9 @@
  * gwin_test_string_block - is compiled only into the test build of glass.dll (GLASS_WIN_TEST_HOOKS,
  * US-068); the release build has none of them.
  *
- * No local header this file includes spells a JNI type any more, and common.h no longer includes jni.h. It
- * still reaches this TU through line 2 of the javac -h constants headers below (Window_Level, Clipboard,
- * CommonDialogs_Type); nothing in this file uses it.
+ * No local header this file includes spells a JNI type any more, and none includes jni.h: common.h dropped
+ * it, and the constants headers below (Window_Level, Clipboard, CommonDialogs_Type) are the JNI-free copies
+ * in native-glass/win/constants, not the javac -h headers whose second line was #include <jni.h>.
  */
 
 #include "glass_win_api.h"
@@ -99,10 +99,10 @@
 #include "KeyTable.h"
 #include "glass_win_test.h"
 
-// The @Native Window.Level constants gwin_window_set_level maps (they are not JNI: javac -h emits
-// this header for the annotated constants whether or not any native method remains).
+// The Window.Level constants gwin_window_set_level maps (native-glass/win/constants: the macros javac -h
+// wrote for them, without jni.h).
 #include "com_sun_glass_ui_Window_Level.h"
-// Clipboard / dialog pins: Clipboard.ACTION_* and CommonDialogs.Type.OPEN / SAVE, all @Native constants.
+// Clipboard / dialog pins: Clipboard.ACTION_* and CommonDialogs.Type.OPEN / SAVE, from the same directory.
 #include "com_sun_glass_ui_Clipboard.h"
 #include "com_sun_glass_ui_CommonDialogs_Type.h"
 
@@ -260,8 +260,8 @@ static_assert(HTNOWHERE == 0 && HTCLIENT == 1 && HTCAPTION == 2 && HTMINBUTTON =
 /*
  * Clipboard / DnD / dialogs (ABI 4): the byte sizes of the two callback tables and of GwinFileFilter
  * the Java layouts hard-code, the CommonDialogs.Type values gwin_dialog_file receives (the C switches
- * on the generated constants, Java passes the @Native ints), and the Clipboard.ACTION_* values the
- * C reads through the generated Clipboard header - Java pins its own copies of the same five.
+ * on the constants header's macros, Java passes the Type.OPEN / SAVE ints), and the Clipboard.ACTION_*
+ * values the C reads through the Clipboard constants header - Java pins its own copies of the same five.
  */
 #if defined(_WIN64)
 static_assert(sizeof(GwinClipboardCallbacks) == 56, "WinClipboardCallbacks.GWIN_CLIPBOARD_CALLBACKS_LAYOUT");

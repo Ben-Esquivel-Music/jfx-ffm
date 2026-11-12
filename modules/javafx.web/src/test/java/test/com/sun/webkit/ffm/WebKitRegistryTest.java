@@ -225,9 +225,9 @@ public class WebKitRegistryTest {
 
     /**
      * A weak id does not keep its object reachable. This is why {@code retain_weak} exists at all:
-     * {@code Source/WebCore/bridge/jni/JobjectWrapper.cpp} takes {@code NewWeakGlobalRef} by default
-     * - {@code useGlobalRef} defaults to false - so modelling every id as strong would pin every
-     * Java object a page script has ever touched.
+     * {@code Source/WebCore/bridge/java/JavaObjectWrapper.cpp} takes a weak reference by default, where
+     * its JNI form took {@code NewWeakGlobalRef} - {@code useGlobalRef} defaults to false - so modelling
+     * every id as strong would pin every Java object a page script has ever touched.
      * <p>
      * The strong id is checked first, and deliberately: it proves the collection this test waits for
      * is really the weak reference's doing and not a vacuous pass.

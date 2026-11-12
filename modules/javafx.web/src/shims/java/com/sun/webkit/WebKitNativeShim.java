@@ -354,7 +354,7 @@ public final class WebKitNativeShim {
             abiUnavailableReason = name + " could not be loaded: " + t;
             return false;
         }
-        SymbolLookup lookup = SymbolLookup.loaderLookup();
+        SymbolLookup lookup = NativeLibLoader.loadedLibrariesLookup();
         if (lookup.find("wkj_abi_version").isEmpty()) {
             abiUnavailableReason = WebKitNative.abiMissingMessage();
             return false;
@@ -659,7 +659,7 @@ public final class WebKitNativeShim {
      * @return the reported version
      */
     public static int actualAbiVersion() {
-        return probeAbiVersion(SymbolLookup.loaderLookup());
+        return probeAbiVersion(NativeLibLoader.loadedLibrariesLookup());
     }
 
     /**

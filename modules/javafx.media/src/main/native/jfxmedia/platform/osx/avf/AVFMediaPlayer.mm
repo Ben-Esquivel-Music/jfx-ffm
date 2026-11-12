@@ -35,7 +35,7 @@
 #import <new>
 #import "CVVideoFrame.h"
 
-#import <jni/Logger.h>
+#import <Utils/Logger.h>
 #import <PipelineManagement/NullAudioEqualizer.h>
 #import <PipelineManagement/NullAudioSpectrum.h>
 // ERROR_LOCATOR_CONNECTION_LOST, the code the resource loader delegate reports to AVFoundation when

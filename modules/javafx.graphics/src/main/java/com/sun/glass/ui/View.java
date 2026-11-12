@@ -27,21 +27,20 @@ package com.sun.glass.ui;
 import com.sun.glass.events.MouseEvent;
 import com.sun.glass.events.ViewEvent;
 import com.sun.javafx.tk.HeaderAreaType;
-import java.lang.annotation.Native;
 import java.lang.ref.WeakReference;
 import java.util.Map;
 import java.util.function.Supplier;
 
 public abstract class View {
 
-    @Native public final static int GESTURE_NO_VALUE = Integer.MAX_VALUE;
-    @Native public final static double GESTURE_NO_DOUBLE_VALUE = Double.NaN;
+    public final static int GESTURE_NO_VALUE = Integer.MAX_VALUE;
+    public final static double GESTURE_NO_DOUBLE_VALUE = Double.NaN;
 
-    @Native public final static byte IME_ATTR_INPUT                 = 0x00;
-    @Native public final static byte IME_ATTR_TARGET_CONVERTED      = 0x01;
-    @Native public final static byte IME_ATTR_CONVERTED             = 0x02;
-    @Native public final static byte IME_ATTR_TARGET_NOTCONVERTED   = 0x03;
-    @Native public final static byte IME_ATTR_INPUT_ERROR           = 0x04;
+    public final static byte IME_ATTR_INPUT                 = 0x00;
+    public final static byte IME_ATTR_TARGET_CONVERTED      = 0x01;
+    public final static byte IME_ATTR_CONVERTED             = 0x02;
+    public final static byte IME_ATTR_TARGET_NOTCONVERTED   = 0x03;
+    public final static byte IME_ATTR_INPUT_ERROR           = 0x04;
 
     final static boolean accessible = ((Supplier<Boolean>) () -> {
         String force = System.getProperty("glass.accessible.force");
@@ -417,12 +416,12 @@ public abstract class View {
 
     static final public class Capability {
         // we need these for native code
-        @Native static final public int k3dKeyValue                     = 0;
-        @Native static final public int kSyncKeyValue                   = 1;
-        @Native static final public int k3dProjectionKeyValue           = 2;
-        @Native static final public int k3dProjectionAngleKeyValue      = 3;
-        @Native static final public int k3dDepthKeyValue                = 4;
-        @Native static final public int kHiDPIAwareKeyValue             = 5;
+        static final public int k3dKeyValue                     = 0;
+        static final public int kSyncKeyValue                   = 1;
+        static final public int k3dProjectionKeyValue           = 2;
+        static final public int k3dProjectionAngleKeyValue      = 3;
+        static final public int k3dDepthKeyValue                = 4;
+        static final public int kHiDPIAwareKeyValue             = 5;
 
         static final public Object k3dKey                       = Integer.valueOf(k3dKeyValue); // value must be Boolean
         static final public Object kSyncKey                     = Integer.valueOf(kSyncKeyValue); // value must be Boolean

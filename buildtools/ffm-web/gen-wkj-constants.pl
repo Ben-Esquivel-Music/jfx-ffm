@@ -159,7 +159,7 @@ sub resolve {
 # Emit EVERY constant found, not merely the names spelled out in the C++.
 #
 # RenderThemeJava.cpp reaches its constants through token-pasting macros --
-# `#define JNI_EXPAND(n) com_sun_webkit_graphics_RenderTheme_##n` -- so the full names
+# `#define RENDER_THEME_CONSTANT(n) com_sun_webkit_graphics_RenderTheme_##n` -- so the full names
 # exist only after preprocessing and no scan of the source text can see them. A scan
 # of what "looks used" silently missed 19 of them, which would have been a build break
 # in a build this repository cannot run. Emitting everything is also what `javac -h`

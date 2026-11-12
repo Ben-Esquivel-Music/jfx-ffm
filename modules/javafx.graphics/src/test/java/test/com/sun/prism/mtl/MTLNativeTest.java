@@ -25,6 +25,7 @@
 
 package test.com.sun.prism.mtl;
 
+import com.sun.glass.utils.NativeLibLoader;
 import com.sun.prism.PixelFormat;
 import com.sun.prism.impl.PrismSettings;
 import com.sun.prism.mtl.MTLNativeShim;
@@ -130,7 +131,7 @@ public class MTLNativeTest {
 
     @Test
     public void everyExportResolvesInTheLoadedLibrary() {
-        SymbolLookup lookup = SymbolLookup.loaderLookup();
+        SymbolLookup lookup = NativeLibLoader.loadedLibrariesLookup();
         for (String name : EXPORTED_SYMBOLS) {
             assertTrue(lookup.find(name).isPresent(), "prism_mtl does not export " + name);
         }

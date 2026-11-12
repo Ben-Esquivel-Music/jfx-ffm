@@ -110,8 +110,7 @@
                              Gradle addJSL/compileFullJava pipeline:
                              1. compile the JSL shader compilers against pass-one classes
                              2. run GenAllDecoraShaders / CompileJSL to emit .java/.hlsl/.frag
-                             3. recompile the whole module (main + generated) as a second pass,
-                                emitting the JNI headers used by the native build -->
+                             3. recompile the whole module (main + generated) as a second pass -->
                         <id>jsl-codegen</id>
                         <phase>compile</phase>
                         <goals>
@@ -123,7 +122,6 @@
                                 <mkdir dir="${project.build.directory}/jsl-compilers/prism"/>
                                 <mkdir dir="${jfx.graphics.gensrc}/jsl-decora"/>
                                 <mkdir dir="${jfx.graphics.gensrc}/jsl-prism"/>
-                                <mkdir dir="${jfx.graphics.gensrc}/headers"/>
 
                                 <javac destdir="${project.build.directory}/jsl-compilers/decora"
                                        includeantruntime="false" encoding="UTF-8" debug="true"
@@ -205,8 +203,7 @@
                                     <fileset dir="${project.basedir}/src/main/jsl-prism" includes="**/*.jsl"/>
                                 </apply>
 
-                                <!-- Second pass: compile main + generated sources as the module,
-                                     generating JNI headers for the native build -->
+                                <!-- Second pass: compile main + generated sources as the module -->
                                 <mkdir dir="${project.build.directory}/mods"/>
                                 <javac destdir="${project.build.directory}/mods"
                                        includeantruntime="false" encoding="UTF-8" debug="true"
@@ -215,8 +212,6 @@
                                     <src path="${project.basedir}/src/main/java"/>
                                     <src path="${jfx.graphics.gensrc}/jsl-decora"/>
                                     <src path="${jfx.graphics.gensrc}/jsl-prism"/>
-                                    <compilerarg value="-h"/>
-                                    <compilerarg value="${jfx.graphics.gensrc}/headers"/>
                                     <compilerarg value="-implicit:none"/>
                                     <compilerarg value="--module-version"/>
                                     <compilerarg value="${jfx.release.version.short}"/>
@@ -708,9 +703,7 @@
                                         <argument>${project.build.directory}/native/cmake</argument>
                                         <argument>-A</argument>
                                         <argument>x64</argument>
-                                        <argument>-DJDK_HOME=${java.home}</argument>
                                         <argument>-DGENSRC_DIR=${jfx.graphics.gensrc}</argument>
-                                        <argument>-DHEADERS_DIR=${jfx.graphics.gensrc}/headers/javafx.graphics</argument>
                                         <argument>-DBIN_DIR=${project.build.directory}/native/bin</argument>
                                         <argument>-DGLASS_WIN_TEST_HOOKS=ON</argument>
                                         <argument>-DGLASS_TEST_BIN_DIR=${project.build.directory}/native/test-bin</argument>
@@ -776,9 +769,7 @@
                                         <argument>-B</argument>
                                         <argument>${project.build.directory}/native/cmake</argument>
                                         <argument>-DCMAKE_BUILD_TYPE=${CONF}</argument>
-                                        <argument>-DJDK_HOME=${java.home}</argument>
                                         <argument>-DGENSRC_DIR=${jfx.graphics.gensrc}</argument>
-                                        <argument>-DHEADERS_DIR=${jfx.graphics.gensrc}/headers/javafx.graphics</argument>
                                         <argument>-DBIN_DIR=${project.build.directory}/native/bin</argument>
                                         <argument>-DINCLUDE_ES2=${INCLUDE_ES2}</argument>
                                         <argument>-DINCLUDE_ES2_MONOCLE=${INCLUDE_ES2_MONOCLE}</argument>
@@ -838,9 +829,7 @@
                                         <argument>-B</argument>
                                         <argument>${project.build.directory}/native/cmake</argument>
                                         <argument>-DCMAKE_BUILD_TYPE=${CONF}</argument>
-                                        <argument>-DJDK_HOME=${java.home}</argument>
                                         <argument>-DGENSRC_DIR=${jfx.graphics.gensrc}</argument>
-                                        <argument>-DHEADERS_DIR=${jfx.graphics.gensrc}/headers/javafx.graphics</argument>
                                         <argument>-DBIN_DIR=${project.build.directory}/native/bin</argument>
                                         <argument>-DSHADER_OBJ_DIR=${project.build.directory}/native/shader-obj</argument>
                                         <argument>-DINCLUDE_ES2=${INCLUDE_ES2}</argument>

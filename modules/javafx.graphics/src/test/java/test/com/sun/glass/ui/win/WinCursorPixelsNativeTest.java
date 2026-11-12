@@ -151,8 +151,8 @@ public class WinCursorPixelsNativeTest {
     /**
      * {@code Java_com_sun_glass_ui_win_WinPixels__1initIDs} returned
      * {@code com_sun_glass_ui_Pixels_Format_BYTE_BGRA_PRE} ({@code Pixels.cpp:242}), which is the
-     * {@code @Native}-pinned 1 of {@code Pixels.java:55}. Asserting both the constant and the literal
-     * is what makes the Java-side replacement provably the same value.
+     * 1 of {@code Pixels.Format.BYTE_BGRA_PRE}, {@code @Native} up to commit {@code 0fd9cb0ef5}. Asserting both
+     * the constant and the literal is what makes the Java-side replacement provably the same value.
      */
     @Test
     public void nativeFormatIsByteBgraPre() {

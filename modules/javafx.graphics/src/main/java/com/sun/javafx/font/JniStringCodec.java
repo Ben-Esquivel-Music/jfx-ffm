@@ -69,9 +69,9 @@ import static java.lang.foreign.ValueLayout.JAVA_BYTE;
  * <p>
  * The eight byte strings measured through the JNI {@code NewStringUTF} of JDK 25.0.4 (Linux) and JDK 26+35 (Windows)
  * are pinned by {@code test.com.sun.javafx.font.JniStringCodecTest};
- * {@code test.com.sun.javafx.font.JniStringOracleTest} compares both directions with the running JVM's own
- * {@code NewStringUTF} and {@code GetStringUTFRegion} (the encoder of {@code GetStringUTFChars}) on random and
- * structured input.
+ * {@code test.com.sun.javafx.font.JniStringCodecGoldenTest} compares both directions with what the JVM's own
+ * {@code NewStringUTF} and {@code GetStringUTFRegion} (the encoder of {@code GetStringUTFChars}) returned for random
+ * and structured input, captured through the JNI function table at commit {@code 0fd9cb0ef5}.
  */
 public final class JniStringCodec {
 

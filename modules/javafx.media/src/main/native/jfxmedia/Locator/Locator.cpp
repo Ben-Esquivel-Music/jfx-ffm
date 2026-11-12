@@ -25,7 +25,7 @@
 
 #include <Common/ProductFlags.h>
 #include "Locator.h"
-#include <jni/Logger.h>
+#include <Utils/Logger.h>
 #include <Common/VSMemory.h>
 
 CLocator::CLocator(LocatorType type, const char* contentType, const char* location)

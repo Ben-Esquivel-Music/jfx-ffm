@@ -25,6 +25,7 @@
 
 package com.sun.glass.ui.gtk;
 
+import com.sun.glass.utils.NativeLibLoader;
 import java.lang.foreign.Arena;
 import java.lang.foreign.FunctionDescriptor;
 import java.lang.foreign.MemorySegment;
@@ -118,7 +119,7 @@ final class GtkLibraryLoader {
     private static final MemorySegment GDK_BACKEND_X11 = Arena.global().allocateFrom("GDK_BACKEND=x11");
 
     /**
-     * Whether the library the class loader loaded as {@code glass} is itself a glass GTK library: the
+     * Whether the library NativeLibLoader loaded as {@code glass} is itself a glass GTK library: the
      * deployment {@code GlassApplication.cpp} described as "renaming the gtk versioned native libraries to be
      * libglass.so", whose {@code _queryLibrary} answered {@code QUERY_USE_CURRENT} because the library that
      * answered was the one to use. Decided once, when this class initializes - which is the toolkit's query,
@@ -126,7 +127,7 @@ final class GtkLibraryLoader {
      * these symbols afterwards.
      */
     private static final boolean GLASS_IS_THE_GTK_LIBRARY =
-            SymbolLookup.loaderLookup().find("ggtk_abi_version").isPresent();
+            NativeLibLoader.loadedLibrariesLookup().find("ggtk_abi_version").isPresent();
 
     private GtkLibraryLoader() {
     }

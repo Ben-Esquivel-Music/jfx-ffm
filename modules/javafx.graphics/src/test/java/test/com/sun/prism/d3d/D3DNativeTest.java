@@ -25,6 +25,7 @@
 
 package test.com.sun.prism.d3d;
 
+import com.sun.glass.utils.NativeLibLoader;
 import com.sun.prism.PixelFormat;
 import com.sun.prism.Texture;
 import com.sun.prism.d3d.D3DNativeShim;
@@ -169,7 +170,7 @@ public class D3DNativeTest {
 
     @Test
     public void everyExportedSymbolResolvesInTheLoadedLibrary() {
-        SymbolLookup lookup = SymbolLookup.loaderLookup();
+        SymbolLookup lookup = NativeLibLoader.loadedLibrariesLookup();
         for (String name : EXPORTED_SYMBOLS) {
             assertTrue(lookup.find(name).isPresent(), "prism_d3d does not export " + name);
         }

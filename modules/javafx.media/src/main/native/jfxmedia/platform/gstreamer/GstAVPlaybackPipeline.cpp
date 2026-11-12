@@ -30,7 +30,7 @@
 #include <gst/app/gstappsink.h>
 #include <PipelineManagement/VideoTrack.h>
 #include <MediaManagement/Media.h>
-#include <jni/Logger.h>
+#include <Utils/Logger.h>
 #include <Common/VSMemory.h>
 #include <fxplugins_common.h>
 

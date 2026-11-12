@@ -25,6 +25,7 @@
 
 package test.com.sun.javafx.iio.jpeg;
 
+import com.sun.glass.utils.NativeLibLoader;
 import com.sun.javafx.iio.ImageLoader;
 import com.sun.javafx.iio.jpeg.JPEGImageLoaderFactory;
 import com.sun.javafx.iio.jpeg.JPEGNativeShim;
@@ -96,7 +97,7 @@ public class JPEGNativeTest {
 
     @Test
     public void everyExportedSymbolResolvesInTheLoadedLibrary() {
-        SymbolLookup lookup = SymbolLookup.loaderLookup();
+        SymbolLookup lookup = NativeLibLoader.loadedLibrariesLookup();
         for (String name : EXPORTED_SYMBOLS) {
             assertTrue(lookup.find(name).isPresent(), "javafx_iio does not export " + name);
         }

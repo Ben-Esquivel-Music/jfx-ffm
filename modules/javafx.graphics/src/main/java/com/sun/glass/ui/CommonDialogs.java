@@ -24,7 +24,6 @@
  */
 package com.sun.glass.ui;
 
-import java.lang.annotation.Native;
 import java.io.IOException;
 import java.util.List;
 import java.util.ArrayList;
@@ -38,8 +37,8 @@ public class CommonDialogs {
      * @see #showFileChooser
      */
     public static final class Type {
-        @Native public static final int OPEN = 0;
-        @Native public static final int SAVE = 1;
+        public static final int OPEN = 0;
+        public static final int SAVE = 1;
     }
 
     /**

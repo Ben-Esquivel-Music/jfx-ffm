@@ -36,9 +36,10 @@
 #   --header  the CORE ABI header (exception slot, WKJHost, wkj_init, ...). Its
 #             WKJ_EXPORT declarations, struct definitions and host table are
 #             parsed out of the C.
-#   --spec    the DOM ABI spec, buildtools/ffm-web/dom-abi.tsv, which
-#             dom-cpp-to-ffm.pl derives mechanically from the DOM binding
-#             sources. The DOM half is NEVER read from a hand-written header:
+#   --spec    the DOM ABI spec, buildtools/ffm-web/dom-abi.tsv. dom-abi.tsv
+#             is the spec; it was first extracted from the JNI-era DOM
+#             bindings by dom-cpp-to-ffm.pl, which US-074 removed (see git
+#             history). The DOM half is NEVER read from a hand-written header:
 #             a guessed signature produces a stub that agrees with a wrong
 #             FunctionDescriptor, which is silent memory corruption rather than
 #             a clean failure - precisely what these tests exist to catch.

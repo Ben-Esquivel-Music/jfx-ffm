@@ -84,11 +84,13 @@ distribution archives are not produced.
 
 javafx.graphics has no JNI on any platform: no class declares a `native`
 method, and its native libraries export plain C functions that Java calls
-through the Foreign Function & Memory API (`java.lang.foreign`). The
-`javac -h` step of the graphics build stays only because Windows `glass`
-still includes the constant headers it generates; the Linux and macOS
-libraries compile without the JDK include directories and without those
-headers.
+through the Foreign Function & Memory API (`java.lang.foreign`). The build
+runs no `javac -h` step, and none of its native libraries compiles against
+the JDK include directories: the Windows, Linux and macOS Glass sources
+read the Java constants they use from JNI-free headers in
+`native-glass/{win,gtk,mac}/constants`, which `WinConstantsHeaderTest`,
+`GtkConstantsHeaderTest` and `MacConstantsHeaderTest` check against the
+Java fields.
 
 # Contribute
 

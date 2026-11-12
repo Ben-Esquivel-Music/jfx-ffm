@@ -38,11 +38,11 @@ set(CMAKE_OSX_DEPLOYMENT_TARGET "11.0" CACHE STRING "Minimum macOS deployment ve
 project(javafxGraphicsNatives LANGUAGES C CXX)
 
 # ---------------------------------------------------------------------------
-# Inputs from Maven (shared across platforms)
+# Inputs from Maven (shared across platforms). No target includes a JDK header
+# or a javac -h header, so the build takes no JDK directory and no generated
+# JNI header directory.
 # ---------------------------------------------------------------------------
-set(JDK_HOME "$ENV{JAVA_HOME}" CACHE PATH "JDK used for JNI headers")
 set(GENSRC_DIR "" CACHE PATH "modules/javafx.graphics/target/gensrc")
-set(HEADERS_DIR "" CACHE PATH "Directory containing javac -h generated JNI headers")
 set(BIN_DIR "" CACHE PATH "Output directory for the built native libraries")
 if(WIN32)
     option(INCLUDE_ES2 "Build the prism_es2 (OpenGL) library" OFF)
@@ -56,8 +56,8 @@ set(INCLUDE_ES2_MONOCLE "AUTO" CACHE STRING
     "Build the prism_es2_monocle (Monocle EGL / OpenGL ES 2) library on Linux: AUTO, ON or OFF")
 set_property(CACHE INCLUDE_ES2_MONOCLE PROPERTY STRINGS AUTO ON OFF)
 
-if(NOT GENSRC_DIR OR NOT HEADERS_DIR OR NOT BIN_DIR)
-    message(FATAL_ERROR "GENSRC_DIR, HEADERS_DIR and BIN_DIR must be provided")
+if(NOT GENSRC_DIR OR NOT BIN_DIR)
+    message(FATAL_ERROR "GENSRC_DIR and BIN_DIR must be provided")
 endif()
 
 set(GRAPHICS_SRC "${CMAKE_CURRENT_SOURCE_DIR}/../src/main")

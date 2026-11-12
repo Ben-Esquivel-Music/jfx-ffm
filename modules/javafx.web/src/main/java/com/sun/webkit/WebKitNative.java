@@ -282,7 +282,7 @@ public final class WebKitNative {
         Error failure = null;
         try {
             NativeLibLoader.loadLibrary(LIBRARY_NAME);
-            lookup = SymbolLookup.loaderLookup();
+            lookup = NativeLibLoader.loadedLibrariesLookup();
             checkAbiVersion(lookup);
             exceptionSlot = bind(lookup, EXCEPTION_SLOT_SYMBOL, FunctionDescriptor.of(ADDRESS));
             init = bind(lookup, INIT_SYMBOL,
@@ -519,13 +519,13 @@ public final class WebKitNative {
      * weak id does not keep its object reachable: once the object is collected {@link #isLive}
      * answers false and {@link #lookup} answers {@code null}, and neither throws.
      * <p>
-     * This exists because {@code Source/WebCore/bridge/jni/JobjectWrapper.cpp} takes
-     * {@code NewWeakGlobalRef} by default - {@code useGlobalRef} defaults to false - and the
-     * LiveConnect code around it is written to tolerate collection. Modelling every id as strong
-     * would pin every Java object a page script has ever touched, which is a behaviour change and
-     * not a cleanup. A new id is minted whenever the object is still there, because the caller may
-     * be asking for a weak view of a strong id; for id zero, an unknown id and a weak id whose
-     * object has been collected nothing is minted and zero is returned.
+     * This exists because {@code Source/WebCore/bridge/java/JavaObjectWrapper.cpp} takes a weak
+     * reference by default, where its JNI form took {@code NewWeakGlobalRef} - {@code useGlobalRef}
+     * defaults to false - and the LiveConnect code around it is written to tolerate collection.
+     * Modelling every id as strong would pin every Java object a page script has ever touched, which
+     * is a behaviour change and not a cleanup. A new id is minted whenever the object is still there,
+     * because the caller may be asking for a weak view of a strong id; for id zero, an unknown id and
+     * a weak id whose object has been collected nothing is minted and zero is returned.
      *
      * @param id the registry id, may be zero
      * @return a weak id the caller owns and must release exactly once, or zero

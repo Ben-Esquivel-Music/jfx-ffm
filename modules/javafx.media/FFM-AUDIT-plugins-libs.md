@@ -27,7 +27,7 @@ Repo: `C:\SourceCode\jfx-ffm`, module `modules/javafx.media`. All paths below ar
 > ("none (regenerable)"), and the first bullet of the Recommendation ("leave them untouched").
 > The manifest of every one of those patches is `FFM-ABI-CONTRACT.md` section 14.2, which
 > exists because `verify-no-jni.pl` skips exactly these directories and so no automated control in the
-> branch can see a change made in them.
+> branch can see a change made in them. US-074 removed `verify-no-jni.pl` (git history has it).
 
 ## 1. Verdict
 

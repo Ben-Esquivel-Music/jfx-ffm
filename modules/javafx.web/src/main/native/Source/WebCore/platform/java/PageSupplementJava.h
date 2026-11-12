@@ -49,7 +49,7 @@ class PageSupplementJava final : public Supplement<WebCore::Page> {
      * A NEW id for the same Java WebPage, owned by the caller - the exact analogue of the
      * local reference this returned, which the caller let die at the end of its scope. The
      * three consumers outside this directory (URLLoader, SocketStreamHandleImplJava and
-     * WebPage::jobjectFromPage) hold it in a WKJHandle.
+     * WebPage::handleFromPage) hold it in a WKJHandle.
      */
     WEBCORE_EXPORT WKJHandle jWebPage() const { return m_webPage; }
 

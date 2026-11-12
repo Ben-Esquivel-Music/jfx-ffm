@@ -39,7 +39,6 @@ import javafx.beans.property.SimpleDoubleProperty;
 import javafx.beans.property.SimpleObjectProperty;
 import javafx.scene.layout.HeaderBar;
 import javafx.scene.layout.Region;
-import java.lang.annotation.Native;
 import java.util.Collections;
 import java.util.LinkedList;
 import java.util.List;
@@ -141,7 +140,7 @@ public abstract class Window {
      * Often used for floating toolbars. It has smaller than usual decorations
      * and doesn't display a taskbar button.
      */
-    @Native public static final int UTILITY         = 1 << 3;
+    public static final int UTILITY         = 1 << 3;
     /**
      * A popup window.
      *
@@ -149,18 +148,18 @@ public abstract class Window {
      * default it may display a task-bar button. To hide it the window must be
      * owned.
      */
-    @Native public static final int POPUP           = 1 << 4;
+    public static final int POPUP           = 1 << 4;
 
     // These affect window decorations as well as system menu actions,
     // so applicable to both decorated and undecorated windows
-    @Native public static final int CLOSABLE        = 1 << 5;
-    @Native public static final int MINIMIZABLE     = 1 << 6;
-    @Native public static final int MAXIMIZABLE     = 1 << 7;
+    public static final int CLOSABLE        = 1 << 5;
+    public static final int MINIMIZABLE     = 1 << 6;
+    public static final int MAXIMIZABLE     = 1 << 7;
 
     /**
      * Indicates that the window trim will draw from right to left.
      */
-    @Native public static final int RIGHT_TO_LEFT     = 1 << 8;
+    public static final int RIGHT_TO_LEFT     = 1 << 8;
 
     /**
      * Indicates that a window will have a client area textured the same way as the platform decorations
@@ -168,22 +167,22 @@ public abstract class Window {
      * This is supported not on all platforms, the client should check if the feature is supported by using
      * {@link com.sun.glass.ui.Application#supportsUnifiedWindows()}
      */
-    @Native public static final int UNIFIED = 1 << 9;
+    public static final int UNIFIED = 1 << 9;
 
     /**
      * Indicates that the window is modal which affects whether the window is minimizable.
      */
-    @Native public static final int MODAL = 1 << 10;
+    public static final int MODAL = 1 << 10;
 
     /**
      * Indicates that the window should use a dark window frame.
      */
-    @Native public static final int DARK_FRAME = 1 << 11;
+    public static final int DARK_FRAME = 1 << 11;
 
     final static public class State {
-        @Native public static final int NORMAL = 1;
-        @Native public static final int MINIMIZED = 2;
-        @Native public static final int MAXIMIZED = 3;
+        public static final int NORMAL = 1;
+        public static final int MINIMIZED = 2;
+        public static final int MAXIMIZED = 3;
     }
 
     /**
@@ -195,18 +194,18 @@ public abstract class Window {
      * @see #setLevel
      */
     public static final class Level {
-        @Native private static final int _MIN = 1;
+        private static final int _MIN = 1;
 
         /** Normal window level. */
-        @Native public static final int NORMAL = 1;
+        public static final int NORMAL = 1;
 
         /** A window level that is above all other NORMAL windows. */
-        @Native public static final int FLOATING = 2;
+        public static final int FLOATING = 2;
 
         /** A very topmost window level. May cover system UI elements such as dock, taskbar, etc. */
-        @Native public static final int TOPMOST = 3;
+        public static final int TOPMOST = 3;
 
-        @Native private static final int _MAX = 3;
+        private static final int _MAX = 3;
     }
 
     private final Window owner;

@@ -127,7 +127,7 @@ inline wkj_ref WKJRetain(wkj_ref ref)
  * Mints a new weak id for the object `ref` names, whether `ref` is strong or weak. A weak
  * id does not keep the object reachable. 0 in the same cases as WKJRetain: nothing is
  * minted for a null or unknown ref or for an object that has been collected. Only
- * LiveConnect needs this (JobjectWrapper takes NewWeakGlobalRef by default); everything
+ * LiveConnect needs this (JavaObjectWrapper holds a weak id by default); everything
  * else wants WKJRetain.
  */
 inline wkj_ref WKJRetainWeak(wkj_ref ref)
