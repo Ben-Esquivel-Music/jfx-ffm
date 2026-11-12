@@ -70,7 +70,7 @@ public enum VideoFormat {
         return lookupMap.get(Integer.valueOf(ntype));
     }
 
-    // The values of CVideoFrame::FrameType in the native code (jfxmedia_api.h)
+    // The values of CVideoFrame::FrameType in the native code (PipelineManagement/VideoFrame.h)
     public static class FormatTypes {
         public static final int FORMAT_TYPE_ARGB = 1;
         public static final int FORMAT_TYPE_BGRA_PRE = 2;
