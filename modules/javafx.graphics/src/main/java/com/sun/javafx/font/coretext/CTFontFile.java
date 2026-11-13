@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2013, 2025, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2013, 2026, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -94,7 +94,14 @@ class CTFontFile extends PrismFontFile {
         }
         if (embedded) {
             cgFontRef = createCGFontForEmbeddedFont();
-            Disposer.addRecord(this, new SelfDisposerRecord(cgFontRef));
+            try {
+                Disposer.addRecord(this, new SelfDisposerRecord(cgFontRef));
+            } catch (Throwable t) {
+                if (cgFontRef != 0) {
+                    OS.CFRelease(cgFontRef);
+                }
+                throw t;
+            }
         } else {
             cgFontRef = 0;
         }
@@ -112,14 +119,20 @@ class CTFontFile extends PrismFontFile {
         boolean result = false;
         long fileRef = OS.CFStringCreate(fontfile);
         if (fileRef != 0) {
-            int pathStyle = OS.kCFURLPOSIXPathStyle;
-            long urlRef = OS.CFURLCreateWithFileSystemPath(alloc, fileRef, pathStyle, false);
-            if (urlRef != 0) {
-                int scope = OS.kCTFontManagerScopeProcess;
-                result = OS.CTFontManagerRegisterFontsForURL(urlRef, scope, 0);
-                OS.CFRelease(urlRef);
+            try {
+                int pathStyle = OS.kCFURLPOSIXPathStyle;
+                long urlRef = OS.CFURLCreateWithFileSystemPath(alloc, fileRef, pathStyle, false);
+                if (urlRef != 0) {
+                    try {
+                        int scope = OS.kCTFontManagerScopeProcess;
+                        result = OS.CTFontManagerRegisterFontsForURL(urlRef, scope, 0);
+                    } finally {
+                        OS.CFRelease(urlRef);
+                    }
+                }
+            } finally {
+                OS.CFRelease(fileRef);
             }
-            OS.CFRelease(fileRef);
         }
         return result;
     }
@@ -128,18 +141,27 @@ class CTFontFile extends PrismFontFile {
         long cgFontRef = 0;
         final long fileNameRef = OS.CFStringCreate(getFileName());
         if (fileNameRef != 0) {
-            final long url = OS.CFURLCreateWithFileSystemPath(
-                    OS.kCFAllocatorDefault(), fileNameRef,
-                    OS.kCFURLPOSIXPathStyle, false);
-            if (url != 0) {
-                long dataProvider = OS.CGDataProviderCreateWithURL(url);
-                if (dataProvider != 0) {
-                    cgFontRef = OS.CGFontCreateWithDataProvider(dataProvider);
-                    OS.CFRelease(dataProvider);
+            try {
+                final long url = OS.CFURLCreateWithFileSystemPath(
+                        OS.kCFAllocatorDefault(), fileNameRef,
+                        OS.kCFURLPOSIXPathStyle, false);
+                if (url != 0) {
+                    try {
+                        long dataProvider = OS.CGDataProviderCreateWithURL(url);
+                        if (dataProvider != 0) {
+                            try {
+                                cgFontRef = OS.CGFontCreateWithDataProvider(dataProvider);
+                            } finally {
+                                OS.CFRelease(dataProvider);
+                            }
+                        }
+                    } finally {
+                        OS.CFRelease(url);
+                    }
                 }
-                OS.CFRelease(url);
+            } finally {
+                OS.CFRelease(fileNameRef);
             }
-            OS.CFRelease(fileNameRef);
         }
         return cgFontRef;
     }
@@ -155,9 +177,11 @@ class CTFontFile extends PrismFontFile {
             if (fontRef == 0) return null;
             long pathRef = OS.CTFontCreatePathForGlyph(fontRef, (short)gc, tx);
             if (pathRef == 0) return null;
-            CGRect rect = OS.CGPathGetPathBoundingBox(pathRef);
-            OS.CGPathRelease(pathRef);
-            return rect;
+            try {
+                return OS.CGPathGetPathBoundingBox(pathRef);
+            } finally {
+                OS.CGPathRelease(pathRef);
+            }
       } finally {
           Reference.reachabilityFence(strike);
       }
@@ -170,9 +194,11 @@ class CTFontFile extends PrismFontFile {
             if (fontRef == 0) return null;
             long pathRef = OS.CTFontCreatePathForGlyph(fontRef, (short)gc, tx);
             if (pathRef == 0) return null;
-            Path2D path = OS.CGPathApply(pathRef);
-            OS.CGPathRelease(pathRef);
-            return path;
+            try {
+                return OS.CGPathApply(pathRef);
+            } finally {
+                OS.CGPathRelease(pathRef);
+            }
       } finally {
           Reference.reachabilityFence(strike);
       }
@@ -234,8 +260,12 @@ class CTFontFile extends PrismFontFile {
             /* Note: not using tx here as the bounds need to be y up */
             long pathRef = OS.CTFontCreatePathForGlyph(fontRef, (short)gc, null);
             if (pathRef == 0) return null;
-            CGRect rect = OS.CGPathGetPathBoundingBox(pathRef);
-            OS.CGPathRelease(pathRef);
+            CGRect rect;
+            try {
+                rect = OS.CGPathGetPathBoundingBox(pathRef);
+            } finally {
+                OS.CGPathRelease(pathRef);
+            }
             float scale = getUnitsPerEm() / size;
             bb[0] = (int)(Math.round(rect.origin.x * scale));
             bb[1] = (int)(Math.round(rect.origin.y * scale));
@@ -269,8 +299,11 @@ class CTFontFile extends PrismFontFile {
           } else {
               final long psNameRef = OS.CFStringCreate(psName);
               if (psNameRef != 0) {
-                  retRef = OS.CTFontCreateWithName(psNameRef, size, matrix);
-                  OS.CFRelease(psNameRef);
+                  try {
+                      retRef = OS.CTFontCreateWithName(psNameRef, size, matrix);
+                  } finally {
+                      OS.CFRelease(psNameRef);
+                  }
               }
            }
        }
@@ -279,8 +312,15 @@ class CTFontFile extends PrismFontFile {
 
     void getCascadingInfo(FontFallbackInfo info) {
         CTFactory factory = (CTFactory)PrismFontFactory.getFontFactory();
+        String[] stringInfo = new String[0];
         long ref = getFontRef(0f, null);
-        String[] stringInfo = MacFontFinder.getCascadeList(ref);
+        if (ref != 0) {
+            try {
+                stringInfo = MacFontFinder.getCascadeList(ref);
+            } finally {
+                OS.CFRelease(ref);
+            }
+        }
         // stringInfo is displayname and file.
         // if there's a null file, skip
         // if there's a non-null file but name starts with ".",
@@ -297,7 +337,7 @@ class CTFontFile extends PrismFontFile {
             if (PrismFontFactory.debugFonts) {
                 System.err.print("Entry : name=" + name + " file="+file);
             }
-            if (file == null || name.startsWith(".")) {
+            if (file == null || name == null || name.startsWith(".")) {
                 if (PrismFontFactory.debugFonts) {
                     System.err.println(" - *** not using this entry (.font and/or null file)");
                 }

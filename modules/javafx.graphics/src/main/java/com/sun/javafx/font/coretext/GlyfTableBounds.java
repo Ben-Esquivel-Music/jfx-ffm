@@ -53,9 +53,13 @@ final class GlyfTableBounds {
         if (loca.address() == 0) {
             return false;
         }
-        MemorySegment entries = contents(loca);
-        long offset = entries.address() == 0 ? NO_HEADER : headerOffset(entries, glyph, format);
-        CFNative.CFRelease(loca);
+        long offset;
+        try {
+            MemorySegment entries = contents(loca);
+            offset = entries.address() == 0 ? NO_HEADER : headerOffset(entries, glyph, format);
+        } finally {
+            CFNative.CFRelease(loca);
+        }
         if (offset == NO_HEADER) {
             return false;
         }
@@ -64,10 +68,12 @@ final class GlyfTableBounds {
         if (glyf.address() == 0) {
             return false;
         }
-        MemorySegment glyphs = contents(glyf);
-        boolean result = glyphs.address() != 0 && boundingBox(glyphs, offset, bb);
-        CFNative.CFRelease(glyf);
-        return result;
+        try {
+            MemorySegment glyphs = contents(glyf);
+            return glyphs.address() != 0 && boundingBox(glyphs, offset, bb);
+        } finally {
+            CFNative.CFRelease(glyf);
+        }
     }
 
     private static MemorySegment contents(MemorySegment data) {

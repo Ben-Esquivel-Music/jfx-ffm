@@ -52,8 +52,8 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * {@code familyToFontListMap}.
  * <p>
  * Left out on purpose: {@code getFont} for a type {@code CTFontCreateUIFontForLanguage} answers with NULL, and
- * {@code getCascadeList(0)}. They hand the NULL to {@code CFRelease} or {@code CFArrayGetCount} and crash the JVM,
- * as the C did (US-067).
+ * {@code getCascadeList(0)}. The C crashed on both, so the golden has no row for either;
+ * {@link MacFontNullInputTest} pins what the Java answers (US-067).
  */
 @EnabledOnOs(OS.MAC)
 public class MacFontFinderGoldenTest {

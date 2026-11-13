@@ -72,7 +72,8 @@ final class MacFontBindings {
     static final String MAC_FONT_FINDER_SHIM = "com/sun/javafx/font/MacFontFinderShim";
     static final String DFONT_DECODER_SHIM = "com/sun/javafx/font/DFontDecoderShim";
     static final List<String> OBSERVERS =
-            List.of("com/sun/javafx/font/MacFontOracleShim", "com/sun/javafx/font/MacMachineShim");
+            List.of("com/sun/javafx/font/MacFontOracleShim", "com/sun/javafx/font/MacFontProbeShim",
+                    "com/sun/javafx/font/MacMachineShim");
 
     // 55 names for 56 natives: CFStringCreateWithCharacters is overloaded.
     static final List<String> OS_NATIVES = List.of(
@@ -105,40 +106,43 @@ final class MacFontBindings {
             OS, OS_NATIVES, MAC_FONT_FINDER, MAC_FONT_FINDER_NATIVES, DFONT_DECODER, DFONT_DECODER_NATIVES);
 
     // Measured on the JNI build. The peers' entries are checked on every run, so a call site moved to another
-    // binding fails at once; those of the delegate owners describe the JNI bodies and are checked at capture.
-    static final Map<String, String> NATIVE_CALL_SITES = Map.of(
-            "com/sun/javafx/font/coretext/CTFactory", "OS.CTFontCopyURLAttribute",
-            "com/sun/javafx/font/coretext/CTFontFile", "MacFontFinder.getCascadeList OS.CFRelease*6"
+    // binding fails at once; US-067 moved them where it added or removed a release. javac copies a finally block to
+    // each exit of its try, so a release written once in a finally counts twice when the try has one normal exit.
+    // The entries of the delegate owners describe the JNI bodies and are checked at capture.
+    static final Map<String, String> NATIVE_CALL_SITES = Map.ofEntries(
+            Map.entry("com/sun/javafx/font/coretext/CTFactory", "OS.CFRelease*2 OS.CTFontCopyURLAttribute"),
+            Map.entry("com/sun/javafx/font/coretext/CTFontFile", "MacFontFinder.getCascadeList OS.CFRelease*15"
                     + " OS.CFURLCreateWithFileSystemPath*2 OS.CGDataProviderCreateWithURL"
-                    + " OS.CGFontCreateWithDataProvider OS.CGPathApply OS.CGPathGetPathBoundingBox*2 OS.CGPathRelease*3"
+                    + " OS.CGFontCreateWithDataProvider OS.CGPathApply OS.CGPathGetPathBoundingBox*2 OS.CGPathRelease*6"
                     + " OS.CTFontCreateCopyWithAttributes OS.CTFontCreatePathForGlyph*3"
                     + " OS.CTFontCreateUIFontForLanguage"
                     + " OS.CTFontCreateWithGraphicsFont OS.CTFontCreateWithName OS.CTFontGetAdvancesForGlyphs"
                     + " OS.CTFontGetBoundingRectForGlyphUsingTables OS.CTFontGetBoundingRectForGlyphs"
-                    + " OS.CTFontManagerRegisterFontsForURL OS.kCFAllocatorDefault*2",
-            "com/sun/javafx/font/coretext/CTFontFile$SelfDisposerRecord", "OS.CFRelease",
-            "com/sun/javafx/font/coretext/CTGlyph", "OS.CGBitmapContextCreate OS.CGBitmapContextGetData*2"
+                    + " OS.CTFontManagerRegisterFontsForURL OS.kCFAllocatorDefault*2"),
+            Map.entry("com/sun/javafx/font/coretext/CTFontFile$SelfDisposerRecord", "OS.CFRelease"),
+            Map.entry("com/sun/javafx/font/coretext/CTFontStrike", "OS.CFRelease"),
+            Map.entry("com/sun/javafx/font/coretext/CTGlyph", "OS.CGBitmapContextCreate OS.CGBitmapContextGetData*2"
                     + " OS.CGColorSpaceCreateDeviceGray OS.CGColorSpaceCreateDeviceRGB OS.CGContextFillRect"
-                    + " OS.CGContextRelease*2 OS.CGContextSetAllowsAntialiasing OS.CGContextSetAllowsFontSmoothing"
+                    + " OS.CGContextRelease*5 OS.CGContextSetAllowsAntialiasing OS.CGContextSetAllowsFontSmoothing"
                     + " OS.CGContextSetAllowsFontSubpixelPositioning OS.CGContextSetAllowsFontSubpixelQuantization"
                     + " OS.CGContextSetRGBFillColor*2 OS.CGContextTranslateCTM*4 OS.CGImageContextGetData"
-                    + " OS.CGRectApplyAffineTransform OS.CTFontDrawGlyphs*2 OS.CTFontGetAdvancesForGlyphs",
-            "com/sun/javafx/font/coretext/CTGlyphLayout", "OS.CFArrayGetCount OS.CFArrayGetValueAtIndex"
+                    + " OS.CGRectApplyAffineTransform OS.CTFontDrawGlyphs*2 OS.CTFontGetAdvancesForGlyphs"),
+            Map.entry("com/sun/javafx/font/coretext/CTGlyphLayout", "OS.CFArrayGetCount OS.CFArrayGetValueAtIndex"
                     + " OS.CFAttributedStringCreate OS.CFDictionaryAddValue*2 OS.CFDictionaryCreateMutable"
-                    + " OS.CFDictionaryGetValue OS.CFRelease*5 OS.CFRetain OS.CFStringCreateWithCharacters"
+                    + " OS.CFDictionaryGetValue OS.CFRelease*10 OS.CFStringCreateWithCharacters"
                     + " OS.CTFontCopyAttributeDisplayName OS.CTFontCreateCopyWithAttributes"
                     + " OS.CTLineCreateWithAttributedString OS.CTLineGetGlyphCount OS.CTLineGetGlyphRuns"
                     + " OS.CTLineGetTypographicBounds OS.CTParagraphStyleCreate OS.CTRunGetAttributes"
                     + " OS.CTRunGetGlyphs*2"
                     + " OS.CTRunGetPositions OS.CTRunGetStringIndices OS.kCFAllocatorDefault"
                     + " OS.kCFTypeDictionaryKeyCallBacks OS.kCFTypeDictionaryValueCallBacks OS.kCTFontAttributeName*2"
-                    + " OS.kCTParagraphStyleAttributeName",
-            "com/sun/javafx/font/coretext/CTStrikeDisposer", "OS.CFRelease",
-            "com/sun/javafx/font/coretext/OS", "OS.CFStringCreateWithCharacters OS.kCFAllocatorDefault",
-            "com/sun/javafx/font/MacFontFinder", "MacFontFinder.getFont*2 MacFontFinder.getFontData",
-            "com/sun/javafx/font/DFontDecoder", "DFontDecoder.createCTFont DFontDecoder.getCTFontFormat"
-                    + " DFontDecoder.getCTFontTable DFontDecoder.getCTFontTags DFontDecoder.releaseCTFont*3",
-            "com/sun/javafx/font/PrismFontFactory", "MacFontFinder.getSystemFontSize");
+                    + " OS.kCTParagraphStyleAttributeName"),
+            Map.entry("com/sun/javafx/font/coretext/CTStrikeDisposer", "OS.CFRelease"),
+            Map.entry("com/sun/javafx/font/coretext/OS", "OS.CFStringCreateWithCharacters OS.kCFAllocatorDefault"),
+            Map.entry("com/sun/javafx/font/MacFontFinder", "MacFontFinder.getFont*2 MacFontFinder.getFontData"),
+            Map.entry("com/sun/javafx/font/DFontDecoder", "DFontDecoder.createCTFont DFontDecoder.getCTFontFormat"
+                    + " DFontDecoder.getCTFontTable DFontDecoder.getCTFontTags DFontDecoder.releaseCTFont*3"),
+            Map.entry("com/sun/javafx/font/PrismFontFactory", "MacFontFinder.getSystemFontSize"));
 
     static final String NATIVE_FONT_DIRECTORY = "src/main/native-font";
 
@@ -162,9 +166,11 @@ final class MacFontBindings {
             "com/sun/javafx/font/coretext/CTStrikeDisposer", OS, MAC_FONT_FINDER, DFONT_DECODER,
             "com/sun/javafx/font/PrismFontFactory");
 
-    // getMonospacedFont, whose only call site is commented out. It must stay uncalled; if production starts calling
-    // it, the exemption is stale and the check says so.
-    static final Set<String> UNCALLED_ENTRY_POINTS = Set.of(MAC_FONT_FINDER + " getMonospacedFont()Ljava/lang/String;");
+    // getMonospacedFont, whose only call site is commented out, and CFRetain, whose only call site was the extra
+    // retain of a fallback font that US-067 removed. Both must stay uncalled; if production starts calling one, its
+    // exemption is stale and the check says so.
+    static final Set<String> UNCALLED_ENTRY_POINTS = Set.of(MAC_FONT_FINDER + " getMonospacedFont()Ljava/lang/String;",
+                                                            OS + " CFRetain(J)V");
 
     private static boolean nativeCountsReported;
 
@@ -437,8 +443,8 @@ final class MacFontBindings {
             }
             String actual = nativeCallSites(classModel(expected.getKey()), NATIVES);
             if (!actual.equals(expected.getValue())) {
-                problems.add(expected.getKey() + " calls [" + actual + "] where the JNI build of commit " + COMMIT
-                        + " calls [" + expected.getValue() + "]: a call site moved to another binding");
+                problems.add(expected.getKey() + " calls [" + actual + "] where NATIVE_CALL_SITES pins ["
+                        + expected.getValue() + "]: a call site moved to another binding");
             }
         }
         return problems;

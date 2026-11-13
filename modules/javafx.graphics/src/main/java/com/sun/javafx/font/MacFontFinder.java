@@ -44,11 +44,26 @@ public class MacFontFinder {
     private static final int MonospacedFontType = 1; /*kCTFontUserFixedPitchFontType*/
     private static String getFont(int type) {
         MemorySegment font = CTNative.CTFontCreateUIFontForLanguage(type, 0, MemorySegment.NULL);
-        MemorySegment family = CTNative.CTFontCopyFamilyName(font);
-        String name = CFNative.cfToString(family);
-        CFNative.CFRelease(family);
-        CFNative.CFRelease(font);
-        return name;
+        if (font.address() == 0) {
+            return null;
+        }
+        try {
+            return familyName(CTNative.CTFontCopyFamilyName(font));
+        } finally {
+            CFNative.CFRelease(font);
+        }
+    }
+
+    /** The string of the +1 family name of a font, which this releases; null when the font has none. */
+    private static String familyName(MemorySegment family) {
+        if (family.address() == 0) {
+            return null;
+        }
+        try {
+            return CFNative.cfToString(family);
+        } finally {
+            CFNative.CFRelease(family);
+        }
     }
 
     public static String getSystemFont() {
@@ -119,21 +134,35 @@ public class MacFontFinder {
      */
     private static String[] getFontData() {
         MemorySegment collection = CTNative.CTFontCollectionCreateFromAvailableFonts(MemorySegment.NULL);
-        MemorySegment fonts = CTNative.CTFontCollectionCreateMatchingFontDescriptors(collection);
-        CFNative.CFRelease(collection);
-        long count = CFNative.CFArrayGetCount(fonts);
-        String[] result = new String[(int) ((count + 2) * 3)];
-        int index = 0;
-        for (long i = 0; i < count; i++) {
-            index = addDescriptor(CFNative.CFArrayGetValueAtIndex(fonts, i), result, index);
+        MemorySegment fonts;
+        try {
+            fonts = CTNative.CTFontCollectionCreateMatchingFontDescriptors(collection);
+        } finally {
+            CFNative.CFRelease(collection);
         }
-        CFNative.CFRelease(fonts);
+        String[] result;
+        int index = 0;
+        try {
+            long count = CFNative.CFArrayGetCount(fonts);
+            result = new String[(int) ((count + 2) * 3)];
+            for (long i = 0; i < count; i++) {
+                index = addDescriptor(CFNative.CFArrayGetValueAtIndex(fonts, i), result, index);
+            }
+        } finally {
+            CFNative.CFRelease(fonts);
+        }
         for (int type : new int[] {CTNative.kCTFontUIFontSystem, CTNative.kCTFontUIFontEmphasizedSystem}) {
             MemorySegment font = CTNative.CTFontCreateUIFontForLanguage(type, 0, MemorySegment.NULL);
-            MemorySegment descriptor = CTNative.CTFontCopyFontDescriptor(font);
-            index = addDescriptor(descriptor, result, index);
-            CFNative.CFRelease(descriptor);
-            CFNative.CFRelease(font);
+            try {
+                MemorySegment descriptor = CTNative.CTFontCopyFontDescriptor(font);
+                try {
+                    index = addDescriptor(descriptor, result, index);
+                } finally {
+                    CFNative.CFRelease(descriptor);
+                }
+            } finally {
+                CFNative.CFRelease(font);
+            }
         }
         return result;
     }
@@ -142,49 +171,85 @@ public class MacFontFinder {
         if (descriptor.address() == 0) {
             return index;
         }
-        MemorySegment name = CTNative.CTFontDescriptorCopyAttribute(descriptor, CTNative.kCTFontDisplayNameAttribute);
-        MemorySegment family = CTNative.CTFontDescriptorCopyAttribute(descriptor, CTNative.kCTFontFamilyNameAttribute);
-        MemorySegment url = CTNative.CTFontDescriptorCopyAttribute(descriptor, CTNative.kCTFontURLAttribute);
-        MemorySegment file = url.address() == 0 ? MemorySegment.NULL
-                : CFNative.CFURLCopyFileSystemPath(url, CFNative.kCFURLPOSIXPathStyle);
-        int next = index;
-        if (name.address() != 0 && family.address() != 0 && file.address() != 0) {
-            result[next++] = CFNative.cfToString(name);
-            result[next++] = CFNative.cfToString(family);
-            result[next++] = CFNative.cfToString(file);
-        }
-        for (MemorySegment object : new MemorySegment[] {name, family, url, file}) {
-            if (object.address() != 0) {
-                CFNative.CFRelease(object);
+        MemorySegment name = MemorySegment.NULL;
+        MemorySegment family = MemorySegment.NULL;
+        MemorySegment url = MemorySegment.NULL;
+        MemorySegment file = MemorySegment.NULL;
+        try {
+            name = CTNative.CTFontDescriptorCopyAttribute(descriptor, CTNative.kCTFontDisplayNameAttribute);
+            family = CTNative.CTFontDescriptorCopyAttribute(descriptor, CTNative.kCTFontFamilyNameAttribute);
+            url = CTNative.CTFontDescriptorCopyAttribute(descriptor, CTNative.kCTFontURLAttribute);
+            if (url.address() != 0) {
+                file = CFNative.CFURLCopyFileSystemPath(url, CFNative.kCFURLPOSIXPathStyle);
             }
+            int next = index;
+            if (name.address() != 0 && family.address() != 0 && file.address() != 0) {
+                result[next++] = CFNative.cfToString(name);
+                result[next++] = CFNative.cfToString(family);
+                result[next++] = CFNative.cfToString(file);
+            }
+            return next;
+        } finally {
+            release(name);
+            release(family);
+            release(url);
+            release(file);
         }
-        return next;
     }
 
-    /** Display name and file per cascade entry; the name and URL copies are leaked, as the C leaked them. */
+    /** Display name and file per cascade entry; none for a zero font or when CoreText gives no list. */
     public static String[] getCascadeList(long fontRef) {
-        MemorySegment codes = CFNative.CFLocaleCopyISOLanguageCodes();
-        MemorySegment descriptors = CTNative.CTFontCopyDefaultCascadeListForLanguages(ptr(fontRef), codes);
-        CFNative.CFRelease(codes);
-        long count = CFNative.CFArrayGetCount(descriptors);
-        String[] names = new String[(int) (count * 2)];
-        for (int i = 0; i < count; i++) {
-            MemorySegment descriptor = CFNative.CFArrayGetValueAtIndex(descriptors, i);
-            CTNative.CTFontDescriptorCopyAttribute(descriptor, CTNative.kCTFontNameAttribute);
-            MemorySegment displayName = CTNative.CTFontDescriptorCopyAttribute(descriptor,
-                                                                               CTNative.kCTFontDisplayNameAttribute);
-            MemorySegment url = CTNative.CTFontDescriptorCopyAttribute(descriptor, CTNative.kCTFontURLAttribute);
-            MemorySegment file = url.address() == 0 ? MemorySegment.NULL
-                    : CFNative.CFURLCopyFileSystemPath(url, CFNative.kCFURLPOSIXPathStyle);
-            names[2 * i] = CFNative.cfToString(displayName);
-            CFNative.CFRelease(displayName);
-            names[2 * i + 1] = CFNative.cfToString(file);
-            if (file.address() != 0) {
-                CFNative.CFRelease(file);
-            }
+        if (fontRef == 0) {
+            return new String[0];
         }
-        CFNative.CFRelease(descriptors);
-        return names;
+        MemorySegment codes = CFNative.CFLocaleCopyISOLanguageCodes();
+        MemorySegment descriptors;
+        try {
+            descriptors = CTNative.CTFontCopyDefaultCascadeListForLanguages(ptr(fontRef), codes);
+        } finally {
+            CFNative.CFRelease(codes);
+        }
+        if (descriptors.address() == 0) {
+            return new String[0];
+        }
+        try {
+            long count = CFNative.CFArrayGetCount(descriptors);
+            String[] names = new String[(int) (count * 2)];
+            for (int i = 0; i < count; i++) {
+                addCascadeEntry(CFNative.CFArrayGetValueAtIndex(descriptors, i), names, 2 * i);
+            }
+            return names;
+        } finally {
+            CFNative.CFRelease(descriptors);
+        }
+    }
+
+    private static void addCascadeEntry(MemorySegment descriptor, String[] names, int index) {
+        MemorySegment name = MemorySegment.NULL;
+        MemorySegment displayName = MemorySegment.NULL;
+        MemorySegment url = MemorySegment.NULL;
+        MemorySegment file = MemorySegment.NULL;
+        try {
+            name = CTNative.CTFontDescriptorCopyAttribute(descriptor, CTNative.kCTFontNameAttribute);
+            displayName = CTNative.CTFontDescriptorCopyAttribute(descriptor, CTNative.kCTFontDisplayNameAttribute);
+            url = CTNative.CTFontDescriptorCopyAttribute(descriptor, CTNative.kCTFontURLAttribute);
+            if (url.address() != 0) {
+                file = CFNative.CFURLCopyFileSystemPath(url, CFNative.kCFURLPOSIXPathStyle);
+            }
+            names[index] = CFNative.cfToString(displayName);
+            names[index + 1] = CFNative.cfToString(file);
+        } finally {
+            release(displayName);
+            release(file);
+            release(url);
+            release(name);
+        }
+    }
+
+    private static void release(MemorySegment object) {
+        if (object.address() != 0) {
+            CFNative.CFRelease(object);
+        }
     }
 
     private static MemorySegment ptr(long address) {

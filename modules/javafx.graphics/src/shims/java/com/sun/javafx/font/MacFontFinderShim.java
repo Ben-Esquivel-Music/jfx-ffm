@@ -25,6 +25,7 @@
 
 package com.sun.javafx.font;
 
+import java.lang.foreign.MemorySegment;
 import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
 import java.util.ArrayList;
@@ -32,7 +33,7 @@ import java.util.HashMap;
 import java.util.Locale;
 
 /**
- * Delegate onto the {@code MacFontFinder} entry points production calls. The two {@code private} methods are named as
+ * Delegate onto the {@code MacFontFinder} entry points production calls. The four {@code private} methods are named as
  * strings and invoked by reflection, so that {@code MacFontBindings.requireSameBinding} can prove they are the
  * methods {@code MacFontFinder} itself calls.
  */
@@ -43,6 +44,10 @@ public final class MacFontFinderShim {
 
     public static String getFont(int type) {
         return invokeStatic("getFont", new Class<?>[] {int.class}, type);
+    }
+
+    public static String familyName(long family) {
+        return invokeStatic("familyName", new Class<?>[] {MemorySegment.class}, MemorySegment.ofAddress(family));
     }
 
     public static String[] getFontData() {
@@ -72,6 +77,14 @@ public final class MacFontFinderShim {
 
     public static String[] getCascadeList(long fontRef) {
         return MacFontFinder.getCascadeList(fontRef);
+    }
+
+    /** The display name and file {@code getCascadeList} records for one descriptor. */
+    public static String[] cascadeEntry(long descriptor) {
+        String[] names = new String[2];
+        invokeStatic("addCascadeEntry", new Class<?>[] {MemorySegment.class, String[].class, int.class},
+                     MemorySegment.ofAddress(descriptor), names, 0);
+        return names;
     }
 
     @SuppressWarnings("unchecked")

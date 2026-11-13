@@ -1,0 +1,1583 @@
+diff --git a/modules/javafx.graphics/src/main/java/com/sun/javafx/font/DFontDecoder.java b/modules/javafx.graphics/src/main/java/com/sun/javafx/font/DFontDecoder.java
+index b34522e9bc..eaa470bdb4 100644
+--- a/modules/javafx.graphics/src/main/java/com/sun/javafx/font/DFontDecoder.java
++++ b/modules/javafx.graphics/src/main/java/com/sun/javafx/font/DFontDecoder.java
+@@ -77,7 +77,14 @@ class DFontDecoder extends FontFileWriter {
+     }
+ 
+     private static int getCTFontFormat(long font) {
+-        MemorySegment formatRef = CTNative.CTFontCopyAttribute(ptr(font), CTNative.kCTFontFormatAttribute);
++        return formatOf(CTNative.CTFontCopyAttribute(ptr(font), CTNative.kCTFontFormatAttribute));
++    }
++
++    /** The sfnt version for the +1 format attribute of a font, which this releases; 0 when the font has none. */
++    private static int formatOf(MemorySegment formatRef) {
++        if (formatRef.address() == 0) {
++            return 0;
++        }
+         int format;
+         try (Arena arena = Arena.ofConfined()) {
+             MemorySegment value = arena.allocate(JAVA_INT);
+@@ -109,6 +116,9 @@ class DFontDecoder extends FontFileWriter {
+ 
+     private static byte[] getCTFontTable(long font, int tag) {
+         MemorySegment table = CTNative.CTFontCopyTable(ptr(font), tag, CTNative.kCTFontTableOptionNoOptions);
++        if (table.address() == 0) {
++            return null;
++        }
+         long length = CFNative.CFDataGetLength(table);
+         byte[] bytes = CFNative.CFDataGetBytePtr(table, length).toArray(JAVA_BYTE);
+         CFNative.CFRelease(table);
+@@ -143,6 +153,9 @@ class DFontDecoder extends FontFileWriter {
+             for (int i = 0; i < tags.length; i++) {
+                 int tag = tags[i];
+                 tableData[i] = DFontDecoder.getCTFontTable(fontRef, tag);
++                if (tableData[i] == null) {
++                    throw new IOException("Could not get tables for Dfont");
++                }
+                 int length = tableData[i].length;
+                 size += (length + 3) & ~3;
+             }
+diff --git a/modules/javafx.graphics/src/main/java/com/sun/javafx/font/MacFontFinder.java b/modules/javafx.graphics/src/main/java/com/sun/javafx/font/MacFontFinder.java
+index dce2e23da1..2e3258eb3b 100644
+--- a/modules/javafx.graphics/src/main/java/com/sun/javafx/font/MacFontFinder.java
++++ b/modules/javafx.graphics/src/main/java/com/sun/javafx/font/MacFontFinder.java
+@@ -44,10 +44,21 @@ public class MacFontFinder {
+     private static final int MonospacedFontType = 1; /*kCTFontUserFixedPitchFontType*/
+     private static String getFont(int type) {
+         MemorySegment font = CTNative.CTFontCreateUIFontForLanguage(type, 0, MemorySegment.NULL);
+-        MemorySegment family = CTNative.CTFontCopyFamilyName(font);
++        if (font.address() == 0) {
++            return null;
++        }
++        String name = familyName(CTNative.CTFontCopyFamilyName(font));
++        CFNative.CFRelease(font);
++        return name;
++    }
++
++    /** The string of the +1 family name of a font, which this releases; null when the font has none. */
++    private static String familyName(MemorySegment family) {
++        if (family.address() == 0) {
++            return null;
++        }
+         String name = CFNative.cfToString(family);
+         CFNative.CFRelease(family);
+-        CFNative.CFRelease(font);
+         return name;
+     }
+ 
+@@ -161,32 +172,47 @@ public class MacFontFinder {
+         return next;
+     }
+ 
+-    /** Display name and file per cascade entry; the name and URL copies are leaked, as the C leaked them. */
++    /** Display name and file per cascade entry; none for a zero font or when CoreText gives no list. */
+     public static String[] getCascadeList(long fontRef) {
++        if (fontRef == 0) {
++            return new String[0];
++        }
+         MemorySegment codes = CFNative.CFLocaleCopyISOLanguageCodes();
+         MemorySegment descriptors = CTNative.CTFontCopyDefaultCascadeListForLanguages(ptr(fontRef), codes);
+         CFNative.CFRelease(codes);
++        if (descriptors.address() == 0) {
++            return new String[0];
++        }
+         long count = CFNative.CFArrayGetCount(descriptors);
+         String[] names = new String[(int) (count * 2)];
+         for (int i = 0; i < count; i++) {
+-            MemorySegment descriptor = CFNative.CFArrayGetValueAtIndex(descriptors, i);
+-            CTNative.CTFontDescriptorCopyAttribute(descriptor, CTNative.kCTFontNameAttribute);
+-            MemorySegment displayName = CTNative.CTFontDescriptorCopyAttribute(descriptor,
+-                                                                               CTNative.kCTFontDisplayNameAttribute);
+-            MemorySegment url = CTNative.CTFontDescriptorCopyAttribute(descriptor, CTNative.kCTFontURLAttribute);
+-            MemorySegment file = url.address() == 0 ? MemorySegment.NULL
+-                    : CFNative.CFURLCopyFileSystemPath(url, CFNative.kCFURLPOSIXPathStyle);
+-            names[2 * i] = CFNative.cfToString(displayName);
+-            CFNative.CFRelease(displayName);
+-            names[2 * i + 1] = CFNative.cfToString(file);
+-            if (file.address() != 0) {
+-                CFNative.CFRelease(file);
+-            }
++            addCascadeEntry(CFNative.CFArrayGetValueAtIndex(descriptors, i), names, 2 * i);
+         }
+         CFNative.CFRelease(descriptors);
+         return names;
+     }
+ 
++    private static void addCascadeEntry(MemorySegment descriptor, String[] names, int index) {
++        MemorySegment name = CTNative.CTFontDescriptorCopyAttribute(descriptor, CTNative.kCTFontNameAttribute);
++        MemorySegment displayName = CTNative.CTFontDescriptorCopyAttribute(descriptor,
++                                                                           CTNative.kCTFontDisplayNameAttribute);
++        MemorySegment url = CTNative.CTFontDescriptorCopyAttribute(descriptor, CTNative.kCTFontURLAttribute);
++        MemorySegment file = url.address() == 0 ? MemorySegment.NULL
++                : CFNative.CFURLCopyFileSystemPath(url, CFNative.kCFURLPOSIXPathStyle);
++        names[index] = CFNative.cfToString(displayName);
++        release(displayName);
++        names[index + 1] = CFNative.cfToString(file);
++        release(file);
++        release(url);
++        release(name);
++    }
++
++    private static void release(MemorySegment object) {
++        if (object.address() != 0) {
++            CFNative.CFRelease(object);
++        }
++    }
++
+     private static MemorySegment ptr(long address) {
+         return MemorySegment.ofAddress(address);
+     }
+diff --git a/modules/javafx.graphics/src/main/java/com/sun/javafx/font/coretext/CTFactory.java b/modules/javafx.graphics/src/main/java/com/sun/javafx/font/coretext/CTFactory.java
+index 44268b08de..f4bdc2d12f 100644
+--- a/modules/javafx.graphics/src/main/java/com/sun/javafx/font/coretext/CTFactory.java
++++ b/modules/javafx.graphics/src/main/java/com/sun/javafx/font/coretext/CTFactory.java
+@@ -1,5 +1,5 @@
+ /*
+- * Copyright (c) 2013, 2025, Oracle and/or its affiliates. All rights reserved.
++ * Copyright (c) 2013, 2026, Oracle and/or its affiliates. All rights reserved.
+  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
+  *
+  * This code is free software; you can redistribute it and/or modify it
+@@ -45,21 +45,33 @@ public class CTFactory extends PrismFontFactory {
+      * This is needed for fonts where the name starts with "."
+      * It isn't just the ".SF" "System Font", but related fallbacks which
+      * layout returns and we need to add as a native fallback to a composite font.
++     *
++     * fontRef is a +1 reference that this consumes: the font file's disposer owns it
++     * once the constructor returns, and on every other exit it is released here.
++     * A zero reference is not released.
+      */
+     CTFontFile createFontFile(String name, long fontRef) throws Exception {
+-        String filename = OS.CTFontCopyURLAttribute(fontRef);
+-        int fIndex = findFontIndex(name, filename);
++        CTFontFile font = null;
++        try {
++            String filename = OS.CTFontCopyURLAttribute(fontRef);
++            int fIndex = findFontIndex(name, filename);
+ 
+-        if (debugFonts) {
+-            System.err.println("createFontFile by ref name="+name + " filename="+filename+" index="+fIndex);
++            if (debugFonts) {
++                System.err.println("createFontFile by ref name="+name + " filename="+filename+" index="+fIndex);
++            }
++            if (fIndex != -1) {
++                font = new CTFontFile(name, filename, fIndex, fontRef);
++            }
++        } finally {
++            if (font == null && fontRef != 0) {
++                OS.CFRelease(fontRef);
++            }
+         }
+-        if (fIndex == -1) {
+-            return null;
++        if (font != null) {
++            // Store the lookup name in the map.
++            // This should prevent us needing to create new instances.
++            storeInMap(name, font);
+         }
+-        CTFontFile font = new CTFontFile(name, filename, fIndex, fontRef);
+-        // Store the lookup name in the map.
+-        // This should prevent us needing to create new instances.
+-        storeInMap(name, font);
+         return font;
+     }
+ 
+diff --git a/modules/javafx.graphics/src/main/java/com/sun/javafx/font/coretext/CTFontFile.java b/modules/javafx.graphics/src/main/java/com/sun/javafx/font/coretext/CTFontFile.java
+index 3ac7d61acf..4c2a70387d 100644
+--- a/modules/javafx.graphics/src/main/java/com/sun/javafx/font/coretext/CTFontFile.java
++++ b/modules/javafx.graphics/src/main/java/com/sun/javafx/font/coretext/CTFontFile.java
+@@ -1,5 +1,5 @@
+ /*
+- * Copyright (c) 2013, 2025, Oracle and/or its affiliates. All rights reserved.
++ * Copyright (c) 2013, 2026, Oracle and/or its affiliates. All rights reserved.
+  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
+  *
+  * This code is free software; you can redistribute it and/or modify it
+@@ -279,8 +279,15 @@ class CTFontFile extends PrismFontFile {
+ 
+     void getCascadingInfo(FontFallbackInfo info) {
+         CTFactory factory = (CTFactory)PrismFontFactory.getFontFactory();
++        String[] stringInfo = new String[0];
+         long ref = getFontRef(0f, null);
+-        String[] stringInfo = MacFontFinder.getCascadeList(ref);
++        if (ref != 0) {
++            try {
++                stringInfo = MacFontFinder.getCascadeList(ref);
++            } finally {
++                OS.CFRelease(ref);
++            }
++        }
+         // stringInfo is displayname and file.
+         // if there's a null file, skip
+         // if there's a non-null file but name starts with ".",
+@@ -297,7 +304,7 @@ class CTFontFile extends PrismFontFile {
+             if (PrismFontFactory.debugFonts) {
+                 System.err.print("Entry : name=" + name + " file="+file);
+             }
+-            if (file == null || name.startsWith(".")) {
++            if (file == null || name == null || name.startsWith(".")) {
+                 if (PrismFontFactory.debugFonts) {
+                     System.err.println(" - *** not using this entry (.font and/or null file)");
+                 }
+diff --git a/modules/javafx.graphics/src/main/java/com/sun/javafx/font/coretext/CTGlyphLayout.java b/modules/javafx.graphics/src/main/java/com/sun/javafx/font/coretext/CTGlyphLayout.java
+index 9ad95bea5c..a4e701d42c 100644
+--- a/modules/javafx.graphics/src/main/java/com/sun/javafx/font/coretext/CTGlyphLayout.java
++++ b/modules/javafx.graphics/src/main/java/com/sun/javafx/font/coretext/CTGlyphLayout.java
+@@ -1,5 +1,5 @@
+ /*
+- * Copyright (c) 2013, 2025, Oracle and/or its affiliates. All rights reserved.
++ * Copyright (c) 2013, 2026, Oracle and/or its affiliates. All rights reserved.
+  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
+  *
+  * This code is free software; you can redistribute it and/or modify it
+@@ -91,20 +91,15 @@ class CTGlyphLayout extends GlyphLayout {
+             }
+             slot = fr.getSlotForFont(fontName);
+             if (slot == -1) {
+-                 CTFontFile newFont = null;
+-                 try {
+-                     CTFactory factory = (CTFactory)PrismFontFactory.getFontFactory();
+-                     long newRef = OS.CTFontCreateCopyWithAttributes(actualFont, 0, null,0);
+-                      OS.CFRetain(newRef); // hope not needed ..
+-                     newFont = factory.createFontFile(fontName, newRef);
+-                     if (newFont != null) {
+-                         slot = fr.addSlotFont(newFont);
+-                     }
+-                 } catch (Exception e) {
+-                     if (PrismFontFactory.debugFonts) {
+-                         e.printStackTrace();
+-                     }
+-                 }
++                try {
++                    CTFactory factory = (CTFactory)PrismFontFactory.getFontFactory();
++                    long newRef = OS.CTFontCreateCopyWithAttributes(actualFont, 0, null, 0);
++                    slot = addFallbackFont(factory, fr, fontName, newRef);
++                } catch (Exception e) {
++                    if (PrismFontFactory.debugFonts) {
++                        e.printStackTrace();
++                    }
++                }
+             }
+             if (PrismFontFactory.debugFonts) {
+                 System.err.println("\tFallback font= "+ fontName + " slot=" + slot);
+@@ -113,6 +108,19 @@ class CTGlyphLayout extends GlyphLayout {
+         return slot;
+     }
+ 
++    /* newRef is the copy of the run's font, a +1 reference createFontFile consumes, or 0 when CoreText made none. */
++    static int addFallbackFont(CTFactory factory, CompositeFontResource fr, String fontName, long newRef)
++            throws Exception {
++        if (newRef == 0) {
++            return -1;
++        }
++        CTFontFile newFont = factory.createFontFile(fontName, newRef);
++        if (newFont == null) {
++            return -1;
++        }
++        return fr.addSlotFont(newFont);
++    }
++
+     @Override
+     public void layout(TextRun run, PGFont font, FontStrike strike, char[] text) {
+ 
+diff --git a/modules/javafx.graphics/src/shims/java/com/sun/javafx/font/DFontDecoderShim.java b/modules/javafx.graphics/src/shims/java/com/sun/javafx/font/DFontDecoderShim.java
+index c4da3bf625..180cfa340e 100644
+--- a/modules/javafx.graphics/src/shims/java/com/sun/javafx/font/DFontDecoderShim.java
++++ b/modules/javafx.graphics/src/shims/java/com/sun/javafx/font/DFontDecoderShim.java
+@@ -25,12 +25,13 @@
+ 
+ package com.sun.javafx.font;
+ 
++import java.lang.foreign.MemorySegment;
+ import java.lang.reflect.InvocationTargetException;
+ import java.lang.reflect.Method;
+ import java.nio.file.Files;
+ 
+ /**
+- * Delegate onto {@code DFontDecoder}: its five {@code private} methods by reflection, and the decode sequence
++ * Delegate onto {@code DFontDecoder}: its six {@code private} methods by reflection, and the decode sequence
+  * {@code PrismFontFactory.getFontResource} runs on a {@code .dfont} file, called directly.
+  */
+ public final class DFontDecoderShim {
+@@ -54,6 +55,10 @@ public final class DFontDecoderShim {
+         return invokeStatic("getCTFontFormat", new Class<?>[] {long.class}, font);
+     }
+ 
++    public static int formatOf(long formatRef) {
++        return invokeStatic("formatOf", new Class<?>[] {MemorySegment.class}, MemorySegment.ofAddress(formatRef));
++    }
++
+     public static int[] getCTFontTags(long font) {
+         return invokeStatic("getCTFontTags", new Class<?>[] {long.class}, font);
+     }
+diff --git a/modules/javafx.graphics/src/shims/java/com/sun/javafx/font/FontResourceShim.java b/modules/javafx.graphics/src/shims/java/com/sun/javafx/font/FontResourceShim.java
+index 563e3bdd91..042f22c4a4 100644
+--- a/modules/javafx.graphics/src/shims/java/com/sun/javafx/font/FontResourceShim.java
++++ b/modules/javafx.graphics/src/shims/java/com/sun/javafx/font/FontResourceShim.java
+@@ -62,6 +62,11 @@ public final class FontResourceShim {
+         return PrismFontFactory.getFontFactory().createFontFile(null, file, index, false, false, false);
+     }
+ 
++    /** The font of {@code file} made as an embedded font is, but unregistered, not copied and in no map; throws. */
++    public static FontResource newUncachedEmbeddedFontFile(String file) throws Exception {
++        return PrismFontFactory.getFontFactory().createFontFile(null, file, 0, false, true, false);
++    }
++
+     /** The package-private {@link PrismFont} constructor. */
+     public static PGFont newPrismFont(FontResource resource, String name, float size) {
+         return new PrismFont(resource, name, size);
+diff --git a/modules/javafx.graphics/src/shims/java/com/sun/javafx/font/MacFontFinderShim.java b/modules/javafx.graphics/src/shims/java/com/sun/javafx/font/MacFontFinderShim.java
+index 5a35ab0c9a..ff0a122411 100644
+--- a/modules/javafx.graphics/src/shims/java/com/sun/javafx/font/MacFontFinderShim.java
++++ b/modules/javafx.graphics/src/shims/java/com/sun/javafx/font/MacFontFinderShim.java
+@@ -25,6 +25,7 @@
+ 
+ package com.sun.javafx.font;
+ 
++import java.lang.foreign.MemorySegment;
+ import java.lang.reflect.InvocationTargetException;
+ import java.lang.reflect.Method;
+ import java.util.ArrayList;
+@@ -32,7 +33,7 @@ import java.util.HashMap;
+ import java.util.Locale;
+ 
+ /**
+- * Delegate onto the {@code MacFontFinder} entry points production calls. The two {@code private} methods are named as
++ * Delegate onto the {@code MacFontFinder} entry points production calls. The four {@code private} methods are named as
+  * strings and invoked by reflection, so that {@code MacFontBindings.requireSameBinding} can prove they are the
+  * methods {@code MacFontFinder} itself calls.
+  */
+@@ -45,6 +46,10 @@ public final class MacFontFinderShim {
+         return invokeStatic("getFont", new Class<?>[] {int.class}, type);
+     }
+ 
++    public static String familyName(long family) {
++        return invokeStatic("familyName", new Class<?>[] {MemorySegment.class}, MemorySegment.ofAddress(family));
++    }
++
+     public static String[] getFontData() {
+         return invokeStatic("getFontData", new Class<?>[0]);
+     }
+@@ -74,6 +79,14 @@ public final class MacFontFinderShim {
+         return MacFontFinder.getCascadeList(fontRef);
+     }
+ 
++    /** The display name and file {@code getCascadeList} records for one descriptor. */
++    public static String[] cascadeEntry(long descriptor) {
++        String[] names = new String[2];
++        invokeStatic("addCascadeEntry", new Class<?>[] {MemorySegment.class, String[].class, int.class},
++                     MemorySegment.ofAddress(descriptor), names, 0);
++        return names;
++    }
++
+     @SuppressWarnings("unchecked")
+     private static <T> T invokeStatic(String name, Class<?>[] parameterTypes, Object... arguments) {
+         try {
+diff --git a/modules/javafx.graphics/src/test/java/test/com/sun/javafx/font/MacCoreTextGoldenTest.java b/modules/javafx.graphics/src/test/java/test/com/sun/javafx/font/MacCoreTextGoldenTest.java
+index d2cf0c1589..8494206749 100644
+--- a/modules/javafx.graphics/src/test/java/test/com/sun/javafx/font/MacCoreTextGoldenTest.java
++++ b/modules/javafx.graphics/src/test/java/test/com/sun/javafx/font/MacCoreTextGoldenTest.java
+@@ -66,8 +66,9 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
+  * context read up to 3 bytes past the bitmap. Production never pairs them. For the same reason no
+  * AA_LCD strike is requested here: with {@code prism.lcdtext} off, {@code CTGlyph} would draw it into its cached grey
+  * context. LCD masks come from the child JVM run with {@code -Dprism.lcdtext=true};</li>
+- * <li>{@code CFRetain(0)}, {@code CFRelease(0)}, a null {@code CGRect} mirror, a missing table tag, and any other
+- * NULL handed to CoreFoundation crash the JVM (US-067);</li>
++ * <li>{@code CFRetain(0)}, {@code CFRelease(0)} and any other NULL handed to a one-to-one entry point still crash
++ * the JVM, as in the C. A null {@code CGRect} or {@code CGAffineTransform} mirror crashed the C; the Java throws
++ * {@code NullPointerException}, which {@link MacFontNullInputTest} pins (US-067);</li>
+  * <li>{@code CFStringCreateWithCharacters(alloc, null, n)} with n &gt; 0 passes NULL with a length.</li>
+  * </ul>
+  */
+diff --git a/modules/javafx.graphics/src/test/java/test/com/sun/javafx/font/MacDFontGoldenTest.java b/modules/javafx.graphics/src/test/java/test/com/sun/javafx/font/MacDFontGoldenTest.java
+index fb649a9062..0c3a8c8cc5 100644
+--- a/modules/javafx.graphics/src/test/java/test/com/sun/javafx/font/MacDFontGoldenTest.java
++++ b/modules/javafx.graphics/src/test/java/test/com/sun/javafx/font/MacDFontGoldenTest.java
+@@ -51,9 +51,9 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
+  * fonts, whatever its file, so no registration is needed; the {@code .dfont} files are in
+  * {@link MacFontProcessGoldenTest}.
+  * <p>
+- * Left out on purpose: a table tag the font lacks, because {@code getCTFontTable} then crashes the JVM in
+- * {@code CFDataGetLength(NULL)} (US-067), and the {@code sbix} table of Apple Color Emoji, which is hundreds of
+- * megabytes (its length is recorded).
++ * Left out on purpose: a table tag the font lacks, which has no row because the C crashed there in
++ * {@code CFDataGetLength(NULL)} ({@link MacFontNullInputTest} pins what the Java answers), and the {@code sbix}
++ * table of Apple Color Emoji, which is hundreds of megabytes (its length is recorded).
+  */
+ @EnabledOnOs(OS.MAC)
+ public class MacDFontGoldenTest {
+diff --git a/modules/javafx.graphics/src/test/java/test/com/sun/javafx/font/MacFontBindings.java b/modules/javafx.graphics/src/test/java/test/com/sun/javafx/font/MacFontBindings.java
+index 37fc049c4f..7a29850f73 100644
+--- a/modules/javafx.graphics/src/test/java/test/com/sun/javafx/font/MacFontBindings.java
++++ b/modules/javafx.graphics/src/test/java/test/com/sun/javafx/font/MacFontBindings.java
+@@ -72,7 +72,8 @@ final class MacFontBindings {
+     static final String MAC_FONT_FINDER_SHIM = "com/sun/javafx/font/MacFontFinderShim";
+     static final String DFONT_DECODER_SHIM = "com/sun/javafx/font/DFontDecoderShim";
+     static final List<String> OBSERVERS =
+-            List.of("com/sun/javafx/font/MacFontOracleShim", "com/sun/javafx/font/MacMachineShim");
++            List.of("com/sun/javafx/font/MacFontOracleShim", "com/sun/javafx/font/MacFontProbeShim",
++                    "com/sun/javafx/font/MacMachineShim");
+ 
+     // 55 names for 56 natives: CFStringCreateWithCharacters is overloaded.
+     static final List<String> OS_NATIVES = List.of(
+@@ -105,10 +106,12 @@ final class MacFontBindings {
+             OS, OS_NATIVES, MAC_FONT_FINDER, MAC_FONT_FINDER_NATIVES, DFONT_DECODER, DFONT_DECODER_NATIVES);
+ 
+     // Measured on the JNI build. The peers' entries are checked on every run, so a call site moved to another
+-    // binding fails at once; those of the delegate owners describe the JNI bodies and are checked at capture.
++    // binding fails at once; US-067 moved them where it added or removed a release. javac copies a finally block to
++    // each exit of its try, so a release written once in a finally counts twice when the try has one normal exit.
++    // The entries of the delegate owners describe the JNI bodies and are checked at capture.
+     static final Map<String, String> NATIVE_CALL_SITES = Map.of(
+-            "com/sun/javafx/font/coretext/CTFactory", "OS.CTFontCopyURLAttribute",
+-            "com/sun/javafx/font/coretext/CTFontFile", "MacFontFinder.getCascadeList OS.CFRelease*6"
++            "com/sun/javafx/font/coretext/CTFactory", "OS.CFRelease*2 OS.CTFontCopyURLAttribute",
++            "com/sun/javafx/font/coretext/CTFontFile", "MacFontFinder.getCascadeList OS.CFRelease*8"
+                     + " OS.CFURLCreateWithFileSystemPath*2 OS.CGDataProviderCreateWithURL"
+                     + " OS.CGFontCreateWithDataProvider OS.CGPathApply OS.CGPathGetPathBoundingBox*2 OS.CGPathRelease*3"
+                     + " OS.CTFontCreateCopyWithAttributes OS.CTFontCreatePathForGlyph*3"
+@@ -125,7 +128,7 @@ final class MacFontBindings {
+                     + " OS.CGRectApplyAffineTransform OS.CTFontDrawGlyphs*2 OS.CTFontGetAdvancesForGlyphs",
+             "com/sun/javafx/font/coretext/CTGlyphLayout", "OS.CFArrayGetCount OS.CFArrayGetValueAtIndex"
+                     + " OS.CFAttributedStringCreate OS.CFDictionaryAddValue*2 OS.CFDictionaryCreateMutable"
+-                    + " OS.CFDictionaryGetValue OS.CFRelease*5 OS.CFRetain OS.CFStringCreateWithCharacters"
++                    + " OS.CFDictionaryGetValue OS.CFRelease*5 OS.CFStringCreateWithCharacters"
+                     + " OS.CTFontCopyAttributeDisplayName OS.CTFontCreateCopyWithAttributes"
+                     + " OS.CTLineCreateWithAttributedString OS.CTLineGetGlyphCount OS.CTLineGetGlyphRuns"
+                     + " OS.CTLineGetTypographicBounds OS.CTParagraphStyleCreate OS.CTRunGetAttributes"
+@@ -162,9 +165,11 @@ final class MacFontBindings {
+             "com/sun/javafx/font/coretext/CTStrikeDisposer", OS, MAC_FONT_FINDER, DFONT_DECODER,
+             "com/sun/javafx/font/PrismFontFactory");
+ 
+-    // getMonospacedFont, whose only call site is commented out. It must stay uncalled; if production starts calling
+-    // it, the exemption is stale and the check says so.
+-    static final Set<String> UNCALLED_ENTRY_POINTS = Set.of(MAC_FONT_FINDER + " getMonospacedFont()Ljava/lang/String;");
++    // getMonospacedFont, whose only call site is commented out, and CFRetain, whose only call site was the extra
++    // retain of a fallback font that US-067 removed. Both must stay uncalled; if production starts calling one, its
++    // exemption is stale and the check says so.
++    static final Set<String> UNCALLED_ENTRY_POINTS = Set.of(MAC_FONT_FINDER + " getMonospacedFont()Ljava/lang/String;",
++                                                            OS + " CFRetain(J)V");
+ 
+     private static boolean nativeCountsReported;
+ 
+@@ -437,8 +442,8 @@ final class MacFontBindings {
+             }
+             String actual = nativeCallSites(classModel(expected.getKey()), NATIVES);
+             if (!actual.equals(expected.getValue())) {
+-                problems.add(expected.getKey() + " calls [" + actual + "] where the JNI build of commit " + COMMIT
+-                        + " calls [" + expected.getValue() + "]: a call site moved to another binding");
++                problems.add(expected.getKey() + " calls [" + actual + "] where NATIVE_CALL_SITES pins ["
++                        + expected.getValue() + "]: a call site moved to another binding");
+             }
+         }
+         return problems;
+diff --git a/modules/javafx.graphics/src/test/java/test/com/sun/javafx/font/MacFontFinderGoldenTest.java b/modules/javafx.graphics/src/test/java/test/com/sun/javafx/font/MacFontFinderGoldenTest.java
+index d81c94180d..c4609d7df4 100644
+--- a/modules/javafx.graphics/src/test/java/test/com/sun/javafx/font/MacFontFinderGoldenTest.java
++++ b/modules/javafx.graphics/src/test/java/test/com/sun/javafx/font/MacFontFinderGoldenTest.java
+@@ -52,8 +52,8 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
+  * {@code familyToFontListMap}.
+  * <p>
+  * Left out on purpose: {@code getFont} for a type {@code CTFontCreateUIFontForLanguage} answers with NULL, and
+- * {@code getCascadeList(0)}. They hand the NULL to {@code CFRelease} or {@code CFArrayGetCount} and crash the JVM,
+- * as the C did (US-067).
++ * {@code getCascadeList(0)}. The C crashed on both, so the golden has no row for either;
++ * {@link MacFontNullInputTest} pins what the Java answers (US-067).
+  */
+ @EnabledOnOs(OS.MAC)
+ public class MacFontFinderGoldenTest {
+diff --git a/modules/javafx.graphics/src/test/java/test/com/sun/javafx/font/MacFontStressChild.java b/modules/javafx.graphics/src/test/java/test/com/sun/javafx/font/MacFontStressChild.java
+index d085a45958..4685046751 100644
+--- a/modules/javafx.graphics/src/test/java/test/com/sun/javafx/font/MacFontStressChild.java
++++ b/modules/javafx.graphics/src/test/java/test/com/sun/javafx/font/MacFontStressChild.java
+@@ -373,11 +373,11 @@ public final class MacFontStressChild {
+         }
+     }
+ 
+-    private interface Call {
++    interface Call {
+         Object call() throws Exception;
+     }
+ 
+-    private static void delta(GoldenMap out, String probe, long object, Call call) throws Exception {
++    static void delta(GoldenMap out, String probe, long object, Call call) throws Exception {
+         for (int i = 0; i < RETAIN_CALLS; i++) {
+             call.call();
+         }
+diff --git a/modules/javafx.graphics/src/shims/java/com/sun/javafx/font/MacFontProbeShim.java b/modules/javafx.graphics/src/shims/java/com/sun/javafx/font/MacFontProbeShim.java
+new file mode 100644
+index 0000000000..e8eab1ca76
+--- /dev/null
++++ b/modules/javafx.graphics/src/shims/java/com/sun/javafx/font/MacFontProbeShim.java
+@@ -0,0 +1,159 @@
++/*
++ * Copyright (c) 2026, Oracle and/or its affiliates. All rights reserved.
++ * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
++ *
++ * This code is free software; you can redistribute it and/or modify it
++ * under the terms of the GNU General Public License version 2 only, as
++ * published by the Free Software Foundation.  Oracle designates this
++ * particular file as subject to the "Classpath" exception as provided
++ * by Oracle in the LICENSE file that accompanied this code.
++ *
++ * This code is distributed in the hope that it will be useful, but WITHOUT
++ * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
++ * FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License
++ * version 2 for more details (a copy is included in the LICENSE file that
++ * accompanied this code).
++ *
++ * You should have received a copy of the GNU General Public License version
++ * 2 along with this work; if not, write to the Free Software Foundation,
++ * Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301 USA.
++ *
++ * Please contact Oracle, 500 Oracle Parkway, Redwood Shores, CA 94065 USA
++ * or visit www.oracle.com if you need additional information or have any
++ * questions.
++ */
++
++package com.sun.javafx.font;
++
++import java.lang.foreign.Arena;
++import java.lang.foreign.FunctionDescriptor;
++import java.lang.foreign.MemorySegment;
++import java.lang.foreign.SymbolLookup;
++import java.lang.invoke.MethodHandle;
++
++import static java.lang.foreign.ValueLayout.ADDRESS;
++import static java.lang.foreign.ValueLayout.JAVA_DOUBLE;
++import static java.lang.foreign.ValueLayout.JAVA_INT;
++
++/**
++ * Test-only CoreText, libobjc and malloc probes for the macOS NULL-input and release tests, over the bindings and
++ * toolkit of {@link MacFontOracleShim}. An observer like it: it uses no font class of the product
++ * ({@code MacFontBindings.requireSameBinding} checks). Every object it hands out is at +1, for the caller to release
++ * with {@link MacFontOracleShim#release(long)}.
++ */
++@SuppressWarnings("restricted")
++public final class MacFontProbeShim {
++
++    private static final MethodHandle CT_FONT_DESCRIPTOR_CREATE_WITH_NAME_AND_SIZE = MacFontOracleShim.bind(
++            MacFontOracleShim.Lib.CT, "CTFontDescriptorCreateWithNameAndSize",
++            FunctionDescriptor.of(ADDRESS, ADDRESS, JAVA_DOUBLE));
++    private static final MethodHandle CT_FONT_DESCRIPTOR_COPY_ATTRIBUTE = MacFontOracleShim.bind(
++            MacFontOracleShim.Lib.CT, "CTFontDescriptorCopyAttribute",
++            FunctionDescriptor.of(ADDRESS, ADDRESS, ADDRESS));
++    private static final MethodHandle CT_FONT_COPY_DEFAULT_CASCADE_LIST_FOR_LANGUAGES = MacFontOracleShim.bind(
++            MacFontOracleShim.Lib.CT, "CTFontCopyDefaultCascadeListForLanguages",
++            FunctionDescriptor.of(ADDRESS, ADDRESS, ADDRESS));
++    private static final MethodHandle CF_LOCALE_COPY_ISO_LANGUAGE_CODES = MacFontOracleShim.bind(
++            MacFontOracleShim.Lib.CF, "CFLocaleCopyISOLanguageCodes", FunctionDescriptor.of(ADDRESS));
++
++    private static final SymbolLookup OBJC = MacFontOracleShim.load("/usr/lib/libobjc.A.dylib");
++    private static final MethodHandle OBJC_AUTORELEASE_POOL_PUSH = MacFontOracleShim.bind(
++            OBJC, "objc_autoreleasePoolPush", FunctionDescriptor.of(ADDRESS));
++    private static final MethodHandle OBJC_AUTORELEASE_POOL_POP = MacFontOracleShim.bind(
++            OBJC, "objc_autoreleasePoolPop", FunctionDescriptor.ofVoid(ADDRESS));
++
++    private static final MethodHandle MALLOC_ZONE_STATISTICS = MacFontOracleShim.bind(
++            MacFontOracleShim.LINKER.defaultLookup(), "malloc_zone_statistics",
++            FunctionDescriptor.ofVoid(ADDRESS, ADDRESS));
++    private static final long MALLOC_STATISTICS_BYTES = 32;
++
++    private MacFontProbeShim() {
++    }
++
++    /** {@code CTFontCreateUIFontForLanguage(type, 0, NULL)}; 0 when CoreText has no font of that type. */
++    public static long uiFont(int type) {
++        try {
++            return ((MemorySegment) MacFontOracleShim.Lib.CT_FONT_CREATE_UI_FONT_FOR_LANGUAGE.invokeExact(type, 0.0,
++                    MemorySegment.NULL)).address();
++        } catch (Throwable t) {
++            throw MacFontOracleShim.unexpected(t);
++        }
++    }
++
++    /** {@code CTFontDescriptorCreateWithNameAndSize}. */
++    public static long createFontDescriptor(String name, double size) {
++        MemorySegment nameRef = MacFontOracleShim.createString(name);
++        try {
++            return ((MemorySegment) CT_FONT_DESCRIPTOR_CREATE_WITH_NAME_AND_SIZE.invokeExact(nameRef, size)).address();
++        } catch (Throwable t) {
++            throw MacFontOracleShim.unexpected(t);
++        } finally {
++            MacFontOracleShim.release(nameRef);
++        }
++    }
++
++    /** Whether the descriptor has a {@code kCTFontDisplayNameAttribute}. */
++    public static boolean hasDisplayName(long descriptor) {
++        try {
++            MemorySegment displayName = (MemorySegment) CT_FONT_DESCRIPTOR_COPY_ATTRIBUTE.invokeExact(
++                    MemorySegment.ofAddress(descriptor), MacFontOracleShim.Lib.K_CT_FONT_DISPLAY_NAME_ATTRIBUTE);
++            MacFontOracleShim.release(displayName);
++            return displayName.address() != 0;
++        } catch (Throwable t) {
++            throw MacFontOracleShim.unexpected(t);
++        }
++    }
++
++    /** The {@code kCTFontNameAttribute} of one entry of a fresh default cascade list of font; 0 past the end. */
++    public static long cascadeEntryName(long font, int entry) {
++        try {
++            MemorySegment codes = (MemorySegment) CF_LOCALE_COPY_ISO_LANGUAGE_CODES.invokeExact();
++            MemorySegment descriptors = (MemorySegment) CT_FONT_COPY_DEFAULT_CASCADE_LIST_FOR_LANGUAGES.invokeExact(
++                    MemorySegment.ofAddress(font), codes);
++            MacFontOracleShim.release(codes);
++            if (descriptors.address() == 0) {
++                return 0;
++            }
++            try {
++                long count = (long) MacFontOracleShim.Lib.CF_ARRAY_GET_COUNT.invokeExact(descriptors);
++                if (entry >= count) {
++                    return 0;
++                }
++                MemorySegment descriptor = MacFontOracleShim.arrayValue(descriptors, entry);
++                return ((MemorySegment) CT_FONT_DESCRIPTOR_COPY_ATTRIBUTE.invokeExact(descriptor,
++                        MacFontOracleShim.Lib.K_CT_FONT_NAME_ATTRIBUTE)).address();
++            } finally {
++                MacFontOracleShim.release(descriptors);
++            }
++        } catch (Throwable t) {
++            throw MacFontOracleShim.unexpected(t);
++        }
++    }
++
++    public static long autoreleasePoolPush() {
++        try {
++            return ((MemorySegment) OBJC_AUTORELEASE_POOL_PUSH.invokeExact()).address();
++        } catch (Throwable t) {
++            throw MacFontOracleShim.unexpected(t);
++        }
++    }
++
++    public static void autoreleasePoolPop(long pool) {
++        try {
++            OBJC_AUTORELEASE_POOL_POP.invokeExact(MemorySegment.ofAddress(pool));
++        } catch (Throwable t) {
++            throw MacFontOracleShim.unexpected(t);
++        }
++    }
++
++    /** {@code blocks_in_use} of {@code malloc_zone_statistics(NULL, &stats)}, all zones. */
++    public static long mallocBlocksInUse() {
++        try (Arena scratch = Arena.ofConfined()) {
++            MemorySegment statistics = scratch.allocate(MALLOC_STATISTICS_BYTES);
++            MALLOC_ZONE_STATISTICS.invokeExact(MemorySegment.NULL, statistics);
++            return Integer.toUnsignedLong(statistics.get(JAVA_INT, 0));
++        } catch (Throwable t) {
++            throw MacFontOracleShim.unexpected(t);
++        }
++    }
++}
+diff --git a/modules/javafx.graphics/src/shims/java/com/sun/javafx/font/coretext/CoreTextPeerShim.java b/modules/javafx.graphics/src/shims/java/com/sun/javafx/font/coretext/CoreTextPeerShim.java
+new file mode 100644
+index 0000000000..462e3ab981
+--- /dev/null
++++ b/modules/javafx.graphics/src/shims/java/com/sun/javafx/font/coretext/CoreTextPeerShim.java
+@@ -0,0 +1,67 @@
++/*
++ * Copyright (c) 2026, Oracle and/or its affiliates. All rights reserved.
++ * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
++ *
++ * This code is free software; you can redistribute it and/or modify it
++ * under the terms of the GNU General Public License version 2 only, as
++ * published by the Free Software Foundation.  Oracle designates this
++ * particular file as subject to the "Classpath" exception as provided
++ * by Oracle in the LICENSE file that accompanied this code.
++ *
++ * This code is distributed in the hope that it will be useful, but WITHOUT
++ * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
++ * FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License
++ * version 2 for more details (a copy is included in the LICENSE file that
++ * accompanied this code).
++ *
++ * You should have received a copy of the GNU General Public License version
++ * 2 along with this work; if not, write to the Free Software Foundation,
++ * Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301 USA.
++ *
++ * Please contact Oracle, 500 Oracle Parkway, Redwood Shores, CA 94065 USA
++ * or visit www.oracle.com if you need additional information or have any
++ * questions.
++ */
++
++package com.sun.javafx.font.coretext;
++
++import com.sun.javafx.font.CompositeFontResource;
++import com.sun.javafx.font.FontResource;
++import com.sun.javafx.font.PrismFontFactory;
++import java.lang.reflect.Field;
++
++/** Package-private access to the macOS font peers for the font tests. No native call of its own. */
++public final class CoreTextPeerShim {
++
++    private CoreTextPeerShim() {
++    }
++
++    public static int addFallbackFont(CompositeFontResource fr, String fontName, long newRef) throws Exception {
++        return CTGlyphLayout.addFallbackFont((CTFactory) PrismFontFactory.getFontFactory(), fr, fontName, newRef);
++    }
++
++    /** With no factory to ask: only a reference refused before the factory is reached returns normally. */
++    public static int addFallbackFontWithoutFactory(CompositeFontResource fr, String fontName, long newRef)
++            throws Exception {
++        return CTGlyphLayout.addFallbackFont(null, fr, fontName, newRef);
++    }
++
++    public static FontResource createFontFile(String name, long fontRef) throws Exception {
++        return ((CTFactory) PrismFontFactory.getFontFactory()).createFontFile(name, fontRef);
++    }
++
++    /** The CTFont a font file made from a reference owns; 0 for any other font. */
++    public static long ctFontRef(FontResource resource) throws ReflectiveOperationException {
++        if (!(resource instanceof CTFontFile)) {
++            return 0;
++        }
++        Field field = CTFontFile.class.getDeclaredField("ctFontRef");
++        field.setAccessible(true);
++        return field.getLong(resource);
++    }
++
++    /** The CGFont of an embedded font file; 0 for any other font. */
++    public static long cgFontRef(FontResource resource) {
++        return resource instanceof CTFontFile file ? file.getCGFontRef() : 0;
++    }
++}
+diff --git a/modules/javafx.graphics/src/test/java/test/com/sun/javafx/font/MacFontNullInputChild.java b/modules/javafx.graphics/src/test/java/test/com/sun/javafx/font/MacFontNullInputChild.java
+new file mode 100644
+index 0000000000..629a7e37ab
+--- /dev/null
++++ b/modules/javafx.graphics/src/test/java/test/com/sun/javafx/font/MacFontNullInputChild.java
+@@ -0,0 +1,176 @@
++/*
++ * Copyright (c) 2026, Oracle and/or its affiliates. All rights reserved.
++ * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
++ *
++ * This code is free software; you can redistribute it and/or modify it
++ * under the terms of the GNU General Public License version 2 only, as
++ * published by the Free Software Foundation.  Oracle designates this
++ * particular file as subject to the "Classpath" exception as provided
++ * by Oracle in the LICENSE file that accompanied this code.
++ *
++ * This code is distributed in the hope that it will be useful, but WITHOUT
++ * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
++ * FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License
++ * version 2 for more details (a copy is included in the LICENSE file that
++ * accompanied this code).
++ *
++ * You should have received a copy of the GNU General Public License version
++ * 2 along with this work; if not, write to the Free Software Foundation,
++ * Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301 USA.
++ *
++ * Please contact Oracle, 500 Oracle Parkway, Redwood Shores, CA 94065 USA
++ * or visit www.oracle.com if you need additional information or have any
++ * questions.
++ */
++
++package test.com.sun.javafx.font;
++
++import com.sun.javafx.font.CompositeFontResource;
++import com.sun.javafx.font.DFontDecoderShim;
++import com.sun.javafx.font.FontResource;
++import com.sun.javafx.font.FontResourceShim;
++import com.sun.javafx.font.MacFontFinderShim;
++import com.sun.javafx.font.MacFontOracleShim;
++import com.sun.javafx.font.MacFontProbeShim;
++import com.sun.javafx.font.PrismFontFactory;
++import com.sun.javafx.font.coretext.CoreTextPeerShim;
++import com.sun.javafx.font.coretext.OSShim;
++import java.nio.charset.StandardCharsets;
++import java.nio.file.Files;
++import java.nio.file.Path;
++import java.util.List;
++import test.com.sun.javafx.font.FontGoldenHarness.GoldenMap;
++
++/**
++ * The child JVM of {@link MacFontNullInputTest}: one scenario per input that once handed NULL to CoreFoundation,
++ * CoreGraphics or CoreText. A regression ends this JVM, not the test fork.
++ */
++public final class MacFontNullInputChild {
++
++    static final String FALLBACK_COPY = "null.fallbackCopy";
++    static final String UI_FONT = "null.uiFont";
++    static final String FAMILY_NAME = "null.familyName";
++    static final String CASCADE_FONT = "null.cascadeFont";
++    static final String CASCADE_EMBEDDED = "null.cascadeEmbedded";
++    static final String CASCADE_NAME = "null.cascadeName";
++    static final String FORMAT = "null.format";
++    static final String TABLE = "null.table";
++    static final String MIRROR = "null.mirror";
++
++    /** {@code kCTFontUIFontNone}. */
++    static final int UI_FONT_TYPE_WITHOUT_A_FONT = -1;
++
++    /** {@code 'zzzz'}, a table no font has. */
++    private static final int TABLE_TAG_NO_FONT_HAS = 0x7a7a7a7a;
++
++    private MacFontNullInputChild() {
++    }
++
++    public static void main(String[] args) throws Exception {
++        String scenario = args[0];
++        GoldenMap out = new GoldenMap();
++        switch (scenario) {
++            case FALLBACK_COPY -> fallbackCopy(out);
++            case UI_FONT -> uiFont(out);
++            case FAMILY_NAME -> out.put("familyName", MacFontFinderShim.familyName(0));
++            case CASCADE_FONT -> out.put("entries", Integer.toString(MacFontFinderShim.getCascadeList(0).length));
++            case CASCADE_EMBEDDED -> cascadeEmbedded(out);
++            case CASCADE_NAME -> cascadeName(out);
++            case FORMAT -> out.put("format", Integer.toString(DFontDecoderShim.formatOf(0)));
++            case TABLE -> table(out);
++            case MIRROR -> mirror(out);
++            default -> throw new IllegalArgumentException("unknown scenario " + scenario);
++        }
++        Files.writeString(Path.of(args[1]), FontGoldens.format(out, List.of("MacFontNullInputChild " + scenario)),
++                          StandardCharsets.UTF_8);
++        System.exit(0);
++    }
++
++    /** CoreText answers no NULL copy for a real font, so the zero goes in where layout hands the copy on. */
++    private static void fallbackCopy(GoldenMap out) throws Exception {
++        CompositeFontResource composite = FontResourceShim.newLogicalFont("System", false, false);
++        String name = "US-067 No Such Fallback";
++        out.put("slot", Integer.toString(CoreTextPeerShim.addFallbackFont(composite, name, 0)));
++        String withoutFactory;
++        try {
++            withoutFactory = Integer.toString(CoreTextPeerShim.addFallbackFontWithoutFactory(composite, name, 0));
++        } catch (Exception e) {
++            withoutFactory = e.getClass().getName();
++        }
++        out.put("slot.noFactory", withoutFactory);
++    }
++
++    private static void uiFont(GoldenMap out) {
++        long font = MacFontProbeShim.uiFont(UI_FONT_TYPE_WITHOUT_A_FONT);
++        if (font != 0) {
++            MacFontOracleShim.release(font);
++        }
++        out.put("coreText.font", Long.toString(font));
++        out.put("getFont", MacFontFinderShim.getFont(UI_FONT_TYPE_WITHOUT_A_FONT));
++    }
++
++    /** Ahem with its {@code glyf} table renamed: the Java side opens it, CoreGraphics makes no font of it. */
++    private static void cascadeEmbedded(GoldenMap out) throws Exception {
++        byte[] font = Files.readAllBytes(MacFontGoldens.pinned("ahem"));
++        byte[] unknownTag = "zzzz".getBytes(StandardCharsets.US_ASCII);
++        System.arraycopy(unknownTag, 0, font, tableRecord(font, "glyf"), unknownTag.length);
++        Path file = Path.of(System.getProperty("java.io.tmpdir"), "us067-ahem-without-glyf.ttf");
++        Files.write(file, font);
++        FontResource resource = FontResourceShim.newUncachedEmbeddedFontFile(file.toString());
++        out.put("cgFont", Long.toString(CoreTextPeerShim.cgFontRef(resource)));
++        out.put("fallbacks",
++                String.join("|", PrismFontFactory.getFontFactory().getFallbacks(resource).getFontNames()));
++    }
++
++    /** The offset of the table directory record of {@code tag} in an sfnt file. */
++    private static int tableRecord(byte[] font, String tag) {
++        int tableCount = (font[4] & 0xff) << 8 | font[5] & 0xff;
++        for (int i = 0; i < tableCount; i++) {
++            int record = 12 + 16 * i;
++            if (new String(font, record, 4, StandardCharsets.US_ASCII).equals(tag)) {
++                return record;
++            }
++        }
++        throw new IllegalStateException("the font has no " + tag + " table");
++    }
++
++    private static void table(GoldenMap out) {
++        long font = DFontDecoderShim.createCTFont("Helvetica");
++        out.put("coreText.table", Long.toString(MacFontOracleShim.copyFontTable(font, TABLE_TAG_NO_FONT_HAS)));
++        out.put("table", DFontDecoderShim.getCTFontTable(font, TABLE_TAG_NO_FONT_HAS) == null ? null : "bytes");
++        DFontDecoderShim.releaseCTFont(font);
++    }
++
++    private static void mirror(GoldenMap out) {
++        double[] identity = {1, 0, 0, 1, 0, 0};
++        out.put("rect.null", thrownAt(() -> OSShim.CGRectApplyAffineTransform(null, identity)));
++        out.put("transform.null", thrownAt(() -> OSShim.CGRectApplyAffineTransform(new double[] {1, 2, 3, 4}, null)));
++        long gray = OSShim.CGColorSpaceCreateDeviceGray();
++        long context = OSShim.CGBitmapContextCreate(0, 8, 8, 8, 8, gray, OSShim.constant("kCGImageAlphaNone"));
++        out.put("fill.null", thrownAt(() -> OSShim.CGContextFillRect(context, null)));
++        OSShim.CGContextFillRect(context, new double[] {0, 0, 8, 8});
++        out.put("fill.after", Integer.toString(OSShim.CGBitmapContextGetData(context, 8, 8, 8).length));
++        OSShim.CGContextRelease(context);
++        OSShim.CFRelease(gray);
++    }
++
++    /** The exception of {@code call} and the frame that threw it, which shows whether a downcall was reached. */
++    private static String thrownAt(Runnable call) {
++        try {
++            call.run();
++            return "none";
++        } catch (RuntimeException e) {
++            StackTraceElement top = e.getStackTrace()[0];
++            return e.getClass().getName() + "@" + top.getClassName() + "." + top.getMethodName();
++        }
++    }
++
++    private static void cascadeName(GoldenMap out) {
++        long descriptor = MacFontProbeShim.createFontDescriptor("US067-NoSuchFontAnywhere", 12);
++        out.put("coreText.displayName", Boolean.toString(MacFontProbeShim.hasDisplayName(descriptor)));
++        String[] entry = MacFontFinderShim.cascadeEntry(descriptor);
++        out.put("name", entry[0]);
++        out.put("file", entry[1]);
++        MacFontOracleShim.release(descriptor);
++    }
++}
+diff --git a/modules/javafx.graphics/src/test/java/test/com/sun/javafx/font/MacFontNullInputTest.java b/modules/javafx.graphics/src/test/java/test/com/sun/javafx/font/MacFontNullInputTest.java
+new file mode 100644
+index 0000000000..47f82754a7
+--- /dev/null
++++ b/modules/javafx.graphics/src/test/java/test/com/sun/javafx/font/MacFontNullInputTest.java
+@@ -0,0 +1,157 @@
++/*
++ * Copyright (c) 2026, Oracle and/or its affiliates. All rights reserved.
++ * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
++ *
++ * This code is free software; you can redistribute it and/or modify it
++ * under the terms of the GNU General Public License version 2 only, as
++ * published by the Free Software Foundation.  Oracle designates this
++ * particular file as subject to the "Classpath" exception as provided
++ * by Oracle in the LICENSE file that accompanied this code.
++ *
++ * This code is distributed in the hope that it will be useful, but WITHOUT
++ * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
++ * FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License
++ * version 2 for more details (a copy is included in the LICENSE file that
++ * accompanied this code).
++ *
++ * You should have received a copy of the GNU General Public License version
++ * 2 along with this work; if not, write to the Free Software Foundation,
++ * Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301 USA.
++ *
++ * Please contact Oracle, 500 Oracle Parkway, Redwood Shores, CA 94065 USA
++ * or visit www.oracle.com if you need additional information or have any
++ * questions.
++ */
++
++package test.com.sun.javafx.font;
++
++import java.util.Map;
++import org.junit.jupiter.api.Tag;
++import org.junit.jupiter.api.Test;
++import org.junit.jupiter.api.Timeout;
++import org.junit.jupiter.api.condition.EnabledOnOs;
++import org.junit.jupiter.api.condition.OS;
++
++import static org.junit.jupiter.api.Assertions.assertEquals;
++
++/**
++ * The inputs that handed NULL to CoreFoundation, CoreGraphics or CoreText in the C of commit
++ * {@value MacFontGoldens#CAPTURE_COMMIT} and ended the JVM there (US-067), with the outcome each has now. Each runs
++ * in a child JVM ({@link MacFontNullInputChild}), so that a regression fails its test instead of ending the test
++ * fork. The goldens have no row for any of them, because the C crashed.
++ */
++@EnabledOnOs(OS.MAC)
++public class MacFontNullInputTest {
++
++    /** Outcome: no fallback slot, so the run's glyphs go to slot 0, as for any fallback that cannot be added. */
++    @Test
++    @Tag("crash-prone")
++    @Timeout(2 * MacFontGoldens.CHILD_TIMEOUT_SECONDS)
++    void aRunFontCoreTextDidNotCopyTakesNoFallbackSlot() throws Exception {
++        Map<String, String> values = run(MacFontNullInputChild.FALLBACK_COPY);
++        assertEquals("-1", values.get("slot"), "a run font CoreText did not copy takes no fallback slot");
++        assertEquals("-1", values.get("slot.noFactory"),
++                     "a zero copy must be refused before the factory is asked for a font file");
++    }
++
++    /** Outcome: no name; {@code PrismFontFactory} then falls back to Lucida Grande for the system font. */
++    @Test
++    @Tag("crash-prone")
++    @Timeout(2 * MacFontGoldens.CHILD_TIMEOUT_SECONDS)
++    void aUiFontTypeWithoutAFontHasNoName() throws Exception {
++        Map<String, String> values = run(MacFontNullInputChild.UI_FONT);
++        assertEquals("0", values.get("coreText.font"), "CoreText now makes a font for UI font type "
++                + MacFontNullInputChild.UI_FONT_TYPE_WITHOUT_A_FONT + ", so this input no longer reaches a NULL font"
++                + " and the test needs another type");
++        assertEquals(FontGoldens.NULL, values.get("getFont"), "a UI font type without a font has no name");
++    }
++
++    /** Outcome: no name. No installed font lacks a family name, so the NULL goes in where the name is read. */
++    @Test
++    @Tag("crash-prone")
++    @Timeout(2 * MacFontGoldens.CHILD_TIMEOUT_SECONDS)
++    void aFontWithoutAFamilyNameHasNoName() throws Exception {
++        Map<String, String> values = run(MacFontNullInputChild.FAMILY_NAME);
++        assertEquals(FontGoldens.NULL, values.get("familyName"), "a font without a family name has no name");
++    }
++
++    /** Outcome: an empty list. */
++    @Test
++    @Tag("crash-prone")
++    @Timeout(2 * MacFontGoldens.CHILD_TIMEOUT_SECONDS)
++    void aZeroFontHasAnEmptyCascadeList() throws Exception {
++        Map<String, String> values = run(MacFontNullInputChild.CASCADE_FONT);
++        assertEquals("0", values.get("entries"), "a zero font has an empty cascade list");
++    }
++
++    /** Outcome: no cascade entry is added, so the font gets the hard-wired fallbacks alone, as any font gets them. */
++    @Test
++    @Tag("crash-prone")
++    @Timeout(2 * MacFontGoldens.CHILD_TIMEOUT_SECONDS)
++    void anEmbeddedFontCoreGraphicsRejectsKeepsTheHardWiredFallbacks() throws Exception {
++        Map<String, String> values = run(MacFontNullInputChild.CASCADE_EMBEDDED);
++        assertEquals("0", values.get("cgFont"), "CoreGraphics accepted the font without a glyf table, so this input"
++                + " no longer reaches a zero font in the cascade lookup");
++        assertEquals("Apple Symbols|Apple Color Emoji|Arial Unicode MS|Heiti SC Light", values.get("fallbacks"),
++                     "a font CoreGraphics rejected has the hard-wired fallbacks and no other");
++    }
++
++    /**
++     * Outcome: a null name, which the cascade lookup skips. No cascade list has such an entry, so a descriptor
++     * without a display name goes in where the list's entries are read.
++     */
++    @Test
++    @Tag("crash-prone")
++    @Timeout(2 * MacFontGoldens.CHILD_TIMEOUT_SECONDS)
++    void aCascadeEntryWithoutADisplayNameHasANullName() throws Exception {
++        Map<String, String> values = run(MacFontNullInputChild.CASCADE_NAME);
++        assertEquals("false", values.get("coreText.displayName"), "CoreText now gives a descriptor of an unknown"
++                + " font a display name, so this input no longer reaches a NULL name");
++        assertEquals(FontGoldens.NULL, values.get("name"), "an entry without a display name has a null name");
++        assertEquals(FontGoldens.NULL, values.get("file"), "an entry without a URL has a null file");
++    }
++
++    /**
++     * Outcome: format 0, as for any format that is not sfnt, so the decoder refuses the font. No installed font
++     * lacks the attribute, so the NULL goes in where the attribute is read.
++     */
++    @Test
++    @Tag("crash-prone")
++    @Timeout(2 * MacFontGoldens.CHILD_TIMEOUT_SECONDS)
++    void aFontWithoutAFormatAttributeHasFormatZero() throws Exception {
++        Map<String, String> values = run(MacFontNullInputChild.FORMAT);
++        assertEquals("0", values.get("format"), "a font without a format attribute has format 0");
++    }
++
++    /** Outcome: no table; the decoder then refuses the font as it does when CoreText lists no tables. */
++    @Test
++    @Tag("crash-prone")
++    @Timeout(2 * MacFontGoldens.CHILD_TIMEOUT_SECONDS)
++    void aTableTheFontLacksIsNull() throws Exception {
++        Map<String, String> values = run(MacFontNullInputChild.TABLE);
++        assertEquals("0", values.get("coreText.table"), "CoreText now makes a table for a tag Helvetica lacks, so"
++                + " this input no longer reaches a NULL table and the test needs another tag");
++        assertEquals(FontGoldens.NULL, values.get("table"), "a table the font lacks is null");
++    }
++
++    /**
++     * Outcome: a {@code NullPointerException} thrown where {@code OS} reads the mirror, which is before any
++     * downcall; the context is usable afterwards. The C crashed here.
++     */
++    @Test
++    @Tag("crash-prone")
++    @Timeout(2 * MacFontGoldens.CHILD_TIMEOUT_SECONDS)
++    void aNullMirrorThrowsBeforeAnyDowncall() throws Exception {
++        Map<String, String> values = run(MacFontNullInputChild.MIRROR);
++        String inRect = "java.lang.NullPointerException@com.sun.javafx.font.coretext.OS.rect";
++        String inTransform = "java.lang.NullPointerException@com.sun.javafx.font.coretext.OS.transform";
++        assertEquals(inRect, values.get("rect.null"), "CGRectApplyAffineTransform with a null rect");
++        assertEquals(inTransform, values.get("transform.null"), "CGRectApplyAffineTransform with a null transform");
++        assertEquals(inRect, values.get("fill.null"), "CGContextFillRect with a null rect");
++        assertEquals("64", values.get("fill.after"), "the context still fills and reads after the null rect");
++    }
++
++    private static Map<String, String> run(String scenario) throws Exception {
++        return MacFontGoldens.runChild(MacFontNullInputChild.class, scenario, Map.of());
++    }
++}
+diff --git a/modules/javafx.graphics/src/test/java/test/com/sun/javafx/font/MacFontReleaseChild.java b/modules/javafx.graphics/src/test/java/test/com/sun/javafx/font/MacFontReleaseChild.java
+new file mode 100644
+index 0000000000..04ccb28477
+--- /dev/null
++++ b/modules/javafx.graphics/src/test/java/test/com/sun/javafx/font/MacFontReleaseChild.java
+@@ -0,0 +1,246 @@
++/*
++ * Copyright (c) 2026, Oracle and/or its affiliates. All rights reserved.
++ * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
++ *
++ * This code is free software; you can redistribute it and/or modify it
++ * under the terms of the GNU General Public License version 2 only, as
++ * published by the Free Software Foundation.  Oracle designates this
++ * particular file as subject to the "Classpath" exception as provided
++ * by Oracle in the LICENSE file that accompanied this code.
++ *
++ * This code is distributed in the hope that it will be useful, but WITHOUT
++ * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
++ * FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License
++ * version 2 for more details (a copy is included in the LICENSE file that
++ * accompanied this code).
++ *
++ * You should have received a copy of the GNU General Public License version
++ * 2 along with this work; if not, write to the Free Software Foundation,
++ * Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301 USA.
++ *
++ * Please contact Oracle, 500 Oracle Parkway, Redwood Shores, CA 94065 USA
++ * or visit www.oracle.com if you need additional information or have any
++ * questions.
++ */
++
++package test.com.sun.javafx.font;
++
++import com.sun.javafx.font.CompositeFontResource;
++import com.sun.javafx.font.FontResource;
++import com.sun.javafx.font.FontResourceShim;
++import com.sun.javafx.font.MacFontFinderShim;
++import com.sun.javafx.font.MacFontOracleShim;
++import com.sun.javafx.font.MacFontProbeShim;
++import com.sun.javafx.font.PGFont;
++import com.sun.javafx.font.PrismFontFactory;
++import com.sun.javafx.font.coretext.CoreTextPeerShim;
++import com.sun.javafx.font.coretext.OSShim;
++import com.sun.javafx.text.PrismTextLayout;
++import java.lang.ref.Reference;
++import java.nio.charset.StandardCharsets;
++import java.nio.file.Files;
++import java.nio.file.Path;
++import java.util.ArrayList;
++import java.util.List;
++import test.com.sun.javafx.font.FontGoldenHarness.GoldenMap;
++
++/**
++ * The child JVM of {@link MacFontReleaseTest}: one scenario per CF object the macOS font layer once left unreleased.
++ * The retain-count probes are those of {@link MacFontStressChild}.
++ */
++public final class MacFontReleaseChild {
++
++    static final String CASCADE_LIST = "release.cascadeList";
++    static final String FALLBACK_FONT = "release.fallbackFont";
++    static final String FONT_FILE_OWNERSHIP = "release.fontFileOwnership";
++    static final String CASCADE_FONT = "release.cascadeFont";
++
++    static final int HEAP_CALLS = 300;
++    static final int HEAP_ROUNDS = 3;
++
++    /** Hebrew, Arabic and Thai: scripts the System font leaves to fallback fonts. */
++    private static final List<String> FALLBACK_TEXTS =
++            List.of("אבג", "مرحبا", "สวัสดี");
++
++    private MacFontReleaseChild() {
++    }
++
++    public static void main(String[] args) throws Exception {
++        String scenario = args[0];
++        GoldenMap out = new GoldenMap();
++        switch (scenario) {
++            case CASCADE_LIST -> cascadeList(out);
++            case FALLBACK_FONT -> fallbackFont(out);
++            case FONT_FILE_OWNERSHIP -> fontFileOwnership(out);
++            case CASCADE_FONT -> cascadeFont(out);
++            default -> throw new IllegalArgumentException("unknown scenario " + scenario);
++        }
++        Files.writeString(Path.of(args[1]), FontGoldens.format(out, List.of("MacFontReleaseChild " + scenario)),
++                          StandardCharsets.UTF_8);
++        System.exit(0);
++    }
++
++    private static void cascadeList(GoldenMap out) throws Exception {
++        long font = MacFontOracleShim.createFont("Helvetica", 12);
++        cascadeUrls(out, font);
++        cascadeNames(out, font);
++        MacFontOracleShim.release(font);
++    }
++
++    /**
++     * The URL of an entry is a new object on every call, so no retain count shows one left behind; the heap does.
++     * Off the AppKit thread CoreText's autoreleased objects wait for a pool, so each round drains its own. The
++     * heap settles over the first rounds, hence a warm-up and the smallest of {@link #HEAP_ROUNDS}.
++     */
++    private static void cascadeUrls(GoldenMap out, long font) {
++        String[] list = cascadeLists(font);
++        double blocksPerCall = Double.MAX_VALUE;
++        for (int round = 0; round < HEAP_ROUNDS; round++) {
++            long before = MacFontProbeShim.mallocBlocksInUse();
++            cascadeLists(font);
++            long after = MacFontProbeShim.mallocBlocksInUse();
++            blocksPerCall = Math.min(blocksPerCall, (after - before) / (double) HEAP_CALLS);
++        }
++        int urls = 0;
++        for (int i = 1; i < list.length; i += 2) {
++            if (list[i] != null) {
++                urls++;
++            }
++        }
++        out.put("blocks.perCall", Double.toString(blocksPerCall));
++        out.put("entries", Integer.toString(list.length / 2));
++        out.put("urls", Integer.toString(urls));
++    }
++
++    private static String[] cascadeLists(long font) {
++        String[] list = new String[0];
++        long pool = MacFontProbeShim.autoreleasePoolPush();
++        for (int i = 0; i < HEAP_CALLS; i++) {
++            list = MacFontFinderShim.getCascadeList(font);
++        }
++        MacFontProbeShim.autoreleasePoolPop(pool);
++        return list;
++    }
++
++    /**
++     * CoreText hands out the same name string for an entry in every list, so its retain count shows a copy left
++     * behind. Immortal strings show nothing: the first counted one is watched.
++     */
++    private static void cascadeNames(GoldenMap out, long font) throws Exception {
++        int entry = -1;
++        long name = 0;
++        for (int i = 0; entry < 0; i++) {
++            long candidate = MacFontProbeShim.cascadeEntryName(font, i);
++            if (candidate == 0) {
++                break;
++            }
++            if (MacFontOracleShim.retainCount(candidate) < Integer.MAX_VALUE) {
++                entry = i;
++                name = candidate;
++            } else {
++                MacFontOracleShim.release(candidate);
++            }
++        }
++        out.put("name.entry", Integer.toString(entry));
++        if (entry < 0) {
++            return;
++        }
++        long watched = name;
++        int watchedEntry = entry;
++        MacFontStressChild.delta(out, "name", watched, () -> MacFontFinderShim.getCascadeList(font));
++        MacFontStressChild.delta(out, "control.nameCopyPerCall", watched,
++                () -> MacFontProbeShim.cascadeEntryName(font, watchedEntry));
++        for (int i = 0; i < 2 * MacFontStressChild.RETAIN_CALLS; i++) {
++            MacFontOracleShim.release(watched);
++        }
++        MacFontOracleShim.release(watched);
++    }
++
++    private static void fallbackFont(GoldenMap out) throws Exception {
++        fallbackFontsOfLayout(out);
++        fallbackFontOfTheSeam(out);
++    }
++
++    /**
++     * The fallback fonts layout adds by reference, which ones being the machine's choice. A fresh copy of a font
++     * has the count of a font with one owner, so a font file's own font must have the same.
++     */
++    private static void fallbackFontsOfLayout(GoldenMap out) throws Exception {
++        PGFont font = PrismFontFactory.getFontFactory().createFont("System", false, false, 12f);
++        CompositeFontResource composite = (CompositeFontResource) font.getFontResource();
++        for (String text : FALLBACK_TEXTS) {
++            PrismTextLayout layout = new PrismTextLayout(0);
++            layout.setContent(text, font);
++            layout.getRuns();
++        }
++        int fonts = 0;
++        for (int slot = 0; slot < composite.getNumSlots(); slot++) {
++            FontResource resource = composite.getSlotResource(slot);
++            long ref = CoreTextPeerShim.ctFontRef(resource);
++            if (ref != 0) {
++                long fresh = OSShim.CTFontCreateCopyWithAttributes(ref, 0, null, 0);
++                out.put("font." + FontGoldenFormat.pad(fonts, 2), resource.getFullName() + "|"
++                        + MacFontOracleShim.retainCount(ref) + "|" + MacFontOracleShim.retainCount(fresh));
++                OSShim.CFRelease(fresh);
++                fonts++;
++            }
++            Reference.reachabilityFence(resource);
++        }
++        out.put("fonts", Integer.toString(fonts));
++    }
++
++    /** The same hand-over as layout's, with a font this probe also holds, so that its count can be read. */
++    private static void fallbackFontOfTheSeam(GoldenMap out) throws Exception {
++        long helvetica = MacFontOracleShim.createFont("Helvetica", 12);
++        long ref = OSShim.CTFontCreateCopyWithAttributes(helvetica, 0, null, 0);
++        OSShim.CFRetain(ref);
++        CompositeFontResource logical = FontResourceShim.newLogicalFont("System", false, false);
++        out.put("seam.before", Long.toString(MacFontOracleShim.retainCount(ref)));
++        out.put("seam.slot", Integer.toString(CoreTextPeerShim.addFallbackFont(logical, "Helvetica", ref)));
++        out.put("seam.after", Long.toString(MacFontOracleShim.retainCount(ref)));
++        Reference.reachabilityFence(logical);
++        OSShim.CFRelease(ref);
++        MacFontOracleShim.release(helvetica);
++    }
++
++    private static void fontFileOwnership(GoldenMap out) throws Exception {
++        long helvetica = MacFontOracleShim.createFont("Helvetica", 12);
++        fontFileFor(out, "unmatched", helvetica, "US-067 No Such Face");
++        fontFileFor(out, "matched", helvetica, "Helvetica");
++        MacFontOracleShim.release(helvetica);
++    }
++
++    /** Hands a copy of {@code font} to the factory under {@code name}, holding a second reference to read it by. */
++    private static void fontFileFor(GoldenMap out, String key, long font, String name) throws Exception {
++        long ref = OSShim.CTFontCreateCopyWithAttributes(font, 0, null, 0);
++        OSShim.CFRetain(ref);
++        out.put(key + ".before", Long.toString(MacFontOracleShim.retainCount(ref)));
++        FontResource made = CoreTextPeerShim.createFontFile(name, ref);
++        out.put(key + ".made", made == null ? null : made.getClass().getSimpleName());
++        out.put(key + ".after", Long.toString(MacFontOracleShim.retainCount(ref)));
++        Reference.reachabilityFence(made);
++        OSShim.CFRelease(ref);
++    }
++
++    /**
++     * A CTFont made over a CGFont holds one reference to it, so the CGFont of an embedded font shows a cascade
++     * lookup that keeps its CTFont. The font file's disposer owns the CGFont, hence the fence.
++     */
++    private static void cascadeFont(GoldenMap out) throws Exception {
++        FontResource resource =
++                FontResourceShim.newUncachedEmbeddedFontFile(MacFontGoldens.pinned("ahem").toString());
++        long cgFont = CoreTextPeerShim.cgFontRef(resource);
++        out.put("cgFont", Long.toString(cgFont));
++        if (cgFont != 0) {
++            MacFontStressChild.delta(out, "cascadeFont", cgFont,
++                    () -> PrismFontFactory.getFontFactory().getFallbacks(resource));
++            List<Long> fonts = new ArrayList<>();
++            MacFontStressChild.delta(out, "control.fontPerCall", cgFont,
++                    () -> fonts.add(OSShim.CTFontCreateWithGraphicsFont(cgFont, 0, null, 0)));
++            for (long font : fonts) {
++                OSShim.CFRelease(font);
++            }
++        }
++        Reference.reachabilityFence(resource);
++    }
++}
+diff --git a/modules/javafx.graphics/src/test/java/test/com/sun/javafx/font/MacFontReleaseTest.java b/modules/javafx.graphics/src/test/java/test/com/sun/javafx/font/MacFontReleaseTest.java
+new file mode 100644
+index 0000000000..1d1907a755
+--- /dev/null
++++ b/modules/javafx.graphics/src/test/java/test/com/sun/javafx/font/MacFontReleaseTest.java
+@@ -0,0 +1,148 @@
++/*
++ * Copyright (c) 2026, Oracle and/or its affiliates. All rights reserved.
++ * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
++ *
++ * This code is free software; you can redistribute it and/or modify it
++ * under the terms of the GNU General Public License version 2 only, as
++ * published by the Free Software Foundation.  Oracle designates this
++ * particular file as subject to the "Classpath" exception as provided
++ * by Oracle in the LICENSE file that accompanied this code.
++ *
++ * This code is distributed in the hope that it will be useful, but WITHOUT
++ * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
++ * FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License
++ * version 2 for more details (a copy is included in the LICENSE file that
++ * accompanied this code).
++ *
++ * You should have received a copy of the GNU General Public License version
++ * 2 along with this work; if not, write to the Free Software Foundation,
++ * Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301 USA.
++ *
++ * Please contact Oracle, 500 Oracle Parkway, Redwood Shores, CA 94065 USA
++ * or visit www.oracle.com if you need additional information or have any
++ * questions.
++ */
++
++package test.com.sun.javafx.font;
++
++import java.util.ArrayList;
++import java.util.List;
++import java.util.Map;
++import org.junit.jupiter.api.Tag;
++import org.junit.jupiter.api.Test;
++import org.junit.jupiter.api.Timeout;
++import org.junit.jupiter.api.condition.EnabledOnOs;
++import org.junit.jupiter.api.condition.OS;
++
++import static org.junit.jupiter.api.Assertions.assertEquals;
++import static org.junit.jupiter.api.Assertions.assertNotEquals;
++
++/**
++ * The CF objects the C of commit {@value MacFontGoldens#CAPTURE_COMMIT} created or copied and never released, and
++ * those a Java exception could leave unreleased (US-067): each is now released exactly once. Each observation runs
++ * in a child JVM ({@link MacFontReleaseChild}), because an over-release ends the JVM. A leak shows as a retain
++ * count that rises with the calls, as in {@link MacFontStressTest}, or as a heap that grows with them.
++ */
++@EnabledOnOs(OS.MAC)
++public class MacFontReleaseTest {
++
++    private static final String RETAIN_CALLS = Integer.toString(MacFontStressChild.RETAIN_CALLS);
++
++    /**
++     * The name copy and the URL of every cascade entry. A URL left behind keeps about two heap blocks, so the bound
++     * of half a block per URL and call tells a leak from the noise of a warm heap. On a macOS where every name
++     * string is immortal ({@code name.entry} is -1) the name copy cannot be observed and only the heap is checked.
++     */
++    @Test
++    @Tag("crash-prone")
++    @Timeout(2 * MacFontGoldens.CHILD_TIMEOUT_SECONDS)
++    void theCascadeListReleasesTheNamesAndUrls() throws Exception {
++        Map<String, String> values = run(MacFontReleaseChild.CASCADE_LIST);
++        List<String> problems = new ArrayList<>();
++        int urls = Integer.parseInt(values.get("urls"));
++        double blocksPerCall = Double.parseDouble(values.get("blocks.perCall"));
++        if (urls < 10) {
++            problems.add("the cascade list of Helvetica has " + urls + " files, too few for the heap to show a URL"
++                    + " that is not released");
++        }
++        if (!(blocksPerCall < urls / 2.0)) {
++            problems.add("a cascade list call leaves " + blocksPerCall + " heap blocks in use, for " + urls
++                    + " URLs: the URLs are not released");
++        }
++        if (!values.get("name.entry").equals("-1")) {
++            expect(problems, values, "retain.delta.control.nameCopyPerCall", RETAIN_CALLS,
++                   "a name copy that is not released must raise the retain count of the watched name");
++            expect(problems, values, "retain.delta.name", "0", "the cascade list releases the name it copies");
++        }
++        assertEquals(List.of(), problems);
++    }
++
++    /**
++     * A fallback font layout takes by reference has one owner, its font file. The layout half reads the fonts this
++     * machine's layout added that way: a fresh copy has the count of a font with one owner, so each font file's font
++     * must have the same. Where no fallback of the machine took that path ({@code fonts} is 0) that half asserts
++     * nothing, and the seam half alone pins the hand-over, the same on every machine.
++     */
++    @Test
++    @Tag("crash-prone")
++    @Timeout(2 * MacFontGoldens.CHILD_TIMEOUT_SECONDS)
++    void aFallbackFontTakenByReferenceIsOwnedOnce() throws Exception {
++        Map<String, String> values = run(MacFontReleaseChild.FALLBACK_FONT);
++        List<String> problems = new ArrayList<>();
++        int fonts = Integer.parseInt(values.get("fonts"));
++        for (int i = 0; i < fonts; i++) {
++            String[] font = values.get("font." + FontGoldenFormat.pad(i, 2)).split("\\|");
++            if (!font[1].equals(font[2])) {
++                problems.add("the fallback font " + font[0] + " has retain count " + font[1] + " where a fresh copy"
++                        + " has " + font[2] + ": its font file is not its only owner");
++            }
++        }
++        if (values.get("seam.slot").equals("-1")) {
++            problems.add("the Helvetica copy was not added as a fallback, so the seam half proves nothing and the"
++                    + " test needs another face");
++        }
++        if (!values.get("seam.after").equals(values.get("seam.before"))) {
++            problems.add("handing a font over as a fallback moved its retain count from " + values.get("seam.before")
++                    + " to " + values.get("seam.after") + ": the font file takes the one reference it is handed");
++        }
++        assertEquals(List.of(), problems);
++    }
++
++    /** The factory consumes the reference: a font file's disposer owns it, or it is released when none is made. */
++    @Test
++    @Tag("crash-prone")
++    @Timeout(2 * MacFontGoldens.CHILD_TIMEOUT_SECONDS)
++    void aFontReferenceIsReleasedUnlessAFontFileTakesIt() throws Exception {
++        Map<String, String> values = run(MacFontReleaseChild.FONT_FILE_OWNERSHIP);
++        long unmatchedBefore = Long.parseLong(values.get("unmatched.before"));
++        assertEquals(FontGoldens.NULL, values.get("unmatched.made"), "no face has the unmatched name");
++        assertEquals(Long.toString(unmatchedBefore - 1), values.get("unmatched.after"),
++                     "a reference no font file took is released");
++        assertEquals("CTFontFile", values.get("matched.made"), "Helvetica has a face of that name");
++        assertEquals(values.get("matched.before"), values.get("matched.after"),
++                     "a reference a font file took is neither retained nor released");
++    }
++
++    /** The CTFont the cascade lookup makes for a font file is released once the list is read. */
++    @Test
++    @Tag("crash-prone")
++    @Timeout(2 * MacFontGoldens.CHILD_TIMEOUT_SECONDS)
++    void theCascadeLookupReleasesItsFont() throws Exception {
++        Map<String, String> values = run(MacFontReleaseChild.CASCADE_FONT);
++        assertNotEquals("0", values.get("cgFont"), "CoreGraphics made no font of Ahem, so no lookup has a font");
++        assertEquals(RETAIN_CALLS, values.get("retain.delta.control.fontPerCall"),
++                     "a CTFont that is not released must raise the retain count of its CGFont");
++        assertEquals("0", values.get("retain.delta.cascadeFont"), "the cascade lookup releases the CTFont it makes");
++    }
++
++    private static void expect(List<String> problems, Map<String, String> values, String key, String expected,
++                               String reason) {
++        if (!expected.equals(values.get(key))) {
++            problems.add(key + " = " + values.get(key) + ", expected " + expected + ": " + reason);
++        }
++    }
++
++    private static Map<String, String> run(String scenario) throws Exception {
++        return MacFontGoldens.runChild(MacFontReleaseChild.class, scenario, Map.of());
++    }
++}
+diff --git a/modules/javafx.graphics/src/test/java/test/com/sun/javafx/font/Us067CorpusDumpTest.java b/modules/javafx.graphics/src/test/java/test/com/sun/javafx/font/Us067CorpusDumpTest.java
+new file mode 100644
+index 0000000000..69e0d257c6
+--- /dev/null
++++ b/modules/javafx.graphics/src/test/java/test/com/sun/javafx/font/Us067CorpusDumpTest.java
+@@ -0,0 +1,81 @@
++/*
++ * Copyright (c) 2026, Oracle and/or its affiliates. All rights reserved.
++ * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
++ *
++ * This code is free software; you can redistribute it and/or modify it
++ * under the terms of the GNU General Public License version 2 only, as
++ * published by the Free Software Foundation.  Oracle designates this
++ * particular file as subject to the "Classpath" exception as provided
++ * by Oracle in the LICENSE file that accompanied this code.
++ *
++ * This code is distributed in the hope that it will be useful, but WITHOUT
++ * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
++ * FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License
++ * version 2 for more details (a copy is included in the LICENSE file that
++ * accompanied this code).
++ *
++ * You should have received a copy of the GNU General Public License version
++ * 2 along with this work; if not, write to the Free Software Foundation,
++ * Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301 USA.
++ *
++ * Please contact Oracle, 500 Oracle Parkway, Redwood Shores, CA 94065 USA
++ * or visit www.oracle.com if you need additional information or have any
++ * questions.
++ */
++
++package test.com.sun.javafx.font;
++
++import java.nio.charset.StandardCharsets;
++import java.nio.file.Files;
++import java.nio.file.Path;
++import java.util.LinkedHashMap;
++import java.util.List;
++import java.util.Map;
++import org.junit.jupiter.api.Test;
++import org.junit.jupiter.api.Timeout;
++import org.junit.jupiter.api.condition.EnabledOnOs;
++import org.junit.jupiter.api.condition.OS;
++import test.com.sun.javafx.font.FontGoldenHarness.Corpus;
++import test.com.sun.javafx.font.FontGoldenHarness.GoldenMap;
++
++import static org.junit.jupiter.api.Assumptions.assumeTrue;
++
++/**
++ * Evidence tooling of US-067, not part of the story: writes what the five macOS golden corpora produce on this
++ * machine to the directory named by {@code -Dus067.dump}, so that a dump taken before the story's fixes can be
++ * compared with one taken after them where no golden compares. Skipped unless that property is set. The owner
++ * removes this file before committing the story.
++ */
++@EnabledOnOs(OS.MAC)
++public class Us067CorpusDumpTest {
++
++    static final String DIRECTORY_PROPERTY = "us067.dump";
++
++    @Test
++    @Timeout(600)
++    void dumpsTheFiveGoldenCorpora() throws Exception {
++        String directory = System.getProperty(DIRECTORY_PROPERTY);
++        assumeTrue(directory != null, "no dump was asked for with -D" + DIRECTORY_PROPERTY + "=<directory>");
++        Path target = Files.createDirectories(Path.of(directory));
++        Map<String, Corpus> corpora = new LinkedHashMap<>();
++        corpora.put("MacCoreTextGoldenTest", MacCoreTextGoldenTest::capture);
++        corpora.put("MacFontFinderGoldenTest", MacFontFinderGoldenTest::capture);
++        corpora.put("MacDFontGoldenTest", MacDFontGoldenTest::capture);
++        corpora.put("MacFontProcessGoldenTest", MacFontProcessGoldenTest::capture);
++        corpora.put("MacGlyphLayoutGoldenTest", MacGlyphLayoutGoldenTest::capture);
++        for (Map.Entry<String, Corpus> corpus : corpora.entrySet()) {
++            Files.writeString(target.resolve(corpus.getKey() + ".txt"), dump(corpus.getKey(), corpus.getValue()),
++                              StandardCharsets.UTF_8);
++        }
++    }
++
++    private static String dump(String name, Corpus corpus) {
++        try {
++            GoldenMap out = new GoldenMap();
++            corpus.capture(out);
++            return FontGoldens.format(out, List.of(name));
++        } catch (Exception | AssertionError e) {
++            return "FAILED " + e + "\n";
++        }
++    }
++}
