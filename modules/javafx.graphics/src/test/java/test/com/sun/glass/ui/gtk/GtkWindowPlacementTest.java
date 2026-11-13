@@ -467,8 +467,10 @@ public class GtkWindowPlacementTest {
                         + "," + first[1],
                 moved.describe("the window was disabled when its first extents came, and once enabled glass has read"
                         + " the position the test moved it to (" + DRAGGED[0] + "," + DRAGGED[1] + ")"));
-        // Only the position: the first extents' set_bounds gave the window a window size, so the client takes the
-        // change in size (as update_frame_extents does at 64d56e2b9c)
+        // Only the position, which is what the extents taken while the window was disabled decide: they ended its
+        // gravity. The size is that of any window sized by its content whose extents change: update_frame_extents
+        // keeps the size type the application gave, so the client keeps its size and the frame takes the change, as
+        // aCentredWindowStaysWhereXMovedItWhenItsExtentsChange asserts
         int[] client = parseRect(changed.client());
         int[] glass = parseRect(changed.glass());
         assertEquals("client at " + DRAGGED[0] + "," + DRAGGED[1] + ", Window at " + DRAGGED[0] + "," + DRAGGED[1],

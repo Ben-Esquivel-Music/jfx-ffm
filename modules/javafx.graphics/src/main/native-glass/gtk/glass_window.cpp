@@ -979,7 +979,13 @@ void WindowContextTop::update_frame_extents() {
         y -= geometry.gravity_y * (float) (h - old_h);
     }
 
-    set_bounds(x, y, move_x, move_y, w, h, cw, ch, 0, 0);
+    // The size keeps the type the application gave it: a window size stays the window's, so the client takes the
+    // change, and a content size (sizeToScene) stays the client's, so the frame takes it. Passed both, set_bounds
+    // would take the window size, and every later change of a content-sized window's extents would resize its
+    // client: openbox estimates 1,1,20,5 for a dialog's frame and drops the resize handle of a fixed-size one once it
+    // manages it, 1,1,20,1, which would make the client 4 pixels taller.
+    set_bounds(x, y, move_x, move_y, (geometry.final_width.type == BOUNDSTYPE_WINDOW) ? w : -1,
+            (geometry.final_height.type == BOUNDSTYPE_WINDOW) ? h : -1, cw, ch, 0, 0);
 
     // Without a move no configure need follow: GTK sends no request for the client size the window has already
     // (gtk_window_move_resize), which a content-sized window keeps. The frame's position and the view's offset in it
@@ -1288,8 +1294,12 @@ void WindowContextTop::process_configure(GdkEventConfigure* event) {
     // The size to come back to (unmaximize, update_frame_extents) comes only from a configure of a window that glass
     // and the WM both have floating: after maximize(false) glass says floating at once, while the WM can still
     // deliver a configure of the maximized window. It is the client plus the floating frame's extents, so that its
-    // client size is the client's.
-    if (!is_iconified && !is_fullscreen && !is_maximized && wm_floating()) {
+    // client size is the client's. It comes only after the window's first GDK_MAP (process_map), as JDK-8232811 had
+    // it: a configure before it can still carry the size the window was mapped with, not the one asked for since
+    // (openbox's synthetic ConfigureNotify when it manages a dialog that sizeToScene resized after its show), and
+    // update_frame_extents, which a window disabled by an application-modal stage runs too (f8c745cf2c), would ask
+    // for that size again.
+    if (!is_iconified && !is_fullscreen && !is_maximized && wm_floating() && mapped) {
         geometry.final_width.value = (geometry.final_width.type == BOUNDSTYPE_CONTENT)
                 ? event->width : event->width + geometry.extents.left + geometry.extents.right;
 
