@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2013, 2023, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2013, 2026, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -135,12 +135,18 @@ class CTGlyph implements Glyph {
             flags = OS.kCGImageAlphaNone;
         }
         long context =  OS.CGBitmapContextCreate(0, width, height, bpc, bpr, space, flags);
-
-        boolean subPixel = strike.isSubPixelGlyph();
-        OS.CGContextSetAllowsFontSmoothing(context, lcd);
-        OS.CGContextSetAllowsAntialiasing(context, true);
-        OS.CGContextSetAllowsFontSubpixelPositioning(context, subPixel);
-        OS.CGContextSetAllowsFontSubpixelQuantization(context, subPixel);
+        try {
+            boolean subPixel = strike.isSubPixelGlyph();
+            OS.CGContextSetAllowsFontSmoothing(context, lcd);
+            OS.CGContextSetAllowsAntialiasing(context, true);
+            OS.CGContextSetAllowsFontSubpixelPositioning(context, subPixel);
+            OS.CGContextSetAllowsFontSubpixelQuantization(context, subPixel);
+        } catch (Throwable t) {
+            if (context != 0) {
+                OS.CGContextRelease(context);
+            }
+            throw t;
+        }
         return context;
 
     }
@@ -161,29 +167,30 @@ class CTGlyph implements Glyph {
         long context = createContext(true, w, h);
         if (context == 0) return new byte[0];
 
-        double drawX = 0, drawY = 0;
-        if (matrix != null) {
-            OS.CGContextTranslateCTM(context, -x, -y);
-        } else {
-            drawX = x;
-            drawY = y;
+        try {
+            double drawX = 0, drawY = 0;
+            if (matrix != null) {
+                OS.CGContextTranslateCTM(context, -x, -y);
+            } else {
+                drawX = x;
+                drawY = y;
+            }
+
+            OS.CTFontDrawGlyphs(fontRef, (short)glyphCode, -drawX, -drawY, context);
+
+            if (matrix != null) {
+                OS.CGContextTranslateCTM(context, x, y);
+            }
+
+            byte[] imageData = OS.CGImageContextGetData(context, w, h, 32);
+            if (imageData == null) {
+                bounds = new CGRect();
+                imageData = new byte[0];
+            }
+            return imageData;
+        } finally {
+            OS.CGContextRelease(context);
         }
-
-        OS.CTFontDrawGlyphs(fontRef, (short)glyphCode, -drawX, -drawY, context);
-
-        if (matrix != null) {
-            OS.CGContextTranslateCTM(context, x, y);
-        }
-
-        byte[] imageData = OS.CGImageContextGetData(context, w, h, 32);
-        if (imageData == null) {
-            bounds = new CGRect();
-            imageData = new byte[0];
-        }
-
-        OS.CGContextRelease(context);
-
-        return imageData;
     }
 
 
@@ -200,44 +207,46 @@ class CTGlyph implements Glyph {
                                createContext(lcdContext, w, h);
         if (context == 0) return new byte[0];
 
-        /* Fill background with white */
-        OS.CGContextSetRGBFillColor(context, 1, 1, 1, 1);
-        CGRect rect = new CGRect();
-        rect.size.width = w;
-        rect.size.height = h;
-        OS.CGContextFillRect(context, rect);
+        try {
+            /* Fill background with white */
+            OS.CGContextSetRGBFillColor(context, 1, 1, 1, 1);
+            CGRect rect = new CGRect();
+            rect.size.width = w;
+            rect.size.height = h;
+            OS.CGContextFillRect(context, rect);
 
-        double drawX = 0, drawY = 0;
-        if (matrix != null) {
-            OS.CGContextTranslateCTM(context, -x, -y);
-        } else {
-            drawX = x - strike.getSubPixelPosition(subPixel);
-            drawY = y;
-        }
+            double drawX = 0, drawY = 0;
+            if (matrix != null) {
+                OS.CGContextTranslateCTM(context, -x, -y);
+            } else {
+                drawX = x - strike.getSubPixelPosition(subPixel);
+                drawY = y;
+            }
 
-        /* Draw the text with black */
-        OS.CGContextSetRGBFillColor(context, 0, 0, 0, 1);
-        OS.CTFontDrawGlyphs(fontRef, (short)glyphCode, -drawX, -drawY, context);
+            /* Draw the text with black */
+            OS.CGContextSetRGBFillColor(context, 0, 0, 0, 1);
+            OS.CTFontDrawGlyphs(fontRef, (short)glyphCode, -drawX, -drawY, context);
 
-        if (matrix != null) {
-            OS.CGContextTranslateCTM(context, x, y);
-        }
+            if (matrix != null) {
+                OS.CGContextTranslateCTM(context, x, y);
+            }
 
-        byte[] imageData;
-        if (lcd) {
-            imageData = OS.CGBitmapContextGetData(context, w, h, 24);
-        } else {
-            imageData = OS.CGBitmapContextGetData(context, w, h, 8);
+            byte[] imageData;
+            if (lcd) {
+                imageData = OS.CGBitmapContextGetData(context, w, h, 24);
+            } else {
+                imageData = OS.CGBitmapContextGetData(context, w, h, 8);
+            }
+            if (imageData == null) {
+                bounds = new CGRect();
+                imageData = new byte[0];
+            }
+            return imageData;
+        } finally {
+            if (!cache) {
+                OS.CGContextRelease(context);
+            }
         }
-        if (imageData == null) {
-            bounds = new CGRect();
-            imageData = new byte[0];
-        }
-
-        if (!cache) {
-            OS.CGContextRelease(context);
-        }
-        return imageData;
     }
 
     @Override public byte[] getPixelData() {

@@ -326,7 +326,12 @@ public abstract class PrismFontFile implements FontResource, FontConstants {
             strike = createStrike(size, transform, aaMode, desc);
             DisposerRecord disposer = strike.getDisposer();
             if (disposer != null) {
-                ref = Disposer.addRecord(strike, disposer);
+                try {
+                    ref = Disposer.addRecord(strike, disposer);
+                } catch (Throwable t) {
+                    disposer.dispose();
+                    throw t;
+                }
             } else {
                 ref = new WeakReference<>(strike);
             }

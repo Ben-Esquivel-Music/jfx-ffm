@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2013, 2023, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2013, 2026, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -92,7 +92,15 @@ class CTFontStrike extends PrismFontStrike<CTFontFile> {
 
     @Override protected DisposerRecord createDisposer(FontStrikeDesc desc) {
         CTFontFile fontResource = getFontResource();
-        return new CTStrikeDisposer(fontResource, desc, fontRef);
+        try {
+            return new CTStrikeDisposer(fontResource, desc, fontRef);
+        } catch (Throwable t) {
+            if (fontRef != 0) {
+                OS.CFRelease(fontRef);
+                fontRef = 0;
+            }
+            throw t;
+        }
     }
 
     @Override protected Glyph createGlyph(int glyphCode) {

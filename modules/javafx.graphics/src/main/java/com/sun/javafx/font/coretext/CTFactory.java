@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2013, 2025, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2013, 2026, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -45,21 +45,33 @@ public class CTFactory extends PrismFontFactory {
      * This is needed for fonts where the name starts with "."
      * It isn't just the ".SF" "System Font", but related fallbacks which
      * layout returns and we need to add as a native fallback to a composite font.
+     *
+     * fontRef is a +1 reference that this consumes: the font file's disposer owns it
+     * once the constructor returns, and on every other exit it is released here.
+     * A zero reference is not released.
      */
     CTFontFile createFontFile(String name, long fontRef) throws Exception {
-        String filename = OS.CTFontCopyURLAttribute(fontRef);
-        int fIndex = findFontIndex(name, filename);
+        CTFontFile font = null;
+        try {
+            String filename = OS.CTFontCopyURLAttribute(fontRef);
+            int fIndex = findFontIndex(name, filename);
 
-        if (debugFonts) {
-            System.err.println("createFontFile by ref name="+name + " filename="+filename+" index="+fIndex);
+            if (debugFonts) {
+                System.err.println("createFontFile by ref name="+name + " filename="+filename+" index="+fIndex);
+            }
+            if (fIndex != -1) {
+                font = new CTFontFile(name, filename, fIndex, fontRef);
+            }
+        } finally {
+            if (font == null && fontRef != 0) {
+                OS.CFRelease(fontRef);
+            }
         }
-        if (fIndex == -1) {
-            return null;
+        if (font != null) {
+            // Store the lookup name in the map.
+            // This should prevent us needing to create new instances.
+            storeInMap(name, font);
         }
-        CTFontFile font = new CTFontFile(name, filename, fIndex, fontRef);
-        // Store the lookup name in the map.
-        // This should prevent us needing to create new instances.
-        storeInMap(name, font);
         return font;
     }
 

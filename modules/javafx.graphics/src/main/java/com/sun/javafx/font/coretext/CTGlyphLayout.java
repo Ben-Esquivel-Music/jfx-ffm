@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2013, 2025, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2013, 2026, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -43,27 +43,40 @@ class CTGlyphLayout extends GlyphLayout {
         long textRef = OS.CFStringCreateWithCharacters(alloc, chars, start, length);
         long lineRef = 0;
         if (textRef != 0) {
-            long attributes = OS.CFDictionaryCreateMutable(alloc, 4,
-                                  OS.kCFTypeDictionaryKeyCallBacks(),
-                                  OS.kCFTypeDictionaryValueCallBacks());
-            if (attributes != 0) {
-                OS.CFDictionaryAddValue(attributes, OS.kCTFontAttributeName(), fontRef);
-                if (rtl) {
-                    long paragraphStyleRef = OS.CTParagraphStyleCreate(OS.kCTWritingDirectionRightToLeft);
-                    if (paragraphStyleRef != 0) {
-                        OS.CFDictionaryAddValue(attributes, OS.kCTParagraphStyleAttributeName(), paragraphStyleRef);
-                        OS.CFRelease(paragraphStyleRef);
+            try {
+                long attributes = OS.CFDictionaryCreateMutable(alloc, 4,
+                                      OS.kCFTypeDictionaryKeyCallBacks(),
+                                      OS.kCFTypeDictionaryValueCallBacks());
+                if (attributes != 0) {
+                    try {
+                        OS.CFDictionaryAddValue(attributes, OS.kCTFontAttributeName(), fontRef);
+                        if (rtl) {
+                            long paragraphStyleRef = OS.CTParagraphStyleCreate(OS.kCTWritingDirectionRightToLeft);
+                            if (paragraphStyleRef != 0) {
+                                try {
+                                    OS.CFDictionaryAddValue(attributes, OS.kCTParagraphStyleAttributeName(),
+                                                            paragraphStyleRef);
+                                } finally {
+                                    OS.CFRelease(paragraphStyleRef);
+                                }
+                            }
+                        }
+                        /* Note that by default CoreText will apply kerning depending on the font*/
+                        long attString = OS.CFAttributedStringCreate(alloc, textRef, attributes);
+                        if (attString != 0) {
+                            try {
+                                lineRef = OS.CTLineCreateWithAttributedString(attString);
+                            } finally {
+                                OS.CFRelease(attString);
+                            }
+                        }
+                    } finally {
+                        OS.CFRelease(attributes);
                     }
                 }
-                /* Note that by default CoreText will apply kerning depending on the font*/
-                long attString = OS.CFAttributedStringCreate(alloc, textRef, attributes);
-                if (attString != 0) {
-                    lineRef = OS.CTLineCreateWithAttributedString(attString);
-                    OS.CFRelease(attString);
-                }
-                OS.CFRelease(attributes);
+            } finally {
+                OS.CFRelease(textRef);
             }
-            OS.CFRelease(textRef);
         }
         return lineRef;
     }
@@ -91,26 +104,34 @@ class CTGlyphLayout extends GlyphLayout {
             }
             slot = fr.getSlotForFont(fontName);
             if (slot == -1) {
-                 CTFontFile newFont = null;
-                 try {
-                     CTFactory factory = (CTFactory)PrismFontFactory.getFontFactory();
-                     long newRef = OS.CTFontCreateCopyWithAttributes(actualFont, 0, null,0);
-                      OS.CFRetain(newRef); // hope not needed ..
-                     newFont = factory.createFontFile(fontName, newRef);
-                     if (newFont != null) {
-                         slot = fr.addSlotFont(newFont);
-                     }
-                 } catch (Exception e) {
-                     if (PrismFontFactory.debugFonts) {
-                         e.printStackTrace();
-                     }
-                 }
+                try {
+                    CTFactory factory = (CTFactory)PrismFontFactory.getFontFactory();
+                    long newRef = OS.CTFontCreateCopyWithAttributes(actualFont, 0, null, 0);
+                    slot = addFallbackFont(factory, fr, fontName, newRef);
+                } catch (Exception e) {
+                    if (PrismFontFactory.debugFonts) {
+                        e.printStackTrace();
+                    }
+                }
             }
             if (PrismFontFactory.debugFonts) {
                 System.err.println("\tFallback font= "+ fontName + " slot=" + slot);
             }
         }
         return slot;
+    }
+
+    /* newRef is the copy of the run's font, a +1 reference createFontFile consumes, or 0 when CoreText made none. */
+    static int addFallbackFont(CTFactory factory, CompositeFontResource fr, String fontName, long newRef)
+            throws Exception {
+        if (newRef == 0) {
+            return -1;
+        }
+        CTFontFile newFont = factory.createFontFile(fontName, newRef);
+        if (newFont == null) {
+            return -1;
+        }
+        return fr.addSlotFont(newFont);
     }
 
     @Override
@@ -130,35 +151,38 @@ class CTGlyphLayout extends GlyphLayout {
         boolean rtl = (run.getLevel() & 1) != 0;
         long lineRef = createCTLine(fontRef, text, rtl, run.getStart(), run.getLength());
         if (lineRef == 0) return;
-        long runs = OS.CTLineGetGlyphRuns(lineRef);
-        if (runs != 0) {
-            int glyphCount = (int)OS.CTLineGetGlyphCount(lineRef);
-            int[] glyphs = new int[glyphCount];
-            float[] positions = new float[glyphCount * 2 + 2];
-            int[] indices = new int[glyphCount];
-            long runCount = OS.CFArrayGetCount(runs);
-            int glyphStart = 0, posStart = 0, indicesStart = 0;
-            for (int i = 0; i < runCount; i++) {
-                long runRef = OS.CFArrayGetValueAtIndex(runs, i);
-                if (runRef == 0) continue;
-                int slot = getFontSlot(runRef, composite, fontName, baseSlot);
-                if (slot != -1) {
-                    glyphStart += OS.CTRunGetGlyphs(runRef, slot << 24, glyphStart, glyphs);
-                } else {
-                    glyphStart += OS.CTRunGetGlyphs(runRef, 0, glyphStart, glyphs);
+        try {
+            long runs = OS.CTLineGetGlyphRuns(lineRef);
+            if (runs != 0) {
+                int glyphCount = (int)OS.CTLineGetGlyphCount(lineRef);
+                int[] glyphs = new int[glyphCount];
+                float[] positions = new float[glyphCount * 2 + 2];
+                int[] indices = new int[glyphCount];
+                long runCount = OS.CFArrayGetCount(runs);
+                int glyphStart = 0, posStart = 0, indicesStart = 0;
+                for (int i = 0; i < runCount; i++) {
+                    long runRef = OS.CFArrayGetValueAtIndex(runs, i);
+                    if (runRef == 0) continue;
+                    int slot = getFontSlot(runRef, composite, fontName, baseSlot);
+                    if (slot != -1) {
+                        glyphStart += OS.CTRunGetGlyphs(runRef, slot << 24, glyphStart, glyphs);
+                    } else {
+                        glyphStart += OS.CTRunGetGlyphs(runRef, 0, glyphStart, glyphs);
+                    }
+                    if (size > 0) {
+                        posStart += OS.CTRunGetPositions(runRef, posStart, positions);
+                    }
+                    indicesStart += OS.CTRunGetStringIndices(runRef, indicesStart, indices);
+
                 }
                 if (size > 0) {
-                    posStart += OS.CTRunGetPositions(runRef, posStart, positions);
+                    positions[posStart] = (float)OS.CTLineGetTypographicBounds(lineRef);
                 }
-                indicesStart += OS.CTRunGetStringIndices(runRef, indicesStart, indices);
-
+                run.shape(glyphCount, glyphs, positions, indices);
             }
-            if (size > 0) {
-                positions[posStart] = (float)OS.CTLineGetTypographicBounds(lineRef);
-            }
-            run.shape(glyphCount, glyphs, positions, indices);
+        } finally {
+            OS.CFRelease(lineRef);
         }
-        OS.CFRelease(lineRef);
     }
 
     @Override

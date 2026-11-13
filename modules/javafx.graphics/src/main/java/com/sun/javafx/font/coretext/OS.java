@@ -129,14 +129,20 @@ class OS {
         if (url.address() == 0) {
             return null;
         }
-        MemorySegment path = CFNative.CFURLCopyFileSystemPath(url, CFNative.kCFURLPOSIXPathStyle);
-        CFNative.CFRelease(url);
+        MemorySegment path;
+        try {
+            path = CFNative.CFURLCopyFileSystemPath(url, CFNative.kCFURLPOSIXPathStyle);
+        } finally {
+            CFNative.CFRelease(url);
+        }
         if (path.address() == 0) {
             return null;
         }
-        String string = CFNative.cfToString(path);
-        CFNative.CFRelease(path);
-        return string;
+        try {
+            return CFNative.cfToString(path);
+        } finally {
+            CFNative.CFRelease(path);
+        }
     }
 
     static final String CTFontCopyAttributeDisplayName(long font) {
@@ -144,9 +150,11 @@ class OS {
         if (name.address() == 0) {
             return null;
         }
-        String string = CFNative.cfToString(name);
-        CFNative.CFRelease(name);
-        return string;
+        try {
+            return CFNative.cfToString(name);
+        } finally {
+            CFNative.CFRelease(name);
+        }
     }
 
     static final void CTFontDrawGlyphs(long font, short glyphs, double x, double y, long context) {
@@ -404,8 +412,9 @@ class OS {
         try (Arena arena = Arena.ofConfined()) {
             MemorySegment copy = CTNative.CTFontCreateCopyWithAttributes(font, size, transform(arena, matrix),
                                                                          MemorySegment.NULL);
-            CFNative.CFRelease(font);
             return copy.address();
+        } finally {
+            CFNative.CFRelease(font);
         }
     }
 
@@ -419,9 +428,11 @@ class OS {
                 boolean bold = found.get(JAVA_LONG, 0) != CFNative.kCFNotFound;
                 int type = bold ? CTNative.kCTFontUIFontEmphasizedSystem : CTNative.kCTFontUIFontSystem;
                 MemorySegment font = CTNative.CTFontCreateUIFontForLanguage(type, 0.0, MemorySegment.NULL);
-                MemorySegment copy = CTNative.CTFontCreateCopyWithAttributes(font, size, m, MemorySegment.NULL);
-                CFNative.CFRelease(font);
-                return copy.address();
+                try {
+                    return CTNative.CTFontCreateCopyWithAttributes(font, size, m, MemorySegment.NULL).address();
+                } finally {
+                    CFNative.CFRelease(font);
+                }
             }
             return CTNative.CTFontCreateWithName(fontName, size, m).address();
         }

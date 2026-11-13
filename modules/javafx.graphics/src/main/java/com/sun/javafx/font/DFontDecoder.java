@@ -47,29 +47,39 @@ class DFontDecoder extends FontFileWriter {
             return 0;
         }
         MemorySegment nameRef = CFNative.toCFString(fontName);
-        MemorySegment descriptor = MemorySegment.NULL;
-        MemorySegment collection = CTNative.CTFontCollectionCreateFromAvailableFonts(MemorySegment.NULL);
-        MemorySegment fonts = CTNative.CTFontCollectionCreateMatchingFontDescriptors(collection);
-        CFNative.CFRelease(collection);
-        long count = CFNative.CFArrayGetCount(fonts);
-        for (long i = 0; i < count && descriptor.address() == 0; i++) {
-            MemorySegment candidate = CFNative.CFArrayGetValueAtIndex(fonts, i);
-            if (candidate.address() != 0) {
-                MemorySegment name = CTNative.CTFontDescriptorCopyAttribute(candidate,
-                                                                            CTNative.kCTFontDisplayNameAttribute);
-                if (name.address() != 0) {
-                    if (CFNative.CFStringCompare(name, nameRef, 0) == CFNative.kCFCompareEqualTo) {
-                        descriptor = candidate;
-                    }
-                    CFNative.CFRelease(name);
-                }
+        try {
+            MemorySegment descriptor = MemorySegment.NULL;
+            MemorySegment collection = CTNative.CTFontCollectionCreateFromAvailableFonts(MemorySegment.NULL);
+            MemorySegment fonts;
+            try {
+                fonts = CTNative.CTFontCollectionCreateMatchingFontDescriptors(collection);
+            } finally {
+                CFNative.CFRelease(collection);
             }
+            try {
+                long count = CFNative.CFArrayGetCount(fonts);
+                for (long i = 0; i < count && descriptor.address() == 0; i++) {
+                    MemorySegment candidate = CFNative.CFArrayGetValueAtIndex(fonts, i);
+                    if (candidate.address() != 0) {
+                        MemorySegment name = CTNative.CTFontDescriptorCopyAttribute(candidate,
+                                CTNative.kCTFontDisplayNameAttribute);
+                        if (name.address() != 0) {
+                            if (CFNative.CFStringCompare(name, nameRef, 0) == CFNative.kCFCompareEqualTo) {
+                                descriptor = candidate;
+                            }
+                            CFNative.CFRelease(name);
+                        }
+                    }
+                }
+                MemorySegment font = descriptor.address() == 0 ? MemorySegment.NULL
+                        : CTNative.CTFontCreateWithFontDescriptor(descriptor, 0, MemorySegment.NULL);
+                return font.address();
+            } finally {
+                CFNative.CFRelease(fonts);
+            }
+        } finally {
+            CFNative.CFRelease(nameRef);
         }
-        MemorySegment font = descriptor.address() == 0 ? MemorySegment.NULL
-                : CTNative.CTFontCreateWithFontDescriptor(descriptor, 0, MemorySegment.NULL);
-        CFNative.CFRelease(fonts);
-        CFNative.CFRelease(nameRef);
-        return font.address();
     }
 
     private static void releaseCTFont(long font) {
@@ -77,14 +87,22 @@ class DFontDecoder extends FontFileWriter {
     }
 
     private static int getCTFontFormat(long font) {
-        MemorySegment formatRef = CTNative.CTFontCopyAttribute(ptr(font), CTNative.kCTFontFormatAttribute);
+        return formatOf(CTNative.CTFontCopyAttribute(ptr(font), CTNative.kCTFontFormatAttribute));
+    }
+
+    /** The sfnt version for the +1 format attribute of a font, which this releases; 0 when the font has none. */
+    private static int formatOf(MemorySegment formatRef) {
+        if (formatRef.address() == 0) {
+            return 0;
+        }
         int format;
         try (Arena arena = Arena.ofConfined()) {
             MemorySegment value = arena.allocate(JAVA_INT);
             CFNative.CFNumberGetValue(formatRef, CFNative.kCFNumberIntType, value);
             format = value.get(JAVA_INT, 0);
+        } finally {
+            CFNative.CFRelease(formatRef);
         }
-        CFNative.CFRelease(formatRef);
         return switch (format) {
             case CTNative.kCTFontFormatOpenTypePostScript -> 0x4f54544f;
             case CTNative.kCTFontFormatOpenTypeTrueType -> 0x00010000;
@@ -99,20 +117,28 @@ class DFontDecoder extends FontFileWriter {
         if (tags.address() == 0) {
             return null;
         }
-        int[] data = new int[(int) CFNative.CFArrayGetCount(tags)];
-        for (int i = 0; i < data.length; i++) {
-            data[i] = (int) CFNative.CFArrayGetValueAtIndex(tags, i).address();
+        try {
+            int[] data = new int[(int) CFNative.CFArrayGetCount(tags)];
+            for (int i = 0; i < data.length; i++) {
+                data[i] = (int) CFNative.CFArrayGetValueAtIndex(tags, i).address();
+            }
+            return data;
+        } finally {
+            CFNative.CFRelease(tags);
         }
-        CFNative.CFRelease(tags);
-        return data;
     }
 
     private static byte[] getCTFontTable(long font, int tag) {
         MemorySegment table = CTNative.CTFontCopyTable(ptr(font), tag, CTNative.kCTFontTableOptionNoOptions);
-        long length = CFNative.CFDataGetLength(table);
-        byte[] bytes = CFNative.CFDataGetBytePtr(table, length).toArray(JAVA_BYTE);
-        CFNative.CFRelease(table);
-        return bytes;
+        if (table.address() == 0) {
+            return null;
+        }
+        try {
+            long length = CFNative.CFDataGetLength(table);
+            return CFNative.CFDataGetBytePtr(table, length).toArray(JAVA_BYTE);
+        } finally {
+            CFNative.CFRelease(table);
+        }
     }
 
     public DFontDecoder() {
@@ -143,6 +169,9 @@ class DFontDecoder extends FontFileWriter {
             for (int i = 0; i < tags.length; i++) {
                 int tag = tags[i];
                 tableData[i] = DFontDecoder.getCTFontTable(fontRef, tag);
+                if (tableData[i] == null) {
+                    throw new IOException("Could not get tables for Dfont");
+                }
                 int length = tableData[i].length;
                 size += (length + 3) & ~3;
             }

@@ -373,11 +373,11 @@ public final class MacFontStressChild {
         }
     }
 
-    private interface Call {
+    interface Call {
         Object call() throws Exception;
     }
 
-    private static void delta(GoldenMap out, String probe, long object, Call call) throws Exception {
+    static void delta(GoldenMap out, String probe, long object, Call call) throws Exception {
         for (int i = 0; i < RETAIN_CALLS; i++) {
             call.call();
         }

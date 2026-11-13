@@ -25,12 +25,13 @@
 
 package com.sun.javafx.font;
 
+import java.lang.foreign.MemorySegment;
 import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
 import java.nio.file.Files;
 
 /**
- * Delegate onto {@code DFontDecoder}: its five {@code private} methods by reflection, and the decode sequence
+ * Delegate onto {@code DFontDecoder}: its six {@code private} methods by reflection, and the decode sequence
  * {@code PrismFontFactory.getFontResource} runs on a {@code .dfont} file, called directly.
  */
 public final class DFontDecoderShim {
@@ -52,6 +53,10 @@ public final class DFontDecoderShim {
 
     public static int getCTFontFormat(long font) {
         return invokeStatic("getCTFontFormat", new Class<?>[] {long.class}, font);
+    }
+
+    public static int formatOf(long formatRef) {
+        return invokeStatic("formatOf", new Class<?>[] {MemorySegment.class}, MemorySegment.ofAddress(formatRef));
     }
 
     public static int[] getCTFontTags(long font) {

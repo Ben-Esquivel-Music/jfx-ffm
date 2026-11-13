@@ -66,8 +66,9 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * context read up to 3 bytes past the bitmap. Production never pairs them. For the same reason no
  * AA_LCD strike is requested here: with {@code prism.lcdtext} off, {@code CTGlyph} would draw it into its cached grey
  * context. LCD masks come from the child JVM run with {@code -Dprism.lcdtext=true};</li>
- * <li>{@code CFRetain(0)}, {@code CFRelease(0)}, a null {@code CGRect} mirror, a missing table tag, and any other
- * NULL handed to CoreFoundation crash the JVM (US-067);</li>
+ * <li>{@code CFRetain(0)}, {@code CFRelease(0)} and any other NULL handed to a one-to-one entry point still crash
+ * the JVM, as in the C. A null {@code CGRect} or {@code CGAffineTransform} mirror crashed the C; the Java throws
+ * {@code NullPointerException}, which {@link MacFontNullInputTest} pins (US-067);</li>
  * <li>{@code CFStringCreateWithCharacters(alloc, null, n)} with n &gt; 0 passes NULL with a length.</li>
  * </ul>
  */

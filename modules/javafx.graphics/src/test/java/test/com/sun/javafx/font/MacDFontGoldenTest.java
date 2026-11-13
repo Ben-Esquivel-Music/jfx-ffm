@@ -51,9 +51,9 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * fonts, whatever its file, so no registration is needed; the {@code .dfont} files are in
  * {@link MacFontProcessGoldenTest}.
  * <p>
- * Left out on purpose: a table tag the font lacks, because {@code getCTFontTable} then crashes the JVM in
- * {@code CFDataGetLength(NULL)} (US-067), and the {@code sbix} table of Apple Color Emoji, which is hundreds of
- * megabytes (its length is recorded).
+ * Left out on purpose: a table tag the font lacks, which has no row because the C crashed there in
+ * {@code CFDataGetLength(NULL)} ({@link MacFontNullInputTest} pins what the Java answers), and the {@code sbix}
+ * table of Apple Color Emoji, which is hundreds of megabytes (its length is recorded).
  */
 @EnabledOnOs(OS.MAC)
 public class MacDFontGoldenTest {

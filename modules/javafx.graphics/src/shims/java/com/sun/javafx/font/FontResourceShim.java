@@ -62,6 +62,11 @@ public final class FontResourceShim {
         return PrismFontFactory.getFontFactory().createFontFile(null, file, index, false, false, false);
     }
 
+    /** The font of {@code file} made as an embedded font is, but unregistered, not copied and in no map; throws. */
+    public static FontResource newUncachedEmbeddedFontFile(String file) throws Exception {
+        return PrismFontFactory.getFontFactory().createFontFile(null, file, 0, false, true, false);
+    }
+
     /** The package-private {@link PrismFont} constructor. */
     public static PGFont newPrismFont(FontResource resource, String name, float size) {
         return new PrismFont(resource, name, size);
