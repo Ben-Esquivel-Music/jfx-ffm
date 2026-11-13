@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2018, 2024, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2018, 2026, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -32,7 +32,6 @@ import javafx.beans.property.SimpleObjectProperty;
 import javafx.scene.Scene;
 import javafx.scene.control.TableColumn;
 import javafx.scene.control.TableView;
-import javafx.scene.input.MouseButton;
 import javafx.scene.robot.Robot;
 import javafx.stage.Stage;
 import javafx.stage.StageStyle;
@@ -74,17 +73,11 @@ public class TableViewResizeColumnToFitContentTest {
         double posX = scene.getWindow().getX() + table.getLayoutX() + wid0 + wid1;
         double posY = scene.getWindow().getY() + table.getLayoutY() + colHeaderHeight / 2;
 
-        CountDownLatch latch = new CountDownLatch(1);
-        Platform.runLater(() -> {
-            robot.mouseMove((int) posX, (int) posY);
-            robot.mousePress(MouseButton.PRIMARY);
-            robot.mouseRelease(MouseButton.PRIMARY);
-            robot.mousePress(MouseButton.PRIMARY);
-            robot.mouseRelease(MouseButton.PRIMARY);
-            latch.countDown();
-        });
-
-        Util.waitForLatch(latch, 5, "Timeout while waiting for mouse double click");
+        // Two clicks 50 ms apart, within the multi-click time. A second press sent with no gap after the first can be
+        // lost while a window manager's synchronous passive button grab (click to focus) still holds the pointer for
+        // the first one (JDK-8322019).
+        Util.runAndWait(() -> robot.mouseMove((int) posX, (int) posY));
+        Util.doubleClick(robot);
         Util.waitForIdle(scene);
 
         Assertions.assertTrue((wid1 != table.getColumns().get(1).getWidth()), "resizeColumnToFitContent failed");
