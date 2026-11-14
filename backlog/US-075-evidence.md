@@ -4,7 +4,8 @@ Host: Windows 10 Pro x64 (10.0.19045), Temurin JDK 27+35, Apache Maven 3.10.0; L
 kernel 6.18.58.1), Temurin 27+35 at `~/jdk27`, Maven 3.10.0 at `~/maven310`. Base commit `36123c04a8`; "after" is
 that commit plus the US-075 working tree. The Windows builds whose outputs are compared (B, A, the final tree
 before the review, R1 and W) passed `-Djfx.build.timestamp=2026-11-13-000000`, so `VersionInfo` and
-`javafx.properties` are the same in all of them. All runs 2026-11-13.
+`javafx.properties` are the same in all of them. All runs 2026-11-13, local time (UTC-5), the CI run of AC 7
+included.
 
 Run names: B = before (`36123c04a8`), A = after. "-java" is
 `mvn -B -ntp clean verify -DskipNative=true -DskipTests` (the Java-only SDK of `sdk-java-only`). "-native" is the
@@ -16,8 +17,9 @@ After all the runs below, the profile comment in `pom.xml` was corrected (D1). T
 WSL run were then repeated on that tree; see "Final tree before the review". The review then moved
 `legal-notices-clean` from prepare-package to initialize and changed the check; every run above "Review" had it at
 prepare-package, and R1-R4 under "Review" were run on the tree with the review fixes. W and L under "Final builds",
-the CI-equivalent build with natives and tests on Windows and in WSL, were the last builds, on the tree with every
-review fix; only the plant reruns of AC 4, which build nothing, came after them.
+the CI-equivalent build with natives and tests on Windows and in WSL, were the last local builds, on the tree with
+every review fix; only the plant reruns of AC 4, which build nothing, came after them. The owner then committed the
+change as `c696e6d3f6` and pushed it, and CI built it (AC 7).
 
 ## What changed
 
@@ -221,9 +223,57 @@ on both sides. No `hs_err_pid*` file under `modules/`.
 
 ## AC 7 — CI
 
-Not run: nothing was pushed (no commit or push without the owner). Locally, the CI command with verify passed with
-natives and tests on Windows (A-native, the final tree before the review, and W) and on WSL Linux (L, without the
-optional `libav*` development packages, so no avplugin); see "Final builds". macOS has not been built.
+Met. The owner committed the change as `c696e6d3f6` ("Ship legal notices in jar", 2026-11-13 21:08 -0500), pushed
+it and opened PR #60 (open, not merged). Its `pom.xml`, `sdk/pom.xml`, `README.md` and `CheckLegalNotices.java` are
+SHA-256-identical to those of W and L ("Final builds"); the rest of the commit is backlog Markdown and TSVs. The
+`submit.yml` run of that push, run 43544611258
+(https://github.com/Ben-Esquivel-Music/jfx-ffm/actions/runs/43544611258), is green in all six jobs, the five build
+jobs of AC 7 and `No JNI`. It ran from 02:08:28 to 02:29:51 UTC on 2026-11-14 (21:08-21:29 local time on
+2026-11-13). Each build job runs `mvn -B -ntp -fae install "-Djfx.web.skipFfmTests=false"`; the test totals are the
+per-module `Tests run:` summaries Maven printed in that invocation.
+
+| Job | Result | Job time | Maven | Tests run / failures / errors / skipped |
+| --- | --- | --- | --- | --- |
+| Windows x64 | success | 12:01 min | BUILD SUCCESS, 11:17 min | 42,371 / 0 / 0 / 1,072 |
+| Linux x64 | success | 19:26 min | BUILD SUCCESS, 7:13 min | 42,115 / 0 / 0 / 1,179 |
+| Linux aarch64 | success | 21:16 min | BUILD SUCCESS, 8:11 min | 42,115 / 0 / 0 / 1,179 |
+| macOS x64 | success | 19:44 min | BUILD SUCCESS, 18:28 min | 42,383 / 0 / 0 / 1,072 |
+| macOS aarch64 | success | 8:32 min | BUILD SUCCESS, 7:57 min | 42,383 / 0 / 0 / 1,066 |
+| No JNI | success | 0:32 min | none (the `CheckNoJni` self-test and the tree check) | — |
+
+Every build leg ran the four `legal-notices-jar-check` executions and `sdk-legal-notices-check`, and each passed. The
+checker printed the lines of W and L, paths aside:
+
+| Leg | Jar checks: graphics, richtext, media, web | SDK check |
+| --- | --- | --- |
+| Windows x64 | 4, 1, 4 and 4 notices, byte for byte | 3 root files and 13 notices of 4 modules, nothing else; 11 jars |
+| Linux x64 | 4, 1, 4 and 4 notices, byte for byte | 3 root files and 13 notices of 4 modules, nothing else; 11 jars |
+| Linux aarch64 | 4, 1, 4 and 4 notices, byte for byte | 3 root files and 13 notices of 4 modules, nothing else; 11 jars |
+| macOS x64 | 4, 1, 4 and 4 notices, byte for byte | 3 root files and 13 notices of 4 modules, nothing else; 11 jars |
+| macOS aarch64 | 4, 1, 4 and 4 notices, byte for byte | 3 root files and 13 notices of 4 modules, nothing else; 11 jars |
+
+On every leg `legal-notices-clean` ran in all 15 projects, `legal-notices-copy` copied 4, 1, 4 and 4 files and
+`sdk-legal-notices` 3 and 13, and no log has a `legal notice problem` line. These executions do not differ between
+legs: every SDK has 11 jars, and `javafx-swt.jar holds module javafx.swt and carries its 0 legal notice(s)` on macOS
+as on Windows and Linux.
+
+On both Linux legs the GTK display step ran `mvn ... test` of `javafx-graphics` twice: without a window manager (274
+tests, 12 skipped) and under openbox (247 tests, 29 skipped), with no failures or errors. Each run reached initialize,
+so those two logs have 17 `legal-notices-clean` executions. The first run deleted the `target/classes/META-INF/legal`
+that install had left, and both runs copied 4,190 resources from the shims to `target/test-classes`, as install did,
+so the notices stayed out of the shims (review finding 1). The step "Verify the optional avplugin was built" passed
+on both Linux legs, so CI covers the avplugin that L could not build.
+
+CI before is run 43431958537, green in all six jobs, on `c8a3348e66`, the head of PR #59. Its tree `81a41930bb` is
+that of the base `36123c04a8`, and its logs have no `legal` line. Per leg and per module, the GTK display runs
+included, the test totals of run 43544611258 equal those of run 43431958537. The Linux totals also equal L's. Windows
+ran W's 42,371 tests with 1,072 skipped against W's 1,065 (`javafx-graphics`: 857 against 850), and so did the CI
+before run. The job logs of both runs are kept in the session scratchpad at `us075/ci/` and `us075/ci/before/`.
+
+The Copilot code review of PR #60 (`copilot-pull-request-reviewer`, 2026-11-14 02:34:37 UTC, state COMMENTED, on
+`c696e6d3f6`) says "🟢 Approval recommended — No active review issues block the legal-notice packaging changes. No
+open issues", with no inline comments. Its overview notes that "CI completion remains pending in the records": that
+was the wording of the pushed commit, which this section replaces.
 
 ## WSL Linux
 
@@ -275,13 +325,15 @@ After the review fixes all of this was checked again (R4 under "Review"); `pom.x
 | R2 (review fixes) | the snippet, verbatim, right after R1 | 0 | 7:03 min (19:22–19:29) |
 | W (final build, Windows) | `mvn -B -ntp -fae clean verify -Djfx.web.skipFfmTests=false -Djfx.build.timestamp=2026-11-13-000000` | 0 | 16:36 min (20:03–20:20) |
 | L (final build, WSL) | `mvn -B -ntp -fae verify -Djfx.web.skipFfmTests=false`, fresh clone | 0 | 13:21 min (20:21–20:35) |
+| CI (AC 7) | `submit.yml` run 43544611258 on `c696e6d3f6`, five build jobs and `No JNI` | success | 0:32–21:16 min per job (21:08–21:29) |
 
 The new steps cost little: `javafx-sdk` took 2.2–2.4 s against 0.1–0.3 s before, and a jar check is one
 source-launcher run.
 
 ## Review
 
-Two rounds. First, three general-purpose reviewers stood in for `game-toolkit-reviewer`, which had no agent file
+Two rounds before the push; after it, the Copilot review of PR #60 recommended approval with no open issues (see
+"AC 7 — CI"). First, three general-purpose reviewers stood in for `game-toolkit-reviewer`, which had no agent file
 then, one each through the build, the check and the evidence lens, and signed off. A skeptic pass confirmed
 exactly three findings, and each got the smallest fix (1-3 below, checked by R1-R4). Then the review the
 Definition of Done names, by `game-toolkit-reviewer`, ran twice: first as a general-purpose agent following its
@@ -363,7 +415,7 @@ Results on the tree with the three fixes (Windows; host, JDK and Maven as above)
   `java buildtools/CheckNoJni.java .` passes (28,100 files).
 
 The CI-equivalent build with natives and tests, on Windows and in WSL, was rerun on the tree with the three fixes;
-see "Final builds". AC 7 (CI) stays pending.
+see "Final builds". AC 7 (CI) was met later, by the `submit.yml` run on the pushed commit; see "AC 7 — CI".
 
 ### game-toolkit-reviewer
 
@@ -397,8 +449,8 @@ only, so no build file changed and W and L stand.
   Fix: D4 says which version they ran on, and AC 4 records P1-P5 rerun against the final check: each fails, and
   passes once undone. The reviewer's own re-plants on scratch copies agreed.
 - **F3 The game-toolkit order still listed US-075 as free to start (nit).** "Order" in `backlog/README.md` said
-  that US-075 "also ships the 13 notices that reach no jar today". Fix: the item is marked in place as implemented,
-  with CI pending the owner's push.
+  that US-075 "also ships the 13 notices that reach no jar today". Fix: the item was marked in place as implemented,
+  with CI pending the owner's push; once AC 7 was met it was marked ✅ done.
 
 ## Final builds
 
@@ -433,6 +485,7 @@ so a failing test would have failed the build. The logs are kept in the session 
   `sdk/target/sdk/legal` hash-equal those of W, and the SDK holds the 7 Linux libraries in `lib/`. The
   Verification loop printed nothing. No `hs_err_pid*` file was written. WSL lacks the `libavcodec-dev`,
   `libavformat-dev` and `libswscale-dev` that the CI Linux job installs, so CMake logged `javafx.media:
-  libavcodec/libavformat not found, skipping avplugin`. CI builds avplugin and checks it in a step after Maven. The
+  libavcodec/libavformat not found, skipping avplugin`. CI builds avplugin and checks it in a step after Maven, which
+  passed on both Linux legs of run 43544611258 (AC 7). The
   job's other packages are present (`pkg-config` finds `gl`, `x11`, `xxf86vm`, `xt`, `gtk+-3.0`, `freetype2`,
   `pangoft2` and `alsa`, and `ldconfig` finds `libXtst.so.6`).

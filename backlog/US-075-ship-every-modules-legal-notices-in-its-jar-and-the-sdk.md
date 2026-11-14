@@ -1,10 +1,8 @@
 # US-075 — Ship every module's legal notices in its jar and the SDK
 
-**Status:** 🚧 Implemented, not merged (2026-11-13, uncommitted on the local branch
-`US-075-ship-every-modules-legal-notices-in-its-jar-and-the-sdk`; acceptance criteria 1-6 are met, the final Windows
-and WSL builds passed and `game-toolkit-reviewer` signed off; AC 7, the five `submit.yml` jobs, waits on the owner's
-push, after which the story becomes Done; filed 2026-11-07 from the game-toolkit design review) · **Epic:** Game
-toolkit · **Blocked by:** none · **Blocks:** US-079, US-081, US-084, US-086
+**Status:** ✅ Done (2026-11-13, PR #60, open; commit `c696e6d3f6`, `submit.yml` green in run 43544611258; filed
+2026-11-07 from the game-toolkit design review) · **Epic:** Game toolkit · **Blocked by:** none · **Blocks:** US-079,
+US-081, US-084, US-086
 
 ## Story
 As anyone who redistributes the SDK or an application built on the fork's jars,
@@ -95,7 +93,10 @@ done
   definition and then as the registered agent type on the final tree after the final builds, and signed off both
   times. Its four findings, all about these records, are fixed, as are the three findings of the stand-ins (see
   "Review" in the evidence).
-- AC 7, the five `submit.yml` jobs, is pending the owner's push; the macOS legs are covered only by CI.
+- AC 7 is met: `submit.yml` run 43544611258 of commit `c696e6d3f6` (PR #60) is green in all five build jobs, the
+  macOS x64 and aarch64 legs included. Each leg ran the four jar checks and the SDK check, which passed, and its test
+  totals per module equal those of the CI run on the base tree. The Copilot review of PR #60 recommended approval
+  with no open issues (see "AC 7 — CI" in the evidence).
 
 ## Notes
 - Related: US-079, US-081 and US-086 add the notices of the code they port; US-084 puts the notices in a game's
