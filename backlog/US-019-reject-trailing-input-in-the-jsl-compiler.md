@@ -1,6 +1,8 @@
 # US-019 — Make the JSL compiler reject input after the last declaration
 
-**Status:** 📋 Ready (filed 2026-09-27; reproduced on Windows by calling the JSL compiler directly and by running the shader generators the way the pom runs them, outside Maven; both fix options prototyped outside the repository, where every shipped shader regenerates md5-identical and the 159 jslc tests pass) · **Found:** 2026-09-27, US-008 (review of the jslc test port: the rule-level tests needed an end-of-input check, and the compiler has none)
+**Status:** 🔷 Implemented (2026-11-14; filed 2026-09-27), uncommitted; the Windows and WSL gates and filing the
+upstream issue are [owner-run](#owner-run-and-pending) · **Found:** 2026-09-27, US-008 (review of the jslc test port:
+the rule-level tests needed an end-of-input check, and the compiler has none)
 
 ## Story
 As a developer who edits a `.jsl` shader, or who reviews such an edit,
@@ -141,8 +143,12 @@ valid program, with trailing input added):
   `/`, `*` and so on, and is dropped as trailing input;
 - errors reported today: a stray `}` before the first declaration gives
   `line 1:0 extraneous input '}' expecting {'const', 'param', 'lowp', 'mediump', 'highp', 'void', TYPE, GLUE_BLOCK}`,
-  an empty program `line 1:0 mismatched input '<EOF>' expecting {…}`, an unclosed function
-  `line 4:0 mismatched input '<EOF>' expecting {…}`. The `(...)+` loop needs one declaration.
+  and an empty program `line 1:0 mismatched input '<EOF>' expecting {…}`. The `(...)+` loop needs one declaration.
+  The message for an unclosed function depends on its body (re-measured 2026-11-14 on macOS, the same before and
+  after the fix): `param float x;` and `void main() {` on two lines give
+  `line 3:0 mismatched input '<EOF>' expecting {…}`, and the same with `color = float4(x);` on a third line gives
+  `line 4:0 extraneous input '<EOF>' expecting {…}`. ANTLR reports `mismatched` when the body's `(statement)*` loop
+  has not started, and `extraneous` after a statement.
 
 ## Proposed fix
 Two options; the choice is part of the story.
@@ -197,7 +203,8 @@ Two options; the choice is part of the story.
   In scratch copies, each negative test must fail:
   - with a valid program in place of the invalid one;
   - with an input that fails for another reason: a lexer error (`@` as the first trailing token gives
-    `token recognition error at: '@'`) and an unclosed function (`mismatched input '<EOF>'`).
+    `token recognition error at: '@'`) and an unclosed function (`mismatched input '<EOF>'` with an empty body,
+    `extraneous input '<EOF>'` after a statement).
 
   The repository version passes.
 - **Valid input is accepted.** A test parses a valid program and asserts all its declarations, and another parses a
@@ -249,3 +256,331 @@ Two options; the choice is part of the story.
   other syntax error.
 - The probe drivers and the instrumented compiler were not kept in the repository. The Problem and Measured sections
   describe each repro fully enough to rebuild it.
+
+## Implementation (2026-11-14, macOS)
+The change is uncommitted in the main tree, on `d803860b7e` (HEAD below). Everything was built and run on one arm64
+Mac: macOS 27.2.1 (build 26B131), Apache Maven 3.10.0 and Oracle Corporation's OpenJDK 27.0.1.0.2 (build
+27.0.1.0.2+1-2), as `sw_vers`, `mvn -version` and `java -version` report on that host. The gate logs print only that
+the enforcer's `RequireJavaVersion` and `RequireMavenVersion` rules passed, and AppleClang 21.0.0.21000334 for the
+native build. This host has no Windows and no Linux, so those gates are [owner-run](#owner-run-and-pending). Paths
+are relative to `modules/javafx.graphics`, as in Problem.
+
+The probe, the mutants, the generator runs and their logs are in the session scratch directory, which is temporary:
+under `/private/tmp/claude-501/-Users-benesquivelmusic-Documents-SourceCode-jfx-ffm/`, the directory
+`9cef09f8-b393-43e9-8574-939b14cb68c5/scratchpad/us019-impl/`. The probe is `probe/ParseProbe.java` there: it calls
+`JSLC.getParserInfo` on each case and prints the declarations and the token where the parser stopped, or the error.
+
+### Choice: option (a)
+EOF in the grammar, with the `LINE_COMMENT` change that both options need.
+- It is the standard ANTLR idiom for a start rule.
+- Every caller of `translation_unit()` gets the check, not only `JSLC.getParserInfo`.
+- ANTLR writes the message, through `ThrowingErrorListener`, in the form of every other syntax error.
+- `JSLC` and `JSLVisitor` do not change: the visitor reads `ctx.external_declaration()` only.
+- Option (b) covers only `getParserInfo` and needs a message of its own.
+- The cost: the grammar differs from upstream's until upstream takes the same change, which the draft upstream issue
+  proposes ([Upstream check](#upstream-check-2026-11-14)).
+
+### Change
+Relative to `d803860b7e`, three files:
+- `src/jslc/antlr/com/sun/scenario/effect/compiler/JSL.g4`: `translation_unit : (e=external_declaration)+ EOF ;`
+  (`:337-339`) and `LINE_COMMENT : '//' ~('\n'|'\r')* ('\r'? '\n' | EOF) -> channel(HIDDEN) ;` (`:477-479`). The
+  header years become `2008, 2026`. Nothing else changes.
+- `src/test/jslc/com/sun/scenario/effect/compiler/TranslationUnitTest.java`, new (`Copyright (c) 2026`, 104 lines).
+  Its 5 tests call `JSLC.getParserInfo(String)`. The valid program is `param float x;` and
+  `void main() { color = float4(x); }`, one per line.
+  - `textAfterTheLastDeclarationIsASyntaxError`: the valid program, then `} ) 42 garbage + + ;`.
+  - `aStrayBraceBetweenTwoDeclarationsIsASyntaxError`: a `}` line between the two declarations.
+  - `aStrayBraceBeforeAFunctionThatCallsAnUndefinedFunctionIsReportedAtTheBrace`: the valid program, `}` and
+    `void other() { undefinedCall(); }`.
+  - These three assert a `ParseCancellationException` and its full message ([Tests](#tests)).
+  - `aValidProgramKeepsAllItsDeclarations` and `aLineCommentWithoutANewlineCanEndTheProgram` (the valid program, then
+    `// trailing comment` with no newline) assert the declarations by kind, qualifier, type and name:
+    `VarDecl param float x` and `FuncDef void main`.
+- `src/test/jslc/com/sun/scenario/effect/compiler/lexer/LineCommentTest.java`: `commentEndingAtEndOfInput`,
+  `assertRecognized("// ignored")`. The header years become `2008, 2026`.
+
+`JSLC`, `JSLVisitor`, `ThrowingErrorListener`, `ParserBase`, the poms, the `.jsl` files and the generators do not
+change. `ParserBase.assertAllInputConsumed` stays ([Notes](#notes)).
+
+### Behaviour changes besides trailing input
+Measured with the probe on HEAD's jslc jar and the change's:
+- An unclosed `/*` at the end is now rejected. After the valid program, `/* unclosed comment` and a newline stop the
+  parser at `/` (3:0) at HEAD and are dropped; the change gives
+  `line 3:0 extraneous input '/' expecting {<EOF>, …}`.
+- A file that is only `// note` without a newline is rejected before and after. The message moves from
+  `line 1:0 mismatched input '/' expecting {'const', …}` to `line 1:7 mismatched input '<EOF>' expecting {'const', …}`:
+  the comment is now one hidden token, and the `(...)+` loop finds no declaration. `// x` alone gives `line 1:4`.
+- A last line `// c` ended by a lone CR (`\r` without `\n`) is now rejected. After the valid program, HEAD accepts it
+  only by dropping it as trailing input (it stops at `/`, 3:0); the change gives
+  `line 3:0 extraneous input '/' expecting {<EOF>, …}`.
+- A lone CR never ended a `//` comment mid-file. HEAD and the change both reject `// header`, a CR and the valid
+  program with `line 1:0 mismatched input '/' expecting {'const', …}`. `param float4 k;`, a CR, `// note`, a CR and
+  `void main() { color = k; }` loses `main` at HEAD (1 declaration, stops at `/`, 1:16), and the change rejects it
+  with `line 1:16 extraneous input '/' expecting {<EOF>, …}`. ANTLR counts lines by `\n` only, hence line 1.
+- Not fixed here: CR-only line ends would be a separate lexer change, `('\r' '\n'? | '\n' | EOF)`. None of the 62
+  `.jsl` files in the tree has a CR: `git ls-files '*.jsl' | xargs grep -l $'\r'` prints nothing.
+
+### Acceptance criteria and evidence
+| Criterion | Evidence | State |
+| --- | --- | --- |
+| Trailing input is rejected | The three negative tests of `TranslationUnitTest`, pinned at `line 3:0`, `line 2:0` and `line 3:0 extraneous input '}' expecting {<EOF>, …}` ([Tests](#tests)) | Met |
+| Mutant proof | Ours: a valid program, `@` as the first trailing token and an unclosed function with an empty body; each of the 3 negative tests fails under each, and the repository version passes ([Tests](#tests)). The review's, with its own inputs ([Independent review](#independent-review-2026-11-14)) | Met |
+| Valid input is accepted | `aValidProgramKeepsAllItsDeclarations` and `aLineCommentWithoutANewlineCanEndTheProgram`. With the EOF change alone the second errors with `line 3:0 extraneous input '/'`, and `LineCommentTest.commentEndingAtEndOfInput` fails ([Tests](#tests), the review's G2) | Met |
+| End to end | `Brightpass.jsl` with a stray `}` on line 35: exit 1, `line 35:0 extraneous input '}' expecting {<EOF>, …}`, no output; HEAD exits 0 with 7 files (HLSL 2 lines, GLSL 16, Metal 13, JSW peer 154 against 218). `GenAllDecoraShaders` exits 1 after the 5 outputs of `ColorAdjust`. `ColorAdjust.jsl` fails at `line 87:0`, the garbage case at `line 43:0` and `PaintImagePattern.jsl` at `line 44:0` ([Generator runs](#generator-runs)) | Met |
+| Generated files unchanged | Outside Maven with `-d3d -es2 -mtl`, all 1,059 files identical by name and md5; `CompileBoxBlur`, `CompileGaussian` and `CompileZoomRadialBlur` exit 0 and their 141 files are unchanged; `PaintTextureYUV422.jsl` and `PaintTextureYUV444.jsl` parse ([Generator runs](#generator-runs)). The review parsed each of the 62 `.jsl` files alone, with identical results on HEAD and the change. M2 on macOS ([Final gates](#final-gates-2026-11-14-macos)) | Met |
+| Build gate | macOS: M1 and M2 ([Final gates](#final-gates-2026-11-14-macos)), extra evidence and not the criterion's commands. Windows and WSL: [owner-run](#owner-run-and-pending) | Passed on macOS (extra evidence); Windows and WSL owner-run |
+| Upstream | [Upstream check](#upstream-check-2026-11-14); the draft issue, kept outside the repository | Checked and drafted; filing pending |
+
+### Tests
+- **jslc.** `mvn -B -ntp -pl buildtools/jslc package` in the main tree runs 202 tests in 26 classes, with 0 failures,
+  0 errors and 0 skipped. The same command in a clone of HEAD runs 196 in 25. Per class the two are equal except
+  `LineCommentTest`, 2 tests before and 3 after, and the new `TranslationUnitTest` with 5.
+- **Pinned messages.** `textAfterTheLastDeclarationIsASyntaxError` and
+  `aStrayBraceBeforeAFunctionThatCallsAnUndefinedFunctionIsReportedAtTheBrace`:
+  `line 3:0 extraneous input '}' expecting {<EOF>, 'const', 'param', 'lowp', 'mediump', 'highp', 'void', TYPE,
+  GLUE_BLOCK}`. `aStrayBraceBetweenTwoDeclarationsIsASyntaxError`: the same at `line 2:0`. This is the form that
+  [Proposed fix](#proposed-fix) gives for option (a).
+- **Mutant proofs,** in a clone with the three files. Each mutant changes only the three negative inputs, and
+  `mvn -B -ntp -pl buildtools/jslc test -Dtest=TranslationUnitTest -Dsurefire.failIfNoSpecifiedTests=false` then
+  runs 5 tests with 3 failures, the two positive tests passing:
+  - the valid program in place of each invalid one:
+    `Expected org.antlr.v4.runtime.misc.ParseCancellationException to be thrown, but nothing was thrown.`;
+  - `@` in place of the stray `}`: `… but was: <line 3:0 token recognition error at: '@'>` (`line 2:0` for the brace
+    between the declarations);
+  - an unclosed function with an empty body: the valid program, then `void unclosed() {` or `void other() {`, and
+    `param float x;` with `void main() {` for the brace between the declarations:
+    `… but was: <line 4:0 mismatched input '<EOF>' expecting {'const', …}>` (`line 3:0` for the brace between the
+    declarations).
+- **Each half of the grammar change alone,** in the same clone, with `-Dtest=TranslationUnitTest,LineCommentTest`:
+  - HEAD's `JSL.g4`: 8 tests, 4 failures. The 3 negative tests throw nothing, and `commentEndingAtEndOfInput` fails
+    with `expected: <// ignored> but was: </>`. `aLineCommentWithoutANewlineCanEndTheProgram` passes, because HEAD
+    drops the comment as trailing input.
+  - The EOF change without the `LINE_COMMENT` change: 1 failure and 1 error. `commentEndingAtEndOfInput` fails as
+    above, and `aLineCommentWithoutANewlineCanEndTheProgram` errors with
+    `line 3:0 extraneous input '/' expecting {<EOF>, …}`.
+- **Parse results,** by the probe, for the cases of [Measured](#measured-2026-09-27-windows-10-jdk-26) (`…` stands
+  for the rest of the message):
+
+  | Program | HEAD | Change |
+  | --- | --- | --- |
+  | The valid program | 2 declarations, stops at EOF | The same |
+  | `} ) 42 garbage + + ;` after it | 2 declarations, stops at `}` (3:0) | `line 3:0 extraneous input '}' expecting {<EOF>, …}` |
+  | `}` and `void other() { undefinedCall(); }` after it | 2 declarations, stops at `}` (3:0) | `line 3:0 extraneous input '}' …` |
+  | `}` between `param` and `main` | 1 declaration, stops at `}` (2:0) | `line 2:0 extraneous input '}' …` |
+  | `;` after it | 2 declarations, stops at `;` (3:0) | `line 3:0 extraneous input ';' …` |
+  | `} @ #` after it | 2 declarations, stops at `}` (3:0) | `line 3:0 extraneous input '}' …` |
+  | `// trailing comment` after it, no final newline | 2 declarations, stops at `/` (3:0) | 2 declarations, stops at EOF |
+  | The same comment with a final newline | 2 declarations, stops at EOF | The same |
+  | An unclosed `/*` comment after it | 2 declarations, stops at `/` (3:0) | `line 3:0 extraneous input '/' …` |
+  | `@` after it | `line 3:0 token recognition error at: '@'` | The same |
+  | `undefinedCall();` inside `main` | `Unknown function undefinedCall()` | The same |
+  | An empty program | `line 1:0 mismatched input '<EOF>' expecting {'const', …}` | The same |
+  | `}` before the first declaration | `line 1:0 extraneous input '}' expecting {'const', …}` | The same |
+  | Unclosed function, empty body | `line 3:0 mismatched input '<EOF>' …` | The same |
+  | Unclosed function, a statement in the body | `line 4:0 extraneous input '<EOF>' …` | The same |
+  | `@` inside `main` | `line 2:33 token recognition error at: '@'` | The same |
+  | `void main() { color = ; }` | `line 1:22 mismatched input ';' expecting {'+', …}` | The same |
+
+  "The same" is byte-identical output.
+
+### Generator runs
+- **Setup.** A clone of HEAD was built with
+  `mvn -B -ntp -pl modules/javafx.graphics -am test-compile -DskipNative=true`. With `compile` instead, the build
+  stops at `Could not resolve dependencies … org.openjfx:javafx-base:jar:tests:28-ea`: the reactor has base's `tests`
+  artifact only from `test-compile` on. Each side's jslc jar came from `mvn -B -ntp -pl buildtools/jslc package`, in
+  that clone and in the main tree.
+- **Run as the pom runs them** (`pom.xml:140-204`), outside Maven, with the generators of the clone's
+  `target/jsl-compilers/{decora,prism}`. Classpath: graphics `target/classes`, base `target/classes`, the jslc jar,
+  `org.antlr:antlr4:4.7.2` and its 6 dependencies as in `maven.compile.classpath`, `src/jslc/resources` and the
+  generator classes, plus the Prism input directory for the Prism generator. The Decora JVM also gets the pom's
+  `--module-path`, `--add-modules=javafx.graphics` and three `--add-exports`. The inputs are copies of
+  `src/main/jsl-decora` and `src/main/jsl-prism`. The two sides differ only in the jslc jar.
+- **Setup check.** The clone's own Maven `target/gensrc` (797 files, macOS's `-mtl -es2`) is md5-identical to the
+  same paths of the HEAD regeneration below, and to M2's.
+- **Regeneration with `-d3d -es2 -mtl`.** `GenAllDecoraShaders` in one JVM and the Prism `CompileJSL` once per
+  `.jsl` file, 30 JVMs, into an empty output root per side. All 31 JVMs exit 0 on both sides, and nothing is written
+  to the working directory. Each side writes 1,059 files (`jsl-decora` 208, `jsl-prism` 848, `mtl-headers` 3),
+  identical by name and md5.
+- **Generator inputs the build does not use.** `CompileBoxBlur`, `CompileGaussian GaussianBlur` and
+  `CompileZoomRadialBlur`, with `-d3d -es2 -mtl -java -hw` and an output root each, exit 0 on both sides and write
+  43, 43 and 55 files, the 141 identical by md5. `PaintTextureYUV422.jsl` and `PaintTextureYUV444.jsl`, parsed
+  alone, give 2 declarations each (`inputTex`, `paint`) and stop at EOF on both sides.
+- **End to end.** The Decora cases ran the Decora `CompileJSL` with `-java -hw` (the output types
+  `GenAllDecoraShaders` gives them) and `-d3d -es2 -mtl`, the Prism case the Prism generator, stopping at the first
+  JVM that fails, as `failonerror` does.
+
+  | Case | HEAD | Change |
+  | --- | --- | --- |
+  | `Brightpass.jsl`, `}` inserted as line 35, before `void main()` | Exit 0, 7 files. `.hlsl` 13 lines become 2, `.frag` 24 become 16, `.metal` 25 become 13 (no fragment function; the helper ends in `return outFragColor;`), `JSWBrightpassPeer.java` 218 become 154. `PPSBrightpassPeer.java` and both headers are unchanged | Exit 1, `line 35:0 extraneous input '}' expecting {<EOF>, 'const', 'param', 'lowp', 'mediump', 'highp', 'void', TYPE, GLUE_BLOCK}`, no file written |
+  | The same input through `GenAllDecoraShaders` | Exit 0, 210 files (208 and 2 headers); 4 Brightpass files differ from the unmodified run's | Exit 1, an `InvocationTargetException` caused by the same `line 35:0` message. It wrote the 5 outputs of `ColorAdjust` (`.hlsl`, `.frag`, `.metal`, `JSWColorAdjustPeer.java`, `PPSColorAdjustPeer.java`) and no header |
+  | `ColorAdjust.jsl`, `}` inserted as line 87, after `rgb_to_hsb` | Exit 0, 7 files; `hsb_to_rgb` is in no output, and the `.hlsl`, `.frag`, `.metal` and the JSW peer differ from the unmodified run's | Exit 1, `line 87:0 extraneous input '}' …`, no file written |
+  | `Brightpass.jsl`, `} ) 42 garbage + + ;` as line 43 | Exit 0, the 7 files byte-identical to those of the unmodified shader | Exit 1, `line 43:0 extraneous input '}' …`, no file written |
+  | `PaintImagePattern.jsl` (Prism), `}` as line 43 | The 30 JVMs exit 0. 88 of the 848 files differ from the unmodified run: the `.hlsl`, `.frag` and `.metal` of the 22 `<mask>_ImagePattern` shaders, with and without `_AlphaTest`, 44 of them `.hlsl` or `.frag` files without `main`, and their 22 loaders, whose texture coordinate index becomes `-1` (from `1`, `0` for `Texture`) and pixel coordinate flag `false` | The first JVM exits 1 with `line 44:0 extraneous input '}' …`, thrown in `compilePatternPaint` for `Solid_ImagePattern`. It wrote the 4 files of `Solid_Color` |
+
+### Final gates (2026-11-14, macOS)
+Both runs were on the host above on 2026-11-14, in fresh clones: before at `d803860b7e`, after at `d803860b7e` plus
+the three files, each `cmp`-identical to the main tree's (md5 `609c2952aac9409fb770b58833be61d5` for `JSL.g4`,
+`9ffc222da30e859345fa2b62e9c8afc9` for `LineCommentTest.java`, `31c74b200ccd030c2d2bdbede68e4323` for
+`TranslationUnitTest.java`). They are extra evidence: the criterion's gates are Windows and WSL. Counts are run /
+failures / errors / skipped.
+
+| Gate | Command | Result |
+| --- | --- | --- |
+| M1 module gate | `mvn -B -ntp -l <log> -Dmaven.test.failure.ignore=true -pl buildtools/jslc,modules/javafx.graphics -am clean test`, before and after | Both exit 0 with BUILD SUCCESS, and `jsl-codegen`, `cmake-configure` and `cmake-build` ran. jslc 196 / 0 / 0 / 0 in 25 classes before and 202 / 0 / 0 / 0 in 26 after; base 5,510 / 0 / 0 / 22 in 290 classes and graphics 26,696 / 0 / 0 / 858 in 629 in both. Of the 945 per-class lines after, `diff` shows only `TranslationUnitTest 5 0 0 0` added and `LineCommentTest` going from `2 0 0 0` to `3 0 0 0` ([per class](US-019-macos-per-class.tsv)). No `hs_err_pid*` file in either clone |
+| M2 generated files | M1's `target/gensrc` | 797 files (`jsl-decora` 158, `jsl-prism` 636, `mtl-headers` 3), identical by name and md5 before and after ([md5 list](US-019-macos-gensrc.md5), the after run's; the before run's is `cmp`-identical). `DecoraShaderCommon.h` lists 50 shaders and `PrismShaderCommon.h` 212 |
+
+M2's count differs from the US-008 gate's (Windows: 108, 424, 46 and 0 in `jsl-decora`, `jsl-prism`, `headers` and
+`mtl-headers`) and from US-018's macOS F2 (817), for two reasons:
+- macOS generates `-mtl -es2` (profile `jsl-backends-mac`, `pom.xml:641-652`), Windows `-d3d` (`jsl-backends-win`,
+  `:609-620`) and Linux `-es2` (the default, `:48`). So `jsl-decora` holds a `.metal` and a `.frag` file for each of
+  the 50 Decora shaders besides the 58 Java peers (158), and `jsl-prism` three files for each of the 212 Prism shaders
+  (636).
+- `9b02d6a602` (#57) removed the second-pass `javac -h`, so `target/gensrc/headers` no longer exists. US-018's F2 had
+  20 files there: 817 is 797 and 20.
+
+The jslc baseline is 196 tests in 25 classes.
+
+### Independent review (2026-11-14)
+- **Verdict:** pass with nits; no blocker and no should-fix.
+- **Mutant proofs with its own inputs** (Definition of Done). Each of the 3 negative tests fails with:
+  - (a) another valid program, `const float k = 2.0;`, `float twice(float v) { return v * k; }` and
+    `void main() { color = float4(twice(0.25)); }`;
+  - (b) the lexer errors `%`, `#` and `"` in place of the stray `}`, each at the same line and column with
+    `token recognition error`;
+  - (c) other syntax errors (a missing `;`).
+- **Each half of the grammar change alone.** G1, HEAD's `translation_unit` with the new `LINE_COMMENT`: the 3
+  negative tests fail and the rest pass. G2, the EOF change with HEAD's `LINE_COMMENT`: `commentEndingAtEndOfInput`
+  fails and `aLineCommentWithoutANewlineCanEndTheProgram` errors with `line 3:0 extraneous input '/'`. G3, HEAD's
+  grammar: 4 failures.
+- **jslc per class** equal to HEAD's except `LineCommentTest`, 2 tests before and 3 after, and the new
+  `TranslationUnitTest` with 5: 202 tests in 26 classes.
+- **Probes** gave the behaviour changes above; its nit is the lone-CR case. It repeated the end-to-end cases with
+  identical results, and the graphics `test-compile` `target/gensrc` (797 files) is identical by name and md5.
+- Its logs are in the session scratch directory, which is temporary and not kept: under
+  `/private/tmp/claude-501/-Users-benesquivelmusic-Documents-SourceCode-jfx-ffm/`, the directory
+  `9cef09f8-b393-43e9-8574-939b14cb68c5/scratchpad/us019-review/logs/`.
+
+### Upstream check (2026-11-14)
+- **JBS.** The five searches of [Upstream too](#upstream-too) give the same counts as on 2026-09-27: 17, 2, 0, 1
+  (JDK-8281422) and 0. No issue reports this. JDK-8226635 is still Open.
+- **openjdk/jfx master.** At `d0e72f9d86` (2026-11-13), `JSL.g4` is byte-identical to HEAD's, and `getParserInfo` is
+  the same (`JSLC.java:110-115` there).
+- **Draft.** The upstream issue is drafted with the `Brightpass.jsl` repro, the outputs without `main` and option (a).
+  It says that upstream runs no jslc test (JDK-8226635), so the fix's test needs that port too. It is kept outside
+  the repository until it is filed: under
+  `/private/tmp/claude-501/-Users-benesquivelmusic-Documents-SourceCode-jfx-ffm/`, the file
+  `9cef09f8-b393-43e9-8574-939b14cb68c5/scratchpad/us019-upstream/US-019-upstream-draft.md`.
+
+### Owner-run and pending
+Replace `<repo-url>` with the repository's remote and `<commit>` with the owner's US-019 commit. Before is
+`d803860b7e`. If `<commit>` is only on the PR branch, fetch it first with
+`git -C jfx-after fetch -q origin pull/<PR>/head`. In PowerShell, quote every `-D` argument; under Git Bash, Maven
+3.10's `bin/mvn` converts the paths. Each gate keeps its logs, its per-class lists (class, run, failures, errors,
+skipped, separated by tabs) and its `target/gensrc` md5 lists as `us019-<os>-<before|after>…` in the directory that
+holds the clones. The check commands ran as written in bash on the macOS host, on M1's clones and logs, and printed
+what is expected below with M1's numbers.
+
+#### Windows gate
+Two sibling checkouts, in Git Bash:
+```bash
+git clone <repo-url> jfx-before && git -C jfx-before checkout --detach d803860b7e
+git clone <repo-url> jfx-after && git -C jfx-after checkout --detach <commit>
+```
+Maven from PowerShell, in the directory that holds both, so that MSVC builds the natives:
+```powershell
+$pl = "buildtools/jslc,modules/javafx.graphics"
+cd jfx-before
+mvn -B -ntp -l ..\us019-windows-before.log -pl $pl clean test "-Djfx.parity.require=true"
+"before exit $LASTEXITCODE"; cd ..
+cd jfx-after
+mvn -B -ntp -l ..\us019-windows-after.log -pl $pl clean test "-Djfx.parity.require=true"
+"after exit $LASTEXITCODE"; cd ..
+```
+The checks, in Git Bash in the same directory:
+```bash
+classes() {
+  tr -d '\r' < "$1" | awk '/Tests run: .* -- in / { c = $NF; sub(/.*Tests run: /, ""); split($0, n, /[^0-9]+/)
+    print c "\t" n[1] "\t" n[2] "\t" n[3] "\t" n[4] }' | LC_ALL=C sort
+}
+for t in before after; do
+  classes us019-windows-$t.log > us019-windows-$t-per-class.tsv
+  (cd jfx-$t/modules/javafx.graphics/target/gensrc && find . -type f | LC_ALL=C sort | xargs md5sum) \
+    > us019-windows-$t-gensrc.md5
+done
+diff us019-windows-before-per-class.tsv us019-windows-after-per-class.tsv
+for t in before after; do
+  echo "$t:"
+  tr -d '\r' < us019-windows-$t.log \
+    | grep -E 'Tests run: [0-9]+, Failures: [0-9]+, Errors: [0-9]+, Skipped: [0-9]+$|BUILD (SUCCESS|FAILURE)'
+done
+cmp us019-windows-before-gensrc.md5 us019-windows-after-gensrc.md5 && echo "gensrc identical by name and md5"
+cut -d/ -f2 us019-windows-after-gensrc.md5 | sort | uniq -c
+for t in before after; do
+  find jfx-$t/modules/javafx.base jfx-$t/modules/javafx.graphics jfx-$t/buildtools/jslc -name 'hs_err_pid*' -type f
+done
+```
+It must show:
+- `before exit 0` and `after exit 0`, and `BUILD SUCCESS` in both logs;
+- from `diff`, no other line than `> com.sun.scenario.effect.compiler.TranslationUnitTest 5 0 0 0`,
+  `< com.sun.scenario.effect.compiler.lexer.LineCommentTest 2 0 0 0` and
+  `> com.sun.scenario.effect.compiler.lexer.LineCommentTest 3 0 0 0` (with tabs between the fields), besides the
+  hunk lines;
+- jslc `Tests run: 196, Failures: 0, Errors: 0, Skipped: 3` before and
+  `Tests run: 202, Failures: 0, Errors: 0, Skipped: 3` after (the three `link/..` tests of `MetalHeadersTest` are
+  disabled on Windows), and the same javafx.graphics line in both, with `Failures: 0, Errors: 0`;
+- `gensrc identical by name and md5`, with `108 jsl-decora` and `424 jsl-prism` and no other directory: Windows
+  generates `-d3d` (`pom.xml:609-620`), so 50 `.hlsl` files and the 58 Java peers in `jsl-decora` and 212 `.hlsl`
+  files and 212 loaders in `jsl-prism`; without `-mtl` the generators write no Metal header, and `headers` is gone
+  since `9b02d6a602`;
+- nothing from `find`.
+
+Without `-am`, as the criterion gives the command, Maven takes `org.openjfx:javafx-base:28-ea` and its `tests` jar
+from the local repository: that needs an earlier `mvn install`, and with nothing installed the build stops with
+`Could not resolve dependencies`. Then add `-am` after the `-pl` value in both runs; javafx.base's 5,510 tests run
+too, and the jslc and javafx.graphics counts do not change.
+
+#### WSL gate
+In WSL (Ubuntu), with JDK 27 and Maven 3.10.0 on `PATH`, from fresh clones, with `-am`, no display and no
+`-Djfx.parity.require=true` (the Linux font goldens were captured on another machine):
+```bash
+cd ~
+git clone <repo-url> jfx-before && git -C jfx-before checkout --detach d803860b7e
+git clone <repo-url> jfx-after && git -C jfx-after checkout --detach <commit>
+for t in before after; do
+  (cd ~/jfx-$t && env -u DISPLAY -u WAYLAND_DISPLAY \
+    mvn -B -ntp -l ../us019-wsl-$t.log -pl buildtools/jslc,modules/javafx.graphics -am clean test; echo "$t exit $?")
+done
+```
+The checks are the Windows ones, run in `~` with `windows` replaced by `wsl` in the file names. They must show what
+the Windows gate shows, with three differences:
+- jslc `Tests run: 196, Failures: 0, Errors: 0, Skipped: 0` before and
+  `Tests run: 202, Failures: 0, Errors: 0, Skipped: 0` after: Linux runs the three `link/..` tests;
+- javafx.base `Tests run: 5510, Failures: 0, Errors: 0, Skipped: 22` in both runs;
+- `108 jsl-decora` and `424 jsl-prism` from `-es2` (`pom.xml:48`): 50 `.frag` files and the 58 Java peers, and 212
+  `.frag` files and 212 loaders.
+
+`LinuxFontConfigGoldenTest`, `LinuxFontProcessGoldenTest`, `LinuxFreetypeGoldenTest` and `LinuxPangoGoldenTest` each
+skip one test in both runs (US-008).
+
+#### After the gates
+The rest of the [Definition of Done](#definition-of-done):
+- Keep each gate's lists with the change, as `US-019-macos-per-class.tsv` and `US-019-macos-gensrc.md5` are kept. In
+  the directory that holds the clones, for `windows` and then `wsl`, with `REPO` the checkout of the commit:
+  ```bash
+  merge() {
+    awk -F'\t' 'function cell() { return $2 ", Failures: " $3 ", Errors: " $4 ", Skipped: " $5 }
+      FNR == NR { b[$1] = cell(); all[$1] = 1; next } { a[$1] = cell(); all[$1] = 1 }
+      END { for (c in all) print c "\t" ((c in b) ? b[c] : "-") "\t" ((c in a) ? a[c] : "-") }' "$1" "$2" |
+      LC_ALL=C sort
+  }
+  o=windows
+  { echo "# US-019: per-class results of <the gate's mvn command>, <host>, <date> (columns: class, before, after;" \
+      "before = d803860b7e, after = <commit>; '-' = no such class)"
+    merge us019-$o-before-per-class.tsv us019-$o-after-per-class.tsv; } > "$REPO/backlog/US-019-$o-per-class.tsv"
+  cp us019-$o-after-gensrc.md5 "$REPO/backlog/US-019-$o-gensrc.md5"
+  ```
+  `merge` gives the macOS file's body from M1's lists. The after md5 list is kept, since the gate requires it to
+  equal the before list.
+- Fill in the results of both gates here and in `backlog/README.md`.
+- File the upstream issue from its draft.
+- Set the status to ✅ Done with the date and the PR, and move the row to the done table of `backlog/README.md`.

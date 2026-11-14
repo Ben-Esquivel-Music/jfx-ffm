@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2008, 2019, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2008, 2026, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -335,7 +335,7 @@ jump_statement
 // Grammar Note:  No 'goto'.  Gotos are not supported.
 
 translation_unit
-        : (e=external_declaration)+
+        : (e=external_declaration)+ EOF
         ;
 
 external_declaration
@@ -475,7 +475,7 @@ COMMENT
     ;
 
 LINE_COMMENT
-    : '//' ~('\n'|'\r')* '\r'? '\n' -> channel(HIDDEN)
+    : '//' ~('\n'|'\r')* ('\r'? '\n' | EOF) -> channel(HIDDEN)
     ;
 
 GLUE_BLOCK
