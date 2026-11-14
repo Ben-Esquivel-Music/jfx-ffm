@@ -1,16 +1,18 @@
-# US-019: per-class results of mvn -B -ntp -l <log> -Dmaven.test.failure.ignore=true -pl buildtools/jslc,modules/javafx.graphics -am clean test, macOS 27.2.1 (build 26B131) arm64, Apache Maven 3.10.0, Oracle OpenJDK 27.0.1.0.2 (build 27.0.1.0.2+1-2), natives built from source, 2026-11-14 (columns: class, before, after; before = d803860b7e, after = d803860b7e plus the uncommitted US-019 change; '-' = no such class); only LineCommentTest (2 tests before, 3 after) and TranslationUnitTest (new) differ
+# US-019: per-class results of mvn -B -ntp -l <log> -Dmaven.test.failure.ignore=true -pl buildtools/jslc,modules/javafx.graphics -am clean test, macOS 27.2.1 (build 26B131) arm64, Apache Maven 3.10.0, Oracle OpenJDK 27.0.1.0.2 (build 27.0.1.0.2+1-2), natives built from source, 2026-11-14 (columns: class, before, after; before = d803860b7e, after = d803860b7e plus the US-019 change; '-' = no such class); only CommentTest (3 tests before, 7 after), LineCommentTest (2 tests before, 5 after), ProgramCommentTest (new, 17 tests), TranslationUnitTest (new, 7 tests) and UnterminatedCommentTest (new, 8 tests) differ
 com.sun.scenario.effect.compiler.JSLCInfoTest	3, Failures: 0, Errors: 0, Skipped: 0	3, Failures: 0, Errors: 0, Skipped: 0
 com.sun.scenario.effect.compiler.MetalHeadersTest	33, Failures: 0, Errors: 0, Skipped: 0	33, Failures: 0, Errors: 0, Skipped: 0
+com.sun.scenario.effect.compiler.ProgramCommentTest	-	17, Failures: 0, Errors: 0, Skipped: 0
 com.sun.scenario.effect.compiler.SymbolTest	1, Failures: 0, Errors: 0, Skipped: 0	1, Failures: 0, Errors: 0, Skipped: 0
-com.sun.scenario.effect.compiler.TranslationUnitTest	-	5, Failures: 0, Errors: 0, Skipped: 0
+com.sun.scenario.effect.compiler.TranslationUnitTest	-	7, Failures: 0, Errors: 0, Skipped: 0
 com.sun.scenario.effect.compiler.backend.hw.MSLBackendTest	1, Failures: 0, Errors: 0, Skipped: 0	1, Failures: 0, Errors: 0, Skipped: 0
 com.sun.scenario.effect.compiler.lexer.BoolTest	3, Failures: 0, Errors: 0, Skipped: 0	3, Failures: 0, Errors: 0, Skipped: 0
-com.sun.scenario.effect.compiler.lexer.CommentTest	3, Failures: 0, Errors: 0, Skipped: 0	3, Failures: 0, Errors: 0, Skipped: 0
+com.sun.scenario.effect.compiler.lexer.CommentTest	3, Failures: 0, Errors: 0, Skipped: 0	7, Failures: 0, Errors: 0, Skipped: 0
 com.sun.scenario.effect.compiler.lexer.FloatTest	3, Failures: 0, Errors: 0, Skipped: 0	3, Failures: 0, Errors: 0, Skipped: 0
 com.sun.scenario.effect.compiler.lexer.IdentifierTest	6, Failures: 0, Errors: 0, Skipped: 0	6, Failures: 0, Errors: 0, Skipped: 0
 com.sun.scenario.effect.compiler.lexer.IntegerTest	2, Failures: 0, Errors: 0, Skipped: 0	2, Failures: 0, Errors: 0, Skipped: 0
-com.sun.scenario.effect.compiler.lexer.LineCommentTest	2, Failures: 0, Errors: 0, Skipped: 0	3, Failures: 0, Errors: 0, Skipped: 0
+com.sun.scenario.effect.compiler.lexer.LineCommentTest	2, Failures: 0, Errors: 0, Skipped: 0	5, Failures: 0, Errors: 0, Skipped: 0
 com.sun.scenario.effect.compiler.lexer.TypeTest	14, Failures: 0, Errors: 0, Skipped: 0	14, Failures: 0, Errors: 0, Skipped: 0
+com.sun.scenario.effect.compiler.lexer.UnterminatedCommentTest	-	8, Failures: 0, Errors: 0, Skipped: 0
 com.sun.scenario.effect.compiler.lexer.WhitespaceTest	5, Failures: 0, Errors: 0, Skipped: 0	5, Failures: 0, Errors: 0, Skipped: 0
 com.sun.scenario.effect.compiler.parser.AddExprTest	23, Failures: 0, Errors: 0, Skipped: 0	23, Failures: 0, Errors: 0, Skipped: 0
 com.sun.scenario.effect.compiler.parser.AssignmentExprTest	7, Failures: 0, Errors: 0, Skipped: 0	7, Failures: 0, Errors: 0, Skipped: 0

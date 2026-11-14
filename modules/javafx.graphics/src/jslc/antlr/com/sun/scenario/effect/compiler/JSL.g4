@@ -474,8 +474,14 @@ COMMENT
     :   '/*' (.)*? '*/' -> channel(HIDDEN)
     ;
 
+// Matches only when no "*/" follows the opener. No parser rule uses it, so an unclosed comment is a syntax error
+// at its opener instead of text lexed as code.
+UNTERMINATED_COMMENT
+    : '/*' (~'*' | '*'+ ~('*'|'/'))* '*'* EOF
+    ;
+
 LINE_COMMENT
-    : '//' ~('\n'|'\r')* ('\r'? '\n' | EOF) -> channel(HIDDEN)
+    : '//' ~('\n'|'\r')* -> channel(HIDDEN)
     ;
 
 GLUE_BLOCK

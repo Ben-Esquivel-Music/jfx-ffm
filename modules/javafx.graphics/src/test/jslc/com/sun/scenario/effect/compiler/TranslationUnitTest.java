@@ -25,49 +25,54 @@
 
 package com.sun.scenario.effect.compiler;
 
-import com.sun.scenario.effect.compiler.tree.ExtDecl;
-import com.sun.scenario.effect.compiler.tree.FuncDef;
-import com.sun.scenario.effect.compiler.tree.VarDecl;
+import com.sun.scenario.effect.compiler.JSLC.JSLCInfo;
+import java.io.IOException;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.List;
+import java.util.stream.Stream;
 import org.antlr.v4.runtime.misc.ParseCancellationException;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
-public class TranslationUnitTest {
+public class TranslationUnitTest extends ProgramBase {
 
-    private static final String VALID_PROGRAM = """
+    private static final String STRAY_BRACE_BETWEEN_THE_DECLARATIONS = """
             param float x;
+            }
             void main() { color = float4(x); }
             """;
 
-    private static final List<String> VALID_PROGRAM_DECLARATIONS =
-            List.of("VarDecl param float x", "FuncDef void main");
+    private static final String STRAY_BRACE_WHERE_END_OF_INPUT_WAS_EXPECTED =
+            "extraneous input '}' expecting {<EOF>, ";
 
-    private static final String EXPECTING_EOF_OR_A_DECLARATION =
-            "expecting {<EOF>, 'const', 'param', 'lowp', 'mediump', 'highp', 'void', TYPE, GLUE_BLOCK}";
+    private static final int EVERY_OUTPUT_TYPE =
+            JSLC.OUT_D3D | JSLC.OUT_ES2 | JSLC.OUT_MTL | JSLC.OUT_JAVA | JSLC.OUT_PRISM;
+
+    private static final long OUT_OF_DATE = Long.MAX_VALUE;
+
+    @TempDir
+    Path tmp;
 
     @Test
     public void textAfterTheLastDeclarationIsASyntaxError() {
         String message = syntaxErrorIn(VALID_PROGRAM + "} ) 42 garbage + + ;\n");
-        assertEquals("line 3:0 extraneous input '}' " + EXPECTING_EOF_OR_A_DECLARATION, message);
+        assertStartsWith("line 3:0 " + STRAY_BRACE_WHERE_END_OF_INPUT_WAS_EXPECTED, message);
     }
 
     @Test
     public void aStrayBraceBetweenTwoDeclarationsIsASyntaxError() {
-        String message = syntaxErrorIn("""
-                param float x;
-                }
-                void main() { color = float4(x); }
-                """);
-        assertEquals("line 2:0 extraneous input '}' " + EXPECTING_EOF_OR_A_DECLARATION, message);
+        String message = syntaxErrorIn(STRAY_BRACE_BETWEEN_THE_DECLARATIONS);
+        assertStartsWith("line 2:0 " + STRAY_BRACE_WHERE_END_OF_INPUT_WAS_EXPECTED, message);
     }
 
     @Test
     public void aStrayBraceBeforeAFunctionThatCallsAnUndefinedFunctionIsReportedAtTheBrace() {
         String message = syntaxErrorIn(VALID_PROGRAM + "}\nvoid other() { undefinedCall(); }\n");
-        assertEquals("line 3:0 extraneous input '}' " + EXPECTING_EOF_OR_A_DECLARATION, message);
+        assertStartsWith("line 3:0 " + STRAY_BRACE_WHERE_END_OF_INPUT_WAS_EXPECTED, message);
     }
 
     @Test
@@ -80,25 +85,40 @@ public class TranslationUnitTest {
         assertEquals(VALID_PROGRAM_DECLARATIONS, declarationsOf(VALID_PROGRAM + "// trailing comment"));
     }
 
-    private static String syntaxErrorIn(String program) {
-        ParseCancellationException e =
-                assertThrows(ParseCancellationException.class, () -> JSLC.getParserInfo(program));
-        return e.getMessage();
+    @Test
+    public void compilingAProgramWithAStrayBraceWritesNoFile() throws Exception {
+        JSLCInfo run = everyOutputRun();
+
+        ParseCancellationException e = assertThrows(ParseCancellationException.class,
+                () -> JSLC.compile(run, STRAY_BRACE_BETWEEN_THE_DECLARATIONS, OUT_OF_DATE));
+
+        assertStartsWith("line 2:0 " + STRAY_BRACE_WHERE_END_OF_INPUT_WAS_EXPECTED, e.getMessage());
+        assertEquals(List.of(), regularFileNamesUnder(tmp));
     }
 
-    private static List<String> declarationsOf(String program) throws Exception {
-        return JSLC.getParserInfo(program).program.getDecls().stream()
-                .map(TranslationUnitTest::describe)
-                .toList();
+    @Test
+    public void compilingTheValidProgramWritesAFileForEveryOutputType() throws Exception {
+        JSLC.compile(everyOutputRun(), VALID_PROGRAM, OUT_OF_DATE);
+
+        assertEquals(List.of("JSWProbePeer.java", "PPSProbePeer.java", "Probe.frag", "Probe.hlsl", "Probe.metal"),
+                regularFileNamesUnder(tmp));
     }
 
-    private static String describe(ExtDecl declaration) {
-        return switch (declaration) {
-            case VarDecl varDecl -> "VarDecl " + varDecl.getVariable().getQualifier() + " "
-                    + varDecl.getVariable().getType() + " " + varDecl.getVariable().getName();
-            case FuncDef funcDef -> "FuncDef " + funcDef.getFunction().getReturnType() + " "
-                    + funcDef.getFunction().getName();
-            default -> declaration.getClass().getSimpleName();
-        };
+    private JSLCInfo everyOutputRun() {
+        JSLCInfo jslcinfo = new JSLCInfo();
+        jslcinfo.outDir = tmp.resolve("out").toString();
+        jslcinfo.metalHeaderDir = tmp.resolve("mtl-headers").toString();
+        jslcinfo.shaderName = "Probe";
+        jslcinfo.outTypes = EVERY_OUTPUT_TYPE;
+        return jslcinfo;
+    }
+
+    private static List<String> regularFileNamesUnder(Path dir) throws IOException {
+        try (Stream<Path> paths = Files.walk(dir)) {
+            return paths.filter(Files::isRegularFile)
+                    .map(path -> path.getFileName().toString())
+                    .sorted()
+                    .toList();
+        }
     }
 }

@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2008, 2024, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2008, 2026, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -26,8 +26,11 @@
 package com.sun.scenario.effect.compiler.lexer;
 
 import com.sun.scenario.effect.compiler.JSLLexer;
+import org.antlr.v4.runtime.Token;
 
 import org.junit.jupiter.api.Test;
+
+import static org.junit.jupiter.api.Assertions.assertEquals;
 
 public class CommentTest extends LexerBase {
 
@@ -39,6 +42,29 @@ public class CommentTest extends LexerBase {
     @Test
     public void multilineComment() {
         assertRecognized("/* ignored \n * line 2 */");
+    }
+
+    @Test
+    public void emptyComment() {
+        assertRecognized("/**/");
+    }
+
+    @Test
+    public void starsBeforeTheCloserBelongToTheComment() {
+        assertRecognized("/***/");
+        assertRecognized("/* ignored **/");
+    }
+
+    @Test
+    public void commentEndsAtTheFirstCloser() {
+        Token token = recognize("/* a */ /* b");
+        assertEquals("/* a */", token.getText());
+        assertEquals(JSLLexer.COMMENT, token.getType());
+    }
+
+    @Test
+    public void unterminatedCommentIsNotAComment() {
+        assertNotRecognized("/* unterminated\n * line 2");
     }
 
     @Test

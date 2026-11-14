@@ -73,7 +73,7 @@ programs, 52 Decora and 212 Prism (US-019 counted them). For line N of a `.jsl` 
 
   Seven of the ten are off, by 1 to 81 lines. The other three are right because their text starts the program.
 - With US-019's option (a) prototyped, a `}` appended to `PaintImagePattern.jsl` (its line 43) gives `line 44:0`.
-  Today that `}` is accepted without an error (US-019).
+  Before US-019 that `}` was accepted without an error; US-019's change rejects it at the same `line 44:0`.
 
 ### Semantic errors carry no location at all
 - Measured, with a line inserted into a function body, or an operator changed:
@@ -277,7 +277,9 @@ Two parts, both about where an error points.
   `PaintImagePattern.jsl:35:4`, `MaskFillPgram.jsl:101:4`, `PaintMultiGradient.jsl:47:4` and
   `PaintLinearGradient.jsl:44:4`. Today they give lines 39, 75, 147, 106, 128, 144, 36, 101, 48 and 125 with no name.
   - A new jslc test in `src/test/jslc/com/sun/scenario/effect/compiler` (the surefire include,
-    `buildtools/jslc/pom.xml:118`, picks it up) asserts the full message, file, line and column included, for:
+    `buildtools/jslc/pom.xml:118`, picks it up) asserts the start of the message, file, line, column and cause
+    included; ANTLR's expected-token list after the cause is not pinned, because it changes with the token vocabulary
+    (US-019's code review, finding 4). It covers:
     - with every option, one named piece with an error on a line other than its first;
     - with (a) or (b), a program of two named pieces with an error in the second, on a line whose number in the
       program differs from its number in the piece.

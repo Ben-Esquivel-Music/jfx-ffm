@@ -26,14 +26,27 @@
 package com.sun.scenario.effect.compiler.lexer;
 
 import com.sun.scenario.effect.compiler.JSLLexer;
+import org.antlr.v4.runtime.Token;
 
 import org.junit.jupiter.api.Test;
+
+import static org.junit.jupiter.api.Assertions.assertEquals;
 
 public class LineCommentTest extends LexerBase {
 
     @Test
-    public void comment() {
-        assertRecognized("// ignored\n");
+    public void commentEndsBeforeALineFeed() {
+        assertCommentBefore("\n");
+    }
+
+    @Test
+    public void commentEndsBeforeACarriageReturnAndLineFeed() {
+        assertCommentBefore("\r\n");
+    }
+
+    @Test
+    public void commentEndsBeforeALoneCarriageReturn() {
+        assertCommentBefore("\r");
     }
 
     @Test
@@ -49,5 +62,11 @@ public class LineCommentTest extends LexerBase {
     @Override
     protected int expectedTokenType() {
         return JSLLexer.LINE_COMMENT;
+    }
+
+    private void assertCommentBefore(String lineEnd) {
+        Token token = recognize("// ignored" + lineEnd);
+        assertEquals("// ignored", token.getText());
+        assertEquals(JSLLexer.LINE_COMMENT, token.getType());
     }
 }
