@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2019, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2019, 2026, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -28,6 +28,7 @@ package com.sun.scenario.effect.compiler;
 import org.antlr.v4.runtime.BaseErrorListener;
 import org.antlr.v4.runtime.RecognitionException;
 import org.antlr.v4.runtime.Recognizer;
+import org.antlr.v4.runtime.Token;
 import org.antlr.v4.runtime.misc.ParseCancellationException;
 
 public class ThrowingErrorListener extends BaseErrorListener {
@@ -37,7 +38,13 @@ public class ThrowingErrorListener extends BaseErrorListener {
     @Override
     public void syntaxError(Recognizer<?, ?> recognizer, Object offendingSymbol, int line, int charPositionInLine, String msg, RecognitionException e)
             throws ParseCancellationException {
+        // ANTLR's message would quote the whole rest of the input, which the unterminated comment token holds.
+        String text = isUnterminatedComment(offendingSymbol) ? "unterminated comment" : msg;
         // We cannot throw a RecognitionException here because it would be swallowed by DefaultErrorStrategy.
-        throw new ParseCancellationException("line " + line + ":" + charPositionInLine + " " + msg);
+        throw new ParseCancellationException("line " + line + ":" + charPositionInLine + " " + text);
+    }
+
+    private static boolean isUnterminatedComment(Object offendingSymbol) {
+        return offendingSymbol instanceof Token token && token.getType() == JSLLexer.UNTERMINATED_COMMENT;
     }
 }

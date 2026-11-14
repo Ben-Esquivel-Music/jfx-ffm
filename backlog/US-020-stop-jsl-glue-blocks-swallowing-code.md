@@ -17,7 +17,7 @@ Paths are relative to `modules/javafx.graphics` unless they start with `backlog/
 ### What a glue block is
 - The lexer rules are `LEFT_FRENCH : '<<'` and `RIGHT_FRENCH : '>>'`
   (`src/jslc/antlr/com/sun/scenario/effect/compiler/JSL.g4:383-384`) and `GLUE_BLOCK : LEFT_FRENCH .* RIGHT_FRENCH ;`
-  (`:481-483`). The parser rule `glue_block` (`:354-356`) is one alternative of `external_declaration` (`:341-345`),
+  (`:487-489`). The parser rule `glue_block` (`:354-356`) is one alternative of `external_declaration` (`:341-345`),
   which `translation_unit` repeats (`:337-339`): the grammar allows any number of glue blocks, anywhere between
   declarations.
 - The visitor cuts off the delimiters (`src/jslc/java/com/sun/scenario/effect/compiler/tree/JSLVisitor.java:738-740`).
@@ -45,7 +45,8 @@ Paths are relative to `modules/javafx.graphics` unless they start with `backlog/
 - ANTLR 4 matches `.*` in a lexer rule greedily, and the lexer takes the longest match: `GLUE_BLOCK` runs from the
   first `<<` to the last `>>` of the program. ANTLR warns about the rule in every build, in both US-008 gate logs
   (WSL; the Windows log has `\` separators): `[WARNING] warning(131): com/sun/scenario/effect/compiler/JSL.g4:482:19:
-  greedy block ()* contains wildcard; the non-greedy syntax ()*? may be preferred`.
+  greedy block ()* contains wildcard; the non-greedy syntax ()*? may be preferred` (`JSL.g4:488:19` since US-019
+  added `UNTERMINATED_COMMENT` above the rule).
 - That last `>>` can be the closer of a second glue block, or any `>>` after the block, even in a JSL `//` or `/* */`
   comment: the lexer is still inside the `GLUE_BLOCK` token that started at `<<`. JSL has no `>>` operator.
 - Parse results with `JSLC.getParserInfo(String)`, the production entry point. Each glue block holds one line of
@@ -78,9 +79,10 @@ glue block holds a Java method, `getHalfThreshold()`; in the first two, a JSL fu
   `Unknown function halve(float)`, for a function the file defines.
 - **The second block between the two `param` declarations** (after line 32): exit 1, `Unknown variable baseImg`.
 - **No second block, a `>>` in a comment of `main`** (`    // luminance >> 1 would halve it` as line 40): exit 0,
-  7 files. The `.hlsl` is empty, the `.frag` is the 14-line GLSL preamble alone, and the `.metal` has 8 lines,
-  without the shader function. `javac` fails on the peers with 16 errors (`JSWBrightpassPeer.java:61`, `illegal
-  start of type`, first) and 10 (`PPSBrightpassPeer.java:59`).
+  7 files (2026-09-27; the End to end criterion gives the result since US-018 and US-019). The `.hlsl` is empty, the
+  `.frag` is the 14-line GLSL preamble alone, and the `.metal` has 8 lines, without the shader function. `javac` fails
+  on the peers with 16 errors (`JSWBrightpassPeer.java:61`, `illegal start of type`, first) and 10
+  (`PPSBrightpassPeer.java:59`).
 - With the rule of option (a) or of option (b) below, all four exit 0 with 7 files and both peers compile. The
   function is in the `.hlsl`, `.frag` and `.metal` outputs of the first two, whose peers contain both blocks, and
   the 7 files of the fourth are identical to those of the unmodified shader.
@@ -222,11 +224,13 @@ own closer. Two options for the closer; the choice is part of the story.
   - block, `param`, block, `main` (today `Unknown variable x`);
   - block, function, block, `param`, `main` (today 3 declarations, without the function);
   - two adjacent blocks (today one block);
-  - one block, `param`, a `//` comment containing `>>`, `main` (today 1 declaration, without an error).
-- **The edge of the chosen rule is pinned.** For (a): a block with `>>` inside a Java line fails with the full
-  message, `line L:C` included (this needs US-019). For (b): the same block parses as one declaration with its full
-  text, a block on one line fails with the full message, and so does a block with a Java line that starts with `>>`
-  (this needs US-019).
+  - one block, `param`, a `//` comment containing `>>`, `main` (1 declaration, without an error, before US-019; with
+    US-019, `line 5:8 extraneous input '1'`, inside the comment).
+- **The edge of the chosen rule is pinned.** For (a): a block with `>>` inside a Java line fails with a message that
+  starts with `line L:C` and the cause (this needs US-019). For (b): the same block parses as one declaration with its
+  full text, a block on one line fails with such a message, and so does a block with a Java line that starts with
+  `>>` (this needs US-019). The rest of ANTLR's expected-token list is not pinned, because it changes with the token
+  vocabulary, which this story changes (US-019's code review, finding 4).
 - **Mutant proof,** as for every jslc negative test (`backlog/US-008-remove-dead-jslc-me-backend-and-simd.md:159-161`).
   In scratch copies:
   - each test of the first criterion fails with the current rule (`.*`) in place of the new one;
@@ -239,8 +243,10 @@ own closer. Two options for the closer; the choice is part of the story.
 - **End to end.** The Decora generator on a copy of `Brightpass.jsl` with the function and the second glue block after
   line 31 exits 0. The function is in the `.hlsl`, `.frag` and `.metal` outputs, and both peers contain both blocks
   and compile. Today the function is in none of the shaders, and each peer has 2 `javac` errors. A copy with
-  `    // luminance >> 1 would halve it` as line 40 writes the 7 files of the unmodified shader. Today its `.hlsl` is
-  empty and the peers have 16 and 10 `javac` errors.
+  `    // luminance >> 1 would halve it` as line 40 writes the 7 files of the unmodified shader. On 2026-09-27 its
+  `.hlsl` was empty and the peers had 16 and 10 `javac` errors. At `d803860b7e` (after US-018) the generator exits 1
+  with `Cannot read Brightpass_Uniforms from the Metal shader ...` after writing the `.hlsl`, `.frag` and `.metal`.
+  With US-019 it exits 1 with `line 40:20 extraneous input '1' ...` and writes nothing.
 - **Glue in a Prism program is an error.** The Prism generator, run as the pom runs it with `-d3d -es2 -mtl`, exits
   1 on the copy with the five-line glue block after line 25 of `PaintImagePattern.jsl`. The message says that a
   Prism program cannot have a glue block and names `Solid_ImagePattern`, the first program with that paint; the copy
