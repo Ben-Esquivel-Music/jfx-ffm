@@ -1,7 +1,8 @@
 # US-075 — Ship every module's legal notices in its jar and the SDK
 
-**Status:** 📋 Ready (filed 2026-11-07 from the game-toolkit design review) · **Epic:** Game toolkit ·
-**Blocked by:** none · **Blocks:** US-079, US-081, US-084, US-086
+**Status:** ✅ Done (2026-11-13, PR #60, open; commit `c696e6d3f6`, `submit.yml` green in run 43544611258; filed
+2026-11-07 from the game-toolkit design review) · **Epic:** Game toolkit · **Blocked by:** none · **Blocks:** US-079,
+US-081, US-084, US-086
 
 ## Story
 As anyone who redistributes the SDK or an application built on the fork's jars,
@@ -79,6 +80,23 @@ done
 - Status set to ✅ Done with the date and the PR, and the row moved to the done table of `backlog/README.md`.
 - Changes left in the working tree / a review branch — **no commits, merges or PRs without explicit approval from
   the repository owner.**
+
+## Outcome
+- Every module jar carries the files of its module's `src/main/legal/` under `META-INF/legal/`. The SDK carries the
+  root `LICENSE`, `ADDITIONAL_LICENSE_INFO` and `ASSEMBLY_EXCEPTION` under `legal/` and each module's notices under
+  `legal/<module>/`.
+- `buildtools/CheckLegalNotices.java` checks every such jar and the SDK at verify and fails the build otherwise.
+- [The evidence](US-075-evidence.md) has the runs, the plants, the [jar diff](US-075-jar-diff.tsv) and the
+  [per-class test results](US-075-windows-per-class.tsv).
+- `game-toolkit-reviewer` (agent definition `.claude/agents/game-toolkit-reviewer.agent.md`, created for this story)
+  reviewed the change after three general-purpose stand-in reviews, first as a general-purpose agent following the
+  definition and then as the registered agent type on the final tree after the final builds, and signed off both
+  times. Its four findings, all about these records, are fixed, as are the three findings of the stand-ins (see
+  "Review" in the evidence).
+- AC 7 is met: `submit.yml` run 43544611258 of commit `c696e6d3f6` (PR #60) is green in all five build jobs, the
+  macOS x64 and aarch64 legs included. Each leg ran the four jar checks and the SDK check, which passed, and its test
+  totals per module equal those of the CI run on the base tree. The Copilot review of PR #60 recommended approval
+  with no open issues (see "AC 7 — CI" in the evidence).
 
 ## Notes
 - Related: US-079, US-081 and US-086 add the notices of the code they port; US-084 puts the notices in a game's

@@ -36,7 +36,7 @@
     <artifactId>javafx-sdk</artifactId>
     <name>javafx-sdk</name>
     <packaging>pom</packaging>
-    <description>Assembles a runnable JavaFX SDK layout under target/sdk (lib jars + native libraries)</description>
+    <description>Assembles a runnable JavaFX SDK layout under target/sdk (lib jars, native libraries and legal notices)</description>
 
     <properties>
         <jfx.sdk.dir>${project.build.directory}/sdk</jfx.sdk.dir>
@@ -210,6 +210,54 @@
 javafx.runtime.version=${jfx.release.version.long}
 javafx.runtime.build=${jfx.promoted.build.number}
 </echo>
+                            </target>
+                        </configuration>
+                    </execution>
+                    <execution>
+                        <!-- US-075: legal/ holds LICENSE, ADDITIONAL_LICENSE_INFO and ASSEMBLY_EXCEPTION of
+                             the repository root, and legal/<module>/<file name> for every file of
+                             modules/<module>/src/main/legal, so that notices of the same name in two
+                             modules do not hide each other. A glob over modules/*/src/main/legal, so a
+                             module that adds notices needs no change here. In the base build, so that the
+                             SDK of sdk-require-natives and the Java-only one of sdk-java-only both carry
+                             them. Plain copies, after deleting legal/ so that a removed notice does not
+                             survive. -->
+                        <id>sdk-legal-notices</id>
+                        <phase>package</phase>
+                        <goals>
+                            <goal>run</goal>
+                        </goals>
+                        <configuration>
+                            <target>
+                                <delete dir="${jfx.sdk.dir}/legal"/>
+                                <copy todir="${jfx.sdk.dir}/legal" failonerror="true">
+                                    <fileset dir="${jfx.root}" includes="LICENSE,ADDITIONAL_LICENSE_INFO,ASSEMBLY_EXCEPTION"
+                                             defaultexcludes="no"/>
+                                </copy>
+                                <copy todir="${jfx.sdk.dir}/legal" failonerror="true">
+                                    <fileset dir="${jfx.root}/modules" includes="*/src/main/legal/*" defaultexcludes="no"/>
+                                    <regexpmapper from="^([^/]+)/src/main/legal/([^/]+)$" to="\1/\2" handledirsep="true"/>
+                                </copy>
+                            </target>
+                        </configuration>
+                    </execution>
+                    <execution>
+                        <!-- US-075: buildtools/CheckLegalNotices.java fails the build unless legal/ holds
+                             exactly those files, byte for byte, and every jar of lib/ carries exactly the
+                             notices of its module under META-INF/legal/. -->
+                        <id>sdk-legal-notices-check</id>
+                        <phase>verify</phase>
+                        <goals>
+                            <goal>run</goal>
+                        </goals>
+                        <configuration>
+                            <target>
+                                <exec executable="${java.home}/bin/java" failonerror="true">
+                                    <arg value="${jfx.root}/buildtools/CheckLegalNotices.java"/>
+                                    <arg value="sdk"/>
+                                    <arg value="${jfx.root}"/>
+                                    <arg value="${jfx.sdk.dir}"/>
+                                </exec>
                             </target>
                         </configuration>
                     </execution>

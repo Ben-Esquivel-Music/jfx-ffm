@@ -78,9 +78,18 @@ skipped. The WebKit library is not compiled from source; see
 [WEBKIT-MEDIA-STUBS.md](WEBKIT-MEDIA-STUBS.md) for how to supply a prebuilt
 `jfxwebkit`, and why a `jfxmedia` from an OpenJFX SDK cannot be used in its
 place any more. The assembled SDK lands in `sdk/target/sdk/`; it holds the
-module jars and `javafx.properties` under `lib/` plus the javafx.graphics and
-javafx.media native libraries. Legal notices, `src.zip`, jmods, javadoc and
-distribution archives are not produced.
+module jars and `javafx.properties` under `lib/`, the javafx.graphics and
+javafx.media native libraries, and the legal notices under `legal/`.
+
+Every module jar carries the files of its module's `src/main/legal/` under
+`META-INF/legal/`. The SDK carries the repository's `LICENSE`,
+`ADDITIONAL_LICENSE_INFO` and `ASSEMBLY_EXCEPTION` under `legal/` and the
+notices of each module under `legal/<module>/`. The build checks the jars and
+the SDK with `buildtools/CheckLegalNotices.java` and fails when a notice is
+missing, present twice or different from its source, or when a jar or
+`legal/` holds a file that has no source. A module that adds a
+`src/main/legal/` directory needs no build change. `src.zip`, jmods, javadoc
+and distribution archives are still not produced.
 
 javafx.graphics has no JNI on any platform: no class declares a `native`
 method, and its native libraries export plain C functions that Java calls
