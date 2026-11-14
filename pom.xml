@@ -413,6 +413,32 @@
                     </execution>
                 </executions>
             </plugin>
+            <!-- US-075: META-INF/legal of the classes directory holds only what the legal-notices
+                 profile below copies there in the same build. Deleted in every project at
+                 initialize, before the shim staging of javafx.graphics, javafx.web and
+                 jfx.incubator.richtext copies the non-class files of the classes directory into
+                 target/shims at process-test-sources, from where they reach the test classes and
+                 the test jars. So in a build without clean a notice of the previous build reaches
+                 none of them, and a notice or a whole src/main/legal directory removed from the
+                 source survives neither there nor in target/classes and the jar. -->
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-antrun-plugin</artifactId>
+                <executions>
+                    <execution>
+                        <id>legal-notices-clean</id>
+                        <phase>initialize</phase>
+                        <goals>
+                            <goal>run</goal>
+                        </goals>
+                        <configuration>
+                            <target>
+                                <delete dir="${project.build.outputDirectory}/META-INF/legal"/>
+                            </target>
+                        </configuration>
+                    </execution>
+                </executions>
+            </plugin>
         </plugins>
     </build>
 
@@ -581,6 +607,68 @@
                                         <exec executable="${java.home}/bin/java" failonerror="true">
                                             <arg value="${jfx.root}/buildtools/CheckModuleVersions.java"/>
                                             <arg value="${jfx.release.version.short}"/>
+                                            <arg value="${project.build.directory}/${project.build.finalName}.jar"/>
+                                        </exec>
+                                    </target>
+                                </configuration>
+                            </execution>
+                        </executions>
+                    </plugin>
+                </plugins>
+            </build>
+        </profile>
+        <profile>
+            <!-- US-075: the jar of every project with a src/main/legal directory carries each file of
+                 that directory, byte for byte, as META-INF/legal/<file name>. Not a top-level legal/
+                 directory: the ModulePackages attribute of the module-info.class in each jar is derived
+                 from the jar's entries when it is packaged (the Windows javafx.graphics jar lists the
+                 resource-only package com.sun.prism.d3d.hlsl), so "legal" would become a package of
+                 javafx.graphics, javafx.media, javafx.web and jfx.incubator.richtext alike, a split
+                 package, while META-INF is not a valid package name. Activated by that directory alone,
+                 so a module that adds notices needs no change to its pom; sdk/pom.xml puts them in the
+                 SDK the same way. The copy runs at prepare-package, after the shim staging and the
+                 tests, so the shims, the tests and the test jars see the classes directory they saw
+                 before; the legal-notices-clean execution of the base build has emptied META-INF/legal
+                 at initialize. It is a plain Ant copy, with no filtering and no line-ending
+                 conversion. buildtools/CheckLegalNotices.java checks the jar at verify. -->
+            <id>legal-notices</id>
+            <activation>
+                <file>
+                    <exists>${basedir}/src/main/legal</exists>
+                </file>
+            </activation>
+            <build>
+                <plugins>
+                    <plugin>
+                        <groupId>org.apache.maven.plugins</groupId>
+                        <artifactId>maven-antrun-plugin</artifactId>
+                        <executions>
+                            <execution>
+                                <id>legal-notices-copy</id>
+                                <phase>prepare-package</phase>
+                                <goals>
+                                    <goal>run</goal>
+                                </goals>
+                                <configuration>
+                                    <target>
+                                        <copy todir="${project.build.outputDirectory}/META-INF/legal" failonerror="true">
+                                            <fileset dir="${project.basedir}/src/main/legal" includes="*" defaultexcludes="no"/>
+                                        </copy>
+                                    </target>
+                                </configuration>
+                            </execution>
+                            <execution>
+                                <id>legal-notices-jar-check</id>
+                                <phase>verify</phase>
+                                <goals>
+                                    <goal>run</goal>
+                                </goals>
+                                <configuration>
+                                    <target>
+                                        <exec executable="${java.home}/bin/java" failonerror="true">
+                                            <arg value="${jfx.root}/buildtools/CheckLegalNotices.java"/>
+                                            <arg value="jar"/>
+                                            <arg value="${project.basedir}/src/main/legal"/>
                                             <arg value="${project.build.directory}/${project.build.finalName}.jar"/>
                                         </exec>
                                     </target>

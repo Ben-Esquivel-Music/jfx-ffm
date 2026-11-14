@@ -1,0 +1,66 @@
+# US-075 (AC 5): every jar of two Windows 10 x64 builds (Temurin 27+35, Maven 3.10.0, -Djfx.build.timestamp=2026-11-13-000000), before = 36123c04a8, after = 36123c04a8 plus the US-075 change, 2026-11-13. build java = mvn -B -ntp clean verify -DskipNative=true -DskipTests; build native = mvn -B -ntp -fae clean verify -Dmaven.test.failure.ignore=true -Djfx.web.skipFfmTests=false. Jar paths: modules/<module>/ and buildtools/jslc/ and tests/system/ are target/ jars, sdk-lib/ is sdk/target/sdk/lib. Entries are counted raw (ZipInputStream) and compared by name and SHA-256 of their content; added/removed/changed give the count and the names. The only differences are META-INF/legal/ plus the module's notices in the 4 module jars with notices and their 4 SDK copies.
+build	jar	entries before	entries after	added	removed	changed
+java	buildtools/jslc/javafx-jslc-28-ea.jar	169	169	0	0	0
+java	modules/javafx.base/javafx-base-28-ea-tests.jar	1409	1409	0	0	0
+java	modules/javafx.base/javafx-base-28-ea.jar	703	703	0	0	0
+java	modules/javafx.controls/javafx-controls-28-ea-tests.jar	7021	7021	0	0	0
+java	modules/javafx.controls/javafx-controls-28-ea.jar	1547	1547	0	0	0
+java	modules/javafx.fxml/javafx-fxml-28-ea-tests.jar	5040	5040	0	0	0
+java	modules/javafx.fxml/javafx-fxml-28-ea.jar	93	93	0	0	0
+java	modules/javafx.graphics/javafx-graphics-28-ea-tests.jar	6069	6069	0	0	0
+java	modules/javafx.graphics/javafx-graphics-28-ea.jar	3289	3294	5: META-INF/legal/ META-INF/legal/gcc.md META-INF/legal/jpeg_fx.md META-INF/legal/mesa3d.md META-INF/legal/pipewire.md	0	0
+java	modules/javafx.media/javafx-media-28-ea.jar	220	225	5: META-INF/legal/ META-INF/legal/directshow.md META-INF/legal/glib.md META-INF/legal/gstreamer.md META-INF/legal/libffi.md	0	0
+java	modules/javafx.swing/javafx-swing-28-ea-tests.jar	64	64	0	0	0
+java	modules/javafx.swing/javafx-swing-28-ea.jar	64	64	0	0	0
+java	modules/javafx.swt/javafx-swt-28-ea.jar	28	28	0	0	0
+java	modules/javafx.web/javafx-web-28-ea-tests.jar	1616	1616	0	0	0
+java	modules/javafx.web/javafx-web-28-ea.jar	697	702	5: META-INF/legal/ META-INF/legal/icu_web.md META-INF/legal/libxml2.md META-INF/legal/libxslt.md META-INF/legal/webkit.md	0	0
+java	modules/jdk.jsobject/jdk-jsobject-28-ea.jar	13	13	0	0	0
+java	modules/jfx.incubator.input/jfx-incubator-input-28-ea-tests.jar	6368	6368	0	0	0
+java	modules/jfx.incubator.input/jfx-incubator-input-28-ea.jar	42	42	0	0	0
+java	modules/jfx.incubator.richtext/jfx-incubator-richtext-28-ea-tests.jar	6664	6664	0	0	0
+java	modules/jfx.incubator.richtext/jfx-incubator-richtext-28-ea.jar	270	272	2: META-INF/legal/ META-INF/legal/unicode-fx.md	0	0
+java	sdk-lib/javafx-swt.jar	28	28	0	0	0
+java	sdk-lib/javafx.base.jar	703	703	0	0	0
+java	sdk-lib/javafx.controls.jar	1547	1547	0	0	0
+java	sdk-lib/javafx.fxml.jar	93	93	0	0	0
+java	sdk-lib/javafx.graphics.jar	3289	3294	5: META-INF/legal/ META-INF/legal/gcc.md META-INF/legal/jpeg_fx.md META-INF/legal/mesa3d.md META-INF/legal/pipewire.md	0	0
+java	sdk-lib/javafx.media.jar	220	225	5: META-INF/legal/ META-INF/legal/directshow.md META-INF/legal/glib.md META-INF/legal/gstreamer.md META-INF/legal/libffi.md	0	0
+java	sdk-lib/javafx.swing.jar	64	64	0	0	0
+java	sdk-lib/javafx.web.jar	697	702	5: META-INF/legal/ META-INF/legal/icu_web.md META-INF/legal/libxml2.md META-INF/legal/libxslt.md META-INF/legal/webkit.md	0	0
+java	sdk-lib/jdk.jsobject.jar	13	13	0	0	0
+java	sdk-lib/jfx.incubator.input.jar	42	42	0	0	0
+java	sdk-lib/jfx.incubator.richtext.jar	270	272	2: META-INF/legal/ META-INF/legal/unicode-fx.md	0	0
+java	tests/system/javafx-system-tests-28-ea.jar	7	7	0	0	0
+native	buildtools/jslc/javafx-jslc-28-ea.jar	169	169	0	0	0
+native	modules/javafx.base/javafx-base-28-ea-tests.jar	1409	1409	0	0	0
+native	modules/javafx.base/javafx-base-28-ea.jar	703	703	0	0	0
+native	modules/javafx.controls/javafx-controls-28-ea-tests.jar	7285	7285	0	0	0
+native	modules/javafx.controls/javafx-controls-28-ea.jar	1547	1547	0	0	0
+native	modules/javafx.fxml/javafx-fxml-28-ea-tests.jar	5304	5304	0	0	0
+native	modules/javafx.fxml/javafx-fxml-28-ea.jar	93	93	0	0	0
+native	modules/javafx.graphics/javafx-graphics-28-ea-tests.jar	6333	6333	0	0	0
+native	modules/javafx.graphics/javafx-graphics-28-ea.jar	3553	3558	5: META-INF/legal/ META-INF/legal/gcc.md META-INF/legal/jpeg_fx.md META-INF/legal/mesa3d.md META-INF/legal/pipewire.md	0	0
+native	modules/javafx.media/javafx-media-28-ea.jar	220	225	5: META-INF/legal/ META-INF/legal/directshow.md META-INF/legal/glib.md META-INF/legal/gstreamer.md META-INF/legal/libffi.md	0	0
+native	modules/javafx.swing/javafx-swing-28-ea-tests.jar	64	64	0	0	0
+native	modules/javafx.swing/javafx-swing-28-ea.jar	64	64	0	0	0
+native	modules/javafx.swt/javafx-swt-28-ea.jar	28	28	0	0	0
+native	modules/javafx.web/javafx-web-28-ea-tests.jar	1616	1616	0	0	0
+native	modules/javafx.web/javafx-web-28-ea.jar	697	702	5: META-INF/legal/ META-INF/legal/icu_web.md META-INF/legal/libxml2.md META-INF/legal/libxslt.md META-INF/legal/webkit.md	0	0
+native	modules/jdk.jsobject/jdk-jsobject-28-ea.jar	13	13	0	0	0
+native	modules/jfx.incubator.input/jfx-incubator-input-28-ea-tests.jar	6632	6632	0	0	0
+native	modules/jfx.incubator.input/jfx-incubator-input-28-ea.jar	42	42	0	0	0
+native	modules/jfx.incubator.richtext/jfx-incubator-richtext-28-ea-tests.jar	6928	6928	0	0	0
+native	modules/jfx.incubator.richtext/jfx-incubator-richtext-28-ea.jar	270	272	2: META-INF/legal/ META-INF/legal/unicode-fx.md	0	0
+native	sdk-lib/javafx-swt.jar	28	28	0	0	0
+native	sdk-lib/javafx.base.jar	703	703	0	0	0
+native	sdk-lib/javafx.controls.jar	1547	1547	0	0	0
+native	sdk-lib/javafx.fxml.jar	93	93	0	0	0
+native	sdk-lib/javafx.graphics.jar	3553	3558	5: META-INF/legal/ META-INF/legal/gcc.md META-INF/legal/jpeg_fx.md META-INF/legal/mesa3d.md META-INF/legal/pipewire.md	0	0
+native	sdk-lib/javafx.media.jar	220	225	5: META-INF/legal/ META-INF/legal/directshow.md META-INF/legal/glib.md META-INF/legal/gstreamer.md META-INF/legal/libffi.md	0	0
+native	sdk-lib/javafx.swing.jar	64	64	0	0	0
+native	sdk-lib/javafx.web.jar	697	702	5: META-INF/legal/ META-INF/legal/icu_web.md META-INF/legal/libxml2.md META-INF/legal/libxslt.md META-INF/legal/webkit.md	0	0
+native	sdk-lib/jdk.jsobject.jar	13	13	0	0	0
+native	sdk-lib/jfx.incubator.input.jar	42	42	0	0	0
+native	sdk-lib/jfx.incubator.richtext.jar	270	272	2: META-INF/legal/ META-INF/legal/unicode-fx.md	0	0
+native	tests/system/javafx-system-tests-28-ea.jar	7	7	0	0	0
