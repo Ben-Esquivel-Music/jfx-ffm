@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2020, 2024, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2020, 2026, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -26,6 +26,7 @@
 package test.robot.javafx.embed.swing;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.junit.jupiter.api.Assertions.fail;
 import static org.junit.jupiter.api.Assumptions.assumeTrue;
@@ -33,12 +34,12 @@ import static test.util.Util.TIMEOUT;
 import java.awt.Color;
 import java.awt.Dimension;
 import java.awt.image.BufferedImage;
+import java.awt.image.ColorModel;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 import javax.swing.JFrame;
 import javax.swing.SwingUtilities;
 import javax.swing.Timer;
-import javafx.application.Platform;
 import javafx.embed.swing.JFXPanel;
 import javafx.embed.swing.JFXPanelShim;
 import javafx.scene.Scene;
@@ -47,6 +48,7 @@ import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 import com.sun.javafx.PlatformUtil;
+import test.util.Util;
 
 public class JFXPanelScaledTest {
     static CountDownLatch launchLatch;
@@ -72,7 +74,7 @@ public class JFXPanelScaledTest {
         launchLatch = new CountDownLatch(1);
 
         // Start the Application
-        SwingUtilities.invokeLater(() -> {
+        SwingUtilities.invokeAndWait(() -> {
             myApp = new MyApp();
         });
         assertTrue(launchLatch.await(5 * TIMEOUT, TimeUnit.MILLISECONDS), "Timeout waiting for Application to launch");
@@ -87,8 +89,11 @@ public class JFXPanelScaledTest {
 
     @Test
     public void testScale() throws Exception {
-        // Get the Swing-side BackBuffer
-        BufferedImage pixelsIm = JFXPanelShim.getPixelsIm(myApp.jfxPanel);
+        // Get a copy of the Swing-side BackBuffer, which JFXPanel creates and paints on the EDT
+        BufferedImage[] backBuffer = new BufferedImage[1];
+        SwingUtilities.invokeAndWait(() -> backBuffer[0] = copyOf(JFXPanelShim.getPixelsIm(myApp.jfxPanel)));
+        BufferedImage pixelsIm = backBuffer[0];
+        assertNotNull(pixelsIm, "JFXPanel has no back buffer");
         assertEquals(TARGET_SCALED_SIZE, pixelsIm.getWidth());
         assertEquals(TARGET_SCALED_SIZE, pixelsIm.getHeight());
 
@@ -106,6 +111,14 @@ public class JFXPanelScaledTest {
         }
     }
 
+    private static BufferedImage copyOf(BufferedImage image) {
+        if (image == null) {
+            return null;
+        }
+        ColorModel colorModel = image.getColorModel();
+        return new BufferedImage(colorModel, image.copyData(null), colorModel.isAlphaPremultiplied(), null);
+    }
+
     public static class MyApp extends JFrame {
         private static final long serialVersionUID = 1L;
         private final JFXPanel jfxPanel;
@@ -119,7 +132,9 @@ public class JFXPanelScaledTest {
             setSize(500, 500);
             setVisible(true);
 
-            Platform.runLater(() -> initFX(jfxPanel));
+            // JFXPanel has no back buffer until the embedded scene is attached, so attach it
+            // before the resizes start, as JDK-8324239 does for JFXPanelHiDPITest
+            Util.runAndWait(() -> initFX(jfxPanel));
 
             // Give it time to paint and resize the buffers
             // the issues only appears if the buffer has been resized, not on the initial
