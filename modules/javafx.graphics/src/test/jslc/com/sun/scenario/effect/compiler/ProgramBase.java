@@ -25,10 +25,16 @@
 
 package com.sun.scenario.effect.compiler;
 
+import com.sun.scenario.effect.compiler.JSLC.JSLCInfo;
 import com.sun.scenario.effect.compiler.tree.ExtDecl;
 import com.sun.scenario.effect.compiler.tree.FuncDef;
+import com.sun.scenario.effect.compiler.tree.GlueBlock;
 import com.sun.scenario.effect.compiler.tree.VarDecl;
+import java.io.IOException;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.List;
+import java.util.stream.Stream;
 import org.antlr.v4.runtime.Token;
 import org.antlr.v4.runtime.misc.ParseCancellationException;
 
@@ -46,6 +52,23 @@ public abstract class ProgramBase {
     protected static final List<String> VALID_PROGRAM_DECLARATIONS =
             List.of("VarDecl param float x", "FuncDef void main");
 
+    protected static final int EVERY_OUTPUT_TYPE =
+            JSLC.OUT_D3D | JSLC.OUT_ES2 | JSLC.OUT_MTL | JSLC.OUT_JAVA | JSLC.OUT_PRISM;
+
+    protected static final List<String> PROBE_FILES_FOR_EVERY_OUTPUT_TYPE =
+            List.of("JSWProbePeer.java", "PPSProbePeer.java", "Probe.frag", "Probe.hlsl", "Probe.metal");
+
+    protected static final long OUT_OF_DATE = Long.MAX_VALUE;
+
+    protected static JSLCInfo probeRun(Path dir, int outTypes) {
+        JSLCInfo jslcinfo = new JSLCInfo();
+        jslcinfo.outDir = dir.resolve("out").toString();
+        jslcinfo.metalHeaderDir = dir.resolve("mtl-headers").toString();
+        jslcinfo.shaderName = "Probe";
+        jslcinfo.outTypes = outTypes;
+        return jslcinfo;
+    }
+
     protected static String syntaxErrorIn(String program) {
         ParseCancellationException e =
                 assertThrows(ParseCancellationException.class, () -> JSLC.getParserInfo(program));
@@ -58,12 +81,24 @@ public abstract class ProgramBase {
     }
 
     protected static List<String> declarationsOf(String program) throws Exception {
-        JSLC.ParserInfo info = JSLC.getParserInfo(program);
+        return declarationsOf(JSLC.getParserInfo(program));
+    }
+
+    protected static List<String> declarationsOf(JSLC.ParserInfo info) {
         Token stop = info.parser.getCurrentToken();
         assertEquals(Token.EOF, stop.getType(), () -> "parse stopped before the end of input, at " + stop);
         return info.program.getDecls().stream()
                 .map(ProgramBase::describe)
                 .toList();
+    }
+
+    protected static List<String> regularFileNamesUnder(Path dir) throws IOException {
+        try (Stream<Path> paths = Files.walk(dir)) {
+            return paths.filter(Files::isRegularFile)
+                    .map(path -> path.getFileName().toString())
+                    .sorted()
+                    .toList();
+        }
     }
 
     private static String describe(ExtDecl declaration) {
@@ -72,6 +107,7 @@ public abstract class ProgramBase {
                     + varDecl.getVariable().getType() + " " + varDecl.getVariable().getName();
             case FuncDef funcDef -> "FuncDef " + funcDef.getFunction().getReturnType() + " "
                     + funcDef.getFunction().getName();
+            case GlueBlock glueBlock -> "GlueBlock " + glueBlock.getText();
             default -> declaration.getClass().getSimpleName();
         };
     }

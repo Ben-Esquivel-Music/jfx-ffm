@@ -31,6 +31,7 @@ import com.sun.scenario.effect.compiler.backend.hw.MSLBackend;
 import com.sun.scenario.effect.compiler.backend.hw.MetalHeaders;
 import com.sun.scenario.effect.compiler.backend.prism.PrismBackend;
 import com.sun.scenario.effect.compiler.backend.sw.java.JSWBackend;
+import com.sun.scenario.effect.compiler.tree.GlueBlock;
 import com.sun.scenario.effect.compiler.tree.JSLVisitor;
 import com.sun.scenario.effect.compiler.tree.ProgramUnit;
 import org.antlr.v4.runtime.CharStream;
@@ -105,6 +106,18 @@ public class JSLC {
         JSLVisitor visitor = new JSLVisitor();
         ProgramUnit program = visitor.visitTranslation_unit(parser.translation_unit());
         return new ParserInfo(parser, visitor, program);
+    }
+
+    public static ParserInfo getParserInfo(JSLCInfo jslcinfo, String source) throws Exception {
+        return getParserInfo(jslcinfo, new ByteArrayInputStream(source.getBytes()));
+    }
+
+    private static ParserInfo getParserInfo(JSLCInfo jslcinfo, InputStream stream) throws Exception {
+        ParserInfo pinfo = getParserInfo(stream);
+        if (jslcinfo.prismProgram && pinfo.program.getDecls().stream().anyMatch(GlueBlock.class::isInstance)) {
+            throw new RuntimeException("A Prism program cannot have a glue block: " + jslcinfo.shaderName);
+        }
+        return pinfo;
     }
 
     /**
@@ -197,7 +210,7 @@ public class JSLC {
         if ((outTypes & OUT_D3D) != 0) {
             File outFile = jslcinfo.getOutputFile(OUT_D3D);
             if (jslcinfo.force || outOfDate(outFile, sourceTime)) {
-                if (pinfo == null) pinfo = getParserInfo(stream);
+                if (pinfo == null) pinfo = getParserInfo(jslcinfo, stream);
                 HLSLBackend hlslBackend = new HLSLBackend(pinfo.parser, pinfo.visitor);
                 hlslBackend.scan(pinfo.program);
                 write(hlslBackend.getShader(), outFile);
@@ -207,7 +220,7 @@ public class JSLC {
         if ((outTypes & OUT_ES2) != 0) {
             File outFile = jslcinfo.getOutputFile(OUT_ES2);
             if (jslcinfo.force || outOfDate(outFile, sourceTime)) {
-                if (pinfo == null) pinfo = getParserInfo(stream);
+                if (pinfo == null) pinfo = getParserInfo(jslcinfo, stream);
                 ES2Backend es2Backend = new ES2Backend(pinfo.parser, pinfo.visitor);
                 es2Backend.scan(pinfo.program);
                 write(es2Backend.getShader(), outFile);
@@ -221,7 +234,7 @@ public class JSLC {
             metalHeaders.target(jslcinfo.getMetalHeaderDir(), jslcinfo.metalHeaderKind);
             boolean compileMetal = jslcinfo.force || outOfDate(outFile, sourceTime);
             if (compileMetal || !metalHeaders.addUnlessRenamed(shaderFileName, outFile)) {
-                if (pinfo == null) pinfo = getParserInfo(stream);
+                if (pinfo == null) pinfo = getParserInfo(jslcinfo, stream);
                 MSLBackend mslBackend = new MSLBackend(pinfo.parser, pinfo.visitor, shaderFileName);
                 mslBackend.scan(pinfo.program);
                 String shader = mslBackend.getShader();
@@ -239,7 +252,7 @@ public class JSLC {
         if ((outTypes & OUT_JAVA) != 0) {
             File outFile = jslcinfo.getOutputFile(OUT_JAVA);
             if (jslcinfo.force || outOfDate(outFile, sourceTime)) {
-                if (pinfo == null) pinfo = getParserInfo(stream);
+                if (pinfo == null) pinfo = getParserInfo(jslcinfo, stream);
                 JSWBackend javaBackend = new JSWBackend(pinfo.parser, pinfo.visitor, pinfo.program);
                 String genCode = javaBackend.getGenCode(shaderName, peerName, genericsName, interfaceName);
                 write(genCode, outFile);
@@ -249,7 +262,7 @@ public class JSLC {
         if ((outTypes & OUT_PRISM) != 0) {
             File outFile = jslcinfo.getOutputFile(OUT_PRISM);
             if (jslcinfo.force || outOfDate(outFile, sourceTime)) {
-                if (pinfo == null) pinfo = getParserInfo(stream);
+                if (pinfo == null) pinfo = getParserInfo(jslcinfo, stream);
                 PrismBackend prismBackend = new PrismBackend(pinfo.parser, pinfo.visitor, pinfo.program);
                 String genCode = prismBackend.getGlueCode(shaderName, peerName, genericsName, interfaceName);
                 write(genCode, outFile);
@@ -298,6 +311,12 @@ public class JSLC {
         public MetalHeaders.Kind metalHeaderKind = MetalHeaders.Kind.DECORA;
         /** The run this JSLCInfo's Metal shaders join; call {@code write()} on it after the run's last compile. */
         public MetalHeaders metalHeaders = new MetalHeaders();
+        /**
+         * Set by the Prism generator ({@code src/main/jsl-prism}): no output of its programs can hold a glue block's
+         * Java text, so a glue block is an error. A Decora program with a Prism peer ({@code OUT_PRISM}) leaves it
+         * unset.
+         */
+        public boolean prismProgram;
 
         private String extraOpts;
 

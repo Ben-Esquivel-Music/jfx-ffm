@@ -424,7 +424,7 @@ public class CompileJSL {
 
         File outFile = jslcinfo.getOutputFile("prism-ps/build/gensrc/{pkg}/shader/{name}_Loader.java");
         if (JSLC.outOfDate(outFile, sourcetime)) {
-            if (pinfo == null) pinfo = JSLC.getParserInfo(source);
+            if (pinfo == null) pinfo = JSLC.getParserInfo(jslcinfo, source);
             PrismLoaderBackend loaderBackend = new PrismLoaderBackend(pinfo.visitor, pinfo.program);
             JSLC.write(loaderBackend.getGlueCode(name), outFile);
         }
@@ -472,6 +472,7 @@ public class CompileJSL {
         nameMap.put(JSLC.OUT_ES2, "prism-es2/build/gensrc/{pkg}/es2/glsl/{name}.frag");
         nameMap.put(JSLC.OUT_MTL, "prism-mtl/build/gensrc/{pkg}/mtl/msl/{name}.metal");
         jslcinfo.metalHeaderKind = MetalHeaders.Kind.PRISM;
+        jslcinfo.prismProgram = true;
         jslcinfo.parseAllArgs(args);
 
         boolean alphaTest = false;

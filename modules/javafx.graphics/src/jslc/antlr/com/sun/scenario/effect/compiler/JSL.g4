@@ -484,6 +484,8 @@ LINE_COMMENT
     : '//' ~('\n'|'\r')* -> channel(HIDDEN)
     ;
 
+// The Java text of a glue block ends at its first ">>", so the text cannot contain ">>": a nested generic type is
+// written "> >".
 GLUE_BLOCK
-    : LEFT_FRENCH .* RIGHT_FRENCH
+    : LEFT_FRENCH .*? RIGHT_FRENCH
     ;

@@ -26,11 +26,8 @@
 package com.sun.scenario.effect.compiler;
 
 import com.sun.scenario.effect.compiler.JSLC.JSLCInfo;
-import java.io.IOException;
-import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
-import java.util.stream.Stream;
 import org.antlr.v4.runtime.misc.ParseCancellationException;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -48,11 +45,6 @@ public class TranslationUnitTest extends ProgramBase {
 
     private static final String STRAY_BRACE_WHERE_END_OF_INPUT_WAS_EXPECTED =
             "extraneous input '}' expecting {<EOF>, ";
-
-    private static final int EVERY_OUTPUT_TYPE =
-            JSLC.OUT_D3D | JSLC.OUT_ES2 | JSLC.OUT_MTL | JSLC.OUT_JAVA | JSLC.OUT_PRISM;
-
-    private static final long OUT_OF_DATE = Long.MAX_VALUE;
 
     @TempDir
     Path tmp;
@@ -87,7 +79,7 @@ public class TranslationUnitTest extends ProgramBase {
 
     @Test
     public void compilingAProgramWithAStrayBraceWritesNoFile() throws Exception {
-        JSLCInfo run = everyOutputRun();
+        JSLCInfo run = probeRun(tmp, EVERY_OUTPUT_TYPE);
 
         ParseCancellationException e = assertThrows(ParseCancellationException.class,
                 () -> JSLC.compile(run, STRAY_BRACE_BETWEEN_THE_DECLARATIONS, OUT_OF_DATE));
@@ -98,27 +90,8 @@ public class TranslationUnitTest extends ProgramBase {
 
     @Test
     public void compilingTheValidProgramWritesAFileForEveryOutputType() throws Exception {
-        JSLC.compile(everyOutputRun(), VALID_PROGRAM, OUT_OF_DATE);
+        JSLC.compile(probeRun(tmp, EVERY_OUTPUT_TYPE), VALID_PROGRAM, OUT_OF_DATE);
 
-        assertEquals(List.of("JSWProbePeer.java", "PPSProbePeer.java", "Probe.frag", "Probe.hlsl", "Probe.metal"),
-                regularFileNamesUnder(tmp));
-    }
-
-    private JSLCInfo everyOutputRun() {
-        JSLCInfo jslcinfo = new JSLCInfo();
-        jslcinfo.outDir = tmp.resolve("out").toString();
-        jslcinfo.metalHeaderDir = tmp.resolve("mtl-headers").toString();
-        jslcinfo.shaderName = "Probe";
-        jslcinfo.outTypes = EVERY_OUTPUT_TYPE;
-        return jslcinfo;
-    }
-
-    private static List<String> regularFileNamesUnder(Path dir) throws IOException {
-        try (Stream<Path> paths = Files.walk(dir)) {
-            return paths.filter(Files::isRegularFile)
-                    .map(path -> path.getFileName().toString())
-                    .sorted()
-                    .toList();
-        }
+        assertEquals(PROBE_FILES_FOR_EVERY_OUTPUT_TYPE, regularFileNamesUnder(tmp));
     }
 }
