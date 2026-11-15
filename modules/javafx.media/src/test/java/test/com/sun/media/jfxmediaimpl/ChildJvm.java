@@ -26,9 +26,11 @@
 package test.com.sun.media.jfxmediaimpl;
 
 import com.sun.media.jfxmediaimpl.NativeMediaManager;
+import java.io.BufferedReader;
 import java.io.File;
 import java.io.FileOutputStream;
 import java.io.IOException;
+import java.io.InputStreamReader;
 import java.io.PrintStream;
 import java.io.RandomAccessFile;
 import java.io.UncheckedIOException;
@@ -40,6 +42,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
 import java.util.concurrent.TimeUnit;
+import java.util.function.Predicate;
 import java.util.stream.Stream;
 
 /**
@@ -59,8 +62,9 @@ import java.util.stream.Stream;
  * build, and what it printed before it was killed is still in the failure message. A child that crashes writes
  * its {@code hs_err} file beside that output, and {@link Run#describe()} carries both. The results a probe reports
  * go to a file of their own as well as to the output, because the output can be far too large to keep: a child
- * that hits a GLib critical can log one per band of every spectrum message, hundreds of megabytes of it, of which
- * only the beginning and the end are read.
+ * that hits a GLib critical can log one per band of every spectrum message, hundreds of megabytes of it. So
+ * {@link Run#output()} holds only its beginning and its end, for failure messages, and {@link Run#scan} reads
+ * the whole file.
  */
 final class ChildJvm {
 
@@ -89,16 +93,58 @@ final class ChildJvm {
      * What one child did.
      *
      * @param command the command line it was started with
-     * @param output what it printed on either stream; its two ends only, when it printed more than twice
-     *        {@link #READ_OUTPUT_BYTES}
+     * @param output what it printed on either stream, for failure messages; its two ends only, when it printed more
+     *        than twice {@link #READ_OUTPUT_BYTES}, so a search of the output belongs to {@link #scan}
+     * @param log the file that holds all of what it printed
      * @param reports the lines it {@linkplain #report reported}
      * @param finished whether it ended within its timeout
      * @param exitValue its exit value, or -1 when it had to be killed
      * @param directory where its output, its reports and any {@code hs_err} file are
      * @param millis how long it ran, in milliseconds
      */
-    record Run(List<String> command, String output, List<String> reports, boolean finished, int exitValue,
-               Path directory, long millis) {
+    record Run(List<String> command, String output, Path log, List<String> reports, boolean finished,
+               int exitValue, Path directory, long millis) {
+
+        /** How many matching lines a {@link Matches} keeps. */
+        static final int KEPT_MATCHES = 5;
+
+        /**
+         * The lines of a {@link #scan}.
+         *
+         * @param count how many lines of the whole log matched
+         * @param first the first of them, at most {@link #KEPT_MATCHES}
+         */
+        record Matches(long count, List<String> first) {
+        }
+
+        /**
+         * Reads the whole {@link #log}, not {@link #output}, and counts the lines that match. Decoded with
+         * replacement: a child killed mid-write can leave a truncated multi-byte sequence, and a decoding error
+         * would end the scan before the lines it is for.
+         *
+         * @param filter which lines count
+         * @return how many lines matched, and the first {@link #KEPT_MATCHES} of them
+         * @throws UncheckedIOException when the log cannot be read, so that a missing log never counts as one
+         *         without a match
+         */
+        Matches scan(Predicate<String> filter) {
+            long count = 0;
+            List<String> first = new ArrayList<>(KEPT_MATCHES);
+            try (BufferedReader in = new BufferedReader(
+                    new InputStreamReader(Files.newInputStream(log), StandardCharsets.UTF_8))) {
+                for (String line = in.readLine(); line != null; line = in.readLine()) {
+                    if (filter.test(line)) {
+                        count++;
+                        if (first.size() < KEPT_MATCHES) {
+                            first.add(line);
+                        }
+                    }
+                }
+            } catch (IOException e) {
+                throw new UncheckedIOException("the child's log " + log + " cannot be read", e);
+            }
+            return new Matches(count, List.copyOf(first));
+        }
 
         /** Whether the child ended by itself, within its timeout, with exit value 0. */
         boolean clean() {
@@ -213,14 +259,14 @@ final class ChildJvm {
                 } catch (InterruptedException _) {
                     // Interrupted again: the flag is set again below either way, and the report takes what is there.
                 }
-                String soFar = new Run(List.copyOf(command), readEnds(log), List.of(), false, -1, directory,
-                        TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - start)).describe();
+                String soFar = new Run(List.copyOf(command), readEnds(log), log, List.of(), false, -1,
+                        directory, TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - start)).describe();
                 Thread.currentThread().interrupt();
                 throw new AssertionError("interrupted while waiting for the child, which was killed:" + soFar, e);
             }
             long millis = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - start);
             List<String> reported = Files.exists(reports) ? readLines(reports) : List.of();
-            return new Run(List.copyOf(command), readEnds(log), reported, finished,
+            return new Run(List.copyOf(command), readEnds(log), log, reported, finished,
                     finished ? child.exitValue() : -1, directory, millis);
         } catch (IOException e) {
             throw new UncheckedIOException("could not run " + command, e);

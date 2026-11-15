@@ -179,7 +179,7 @@ public class SpectrumBandChangeTest {
                 + " with a band no message carries), stale "
                 + run.value("counter." + SPECTRUM_STALE_DROPPED) + ", events "
                 + run.value("counter." + SPECTRUM_EVENTS_SENT) + ", written "
-                + run.value("counter." + SPECTRUM_BANDS_WRITTEN) + ", " + criticals(run).size()
+                + run.value("counter." + SPECTRUM_BANDS_WRITTEN) + ", " + criticals(run).count()
                 + " critical lines, schedule " + run.value("schedule.millis") + " ms, child " + run.millis() + " ms";
     }
 
@@ -196,9 +196,10 @@ public class SpectrumBandChangeTest {
     }
 
     private static void assertNoCritical(ChildJvm.Run run) {
-        List<String> criticals = criticals(run);
-        assertTrue(criticals.isEmpty(), () -> criticals.size() + " lines of the child's output hold one of "
-                + CRITICAL_MARKERS + ", the first: " + criticals.get(0) + ":" + run.describe());
+        ChildJvm.Run.Matches criticals = criticals(run);
+        assertEquals(0L, criticals.count(), () -> criticals.count() + " lines of the child's whole log hold one of "
+                + CRITICAL_MARKERS + ", the first " + criticals.first().size() + ":\n"
+                + String.join("\n", criticals.first()) + run.describe());
     }
 
     private static void assertNoBandNoMessageCarries(ChildJvm.Run run) {
@@ -208,10 +209,8 @@ public class SpectrumBandChangeTest {
                 + ":" + run.describe());
     }
 
-    private static List<String> criticals(ChildJvm.Run run) {
-        return run.output().lines()
-                .filter(line -> CRITICAL_MARKERS.stream().anyMatch(line::contains))
-                .toList();
+    private static ChildJvm.Run.Matches criticals(ChildJvm.Run run) {
+        return run.scan(line -> CRITICAL_MARKERS.stream().anyMatch(line::contains));
     }
 
     private static void assertEveryRoundDelivered(ChildJvm.Run run) {
