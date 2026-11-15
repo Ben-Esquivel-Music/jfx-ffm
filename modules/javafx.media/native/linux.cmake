@@ -119,6 +119,7 @@ endif()
 # ---------------------------------------------------------------------------
 # add_media_library(<name>
 #     OUTPUT_NAME <so base name>     # produces lib<OUTPUT_NAME>.so
+#     OUTPUT_DIR <dir>               # where the .so goes; defaults to BIN_DIR
 #     SOURCES <files...>             # explicit, exactly as the makefile listed
 #     INCLUDE_DIRS <dirs...>
 #     COMPILE_DEFINITIONS <defs...>
@@ -128,16 +129,21 @@ endif()
 # )
 # ---------------------------------------------------------------------------
 function(add_media_library name)
-    cmake_parse_arguments(MEDIA "" "OUTPUT_NAME"
+    cmake_parse_arguments(MEDIA "" "OUTPUT_NAME;OUTPUT_DIR"
         "SOURCES;INCLUDE_DIRS;COMPILE_DEFINITIONS;COMPILE_OPTIONS;LINK_LIBS;LINK_OPTIONS" ${ARGN})
+
+    set(out_dir "${BIN_DIR}")
+    if(MEDIA_OUTPUT_DIR)
+        set(out_dir "${MEDIA_OUTPUT_DIR}")
+    endif()
 
     add_library(${name} SHARED ${MEDIA_SOURCES})
     set_target_properties(${name} PROPERTIES
         OUTPUT_NAME "${MEDIA_OUTPUT_NAME}"
         LINKER_LANGUAGE CXX
-        LIBRARY_OUTPUT_DIRECTORY "${BIN_DIR}"
-        LIBRARY_OUTPUT_DIRECTORY_RELEASE "${BIN_DIR}"
-        LIBRARY_OUTPUT_DIRECTORY_DEBUG "${BIN_DIR}")
+        LIBRARY_OUTPUT_DIRECTORY "${out_dir}"
+        LIBRARY_OUTPUT_DIRECTORY_RELEASE "${out_dir}"
+        LIBRARY_OUTPUT_DIRECTORY_DEBUG "${out_dir}")
 
     target_compile_definitions(${name} PRIVATE ${MEDIA_COMPILE_DEFINITIONS})
     target_compile_options(${name} PRIVATE
@@ -418,7 +424,7 @@ endif()
 # libjfxmedia.so  (jfxmedia/projects/linux/Makefile). Exports the jfxm_* C ABI
 # of jfxmedia/jfxmedia_api.h; it needs no JDK headers.
 # ===========================================================================
-add_media_library(jfxmedia
+set(JFXMEDIA_LIBRARY_ARGS
     OUTPUT_NAME jfxmedia
     SOURCES
         "${JFXMEDIA_SRC}/Utils/Logger.cpp"
@@ -465,3 +471,19 @@ add_media_library(jfxmedia
         "$<$<COMPILE_LANGUAGE:CXX>:-fno-rtti>"
     LINK_LIBS gstreamerLite PkgConfig::JFXM_GLIB
     LINK_OPTIONS "LINKER:-rpath,$ORIGIN")
+
+add_media_library(jfxmedia ${JFXMEDIA_LIBRARY_ARGS})
+
+# The hooks build (JFXM_TEST_HOOKS, see CMakeLists.txt)
+if(JFXM_TEST_HOOKS)
+    add_media_library(jfxmedia_test ${JFXMEDIA_LIBRARY_ARGS}
+        OUTPUT_DIR "${JFXM_TEST_BIN_DIR}")
+    target_sources(jfxmedia_test PRIVATE "${JFXMEDIA_SRC}/ffi/jfxmedia_test_hooks.cpp")
+    target_compile_definitions(jfxmedia_test PRIVATE JFXM_TEST_HOOKS=1)
+    # libgstreamer-lite.so stays in BIN_DIR, not next to this library; reach it from $ORIGIN, not by a build-tree path
+    file(RELATIVE_PATH jfxm_bin_from_test_bin "${JFXM_TEST_BIN_DIR}" "${BIN_DIR}")
+    target_link_options(jfxmedia_test PRIVATE "LINKER:-rpath,$ORIGIN/${jfxm_bin_from_test_bin}")
+    set_target_properties(jfxmedia_test PROPERTIES SKIP_BUILD_RPATH TRUE)
+    # A build of jfxmedia alone must not leave an older hooks library behind for the tests
+    add_dependencies(jfxmedia jfxmedia_test)
+endif()

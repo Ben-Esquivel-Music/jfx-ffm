@@ -62,6 +62,7 @@ CGstAudioSpectrum::CGstAudioSpectrum(GstElement* pSpectrum, bool enabled)
                               "message-phase", TRUE, NULL);
     g_mutex_init(&m_BandsLock);
     m_pHolder = NULL;
+    m_HolderBands = 0;
 }
 
 CGstAudioSpectrum::~CGstAudioSpectrum()
@@ -71,6 +72,7 @@ CGstAudioSpectrum::~CGstAudioSpectrum()
     g_mutex_lock(&m_BandsLock);
     CBandsHolder *holder = m_pHolder;
     m_pHolder = NULL;
+    m_HolderBands = 0;
     g_mutex_unlock(&m_BandsLock);
 
     CBandsHolder::ReleaseRef(holder);
@@ -104,36 +106,47 @@ void CGstAudioSpectrum::SetBands(int bands, CBandsHolder* holder)
 
     // AddRef because the reference the caller passes in is the caller's, not this spectrum's
     // (AudioSpectrum.h). The swap runs under m_BandsLock so that it cannot fall between the read
-    // and the AddRef in UpdateBands: swapping lock-free lets a spectrum thread retain a holder
-    // whose last reference this call has already dropped, and so touch freed memory.
+    // and the AddRef in UpdateBandsIfCurrent: swapping lock-free lets a spectrum thread retain a
+    // holder whose last reference this call has already dropped, and so touch freed memory.
     g_mutex_lock(&m_BandsLock);
     CBandsHolder *old_holder = m_pHolder;
     m_pHolder = CBandsHolder::AddRef(holder);
+    m_HolderBands = (NULL != holder) ? bands : 0;
     g_mutex_unlock(&m_BandsLock);
 
     // Released outside the lock, and it has to be: dropping the last reference runs
     // ~CFfiBandsHolder, which calls back into Java, and a spectrum thread blocked on m_BandsLock
     // must not be left waiting on that. The old holder's pair stays alive until whichever spectrum
-    // thread is still inside UpdateBands drops the last reference to it.
+    // thread is still inside UpdateBandsIfCurrent drops the last reference to it.
     CBandsHolder::ReleaseRef(old_holder);
 }
 
 void CGstAudioSpectrum::UpdateBands(int size, const float* magnitudes, const float* phases)
 {
-    // Read and retain as one step: it is the pair of them that races with the swap in SetBands.
+    UpdateBandsIfCurrent(size, magnitudes, phases);
+}
+
+bool CGstAudioSpectrum::UpdateBandsIfCurrent(int size, const float* magnitudes, const float* phases)
+{
+    // Read the holder with its count and retain it as one step: that is what races with the swap
+    // in SetBands.
     g_mutex_lock(&m_BandsLock);
     CBandsHolder *holder = CBandsHolder::AddRef(m_pHolder);
+    int holderBands = m_HolderBands;
     g_mutex_unlock(&m_BandsLock);
 
     // NULL until the first SetBands installs a holder, and again after a SetBands given none.
     if (holder == NULL)
-        return;
+        return true;
 
     // The reference taken above keeps the pair alive for this delivery even once SetBands has
     // installed a newer holder, so the write itself needs no lock - and must not hold one, since
     // this can be the thread that drops the last reference and so runs ~CFfiBandsHolder.
-    holder->UpdateBands(size, magnitudes, phases);
+    bool current = (holderBands == size);
+    if (current)
+        holder->UpdateBands(size, magnitudes, phases);
     CBandsHolder::ReleaseRef(holder);
+    return current;
 }
 
 double CGstAudioSpectrum::GetInterval()

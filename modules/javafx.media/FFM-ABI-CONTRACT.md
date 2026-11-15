@@ -66,10 +66,8 @@ the first media test tree (`FFM-TEST-PLAN.md`).
    keeps being generated from `MediaError.java` by `src/tools/java/headergen/HeaderGen.java`, now
    run by Maven (see `FFM-BUILD-PLAN.md`), so the two sides cannot drift. No exception is thrown
    across the boundary by design, with one gap under memory exhaustion: `new (nothrow)` covers the
-   allocation itself but not a throwing constructor or a throwing assignment, so `std::bad_alloc`
-   can still escape `extern "C"` — at the two `CLocatorStream` constructions in `ffi/jfxmedia_api.cpp`
-   and `platform/osx/OSXMediaPlayer.mm`, at the `location`/`content_type` `std::string` assignments
-   in `jfxm_media_create`'s AVF branch, and at the unchecked plain `new CLogger` in `Utils/Logger.cpp`.
+   allocation itself but not a throwing constructor, a throwing assignment or a container insert, so
+   `std::bad_alloc` can still escape at the places the header comment of `jfxmedia_api.h` lists.
    That is inherited from the pre-FFM code, not introduced by this ABI.
 6. **Native code never holds a Java reference.** Every former `jobject` global ref becomes a
    Java-assigned `int64_t` registry id passed as `void* user`; every former `jmethodID` becomes a
@@ -696,7 +694,7 @@ JFXM_EXPORT double  jfxm_eq_band_get_gain(void* band);
 JFXM_EXPORT void    jfxm_eq_band_set_gain(void* band, double db);
 
 /* Handing memory back: C calls this once when it has dropped its last reference to a block Java
- * gave it, on whichever thread dropped that reference (GST MainLoop / streaming thread, the app
+ * gave it, on whichever thread dropped that reference (the GST MainLoop thread, the app
  * thread doing set_bands / dispose, or the thread tearing an AVF audio tap down; no C lock is held
  * across it). The Java target must be thread-safe, must not block and must not throw. After it
  * returns, C never touches the memory again - and not before. */
@@ -708,8 +706,9 @@ typedef void (*JfxmReleaseFn)(void* user);
  * audio tap) before firing the audio_spectrum callback.
  *
  * The pair is owned by the refcounted CFfiBandsHolder C builds around it, exactly as
- * CJavaBandsHolder held a NewGlobalRef on the two float[]s - NOT by the call. CGstAudioSpectrum is
- * lock-free, so a spectrum thread already inside UpdateBands keeps writing through the old pair
+ * CJavaBandsHolder held a NewGlobalRef on the two float[]s - NOT by the call. CGstAudioSpectrum swaps
+ * the holder under its lock but writes through a reference taken under that lock after dropping it,
+ * so a spectrum thread that took its reference before the swap keeps writing through the old pair
  * after a newer set_bands call has returned. `release` is the only signal that the pair is dead:
  * it runs exactly once per set_bands call (also when spectrum is NULL, and if the call fails),
  * with release_user, on the thread that dropped the last reference. `release` may be NULL, in
@@ -717,7 +716,21 @@ typedef void (*JfxmReleaseFn)(void* user);
  *
  * set_bands validates count > 0 and both buffers non-NULL, as every other entry point validates its
  * handle; a call that fails the check installs nothing, retires nothing and still runs `release`
- * once. No upper bound is checked: a positive count is the caller's promise about the buffers. */
+ * once. No upper bound is checked: a positive count is the caller's promise about the buffers.
+ *
+ * With the GStreamer pipeline the count is also set on the spectrum element, whose "bands" property
+ * accepts 0 to 1024 (gstspectrum.c); g_object_set refuses any other value and leaves the property
+ * as it was. A count above 1024 still installs the new pair while the element keeps computing for
+ * its previous count: every spectrum message is then dropped as computed for another count, nothing
+ * is written to the pair and audio_spectrum does not fire until a set_bands call whose count the
+ * element accepts. A count of 1 is accepted by this call but is not usable with the GStreamer
+ * pipeline - the element's transform length, 2 * count - 2, is then 0 and the element divides by
+ * it - so a caller must pass at least 2, as NativeAudioSpectrum does.
+ *
+ * Calls on one spectrum must not overlap: with the GStreamer pipeline the count is set on the
+ * element outside the lock under which the pair is installed, so two overlapping calls with
+ * different counts can leave the element computing for one count while the pair installed last is
+ * for the other, and audio_spectrum then does not fire until the next set_bands call. */
 JFXM_EXPORT int32_t jfxm_spectrum_get_enabled(void* spectrum);
 JFXM_EXPORT void    jfxm_spectrum_set_enabled(void* spectrum, int32_t enabled);
 JFXM_EXPORT void    jfxm_spectrum_set_bands(void* spectrum, int32_t count,
@@ -746,23 +759,31 @@ GStreamer path behaves exactly as before), `AVFAudioSpectrumUnit`'s destructor g
 `ReleaseRef` for the pair it is still holding at teardown, `CNullAudioSpectrum` conforms too, and
 `jfxm_spectrum_set_bands` ends with a single `CBandsHolder::ReleaseRef` on every path.
 
-The `release`/`release_user` pair is what makes that safe. `CGstAudioSpectrum::UpdateBands` is
-lock-free - it `AddRef`s the current holder, writes, then `ReleaseRef`s it - so an application that
-calls `setBandCount()` during playback with a spectrum listener attached leaves the *previous*
-holder alive and writing into the *previous* Java arrays after `jfxm_spectrum_set_bands` has
-returned. `CJavaBandsHolder` survived that because it held a `NewGlobalRef` on each `float[]`;
-`CFfiBandsHolder` reproduces it by calling `release(release_user)` from its destructor, i.e. at the
-moment the last reference goes away. Java must treat that callback, and only that callback, as
-permission to free the pair (section 4). `AVFAudioSpectrumUnit::SetBands` drops the superseded
-reference *after* it releases the band lock, so no destructor - and so no upcall - runs under a
-lock the real-time audio tap is waiting on.
+The `release`/`release_user` pair is what makes that safe. `CGstAudioSpectrum::UpdateBandsIfCurrent`
+writes with no lock held - it `AddRef`s the current holder under `m_BandsLock`, drops the lock,
+writes, then `ReleaseRef`s it - so an application that calls `setBandCount()` during playback with
+a spectrum listener attached leaves the *previous* holder alive and writing into the *previous* Java
+arrays after `jfxm_spectrum_set_bands` has returned. `CJavaBandsHolder` survived that because it
+held a `NewGlobalRef` on each `float[]`; `CFfiBandsHolder` reproduces it by calling
+`release(release_user)` from its destructor, i.e. at the moment the last reference goes away. Java
+must treat that callback, and only that callback, as permission to free the pair (section 4).
+`AVFAudioSpectrumUnit::SetBands` drops the superseded reference *after* it releases the band lock,
+so no destructor - and so no upcall - runs under a lock the real-time audio tap is waiting on.
 
-The exactly-once guarantee assumes `set_bands` calls on one spectrum are serialised, which is what
-`NativeAudioSpectrum` does today. `CGstAudioSpectrum::SetBands` reads and then writes `m_pHolder`
-rather than exchanging it, so two threads calling `setBandCount()` on the same spectrum at once can
-both release the same superseded holder and neither release one of the new ones. That shape is
-older than this ABI and is listed in `FFM-STATUS.md` section 4a; making it an exchange is the fix
-if the assumption ever stops holding.
+Release exactly once per call no longer rests on `set_bands` calls on one spectrum being
+serialised: `CGstAudioSpectrum::SetBands` exchanges the holder under `m_BandsLock`, so each call
+releases exactly the holder it superseded (section 14.1). The calls are nevertheless made one at a
+time today. `NativeAudioSpectrum` takes no lock; `javafx.scene.media.MediaPlayer` calls
+`setBandCount` only under its `disposeLock` (`MediaPlayer.java:1822-1824` and `:2170-2173`), after
+the one call the `NativeAudioSpectrum` constructor makes. Keeping it so is an obligation on the
+caller of `jfxm_spectrum_set_bands`, stated in the comment on its declaration above: calls on one
+spectrum must not overlap. What still depends on that is the pairing of the element's band count
+with the installed holder. `SetBands` sets the element's "bands" property
+(`GstAudioSpectrum.cpp:105`) before, and outside, the `m_BandsLock` hold in which it swaps the
+holder and its count (`:111-115`), so two overlapping calls with different counts can leave the
+element computing for one count while the holder installed last is for the other. Every spectrum
+message is then dropped as computed for another count, and `audio_spectrum` does not fire until the
+next `set_bands`.
 
 ## 12. What is deleted (in a separate change from the migration)
 
@@ -970,24 +991,40 @@ Each one is intentional:
 * `jfxm_spectrum_set_bands` takes `(JfxmReleaseFn release, void* release_user)` on top of the JNI
   argument list (sections 4 and 11). That is not decoration: without it C has no way to tell Java
   that a band pair is dead, and `setBandCount()` during playback corrupts the heap.
-* **`CGstAudioSpectrum::UpdateBands` no longer dereferences a NULL holder.** Master called
+* **`CGstAudioSpectrum::UpdateBandsIfCurrent` no longer dereferences a NULL holder.** Master called
   `holder->UpdateBands(...)` on the result of `CBandsHolder::AddRef(m_pHolder)`, which returns `NULL`
-  when no holder has been installed. `GstAudioSpectrum.cpp:129-130` now returns instead. Observable
-  delta: a spectrum that produces data before `setBandCount` has installed a pair - or again after a
-  `SetBands` given none - drops the delivery rather than crashing the process. Unreachable through
-  `NativeAudioSpectrum` today, which is why it sat in `FFM-STATUS.md` section 4a for a while; it is a
-  fix, and section 4a no longer lists it as unfixed.
+  when no holder has been installed. `GstAudioSpectrum.cpp:139-140` now returns `true` instead, so
+  the bus handler still sends the `audio_spectrum` event (`GstAudioPlaybackPipeline.cpp:1566-1573`).
+  Observable delta: a spectrum that produces data before `setBandCount` has installed a pair - or
+  again after a `SetBands` given none - skips only the write into the pair rather than crashing the
+  process. Unreachable through `NativeAudioSpectrum` today, which is why it sat in `FFM-STATUS.md`
+  section 4a for a while; it is a fix, and section 4a no longer lists it as unfixed.
 * **`CGstAudioSpectrum::SetBands` swaps the holder under `m_BandsLock`.** Master did a bare
   `g_atomic_pointer_get` followed by a `g_atomic_pointer_set`, which cannot make the read and the
-  `AddRef` in `UpdateBands` one step. `GstAudioSpectrum.cpp:101-119` now takes the lock across the
-  swap, and `UpdateBands` takes the same lock across its read-and-retain (`:124-126`). Both release
-  the superseded holder **outside** the lock, deliberately: dropping the last reference runs
-  `~CFfiBandsHolder`, which calls back into Java, and a spectrum thread blocked on `m_BandsLock` must
-  not be left waiting on a native-to-Java transition. Observable delta: two threads calling
-  `setBandCount()` on one spectrum can no longer both release the same superseded holder - a double
-  free, plus a `release` upcall on freed memory - while one of the two new holders is never released.
-  Serialised by `NativeAudioSpectrum` today, so unreachable, but the ABI's release-exactly-once
-  promise no longer rests on that assumption.
+  `AddRef` in `UpdateBandsIfCurrent` one step. `GstAudioSpectrum.cpp:103-122` now takes the lock
+  across the swap, and `UpdateBandsIfCurrent` takes the same lock across its read-and-retain
+  (`:133-136`). Both release the superseded holder **outside** the lock, deliberately: dropping the
+  last reference runs `~CFfiBandsHolder`, which calls back into Java, and a spectrum thread blocked
+  on `m_BandsLock` must not be left waiting on a native-to-Java transition. Observable delta: two
+  threads calling `setBandCount()` on one spectrum can no longer both release the same superseded
+  holder - a double free, plus a `release` upcall on freed memory - while one of the two new holders
+  is never released. Serialised by `MediaPlayer` today (section 11), so unreachable, but the ABI's
+  release-exactly-once promise no longer rests on that assumption.
+* **The GStreamer path no longer fires `audio_spectrum` for a band count its element refuses.** The
+  spectrum element's "bands" property accepts 0 to 1024 (`MAX_BANDS` and the property spec,
+  `gstspectrum.c:72` and `:177-181`), and `g_object_set` refuses any other value and leaves the
+  property as it was. `javafx.scene.media.MediaPlayer` clamps `audioSpectrumNumBands` only from
+  below (`MediaPlayer.java:282`, `:2173`), so the public API can pass such a count. Before - in the
+  JNI implementation (`939aa61ead`, the parent of the media FFM port) and in this fork at
+  `29f69dc205` alike - the pair for the refused count was installed, the bus handler took the
+  element's unchanged count as the band count and handed the holder lists of that length, the
+  holder wrote nothing because the lengths differed, and `audio_spectrum` fired for every message:
+  the `AudioSpectrumListener` was called with the values the pair had been seeded with (magnitudes
+  at `NativeAudioSpectrum.DEFAULT_THRESHOLD`, phases at 0). Now the pair for the refused count is
+  still installed, every spectrum message is dropped as computed for another count, nothing is
+  written and `audio_spectrum` does not fire until a `set_bands` call whose count the element
+  accepts (`jfxmedia_api.h:524-529`). Observable delta: the `AudioSpectrumListener` is no longer
+  called for such a count. Neither behaviour gave correct data for it.
 * **A second `jfxm_player_init` on the same GST media handle is rejected.** It returns
   `ERROR_MEDIA_CREATION` (0x0102), leaves the first dispatcher in place and frees the one the call
   asked for. Master replaced `m_pEventDispatcher` without deleting the old one
@@ -1095,15 +1132,15 @@ Each one is intentional:
 
 ### 14.2 Patches to the vendored `gstreamer-lite` tree (the patch manifest)
 
-These files are **third-party sources under their own licence**, and they are the one part of the
-module `buildtools/ffm-media/verify-no-jni.pl` deliberately cannot see: it skips
+`gstdirectsoundsink.c` is third-party; the rest are JavaFX's, three with GPLv2 + Classpath exception
+headers. All are the one part of the module `verify-no-jni.pl` deliberately cannot see: it skips
 `gstreamer/gstreamer-lite`, `gstreamer/3rd_party` and `gstreamer/plugins`, correctly, because those
 trees contain no JNI. The exclusion is right and the consequence is that **no automated control in
 this branch covers a change made in them**. This subsection is that control: it is the manifest of the
 local delta, and a future upstream GStreamer merge should start here rather than with `git log`.
 US-074 removed `verify-no-jni.pl` (git history has it); its successor `buildtools/CheckNoJni.java` reads these trees too, for JNI only.
 
-Measured at the merge base `939aa61ea`: seven files, `+500 / −71`. Per-file deltas are in
+Measured at the merge base `939aa61ea`: seven files, `+556 / −71`. Per-file deltas are in
 `FFM-STATUS.md` section 1b.
 
 **`plugins/javasource/javasource.c`** (+78 / −7) and **`marshal.c` / `marshal.h` / `marshal.in`**
@@ -1123,7 +1160,7 @@ Measured at the merge base `939aa61ea`: seven files, `+500 / −71`. Per-file de
   anywhere. If you regenerate these two files, regenerate them from `marshal.in` and diff the result
   against what is committed.
 
-**`gstreamer-lite/gst-plugins-good/sys/directsound/gstdirectsoundnotify.cpp` / `.h`** (+232 / −21,
+**`gstreamer-lite/gst-plugins-good/sys/directsound/gstdirectsoundnotify.cpp` / `.h`** (+288 / −21,
 +57 / −1) and **`gstdirectsoundsink.c`** (+104 / −17)
 
 * **A deliberate, permanent, unbounded leak on the registered path.** `ReleaseNotificator` calls
@@ -1183,6 +1220,52 @@ Measured at the merge base `939aa61ea`: seven files, `+500 / −71`. Per-file de
   invariant in section 14.3 from aspirational into enforceable. **The limit, stated because it is
   real:** it cannot cover a `DllMain` in another module of the process that reaches
   `gst_directsound_sink_finalize`, because the loader lock is process-wide.
+
+US-040 changed three more files after that measurement, and the figures above leave them out. The
+deltas below are against `29f69dc205`, where all three were still as they were at the merge base:
+
+**`gstreamer-lite/gst-plugins-good/gst/spectrum/gstspectrum.c`** (+27 / −3), and the Windows
+export lists **`3rd_party/glib/build/win32/vs100/glib-lite.def`** and
+**`projects/win/gstreamer-lite.def`** (+1 / −0 each)
+
+* **`gst_spectrum_transform_ip` reads the band count under the element's lock.** In the
+  `GSTREAMER_LITE` branch it read `bands`, `nfft` and the output channel count before it took
+  `spectrum->lock` (`:919`); a new `#ifdef GSTREAMER_LITE` block reads them right after it
+  (`:925-927`). *Why.* `gst_spectrum_set_property` changes them, and frees the channel data, under
+  that lock, so a band-count change landing in between left the loops indexing data allocated for
+  the new count with the old one: a heap overflow after a lowering. The trigger is
+  `MediaPlayer.setAudioSpectrumNumBands` during playback; the block applies on every platform,
+  macOS included. *Observable.* Nothing with a constant band count; a change during playback no
+  longer reaches the loops with a stale count.
+* **`gst_spectrum_start` and `gst_spectrum_stop` reset the channel data under `spectrum->lock`**
+  (`:414-425`, `:435-442`), under `#if defined (GSTREAMER_LITE) && !defined (OSX)`; the `#else`
+  keeps the upstream statement. *Why.* The setter frees the same data under that lock, so a reset
+  outside it could free it twice: a state change to NULL on the bus thread's error path
+  (`jfxmedia/platform/gstreamer/GstAudioPlaybackPipeline.cpp:1286`) together with a band-count
+  change. *Not on macOS.* `AVFAudioSpectrumUnit` changes the element's state while it holds its
+  band lock, and takes that lock again in the message callback that `transform_ip` calls under
+  `spectrum->lock`, so locking the reset there would take the two locks in opposite orders. Only
+  `native/mac.cmake` defines `OSX`; macOS, its GStreamer pipeline included, keeps the upstream
+  reset (US-115). *Observable.* Nothing on a normal start or stop; on Windows and Linux a reset in
+  either that meets a band-count change can no longer free the channel data twice.
+* **Two appended exports, `NONAME` like the rest of each list.** `glib-lite.def` exports
+  `g_object_weak_ref` (`@552`), which only the hooks build `jfxmedia_test` calls
+  (`jfxmedia/ffi/jfxmedia_test_hooks.cpp:79`, `:85`); `gstreamer-lite.def` exports
+  `gst_value_list_get_size` (`@156`), with which jfxmedia's bus handler sizes the lists of a
+  spectrum message (`jfxmedia/platform/gstreamer/GstAudioPlaybackPipeline.cpp:1534-1535`).
+  *Observable.* The shipped `glib-lite.dll` and `gstreamer-lite.dll` have one export more each,
+  and `jfxmedia.dll` imports ordinal 156. Without the first line the Windows hooks build does not
+  link, without the second `jfxmedia` does not: a probe linked against the real import libraries
+  gave LNK2019 for both names. Linux and macOS have no export list.
+* **What is not proven.** No deterministic test covers either `gstspectrum.c` change. A mutant
+  that moves the three reads back before the lock survives US-040's spectrum tests (40 runs of 40),
+  and removing the start and stop lock was not tried, as no test provokes that race; the gates
+  show that the locks break nothing, not that the races are gone. Upstream GStreamer's own
+  `#else` branch is untouched (in `transform_ip` it still reads before the lock), and whether
+  current upstream GStreamer still has either defect was not checked.
+* **What a merge must keep.** The `GSTREAMER_LITE` blocks in `transform_ip`, `start` and `stop`,
+  the `!defined (OSX)` guard included, unless the merged upstream reads and resets under its lock
+  itself; and both `.def` lines in any regenerated or replaced export list.
 
 ### 14.3 Contract invariants the compiler cannot enforce
 

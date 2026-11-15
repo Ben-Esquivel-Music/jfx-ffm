@@ -42,9 +42,10 @@ CLogger::LSingleton CLogger::s_Singleton;
  * One process-wide lock rather than a member, because Singleton<CLogger>::GetInstance is itself
  * unsynchronised: a member lock would be reached through the very pointer whose publication is
  * racy. It is created during the dynamic initialisation of this translation unit, which the
- * dynamic loader runs before any exported function of the library can be called. Until then, and
- * if the allocation fails, it stays NULL and access is simply unsynchronised - the behaviour this
- * code had before - rather than a crash.
+ * dynamic loader runs before any exported function of the library can be called; until then it is
+ * NULL and access is simply unsynchronised. CJfxCriticalSection::Create uses a plain new, so a
+ * failing allocation throws std::bad_alloc out of that initialisation (jfxmedia_api.h) instead of
+ * leaving the lock NULL.
  */
 static CJfxCriticalSection *s_pLoggerLock = CJfxCriticalSection::Create();
 
@@ -170,7 +171,7 @@ uint32_t CLogger::CreateInstance(CLogger **ppLogger)
         return ERROR_FUNCTION_PARAM_NULL;
     }
 
-    *ppLogger = new CLogger();
+    *ppLogger = new (nothrow) CLogger();
     if (*ppLogger == NULL) {
         return ERROR_MEMORY_ALLOCATION;
     }

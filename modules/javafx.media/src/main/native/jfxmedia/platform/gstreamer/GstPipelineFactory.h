@@ -89,9 +89,9 @@ private:
     static void     SourceCloseConnection(GstElement *src, gpointer data);
     static int      SourceProperty(GstElement *src, int prop, int value, gpointer data);
 
-    // GClosureNotify of the "close-connection" closure, and the only place the CStreamCallbacks
-    // shared by the six handlers above is freed. CreateSourceElement explains why that closure owns
-    // it; SourceCloseConnection therefore does not delete it.
+    // GClosureNotify of the "close-connection" closure: frees the CStreamCallbacks shared by the six
+    // handlers above when that closure dies. CreateSourceElement explains why that closure owns it;
+    // SourceCloseConnection therefore does not delete it.
     static void     SourceCallbacksDestroyed(gpointer data, GClosure *closure);
 };
 

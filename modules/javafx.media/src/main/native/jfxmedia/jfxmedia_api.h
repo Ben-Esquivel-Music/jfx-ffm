@@ -32,11 +32,24 @@
  * pointers that receives the opaque void* user Java handed in. Errors are reported as MediaError
  * return codes generated into jfxmedia_errors.h, and no exception is thrown across the boundary by
  * design. One gap remains under memory exhaustion: new (nothrow) covers the allocation itself but
- * not a throwing constructor or a throwing assignment, so std::bad_alloc can still escape
- * extern "C" - at the two CLocatorStream constructions in ffi/jfxmedia_api.cpp and
- * platform/osx/OSXMediaPlayer.mm, at the location/content_type std::string assignments in
- * jfxm_media_create's AVF branch, and at the unchecked plain new CLogger in Utils/Logger.cpp. That
- * is inherited from the pre-FFM code, not introduced by this ABI.
+ * not a throwing constructor, a throwing std::string assignment or a standard container insert, and
+ * a few plain new remain, so std::bad_alloc can still escape
+ *   - out of extern "C", on the caller's thread: from jfxm_media_create, at the CLocatorStream
+ *     construction in ffi/jfxmedia_api.cpp, at the location/content_type std::string assignments
+ *     of its AVF branch, and in the std::string and GstElementContainer work of
+ *     CGstPipelineFactory::CreatePlayerPipeline, including the two pipeline constructors behind
+ *     new (nothrow); from jfxm_player_init, at the CLocatorStream construction in
+ *     platform/osx/OSXMediaPlayer.mm; from both, at the plain new in CJfxCriticalSection::Create;
+ *     from jfxm_eq_add_band, at the band map insert of CGstAudioEqualizer::AddBand; and from
+ *     jfxm_frame_convert, at the three plain new CGstVideoFrame in CGstVideoFrame::ConvertToFormat;
+ *   - into GLib and GStreamer frames, on a streaming thread: at the std::string work of the track
+ *     events - the mime types the audio and video pad probes store, the CAudioTrack and CVideoTrack
+ *     constructors behind new (nothrow), and the name and language copies in
+ *     CFfiPlayerEventDispatcher's track events - and, on Windows, at the GstElementContainer insert
+ *     in CGstAVPlaybackPipeline::LoadDecoder;
+ *   - into the loader, at the CJfxCriticalSection::Create in a static initialiser of
+ *     Utils/Logger.cpp.
+ * That is inherited from the pre-FFM code, not introduced by this ABI.
  *
  * The design contract is modules/javafx.media/FFM-ABI-CONTRACT.md; the symbol set is identical on
  * every platform (functions that only make sense on one backend return ERROR_NOT_IMPLEMENTED
@@ -507,6 +520,20 @@ typedef void (*JfxmReleaseFn)(void* user);
  * NULL spectrum is; `release` still runs once, before the call returns, because it runs once per
  * call on every path. No upper bound is checked: any positive `count` is taken as the caller's
  * promise that both buffers hold that many floats.
+ *
+ * With the GStreamer pipeline the count is also set on the spectrum element, whose "bands" property
+ * accepts 0 to 1024 (gstspectrum.c); g_object_set refuses any other value and leaves the property as
+ * it was. A `count` above 1024 therefore still installs the new pair while the element keeps
+ * computing for its previous count: every spectrum message is then dropped as computed for another
+ * count, nothing is written to the pair and audio_spectrum does not fire until a set_bands call
+ * whose count the element accepts. A `count` of 1 is accepted by this call but is not usable with
+ * the GStreamer pipeline - the element's transform length, 2 * count - 2, is then 0 and the element
+ * divides by it - so a caller must pass at least 2, as NativeAudioSpectrum does.
+ *
+ * Calls on one spectrum must not overlap: with the GStreamer pipeline the count is set on the
+ * element outside the lock under which the pair is installed, so two overlapping calls with
+ * different counts can leave the element computing for one count while the pair installed last is
+ * for the other, and audio_spectrum then does not fire until the next set_bands call.
  */
 JFXM_EXPORT int32_t jfxm_spectrum_get_enabled(void* spectrum);
 JFXM_EXPORT void    jfxm_spectrum_set_enabled(void* spectrum, int32_t enabled);

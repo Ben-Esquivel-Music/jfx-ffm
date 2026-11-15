@@ -550,3 +550,4 @@ g_weak_ref_init	@548	NONAME
 g_weak_ref_set	@549	NONAME
 g_win32_error_message	@550	NONAME
 g_win32_get_package_installation_directory_of_module	@551	NONAME
+g_object_weak_ref	@552	NONAME

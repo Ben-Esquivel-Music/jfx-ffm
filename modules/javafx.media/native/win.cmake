@@ -139,6 +139,10 @@ endfunction()
 # add_media_library(<name>          # one link.exe DLL of the makefiles
 #     OUTPUT_NAME <dll base name>
 #     RC_INTERNAL_NAME <name>        # JFX_INTERNAL_NAME in version.rc (default <name>)
+#     OUTPUT_DIR <dir>               # where the DLL, .pdb and .map go; defaults to BIN_DIR. When
+#                                    # given, the import library and .exp get a directory of their
+#                                    # own too, so a second target with the same OUTPUT_NAME
+#                                    # (jfxmedia_test) writes no file another target writes
 #     DEF_FILE <file>                # link.exe -def: export list
 #     SOURCES <files...>
 #     INCLUDE_DIRS <dirs...>
@@ -149,11 +153,16 @@ endfunction()
 # )
 # ---------------------------------------------------------------------------
 function(add_media_library name)
-    cmake_parse_arguments(MEDIA "" "OUTPUT_NAME;RC_INTERNAL_NAME;DEF_FILE"
+    cmake_parse_arguments(MEDIA "" "OUTPUT_NAME;RC_INTERNAL_NAME;OUTPUT_DIR;DEF_FILE"
         "SOURCES;INCLUDE_DIRS;COMPILE_DEFINITIONS;COMPILE_OPTIONS;LINK_LIBS;LINK_OPTIONS" ${ARGN})
 
     if(NOT MEDIA_RC_INTERNAL_NAME)
         set(MEDIA_RC_INTERNAL_NAME "${name}")
+    endif()
+
+    set(out_dir "${BIN_DIR}")
+    if(MEDIA_OUTPUT_DIR)
+        set(out_dir "${MEDIA_OUTPUT_DIR}")
     endif()
 
     # Each DLL compiles its own copy of the shared version resource with its own
@@ -179,12 +188,18 @@ function(add_media_library name)
     set_target_properties(${name} PROPERTIES
         OUTPUT_NAME "${MEDIA_OUTPUT_NAME}"
         PREFIX ""
-        RUNTIME_OUTPUT_DIRECTORY "${BIN_DIR}"
-        RUNTIME_OUTPUT_DIRECTORY_RELEASE "${BIN_DIR}"
-        RUNTIME_OUTPUT_DIRECTORY_DEBUG "${BIN_DIR}"
-        PDB_OUTPUT_DIRECTORY "${BIN_DIR}"
-        PDB_OUTPUT_DIRECTORY_RELEASE "${BIN_DIR}"
-        PDB_OUTPUT_DIRECTORY_DEBUG "${BIN_DIR}")
+        RUNTIME_OUTPUT_DIRECTORY "${out_dir}"
+        RUNTIME_OUTPUT_DIRECTORY_RELEASE "${out_dir}"
+        RUNTIME_OUTPUT_DIRECTORY_DEBUG "${out_dir}"
+        PDB_OUTPUT_DIRECTORY "${out_dir}"
+        PDB_OUTPUT_DIRECTORY_RELEASE "${out_dir}"
+        PDB_OUTPUT_DIRECTORY_DEBUG "${out_dir}")
+    if(MEDIA_OUTPUT_DIR)
+        # The import library and .exp otherwise land in the build tree's per-config directory, which
+        # every target shares: two targets with one OUTPUT_NAME would both write <name>.lib there.
+        set_target_properties(${name} PROPERTIES
+            ARCHIVE_OUTPUT_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/lib/${name}")
+    endif()
     if(NOT MEDIA_SOURCES)
         # Only archives, a .def and the .rc: nothing to infer the linker language from
         set_target_properties(${name} PROPERTIES LINKER_LANGUAGE C)
@@ -791,8 +806,9 @@ add_media_library(fxplugins
 #                C ABI of jfxmedia/jfxmedia_api.h). The makefile also lists
 #                gst-plugins-base/win32/common/, which no longer exists.
 # ===========================================================================
-add_media_library(jfxmedia
+set(JFXMEDIA_LIBRARY_ARGS
     OUTPUT_NAME jfxmedia
+    RC_INTERNAL_NAME jfxmedia
     SOURCES
         "${JFXMEDIA_SRC}/Utils/Logger.cpp"
         # FFM C ABI (jfxmedia_api.h)
@@ -841,3 +857,16 @@ add_media_library(jfxmedia
         "$<$<CONFIG:Release>:/O2>"
         "$<$<CONFIG:Debug>:/Od;/RTC1;/Zi>"
     LINK_LIBS gstreamerLite glibLite Winmm.lib kernel32.lib user32.lib comdlg32.lib advapi32.lib)
+
+add_media_library(jfxmedia ${JFXMEDIA_LIBRARY_ARGS})
+
+# The hooks build (JFXM_TEST_HOOKS, see CMakeLists.txt). RC_INTERNAL_NAME above keeps its version
+# resource the shipped DLL's rather than one named after the target.
+if(JFXM_TEST_HOOKS)
+    add_media_library(jfxmedia_test ${JFXMEDIA_LIBRARY_ARGS}
+        OUTPUT_DIR "${JFXM_TEST_BIN_DIR}")
+    target_sources(jfxmedia_test PRIVATE "${JFXMEDIA_SRC}/ffi/jfxmedia_test_hooks.cpp")
+    target_compile_definitions(jfxmedia_test PRIVATE JFXM_TEST_HOOKS=1)
+    # A build of jfxmedia alone must not leave an older hooks library behind for the tests
+    add_dependencies(jfxmedia jfxmedia_test)
+endif()

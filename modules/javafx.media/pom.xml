@@ -90,7 +90,11 @@
                          directory this module's own CMake build writes into, which is how
                          test.com.sun.media.jfxmediaimpl.MediaNatives tells "this build produced
                          no natives" (a skip) from "a jfxmedia is reachable and does not work"
-                         (a broken build, and a failure). -->
+                         (a broken build, and a failure). jfx.media.nativeTestBinDir names the
+                         directory the native-win and native-linux profiles write the hooks build
+                         of jfxmedia into. It is deliberately not on java.library.path: only the
+                         child JVMs of the hook tests load that build, and every other test runs
+                         against the shipped library. -->
                     <argLine>
                         --upgrade-module-path "${jfx.shims.base}${path.separator}${jfx.shims.graphics}${path.separator}${jfx.classes.media}"
                         --add-modules javafx.base,javafx.graphics,javafx.media
@@ -99,6 +103,7 @@
                         --enable-native-access=javafx.graphics,javafx.media
                         "-Djava.library.path=${project.build.directory}/native/bin${path.separator}${jfx.native.librarypath}"
                         "-Djfx.media.nativeBinDir=${project.build.directory}/native/bin"
+                        "-Djfx.media.nativeTestBinDir=${project.build.directory}/native/test-bin"
                         ${jfx.headless.args}
                     </argLine>
                 </configuration>
@@ -234,6 +239,8 @@
                                         <argument>-DJFX_VER=${jfx.release.version}</argument>
                                         <argument>-DJFX_FVER=${jfx.release.major.version},${jfx.release.minor.version},${jfx.release.security.version},${jfx.release.patch.version}</argument>
                                         <argument>-DJFX_BUILD_ID=${jfx.release.version.long}</argument>
+                                        <argument>-DJFXM_TEST_HOOKS=ON</argument>
+                                        <argument>-DJFXM_TEST_BIN_DIR=${project.build.directory}/native/test-bin</argument>
                                     </arguments>
                                 </configuration>
                             </execution>
@@ -297,6 +304,8 @@
                                         <argument>-DJFX_VER=${jfx.release.version}</argument>
                                         <argument>-DJFX_FVER=${jfx.release.major.version},${jfx.release.minor.version},${jfx.release.security.version},${jfx.release.patch.version}</argument>
                                         <argument>-DJFX_BUILD_ID=${jfx.release.version.long}</argument>
+                                        <argument>-DJFXM_TEST_HOOKS=ON</argument>
+                                        <argument>-DJFXM_TEST_BIN_DIR=${project.build.directory}/native/test-bin</argument>
                                     </arguments>
                                 </configuration>
                             </execution>

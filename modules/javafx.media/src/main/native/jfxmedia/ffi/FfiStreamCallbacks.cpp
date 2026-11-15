@@ -24,6 +24,7 @@
  */
 
 #include "FfiStreamCallbacks.h"
+#include "JfxmTestHooks.h"
 
 #include <Common/VSMemory.h>
 
@@ -45,6 +46,7 @@ CFfiStreamCallbacks::CFfiStreamCallbacks(const JfxmStreamCallbacks* pCallbacks, 
     } else {
         memset(&m_Callbacks, 0, sizeof(m_Callbacks));
     }
+    JfxmTestHooks::AdapterConstructed();
 }
 
 CFfiStreamCallbacks::~CFfiStreamCallbacks()
@@ -55,6 +57,7 @@ CFfiStreamCallbacks::~CFfiStreamCallbacks()
     }
     m_ppOwnerSlot = NULL;
     memset(&m_Callbacks, 0, sizeof(m_Callbacks));
+    JfxmTestHooks::AdapterDestroyed();
 }
 
 void CFfiStreamCallbacks::SetOwnerSlot(CFfiStreamCallbacks** ppSlot)
