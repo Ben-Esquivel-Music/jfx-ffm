@@ -46,8 +46,8 @@ programs, 52 Decora and 212 Prism (US-019 counted them). For line N of a `.jsl` 
   - Line N of `PaintLinearGradient.jsl` or `PaintRadialGradient.jsl`: N + 81 in the first program compiled with it
     (`PaintMultiGradient.jsl` has 79 lines).
   - One file is part of many programs: `PaintImagePattern.jsl` of 22, `PaintMultiGradient.jsl` of 132.
-- The four Decora drivers the build does not call (`CompileBoxBlur`, `CompileGaussian`, `CompileZoomRadialBlur` and
-  `CompileExternal`) compile single files, three of them with placeholders replaced.
+- The four Decora drivers the build did not call (`CompileBoxBlur`, `CompileGaussian`, `CompileZoomRadialBlur` and
+  `CompileExternal`) compiled single files, three of them with placeholders replaced. US-021 deleted them.
 
 ### What a developer sees for a syntax error
 - The generator's JVM ends with `Exception in thread "main" org.antlr.v4.runtime.misc.ParseCancellationException:
@@ -158,8 +158,9 @@ programs, 52 Decora and 212 Prism (US-019 counted them). For line N of a `.jsl` 
   and closed by `CharStreams.fromStream` (it closes the channel in a try-with-resources, ANTLR 4.7.2 runtime), only
   when an output is out of date and the program is parsed (`JSLC.java:193-244`). When every output is up to date, it
   is not closed until a garbage collection finds it (its cleaner closes it) or the JVM exits.
-- Callers: the Decora `CompileJSL` (`src/main/jsl-decora/CompileJSL.java:75`), for 6 of the build's programs;
-  `CompileExternal.java:44` in the same directory and `JSLC.main` (`JSLC.java:434`), which the build does not run.
+- Callers (lines at `7a66c85e39`): the Decora `CompileJSL` (`src/main/jsl-decora/CompileJSL.java:83`), for 6 of the
+  build's programs, and `JSLC.main` (`JSLC.java:473`, its call at `:489`), which the build does not run.
+  `CompileExternal.java:44` in the same directory, which the build did not run either, was deleted by US-021.
   The other generators read their files with the `readFile` of either `CompileJSL`, which closes them
   (`src/main/jsl-decora/CompileJSL.java:42-65`, `src/main/jsl-prism/CompileJSL.java:432-455`).
 - Measured with a fresh copy of `Brightpass.jsl` for each of 1,000 calls with its `.hlsl` output up to date and
