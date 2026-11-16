@@ -110,22 +110,22 @@ a single sentence that was false:
 The branch review lists **six** of these files (`+499 / −70`) and omits the seventh, `marshal.in` —
 which is the one it singles out for praise, correctly, as the `glib-genmarshal` input that was
 updated in step with the generated files. It lives in a skipped tree and it was modified, so it
-belongs in the manifest; the net is `+429` either way. Counted from
+belongs in the manifest; the net is the same either way. Counted from
 `git diff --numstat 939aa61ea..HEAD` over the three skipped directories:
 
 | File (under `src/main/native/gstreamer/`) | Delta |
 |---|---:|
-| `gstreamer-lite/gst-plugins-good/sys/directsound/gstdirectsoundnotify.cpp` | +232 / −21 |
+| `gstreamer-lite/gst-plugins-good/sys/directsound/gstdirectsoundnotify.cpp` | +288 / −21 |
 | `gstreamer-lite/gst-plugins-good/sys/directsound/gstdirectsoundsink.c` | +104 / −17 |
 | `plugins/javasource/javasource.c` | +78 / −7 |
 | `gstreamer-lite/gst-plugins-good/sys/directsound/gstdirectsoundnotify.h` | +57 / −1 |
 | `plugins/javasource/marshal.c` | +21 / −17 |
 | `plugins/javasource/marshal.h` | +7 / −7 |
 | `plugins/javasource/marshal.in` (the `glib-genmarshal` input) | +1 / −1 |
-| **Total** | **+500 / −71** |
+| **Total** | **+556 / −71** |
 
-Those are logic changes — flow-control returns, atomics, a notificator lifecycle — in third-party
-engine code under its own licence, and **the residue script cannot see any of them**. Each is
+Those are logic changes — flow-control returns, atomics, a notificator lifecycle — in the vendored
+engine trees, and **the residue script cannot see any of them**. Each is
 declared, with its rationale and its observable delta, in `FFM-ABI-CONTRACT.md` §14.2, which doubles
 as the patch manifest a future upstream GStreamer merge will need. No other control in this branch
 covers vendored changes: when the script prints a clean scoreboard, read it as "no JNI residue", not
@@ -133,7 +133,7 @@ as "nothing else changed".
 
 The review-remediation round added further changes to `gstdirectsoundnotify.cpp` (a no-op `DllMain`
 as a link-time assertion, and the removal of an `assert` that could abort a debug build); they are in
-§14.2 with everything else, and they will move the deltas in the table above when they are committed.
+§14.2 with everything else, and the table above counts them; the review's figures and the §1a table do not.
 
 One caveat on reading the zero in the table: the script skips comment lines, and seven comments in
 the tree still say "JNIEnv" or "JNI_OnLoad" while recording what a `jfxm_*` function replaced. That
@@ -323,12 +323,12 @@ someone to "fix" what is already fixed and to distrust a table whose other rows 
 have been moved out; they are now recorded as declared departures in `FFM-ABI-CONTRACT.md` §14.1,
 verified at HEAD:
 
-* the **NULL-holder dereference** in `CGstAudioSpectrum::UpdateBands` is guarded —
-  `if (holder == NULL) return;` immediately after the `AddRef`, `GstAudioSpectrum.cpp:129-130`
-  (master dereferenced the `AddRef` result unconditionally);
-* the **non-atomic `SetBands` swap** now runs under `m_BandsLock`, `GstAudioSpectrum.cpp:101-119`,
-  with the matching read-and-retain under the same lock in `UpdateBands` at `:124-126` and the
-  `ReleaseRef` deliberately outside it (master used a bare `g_atomic_pointer_get` /
+* the **NULL-holder dereference** in `CGstAudioSpectrum::UpdateBandsIfCurrent` is guarded —
+  `if (holder == NULL) return true;` after the read-and-retain under `m_BandsLock`,
+  `GstAudioSpectrum.cpp:139-140` (master dereferenced the `AddRef` result unconditionally);
+* the **non-atomic `SetBands` swap** now runs under `m_BandsLock`, `GstAudioSpectrum.cpp:103-122`,
+  with the matching read-and-retain under the same lock in `UpdateBandsIfCurrent` at `:133-136` and
+  the `ReleaseRef` deliberately outside it (master used a bare `g_atomic_pointer_get` /
   `g_atomic_pointer_set` pair, which cannot make the read and the `AddRef` one step).
 
 | Where | What | Effect |

@@ -49,17 +49,18 @@ final class NativeAudioSpectrum implements AudioSpectrum {
 
     /**
      * One pair of off-heap band arrays, the number of bands they hold and the arena that owns them.
-     * The native bands holder is reference counted and its writer is lock free, so a pair can still
-     * be written to after a newer {@code jfxm_spectrum_set_bands} call has returned; C says when it
-     * is done with a pair by running that call's release action (contract section 11).
+     * The native bands holder is reference counted and its writer holds no lock while it writes, so a
+     * pair can still be written to after a newer {@code jfxm_spectrum_set_bands} call has returned; C
+     * says when it is done with a pair by running that call's release action (contract section 11).
      * <p>
      * The arena is an {@link Arena#ofAuto() automatic} one on purpose. C may run the release action on
-     * a GStreamer streaming thread: {@code CGstAudioSpectrum::UpdateBands} takes its own reference for
-     * the write rather than locking, so the thread that finishes a write can be the one that drops the
-     * last reference, and closing a shared arena there - a thread handshake - would be exactly the kind
-     * of blocking the ABI forbids. Dropping the last reference instead is free, and the memory cannot
-     * be reclaimed before that moment: until C releases it, the pair is reachable both from this
-     * spectrum and from the facade's registry entry for the handover.
+     * the GStreamer main-loop thread, the one that runs the bus handler:
+     * {@code CGstAudioSpectrum::UpdateBandsIfCurrent} takes its own reference for the write and holds
+     * no lock during the write, so the thread that finishes a write can be the one that drops the last
+     * reference, and closing a shared arena there - a thread handshake - would be exactly the kind of
+     * blocking the ABI forbids. Dropping the last reference instead is free, and the memory cannot be
+     * reclaimed before that moment: until C releases it, the pair is reachable both from this spectrum
+     * and from the facade's registry entry for the handover.
      */
     private record Bands(Arena arena, MemorySegment magnitudes, MemorySegment phases, int count) {
         static final Bands NONE = new Bands(null, MemorySegment.NULL, MemorySegment.NULL, 0);

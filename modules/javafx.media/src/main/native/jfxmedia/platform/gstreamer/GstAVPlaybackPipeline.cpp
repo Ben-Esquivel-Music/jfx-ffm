@@ -346,8 +346,8 @@ GstFlowReturn CGstAVPlaybackPipeline::OnAppSinkHaveFrame(GstElement* pElem, CGst
     }
 
     //***** Create a VideoFrame object
-    CGstVideoFrame* pVideoFrame = new CGstVideoFrame();
-    if (!pVideoFrame->Init(pSample))
+    CGstVideoFrame* pVideoFrame = new (nothrow) CGstVideoFrame();
+    if (NULL == pVideoFrame || !pVideoFrame->Init(pSample))
     {
         gst_sample_unref(pSample);
         delete pVideoFrame;
@@ -422,8 +422,8 @@ GstFlowReturn CGstAVPlaybackPipeline::OnAppSinkPreroll(GstElement* pElem, CGstAV
                 GST_BUFFER_TIMESTAMP(pBuffer) - pPipeline->m_FirstPTS;
         }
 
-        CGstVideoFrame* pVideoFrame = new CGstVideoFrame();
-        if (!pVideoFrame->Init(pSample))
+        CGstVideoFrame* pVideoFrame = new (nothrow) CGstVideoFrame();
+        if (NULL == pVideoFrame || !pVideoFrame->Init(pSample))
         {
             // INLINE - gst_sample_unref()
             gst_sample_unref (pSample);
@@ -895,7 +895,7 @@ GstPadProbeReturn CGstAVPlaybackPipeline::VideoDecoderSrcProbe(GstPad* pPad, Gst
         }
 
         // Create the video track.
-        CVideoTrack *p_VideoTrack = new CVideoTrack(
+        CVideoTrack *p_VideoTrack = new (nothrow) CVideoTrack(
             (int64_t)trackID,
             strMimeType,
             encoding,
@@ -903,9 +903,13 @@ GstPadProbeReturn CGstAVPlaybackPipeline::VideoDecoderSrcProbe(GstPad* pPad, Gst
             width, height,
             frameRate,
             hasAlpha);
+        if (NULL == p_VideoTrack)
+        {
+            LOGGER_LOGMSG(LOGGER_ERROR, "Cannot allocate the video track, track event dropped.\n");
+        }
 
         // Dispatch the track event.
-        if (!pPipeline->m_pEventDispatcher->SendVideoTrackEvent(p_VideoTrack))
+        if (NULL != p_VideoTrack && !pPipeline->m_pEventDispatcher->SendVideoTrackEvent(p_VideoTrack))
         {
             if(!pPipeline->m_pEventDispatcher->SendPlayerMediaErrorEvent(ERROR_JNI_SEND_VIDEO_TRACK_EVENT))
             {

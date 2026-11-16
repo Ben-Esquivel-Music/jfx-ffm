@@ -32,6 +32,7 @@
 #include <Common/VSMemory.h>
 #include <MediaManagement/MediaTypes.h>
 #include <Locator/LocatorStream.h>
+#include <ffi/JfxmTestHooks.h>
 #include <jfxmedia_errors.h>
 #include <gst/gstelement.h>
 #include <algorithm>
@@ -230,6 +231,7 @@ uint32_t CGstPipelineFactory::CreateSourceElement(CLocator *locator, CStreamCall
     GstElement *javaSource = CreateElement("javasource");
     if (NULL == javaSource)
         return ERROR_GSTREAMER_ELEMENT_CREATE;
+    JfxmTestHooks::WatchSource(javaSource);
 
     bool isRandomAccess = callbacks->IsRandomAccess();
 
@@ -237,21 +239,23 @@ uint32_t CGstPipelineFactory::CreateSourceElement(CLocator *locator, CStreamCall
     g_signal_connect(javaSource, "copy-block", G_CALLBACK(SourceCopyBlock), callbacks);
     g_signal_connect(javaSource, "seek-data", G_CALLBACK(SourceSeekData), callbacks);
     // This connection, and only this one, carries a GClosureNotify: from here on the javasource
-    // element owns the adapter and GStreamer is what frees it, when the closure dies. A closure is
-    // finalized exactly once, and a disconnected handler is no longer in the element's handler list
-    // (g_signal_handlers_destroy skips handlers whose sequential_number the disconnect zeroed), so
-    // the two ways the closure can die are mutually exclusive:
+    // element owns the adapter and GStreamer is what frees it, when the closure dies - unless
+    // jfxm_media_create fails after this function returned and abandons the element unfinalized;
+    // then InitGstMedia frees it. A closure is finalized exactly once, and a disconnected handler is
+    // no longer in the element's handler list (g_signal_handlers_destroy skips handlers whose
+    // sequential_number the disconnect zeroed), so the two ways the closure can die are mutually
+    // exclusive:
     //   - the disconnect at the end of SourceCloseConnection, i.e. after javasource emitted
     //     "close-connection" on its READY -> NULL transition (javasource.c, java_source_change_state);
-    //   - g_signal_handlers_destroy() from g_object_unref, when the pipeline holding the element is
+    //   - g_signal_handlers_destroy() when the element is finalized: when the pipeline holding it is
     //     unreffed in CGstAudioPlaybackPipeline::Dispose() (via CGstAVPlaybackPipeline::Dispose for
-    //     AV pipelines).
+    //     AV pipelines), or when a failure return of this function releases it.
     // The second is what the first cannot cover: javasource emits the signal on that one transition
-    // and nowhere else - java_source_finalize does not emit it - so a pipeline that never left
-    // GST_STATE_NULL, because its media was created and never played or because CGst*Pipeline::Init()
-    // failed before its set_state(PAUSED), used to drop the adapter without ever freeing it, together
-    // with the nine upcall-stub addresses it holds. The other five connections deliberately carry no
-    // notify: one owner, one free.
+    // and nowhere else - java_source_finalize does not emit it - so for an element that never left
+    // GST_STATE_NULL (a media created and never played, a CGst*Pipeline::Init() that failed before
+    // its set_state(PAUSED), a failure return below) the adapter and the nine upcall-stub addresses
+    // it holds are freed when the element is finalized. The other five connections deliberately
+    // carry no notify: one owner, one free.
     g_signal_connect_data(javaSource, "close-connection", G_CALLBACK(SourceCloseConnection),
                           callbacks, SourceCallbacksDestroyed, (GConnectFlags)0);
     g_signal_connect(javaSource, "property", G_CALLBACK(SourceProperty), callbacks);
@@ -281,33 +285,48 @@ uint32_t CGstPipelineFactory::CreateSourceElement(CLocator *locator, CStreamCall
     bool needBuffer = callbacks->NeedBuffer();
     pOptions->SetBufferingEnabled(needBuffer);
 
-    // The three failure returns below abandon javaSource - or the floating bin that has taken it -
-    // without unreffing it. That pre-existing GstElement leak is what keeps the adapter's closure
-    // alive and unfinalized on this path, which is why InitGstMedia in ffi/jfxmedia_api.cpp still
-    // deletes the adapters itself when jfxm_media_create fails. Adding the cleanup unref here is
-    // safe with respect to that: InitGstMedia registers an owner slot on each adapter across
-    // CMediaManager::CreatePlayer, so an adapter this unref frees through the closure notify
-    // clears the local pointer there and is not freed a second time. It stopped being a double
-    // free waiting to happen; it is still worth reading that cleanup block before changing this.
+    // Each failure return below releases what this function made. What it releases is still
+    // floating, so each release sinks before it unrefs. Finalizing javaSource frees the adapter
+    // through the closure notify; InitGstMedia (ffi/jfxmedia_api.cpp) watches each adapter through an
+    // owner slot, so its own cleanup does not free it again.
     if (needBuffer)
     {
         g_object_set(javaSource, "stop-on-pause", FALSE, NULL);
-        source = gst_bin_new(NULL);
+        source = JfxmTestHooks::FaultArmed(JFXM_TEST_FAULT_BIN_NEW) ? NULL : gst_bin_new(NULL);
         if (NULL == source)
+        {
+            // Not gst_object_ref_sink: the Windows gstreamer-lite does not export it, and it only adds a NULL check.
+            g_object_ref_sink(javaSource);
+            gst_object_unref(javaSource);
             return ERROR_GSTREAMER_BIN_CREATE;
+        }
+        JfxmTestHooks::WatchBin(source);
 
-        if (pOptions->GetHLSModeEnabled())
+        if (JfxmTestHooks::FaultArmed(JFXM_TEST_FAULT_BUFFER_ELEMENT))
+            buffer = NULL;
+        else if (pOptions->GetHLSModeEnabled())
             buffer = CreateElement("hlsprogressbuffer");
         else
             buffer = CreateElement("progressbuffer");
 
         if (NULL == buffer)
+        {
+            g_object_ref_sink(javaSource);
+            gst_object_unref(javaSource);
+            g_object_ref_sink(source);
+            gst_object_unref(source);
             return ERROR_GSTREAMER_ELEMENT_CREATE;
+        }
 
         gst_bin_add_many(GST_BIN(source), javaSource, buffer, NULL);
 
-        if (!gst_element_link(javaSource, buffer))
+        if (JfxmTestHooks::FaultArmed(JFXM_TEST_FAULT_LINK) || !gst_element_link(javaSource, buffer))
+        {
+            // The bin owns javaSource and buffer since gst_bin_add_many and releases them with itself.
+            g_object_ref_sink(source);
+            gst_object_unref(source);
             return ERROR_GSTREAMER_ELEMENT_LINK;
+        }
     }
     else
     {
@@ -371,8 +390,8 @@ void CGstPipelineFactory::SourceCloseConnection(GstElement *src, gpointer data)
     g_signal_handlers_disconnect_by_func (src, (void*)G_CALLBACK (SourceCloseConnection), callbacks);
 }
 
-// GClosureNotify of the "close-connection" closure, i.e. the single point at which the adapter shared
-// by the six javasource handlers is freed. It runs on whichever thread dropped the closure's last
+// GClosureNotify of the "close-connection" closure: frees the adapter shared by the six javasource
+// handlers when that closure dies. It runs on whichever thread dropped the closure's last
 // reference and never under GLib's signal lock (handler_unref_R releases SIGNAL_LOCK before
 // g_closure_unref), and every such thread is safe:
 //   - on the READY -> NULL transition javasource's source task has already been joined, because the
@@ -380,8 +399,9 @@ void CGstPipelineFactory::SourceCloseConnection(GstElement *src, gpointer data)
 //     java_source_activatemode's inactive branch and its gst_pad_stop_task, and it does so before
 //     javasource emits "close-connection";
 //   - at element finalize the reference count is zero, so nothing holds the element to call into.
-// It is also safe with respect to Java: ~CFfiStreamCallbacks only clears its own copy of the table,
-// so this makes no upcall and does not care whether the caller's arena is still open.
+// It is also safe with respect to Java: ~CFfiStreamCallbacks clears its own copy of the table and
+// NULLs its owner slot, if one is registered, and calls nothing in the table, so this makes no upcall
+// and does not care whether the caller's arena is still open.
 void CGstPipelineFactory::SourceCallbacksDestroyed(gpointer data, GClosure *closure)
 {
     (void)closure;
@@ -747,8 +767,8 @@ uint32_t CGstPipelineFactory::CreateAudioPipeline(bool bConvertFormat, CPipeline
 
     pElements->add(PIPELINE, pipeline);
 
-    *ppPipeline = new CGstAudioPlaybackPipeline(*pElements, flags, pOptions);
-    if (NULL == ppPipeline)
+    *ppPipeline = new (nothrow) CGstAudioPlaybackPipeline(*pElements, flags, pOptions);
+    if (NULL == *ppPipeline)
         uRetCode = ERROR_MEMORY_ALLOCATION;
 
     return uRetCode;
@@ -862,7 +882,7 @@ uint32_t CGstPipelineFactory::CreateAVPipeline(bool bConvertFormat, GstElement* 
     if (audioDemuxer != NULL)
         pElements->add(AUDIO_PARSER, audioDemuxer);
 
-    *ppPipeline = new CGstAVPlaybackPipeline(*pElements, audioFlags, pOptions);
+    *ppPipeline = new (nothrow) CGstAVPlaybackPipeline(*pElements, audioFlags, pOptions);
     if( NULL == *ppPipeline)
         return ERROR_MEMORY_ALLOCATION;
 

@@ -42,6 +42,11 @@ public:
     virtual size_t    GetBands();
     virtual void      UpdateBands(int size, const float* magnitudes, const float* phases);
 
+    // Writes the bands into the installed holder only if it was installed for `size` bands, and says
+    // whether the caller may deliver them: true with no holder installed, false for bands computed
+    // for another count, whose band i covers another frequency range than the holder's band i.
+    bool              UpdateBandsIfCurrent(int size, const float* magnitudes, const float* phases);
+
     virtual double    GetInterval();
     virtual void      SetInterval(double interval);
 
@@ -51,14 +56,17 @@ public:
 private:
     GstElement*   m_pSpectrum;
 
-    // m_BandsLock guards m_pHolder. Acquiring a reference has to happen atomically with the swap
-    // in SetBands: a lock-free read followed by AddRef can be overtaken by a SetBands that drops
-    // the last reference in between, leaving UpdateBands to increment a counter that has already
-    // been freed. Both sides therefore take this lock, and both drop the reference they lose
-    // outside it - ~CFfiBandsHolder hands the band pair back to Java (jfxmedia_api.h,
-    // JfxmReleaseFn), which must not run while a spectrum thread waits on the lock.
+    // m_BandsLock guards m_pHolder and m_HolderBands, the band count SetBands installed m_pHolder for
+    // (0 with no holder). SetBands swaps both in one hold and UpdateBandsIfCurrent reads both in one
+    // hold, so a count is never paired with another holder. Acquiring a reference has to happen
+    // atomically with the swap too: a lock-free read followed by AddRef can be overtaken by a
+    // SetBands that drops the last reference in between, leaving UpdateBandsIfCurrent to increment a
+    // counter that has already been freed. Both sides therefore take this lock, and both drop the
+    // reference they lose outside it - ~CFfiBandsHolder hands the band pair back to Java
+    // (jfxmedia_api.h, JfxmReleaseFn), which must not run while a spectrum thread waits on the lock.
     GMutex        m_BandsLock;
     CBandsHolder* m_pHolder;
+    int           m_HolderBands;
 };
 
 #endif // _GST_AUDIO_SPECTRUM_H_

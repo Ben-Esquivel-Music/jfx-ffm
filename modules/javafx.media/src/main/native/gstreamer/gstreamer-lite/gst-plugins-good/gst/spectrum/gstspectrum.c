@@ -411,7 +411,18 @@ gst_spectrum_start (GstBaseTransform * trans)
 {
   GstSpectrum *spectrum = GST_SPECTRUM (trans);
 
+#if defined (GSTREAMER_LITE) && !defined (OSX)
+  /* Under the lock, since gst_spectrum_set_property frees the same channel
+   * data under it and a reset outside it could free that data a second time.
+   * Not on macOS: AVFAudioSpectrumUnit changes the element's state while
+   * holding its band lock, and takes that lock again in the message callback
+   * that gst_spectrum_transform_ip calls under this one. */
+  g_mutex_lock (&spectrum->lock);
   gst_spectrum_reset_state (spectrum);
+  g_mutex_unlock (&spectrum->lock);
+#else
+  gst_spectrum_reset_state (spectrum);
+#endif // GSTREAMER_LITE and not OSX
 
   return TRUE;
 }
@@ -421,7 +432,14 @@ gst_spectrum_stop (GstBaseTransform * trans)
 {
   GstSpectrum *spectrum = GST_SPECTRUM (trans);
 
+#if defined (GSTREAMER_LITE) && !defined (OSX)
+  /* Locked, and not on macOS, for the reasons given in gst_spectrum_start. */
+  g_mutex_lock (&spectrum->lock);
   gst_spectrum_reset_state (spectrum);
+  g_mutex_unlock (&spectrum->lock);
+#else
+  gst_spectrum_reset_state (spectrum);
+#endif // GSTREAMER_LITE and not OSX
 
   return TRUE;
 }
@@ -875,10 +893,7 @@ gst_spectrum_transform_ip (GstBaseTransform * trans, GstBuffer * buffer)
     bpf = spectrum->bpf_user;
   }
 #endif // OSX
-  output_channels = spectrum->multi_channel ? channels : 1;
   max_value = (1UL << ((bps << 3) - 1)) - 1;
-  bands = spectrum->bands;
-  nfft = 2 * bands - 2;
 #else // GSTREAMER_LITE
 
   guint rate = GST_AUDIO_FILTER_RATE (spectrum);
@@ -902,6 +917,15 @@ gst_spectrum_transform_ip (GstBaseTransform * trans, GstBuffer * buffer)
 #endif // GSTREAMER_LITE
 
   g_mutex_lock (&spectrum->lock);
+#ifdef GSTREAMER_LITE
+  /* Read under the lock: gst_spectrum_set_property changes these, and frees
+   * the channel data, under it. Read before it, a change landing in between
+   * would leave the loops below indexing channel data allocated for the new
+   * values with the old ones. */
+  output_channels = spectrum->multi_channel ? channels : 1;
+  bands = spectrum->bands;
+  nfft = 2 * bands - 2;
+#endif // GSTREAMER_LITE
   gst_buffer_map (buffer, &map, GST_MAP_READ);
   data = map.data;
   size = map.size;

@@ -31,6 +31,7 @@
 #include <MediaManagement/Media.h>
 #include <Common/VSMemory.h>
 #include <Utils/Logger.h>
+#include <ffi/JfxmTestHooks.h>
 #include <fxplugins_common.h>
 
 #include <string.h>
@@ -554,7 +555,7 @@ uint32_t CGstAudioPlaybackPipeline::Pause()
     m_StateLock->Enter();
     if (Stopped == m_PlayerState || Stalled == m_PlayerState)
     {
-        SetPlayerState(Paused, false);
+        SetPlayerState(Paused, false, false);
         m_StateLock->Exit();
         return ERROR_NONE;
     }
@@ -1168,11 +1169,15 @@ gboolean CGstAudioPlaybackPipeline::BusCallback(GstBus* bus, GstMessage* msg, sB
             if (!pPipeline->IsPlayerState(Finished))
             {
                 // Set the state to Finished which may only be exited by seeking back before the finish time.
-                pPipeline->SetPlayerState(Finished, false);
+                pPipeline->SetPlayerState(Finished, false, false);
 
 #if ENABLE_PROGRESS_BUFFER
                 if (pPipeline->m_pOptions->GetHLSModeEnabled())
+                {
+                    pPipeline->m_StallLock->Enter();
                     pPipeline->m_bLastProgressValueEOS = FALSE; // Otherwise we will resume playback if we loop and user hits stop
+                    pPipeline->m_StallLock->Exit();
+                }
 #endif // ENABLE_PROGRESS_BUFFER
             }
         }
@@ -1280,7 +1285,7 @@ gboolean CGstAudioPlaybackPipeline::BusCallback(GstBus* bus, GstMessage* msg, sB
             if (!pPipeline->IsPlayerState(Error))
                 gst_element_set_state(pPipeline->m_Elements[PIPELINE], GST_STATE_NULL); // Ignore return value.
 
-            pPipeline->SetPlayerState(Error, true);
+            pPipeline->SetPlayerState(Error, true, false);
 
             if (error)
             {
@@ -1433,7 +1438,11 @@ gboolean CGstAudioPlaybackPipeline::BusCallback(GstBus* bus, GstMessage* msg, sB
                     // Update buffer position only if progress buffer got EOS.
                     // In some case progress may not be reported yet, because duration was not available yet.
                     // By now it should be available, so lets update buffer position.
-                    if (pPipeline->m_bLastProgressValueEOS)
+                    pPipeline->m_StallLock->Enter();
+                    gboolean bProgressEOS = pPipeline->m_bLastProgressValueEOS;
+                    pPipeline->m_StallLock->Exit();
+
+                    if (bProgressEOS)
                         pPipeline->UpdateBufferPosition();
 #endif // ENABLE_PROGRESS_BUFFER
                 }
@@ -1470,7 +1479,9 @@ gboolean CGstAudioPlaybackPipeline::BusCallback(GstBus* bus, GstMessage* msg, sB
                 pPipeline->m_llLastProgressValueStart = start;
                 pPipeline->m_llLastProgressValuePosition = position;
                 pPipeline->m_llLastProgressValueStop = stop;
+                pPipeline->m_StallLock->Enter();
                 pPipeline->m_bLastProgressValueEOS = eos;
+                pPipeline->m_StallLock->Exit();
 
                 // Update buffer position
                 pPipeline->UpdateBufferPosition();
@@ -1491,7 +1502,11 @@ gboolean CGstAudioPlaybackPipeline::BusCallback(GstBus* bus, GstMessage* msg, sB
                 pPipeline->HLSBufferResume(false);
             }
             else if (gst_structure_has_name(pStr, HLS_PB_MESSAGE_NOT_FULL))
+            {
+                pPipeline->m_StallLock->Enter();
                 pPipeline->m_bHLSPBFull = false;
+                pPipeline->m_StallLock->Exit();
+            }
         }
             break;
 #endif  //ENABLE_PROGRESS_BUFFER
@@ -1509,26 +1524,52 @@ gboolean CGstAudioPlaybackPipeline::BusCallback(GstBus* bus, GstMessage* msg, sB
                 if (!gst_structure_get_clock_time (pStr, "duration", &duration))
                     duration = GST_CLOCK_TIME_NONE;
 
-                size_t bandsNum = pPipeline->GetAudioSpectrum()->GetBands();
+                // The band count is the message's own: the element's "bands" property may have
+                // changed since it computed these lists.
+                const GValue *magnitudes_value = gst_structure_get_value(pStr, "magnitude");
+                const GValue *phases_value = gst_structure_get_value(pStr, "phase");
+                guint bandsNum = 0;
+                if (NULL != magnitudes_value && NULL != phases_value)
+                {
+                    guint magnitudesNum = gst_value_list_get_size(magnitudes_value);
+                    guint phasesNum = gst_value_list_get_size(phases_value);
+                    bandsNum = MIN(magnitudesNum, phasesNum);
+                }
 
+                float *magnitudes = NULL;
+                float *phases = NULL;
                 if (bandsNum > 0)
                 {
-                    float *magnitudes = new float[bandsNum];
-                    float *phases = new float[bandsNum];
+                    magnitudes = new (nothrow) float[bandsNum];
+                    phases = new (nothrow) float[bandsNum];
+                    if (NULL == magnitudes || NULL == phases)
+                    {
+                        delete [] magnitudes;
+                        delete [] phases;
+                        LOGGER_LOGMSG(LOGGER_ERROR, "Cannot allocate the spectrum bands, message dropped.\n");
+                        break;
+                    }
 
-                    const GValue *magnitudes_value = gst_structure_get_value(pStr, "magnitude");
-                    const GValue *phases_value = gst_structure_get_value(pStr, "phase");
-                    for (int i=0; i < bandsNum; i++)
+                    for (guint i = 0; i < bandsNum; i++)
                     {
                         magnitudes[i] = g_value_get_float( gst_value_list_get_value (magnitudes_value, i));
                         phases[i] = g_value_get_float( gst_value_list_get_value (phases_value, i));
                     }
-                    pPipeline->GetAudioSpectrum()->UpdateBands((int)bandsNum, magnitudes, phases);
-
-                    delete [] magnitudes;
-                    delete [] phases;
                 }
 
+                bool bCurrent = pPipeline->m_pAudioSpectrum->UpdateBandsIfCurrent((int)bandsNum, magnitudes, phases);
+
+                delete [] magnitudes;
+                delete [] phases;
+
+                // Computed for another band count than the installed holder's: nothing was written.
+                if (!bCurrent)
+                {
+                    JfxmTestHooks::SpectrumStaleDropped();
+                    break;
+                }
+
+                JfxmTestHooks::SpectrumEventSent();
                 if (!pPipeline->m_pEventDispatcher->SendAudioSpectrumEvent(GST_TIME_AS_SECONDS((double)timestamp),
                     GST_TIME_AS_SECONDS((double)duration), false)) // Always false, since GStreamer does not need it,
                                                                    // but if it will be required such case needs to be
@@ -1595,7 +1636,7 @@ void CGstAudioPlaybackPipeline::BusCallbackDestroyNotify(sBusCallbackContent* pB
  * called for normal state changes.  This is for out-of-band changes like stalled condition or EOS.
  *
  */
-void CGstAudioPlaybackPipeline::SetPlayerState(PlayerState newPlayerState, bool bSilent)
+void CGstAudioPlaybackPipeline::SetPlayerState(PlayerState newPlayerState, bool bSilent, bool bResumeIfStalled)
 {
     m_StateLock->Enter();
 
@@ -1623,13 +1664,7 @@ void CGstAudioPlaybackPipeline::SetPlayerState(PlayerState newPlayerState, bool 
 
     m_StateLock->Exit();
 
-#if ENABLE_PROGRESS_BUFFER
-    if ((updateState && newPlayerState == Stalled && m_bLastProgressValueEOS) ||
-        (updateState && newPlayerState == Stalled && m_bHLSPBFull))
-#else // ENABLE_PROGRESS_BUFFER
-    if ((updateState && newPlayerState == Stalled) ||
-        (updateState && newPlayerState == Stalled && m_bHLSPBFull))
-#endif // ENABLE_PROGRESS_BUFFER
+    if (updateState && newPlayerState == Stalled && bResumeIfStalled)
     {
        Play();
     }
@@ -1672,6 +1707,15 @@ bool CGstAudioPlaybackPipeline::IsPlayerPendingState(PlayerState state)
  */
 void CGstAudioPlaybackPipeline::UpdatePlayerState(GstState newState, GstState oldState)
 {
+    // Read before m_StateLock is taken: m_StallLock is never taken inside m_StateLock.
+#if ENABLE_PROGRESS_BUFFER
+    m_StallLock->Enter();
+    bool bResumeIfStalled = m_bLastProgressValueEOS || m_bHLSPBFull;
+    m_StallLock->Exit();
+#else // ENABLE_PROGRESS_BUFFER
+    bool bResumeIfStalled = true;
+#endif // ENABLE_PROGRESS_BUFFER
+
     m_StateLock->Enter();
 
     PlayerState newPlayerState = m_PlayerState;
@@ -1851,7 +1895,7 @@ void CGstAudioPlaybackPipeline::UpdatePlayerState(GstState newState, GstState ol
             break;
     }
 
-    SetPlayerState(newPlayerState, bSilent);
+    SetPlayerState(newPlayerState, bSilent, bResumeIfStalled);
     m_StateLock->Exit();
 }
 
@@ -1906,7 +1950,7 @@ void CGstAudioPlaybackPipeline::SendTrackEvent()
                 break;
         }
 
-        CAudioTrack *p_AudioTrack = new CAudioTrack(m_AudioTrackInfo.trackID,
+        CAudioTrack *p_AudioTrack = new (nothrow) CAudioTrack(m_AudioTrackInfo.trackID,
                                                     m_AudioTrackInfo.mimeType,
                                                     encoding,
                                                     (bool)m_AudioTrackInfo.trackEnabled,
@@ -1914,8 +1958,12 @@ void CGstAudioPlaybackPipeline::SendTrackEvent()
                                                     m_AudioTrackInfo.channels,
                                                     channelMask,
                                                     (float)m_AudioTrackInfo.rate);
+        if (NULL == p_AudioTrack)
+        {
+            LOGGER_LOGMSG(LOGGER_ERROR, "Cannot allocate the audio track, track event dropped.\n");
+        }
 
-        if (!m_pEventDispatcher->SendAudioTrackEvent(p_AudioTrack))
+        if (NULL != p_AudioTrack && !m_pEventDispatcher->SendAudioTrackEvent(p_AudioTrack))
         {
             if(!m_pEventDispatcher->SendPlayerMediaErrorEvent(ERROR_JNI_SEND_AUDIO_TRACK_EVENT))
             {
@@ -2089,11 +2137,14 @@ void CGstAudioPlaybackPipeline::UpdateBufferPosition()
 
         m_StallLock->Enter();
         m_BufferPosition = bufferPosition;
+        gboolean bProgressEOS = m_bLastProgressValueEOS;
         m_StallLock->Exit();
 
         // We need to unblock when we have atleast data for duration of m_dResumeDeltaTime or
         // if progress buffer got eos, since buffer position will not be updated anymore and no more data will be available.
-        bool resume = IsPlayerState(Stalled) && ((bufferPosition - streamTime > m_dResumeDeltaTime) || m_bLastProgressValueEOS) && !IsPlayerPendingState(Paused) && !IsPlayerPendingState(Stopped);
+        bool resume = IsPlayerState(Stalled) &&
+                      ((bufferPosition - streamTime > m_dResumeDeltaTime) || bProgressEOS) &&
+                      !IsPlayerPendingState(Paused) && !IsPlayerPendingState(Stopped);
 
         if (resume)
         {

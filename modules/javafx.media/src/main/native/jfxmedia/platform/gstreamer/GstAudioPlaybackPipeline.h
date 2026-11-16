@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2010, 2021, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2010, 2026, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -120,7 +120,7 @@ protected:
 
     static gboolean     BusCallback(GstBus *pBus, GstMessage *message, sBusCallbackContent* pBusCallbackContent);
     static void         BusCallbackDestroyNotify(sBusCallbackContent* pBusCallbackContent);
-    void                SetPlayerState(PlayerState newPlayerState, bool bSilent);
+    void                SetPlayerState(PlayerState newPlayerState, bool bSilent, bool bResumeIfStalled);
     void                UpdatePlayerState(GstState newState, GstState oldState);
     bool                IsPlayerState(PlayerState state);
     bool                IsPlayerPendingState(PlayerState state);
@@ -169,8 +169,8 @@ private:
 
     // Stall handling stuff
     CJfxCriticalSection* m_StallLock;
-    gdouble              m_BufferPosition;
-    bool                 m_bHLSPBFull;
+    gdouble              m_BufferPosition; // guarded by m_StallLock
+    bool                 m_bHLSPBFull;     // guarded by m_StallLock
 
     // Seek/Rate
     CJfxCriticalSection* m_SeekLock;
@@ -207,7 +207,7 @@ private:
     gint64    m_llLastProgressValueStart;
     gint64    m_llLastProgressValuePosition;
     gint64    m_llLastProgressValueStop;
-    gboolean  m_bLastProgressValueEOS;
+    gboolean  m_bLastProgressValueEOS; // guarded by m_StallLock
 #endif // ENABLE_PROGRESS_BUFFER
 };
 

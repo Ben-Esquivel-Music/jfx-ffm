@@ -26,6 +26,7 @@
 #include "FfiBandsHolder.h"
 
 #include <Common/VSMemory.h>
+#include <ffi/JfxmTestHooks.h>
 
 #include <string.h>
 
@@ -44,7 +45,7 @@ CFfiBandsHolder::~CFfiBandsHolder()
 {
     // Reached only when the reference count hit zero, so no spectrum thread can be inside
     // UpdateBands any more: this is the one moment at which the pair may be handed back. The
-    // caller of ReleaseRef decides the thread - a GST MainLoop / streaming thread, the application
+    // caller of ReleaseRef decides the thread - the GST MainLoop thread, the application
     // thread doing set_bands / dispose, or the thread that tears an AVF audio tap down - so the
     // target must be thread-safe and must not block (jfxmedia_api.h, JfxmReleaseFn).
     JfxmReleaseFn release = m_Release;
@@ -71,5 +72,6 @@ void CFfiBandsHolder::UpdateBands(int size, const float* magnitudes, const float
     if (NULL != m_Magnitudes && NULL != m_Phases && NULL != magnitudes && NULL != phases) {
         memcpy(m_Magnitudes, magnitudes, (size_t)size * sizeof(float));
         memcpy(m_Phases, phases, (size_t)size * sizeof(float));
+        JfxmTestHooks::SpectrumBandsWritten();
     }
 }

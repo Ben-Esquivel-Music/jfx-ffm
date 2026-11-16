@@ -299,12 +299,11 @@ static int32_t InitGstMedia(const char* content_type, const char* location, int6
     //***** Create the media object
     //
     // Both adapters are watched from here to the end of the function: while a slot is registered,
-    // ~CFfiStreamCallbacks NULLs the local that points at it, so if anything below this line frees
-    // an adapter the cleanup block sees NULL and does not free it a second time. Nothing does
-    // today - the block below sets out why at length - and with the slots in place that argument
-    // no longer has to hold for this function to be correct, only for it to be leak free. The
-    // slots are the addresses of locals, so they must not outlive this frame: the two lines before
-    // the return unregister them, and every exit from here down goes through that return.
+    // ~CFfiStreamCallbacks NULLs the local that points at it. A failure return of
+    // CGstPipelineFactory::CreateSourceElement frees the adapter it was given, and the cleanup block
+    // then sees NULL and does not free it a second time. The slots are the addresses of locals, so
+    // they must not outlive this frame: the two lines before the return unregister them, and every
+    // exit from here down goes through that return.
     callbacks->SetOwnerSlot(&callbacks);
     if (NULL != audioStreamCallbacks)
         audioStreamCallbacks->SetOwnerSlot(&audioStreamCallbacks);
@@ -336,33 +335,20 @@ static int32_t InitGstMedia(const char* content_type, const char* location, int6
             delete pMedia;
 
         // The adapters are shared with the pipeline from the moment CGstPipelineFactory::
-        // CreateSourceElement hands each one to a javasource element, but only GStreamer frees
-        // them: the "close-connection" connection carries a GClosureNotify
-        // (CGstPipelineFactory::SourceCallbacksDestroyed) and the adapter dies with that closure.
-        // Nothing on this path ever finalizes it, so the two deletes below are still the only free:
-        //   - no failing exit at or below CreateSourceElement unrefs the javasource element. Its
-        //     own three returns after the connects abandon javaSource or the floating bin holding
-        //     it; CreatePlayerPipeline returns with a stack GstElementContainer whose destructor
-        //     only clears its map; no error return in CreatePipeline, CreateAudioPipeline,
-        //     CreateAVPipeline, CreateAudioBin, CreateVideoBin or AttachToSource unrefs the
-        //     pipeline or the source bin; and CMediaManager::CreatePlayer's delete of the pipeline
-        //     object runs ~CPipeline, whose Dispose() call resolves to the empty CPipeline::Dispose
-        //     because virtual dispatch during base destruction uses the base vtable.
-        //   - the delete of pMedia above cannot have freed them either. It is unreachable today,
-        //     since CreatePlayerPipeline returns ERROR_PIPELINE_CREATION for a NULL pipeline and so
-        //     CMedia::IsValid cannot fail; and were it reachable, the only way in is IsValid
-        //     answering false, which means m_pPipeline is NULL, and ~CMedia then disposes nothing
-        //     and unrefs nothing.
-        // Both of those are arguments about a free that does not happen, and neither of them is
-        // enforced by anything: a gst_object_unref added to one of those failure paths would
-        // finalize the closure, free the adapters and make the two deletes below a double free.
-        // That is what the owner slots registered across CreatePlayer above are for. An adapter
-        // freed underneath this function NULLs its own local, so the matching delete becomes a
-        // no-op and the other case - no element ever took ownership - still frees exactly once.
-        // Neither outcome leaks: whoever owns the adapter at that point is who freed it. The
-        // failure path is therefore correct on its own rather than on the strength of this
-        // comment, and an edit that adds the unref no longer has to remember to come here. The
-        // deletes stay because they are still the only free on the path that exists today.
+        // CreateSourceElement hands each one to a javasource element, and from then on GStreamer
+        // frees an adapter when its element is finalized: the "close-connection" connection carries
+        // a GClosureNotify (CGstPipelineFactory::SourceCallbacksDestroyed) and the adapter dies with
+        // that closure. On this path that happens only at the failure returns of
+        // CreateSourceElement, which release the elements they made; the owner slot has then NULLed
+        // the local, so the matching delete below is a no-op. No other failing exit finalizes an
+        // element: CreatePlayerPipeline's later returns leave a stack GstElementContainer whose
+        // destructor only clears its map; no error return in CreatePipeline, CreateAudioPipeline,
+        // CreateAVPipeline, CreateAudioBin, CreateVideoBin or AttachToSource unrefs the pipeline or
+        // the source bin; and CMediaManager::CreatePlayer's delete of the pipeline object runs
+        // ~CPipeline, whose Dispose() call resolves to the empty CPipeline::Dispose because virtual
+        // dispatch during base destruction uses the base vtable. The delete of pMedia above frees
+        // no adapter either: it runs only when CMedia::IsValid failed, i.e. with no pipeline. So
+        // each adapter is freed exactly once, by its element or by the deletes below.
         //
         // They may not simply be dropped: the adapters hold upcall-stub addresses that
         // GSTMedia.createNativeMedia frees in its finally block, so leaving them alive would make
@@ -413,8 +399,9 @@ int32_t jfxm_media_create(int32_t backend,
         int32_t iRet = InitGstMedia(content_type, location, size_hint, cb, user, audio_cb, audio_user, &pMedia);
         if (ERROR_NONE != iRet)
         {
-            // InitGstMedia deleted the media and both adapters on every failing exit of its own (see
-            // the ownership comment there), so the empty handle is all that is left. With gst still
+            // On every failing exit of InitGstMedia the media and both adapters are gone: it deleted
+            // them, or a failing CreateSourceElement freed an adapter with its element (see the
+            // ownership comment there). So the empty handle is all that is left. With gst still
             // NULL this is exactly what jfxm_media_dispose would do.
             delete pHandle;
             return iRet;

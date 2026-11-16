@@ -39,10 +39,12 @@
  * CGstPipelineFactory::SourceCallbacksDestroyed, the GClosureNotify of the "close-connection"
  * signal: either from the disconnect at the end of SourceCloseConnection, after a real
  * READY->NULL transition, or from g_signal_handlers_destroy when g_object_unref finalizes an
- * element that never left GST_STATE_NULL (a media created and never played). The AVF adapter has
- * no such predecessor: the JNI player closed the connection and dropped the pointer without
- * deleting anything, leaking the adapter and its CLocatorStream with every jar:/jrt: player. It is
- * deleted by AVFMediaPlayer's -dispose, by the two paths of
+ * element that never left GST_STATE_NULL (a media created and never played, or an element a
+ * failure return of CGstPipelineFactory::CreateSourceElement releases). When jfxm_media_create
+ * fails and no element has freed it, InitGstMedia (ffi/jfxmedia_api.cpp) deletes it. The AVF
+ * adapter has no such predecessor: the JNI player closed the connection and dropped the pointer
+ * without deleting anything, leaking the adapter and its CLocatorStream with every jar:/jrt:
+ * player. It is deleted by AVFMediaPlayer's -dispose, by the two paths of
  * -[AVFMediaPlayer initWithURL:eventHandler:locatorStream:] that return nil, and by the !player
  * branch of jfxm_avf_player_init - each of which deletes the CLocatorStream too, since
  * CLocatorStream stores the adapter pointer without owning it.
@@ -66,9 +68,10 @@ public:
     // Registers, or with NULL unregisters, the caller's own pointer variable as this object's
     // owning slot: while it is set, ~CFfiStreamCallbacks NULLs that variable, so a caller holding
     // the only other copy of the pointer can tell whether somebody else has already freed the
-    // object. InitGstMedia (ffi/jfxmedia_api.cpp) is the one user and the comment on its cleanup
-    // block is the reason this exists; nothing here is thread safe, and it must not be used from
-    // a slot that can outlive the object or from one that another thread can be writing.
+    // object. InitGstMedia (ffi/jfxmedia_api.cpp) is the one user: a failure return of
+    // CGstPipelineFactory::CreateSourceElement frees the adapter underneath it, on its own thread.
+    // Nothing here is thread safe, and it must not be used from a slot that can outlive the object
+    // or from one that another thread can be writing.
     void    SetOwnerSlot(CFfiStreamCallbacks** ppSlot);
 
 private:

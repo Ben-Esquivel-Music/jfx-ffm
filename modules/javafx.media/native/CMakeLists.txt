@@ -62,6 +62,35 @@ if(NOT GENSRC_DIR OR NOT HEADERS_DIR OR NOT BIN_DIR)
     message(FATAL_ERROR "GENSRC_DIR, HEADERS_DIR and BIN_DIR must be provided")
 endif()
 
+# JFXM_TEST_HOOKS=ON adds the target jfxmedia_test (win.cmake, linux.cmake): the hooks build of
+# jfxmedia, the jfxmedia sources plus ffi/jfxmedia_test_hooks.cpp compiled with JFXM_TEST_HOOKS=1,
+# linked under the shipped library name into JFXM_TEST_BIN_DIR. That directory is never BIN_DIR,
+# where it would replace the shipped jfxmedia that the SDK, the other modules and tests/system load.
+# The target jfxmedia depends on jfxmedia_test, so building the shipped library alone rebuilds both.
+option(JFXM_TEST_HOOKS
+    "Also build the hooks build of jfxmedia (target jfxmedia_test) into JFXM_TEST_BIN_DIR" OFF)
+set(JFXM_TEST_BIN_DIR "" CACHE PATH "Output directory of the hooks build of jfxmedia; never BIN_DIR")
+
+if(JFXM_TEST_HOOKS)
+    if(APPLE)
+        message(FATAL_ERROR "JFXM_TEST_HOOKS is supported on Windows and Linux only")
+    endif()
+    if(NOT JFXM_TEST_BIN_DIR)
+        message(FATAL_ERROR "JFXM_TEST_HOOKS=ON needs JFXM_TEST_BIN_DIR, "
+            "the output directory of the hooks build of jfxmedia")
+    endif()
+    get_filename_component(jfxm_test_bin_dir "${JFXM_TEST_BIN_DIR}" REALPATH)
+    get_filename_component(jfxm_bin_dir "${BIN_DIR}" REALPATH)
+    if(WIN32)
+        string(TOLOWER "${jfxm_test_bin_dir}" jfxm_test_bin_dir)
+        string(TOLOWER "${jfxm_bin_dir}" jfxm_bin_dir)
+    endif()
+    if(jfxm_test_bin_dir STREQUAL jfxm_bin_dir)
+        message(FATAL_ERROR "JFXM_TEST_BIN_DIR must not be BIN_DIR (${BIN_DIR}): "
+            "the hooks build of jfxmedia would replace the shipped library")
+    endif()
+endif()
+
 # ---------------------------------------------------------------------------
 # Source roots shared by the platform files
 # ---------------------------------------------------------------------------

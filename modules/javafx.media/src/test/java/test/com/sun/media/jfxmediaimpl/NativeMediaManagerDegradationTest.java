@@ -25,16 +25,12 @@
 
 package test.com.sun.media.jfxmediaimpl;
 
-import com.sun.media.jfxmediaimpl.NativeMediaManager;
-import java.io.File;
 import java.io.IOException;
-import java.net.URI;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Optional;
 import java.util.concurrent.TimeUnit;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -202,7 +198,7 @@ public class NativeMediaManagerDegradationTest {
         List<String> command = new ArrayList<>();
         command.add(Path.of(System.getProperty("java.home"), "bin", "java").toString());
         command.add("-classpath");
-        command.add(childClassPath());
+        command.add(ChildJvm.childClassPath());
         command.add("-Djava.library.path=" + libraryPath);
         command.add("-Djfxmedia.loglevel=error");
         command.addAll(List.of(jvmOptions));
@@ -224,31 +220,6 @@ public class NativeMediaManagerDegradationTest {
         assertTrue(finished, () -> "the child JVM did not finish:\n" + command + "\n" + output);
         assertEquals(0, child.exitValue(), () -> "the child JVM failed:\n" + output);
         return output;
-    }
-
-    /**
-     * The class path the child needs: this JVM's own, which carries the tests and the javafx.base and
-     * javafx.graphics jars, plus javafx.media itself, which this JVM has on the upgrade module path
-     * rather than the class path. The child loads all of it from the class path, where the module
-     * system's access rules do not apply, so no {@code --add-exports} has to be repeated.
-     */
-    private static String childClassPath() {
-        List<String> entries = new ArrayList<>();
-        entries.add(System.getProperty("java.class.path"));
-        mediaClasses().ifPresent(entries::add);
-        return String.join(File.pathSeparator, entries);
-    }
-
-    private static Optional<String> mediaClasses() {
-        Module media = NativeMediaManager.class.getModule();
-        if (!media.isNamed()) {
-            return Optional.empty();    // already on the class path, so java.class.path has it
-        }
-        Optional<URI> location = ModuleLayer.boot().configuration()
-                .findModule(media.getName())
-                .flatMap(module -> module.reference().location());
-        return location.filter(uri -> "file".equals(uri.getScheme()))
-                .map(uri -> Path.of(uri).toString());
     }
 
     /**
