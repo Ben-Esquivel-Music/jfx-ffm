@@ -1,0 +1,58 @@
+# Copyright (c) 2026, Oracle and/or its affiliates. All rights reserved.
+# DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
+#
+# This code is free software; you can redistribute it and/or modify it
+# under the terms of the GNU General Public License version 2 only, as
+# published by the Free Software Foundation.  Oracle designates this
+# particular file as subject to the "Classpath" exception as provided
+# by Oracle in the LICENSE file that accompanied this code.
+#
+# This code is distributed in the hope that it will be useful, but WITHOUT
+# ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
+# FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License
+# version 2 for more details (a copy is included in the LICENSE file that
+# accompanied this code).
+#
+# You should have received a copy of the GNU General Public License version
+# 2 along with this work; if not, write to the Free Software Foundation,
+# Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301 USA.
+#
+# Please contact Oracle, 500 Oracle Parkway, Redwood Shores, CA 94065 USA
+# or visit www.oracle.com if you need additional information or have any
+# questions.
+
+# The Rust workspace of the native libraries. Each library that is part Rust has one crate in
+# modules/<module>/src/main/native-rust/<library>, built as a staticlib into that library's CMake target.
+# Every cargo call of the build runs with --locked --offline.
+[workspace]
+resolver = "3"
+members = [
+    "modules/*/src/main/native-rust/*",
+    "buildtools/rust/jfx-rust-support",
+]
+
+[workspace.package]
+edition = "2024"
+rust-version = "1.100"
+license = "GPL-2.0-only WITH Classpath-exception-2.0"
+publish = false
+
+[workspace.dependencies]
+jfx-rust-support = { path = "buildtools/rust/jfx-rust-support" }
+
+[workspace.lints.rust]
+unsafe_op_in_unsafe_fn = "deny"
+
+[workspace.lints.clippy]
+undocumented_unsafe_blocks = "warn"
+
+# panic is left at Cargo's default "unwind": every export catches panics through jfx_rust_support::guard and
+# returns the C failure value, which "abort" would turn into a process abort without an hs_err file.
+[profile.release]
+opt-level = 3
+debug = false
+lto = true
+codegen-units = 1
+
+[profile.dev]
+debug = true

@@ -241,6 +241,7 @@
                                         <argument>-DJFX_BUILD_ID=${jfx.release.version.long}</argument>
                                         <argument>-DJFXM_TEST_HOOKS=ON</argument>
                                         <argument>-DJFXM_TEST_BIN_DIR=${project.build.directory}/native/test-bin</argument>
+                                        <argument>-DJFX_RUST=${JFX_RUST}</argument>
                                     </arguments>
                                 </configuration>
                             </execution>
@@ -258,6 +259,43 @@
                                         <argument>--config</argument>
                                         <argument>${CONF}</argument>
                                         <argument>--parallel</argument>
+                                    </arguments>
+                                </configuration>
+                            </execution>
+                            <execution>
+                                <id>rust-test</id>
+                                <phase>test</phase>
+                                <goals>
+                                    <goal>exec</goal>
+                                </goals>
+                                <configuration>
+                                    <executable>cmake</executable>
+                                    <arguments>
+                                        <argument>--build</argument>
+                                        <argument>${project.build.directory}/native/cmake</argument>
+                                        <argument>--config</argument>
+                                        <argument>${CONF}</argument>
+                                        <argument>--target</argument>
+                                        <argument>jfx_rust_test</argument>
+                                    </arguments>
+                                    <skip>${skipTests}</skip>
+                                </configuration>
+                            </execution>
+                            <execution>
+                                <id>rust-lint</id>
+                                <phase>verify</phase>
+                                <goals>
+                                    <goal>exec</goal>
+                                </goals>
+                                <configuration>
+                                    <executable>cmake</executable>
+                                    <arguments>
+                                        <argument>--build</argument>
+                                        <argument>${project.build.directory}/native/cmake</argument>
+                                        <argument>--config</argument>
+                                        <argument>${CONF}</argument>
+                                        <argument>--target</argument>
+                                        <argument>jfx_rust_lint</argument>
                                     </arguments>
                                 </configuration>
                             </execution>
@@ -306,6 +344,7 @@
                                         <argument>-DJFX_BUILD_ID=${jfx.release.version.long}</argument>
                                         <argument>-DJFXM_TEST_HOOKS=ON</argument>
                                         <argument>-DJFXM_TEST_BIN_DIR=${project.build.directory}/native/test-bin</argument>
+                                        <argument>-DJFX_RUST=${JFX_RUST}</argument>
                                     </arguments>
                                 </configuration>
                             </execution>
@@ -321,6 +360,39 @@
                                         <argument>--build</argument>
                                         <argument>${project.build.directory}/native/cmake</argument>
                                         <argument>--parallel</argument>
+                                    </arguments>
+                                </configuration>
+                            </execution>
+                            <execution>
+                                <id>rust-test</id>
+                                <phase>test</phase>
+                                <goals>
+                                    <goal>exec</goal>
+                                </goals>
+                                <configuration>
+                                    <executable>cmake</executable>
+                                    <arguments>
+                                        <argument>--build</argument>
+                                        <argument>${project.build.directory}/native/cmake</argument>
+                                        <argument>--target</argument>
+                                        <argument>jfx_rust_test</argument>
+                                    </arguments>
+                                    <skip>${skipTests}</skip>
+                                </configuration>
+                            </execution>
+                            <execution>
+                                <id>rust-lint</id>
+                                <phase>verify</phase>
+                                <goals>
+                                    <goal>exec</goal>
+                                </goals>
+                                <configuration>
+                                    <executable>cmake</executable>
+                                    <arguments>
+                                        <argument>--build</argument>
+                                        <argument>${project.build.directory}/native/cmake</argument>
+                                        <argument>--target</argument>
+                                        <argument>jfx_rust_lint</argument>
                                     </arguments>
                                 </configuration>
                             </execution>
@@ -367,6 +439,7 @@
                                         <argument>-DJFX_VER=${jfx.release.version}</argument>
                                         <argument>-DJFX_FVER=${jfx.release.major.version},${jfx.release.minor.version},${jfx.release.security.version},${jfx.release.patch.version}</argument>
                                         <argument>-DJFX_BUILD_ID=${jfx.release.version.long}</argument>
+                                        <argument>-DJFX_RUST=${JFX_RUST}</argument>
                                     </arguments>
                                 </configuration>
                             </execution>
@@ -382,6 +455,39 @@
                                         <argument>--build</argument>
                                         <argument>${project.build.directory}/native/cmake</argument>
                                         <argument>--parallel</argument>
+                                    </arguments>
+                                </configuration>
+                            </execution>
+                            <execution>
+                                <id>rust-test</id>
+                                <phase>test</phase>
+                                <goals>
+                                    <goal>exec</goal>
+                                </goals>
+                                <configuration>
+                                    <executable>cmake</executable>
+                                    <arguments>
+                                        <argument>--build</argument>
+                                        <argument>${project.build.directory}/native/cmake</argument>
+                                        <argument>--target</argument>
+                                        <argument>jfx_rust_test</argument>
+                                    </arguments>
+                                    <skip>${skipTests}</skip>
+                                </configuration>
+                            </execution>
+                            <execution>
+                                <id>rust-lint</id>
+                                <phase>verify</phase>
+                                <goals>
+                                    <goal>exec</goal>
+                                </goals>
+                                <configuration>
+                                    <executable>cmake</executable>
+                                    <arguments>
+                                        <argument>--build</argument>
+                                        <argument>${project.build.directory}/native/cmake</argument>
+                                        <argument>--target</argument>
+                                        <argument>jfx_rust_lint</argument>
                                     </arguments>
                                 </configuration>
                             </execution>

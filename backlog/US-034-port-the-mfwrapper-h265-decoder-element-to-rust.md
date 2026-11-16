@@ -99,7 +99,7 @@ Paths as in the javasource port story.
     goldens after it.
   - The same enumeration flags and MFT choice order.
   - The same output types and caps.
-- **Crate.** Modules are added to `fxplugins-rs` under `#[cfg(windows)]`. `mfwrapper_init` is exported with the C
+- **Crate.** Modules are added to `fxplugins` under `#[cfg(windows)]`. `mfwrapper_init` is exported with the C
   prototype (`fxplugins.c:34`).
 - **COM rules.** Smart pointers only. The `#[implement]` buffer keeps its GstBuffer ref and map while any MF
   reference exists, as `CMFGSTBuffer` did, and answers `QueryInterface` for the same IIDs

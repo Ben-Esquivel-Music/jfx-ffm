@@ -78,7 +78,7 @@ Paths relative to `modules/javafx.media/src/main/native/` unless they start with
   and the same thread for every callback. `fxplugins.c` stays C and keeps `gst_plugin_desc`. The crate exports
   `java_source_plugin_init` with the C prototype, so the C caller pulls the member in, and `java_source_get_type`
   if the pre-port export list has it.
-- **Crate.** `fxplugins-rs` (staticlib) in the US-027 layout
+- **Crate.** `fxplugins` (staticlib) in the US-027 layout
   (`modules/javafx.media/src/main/native-rust/fxplugins/`), one module per element. The progressbuffer
   and mfwrapper ports add modules to it. It uses the `gstreamer` and `glib` crates with no `v1_xx` feature beyond
   what the code needs, and no `gstreamer-base`.

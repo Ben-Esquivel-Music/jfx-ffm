@@ -39,6 +39,12 @@
 # ffmpeg development packages) and jfxmedia_avf on macOS (the AVFoundation
 # backend).
 #
+# The Linux and Windows jobs also set up the Rust toolchain that
+# rust-toolchain.toml pins, plus cbindgen for the build's lint, because
+# jfxmedia links a Rust staticlib there (macOS builds no Rust yet); a step after
+# the build checks that jfxmedia exports exactly the JFXM_EXPORT names of
+# jfxmedia_api.h.
+#
 # The Linux jobs then run the GTK glass display tests, which the build skips for
 # want of a display, on a private Xvfb: once without and once with a window
 # manager (.github/scripts/run-gtk-display-tests.sh).
@@ -181,6 +187,26 @@ jobs:
           java -version
           mvn -version
 
+      - name: Set up the Rust toolchain
+        working-directory: jfx
+        run: |
+          set -x
+          # jfxmedia links a Rust staticlib (buildtools/rust/jfx_rust.cmake). In the repository root,
+          # rustup installs the toolchain that rust-toolchain.toml pins, and the lint of the build
+          # (jfx_rust_lint) needs the pinned cbindgen. An image without rustup gets rustup-init the
+          # way the boot JDK is fetched.
+          cargo_bin="${CARGO_HOME:-${HOME}/.cargo}/bin"
+          if ! command -v rustup > /dev/null; then
+            wget -O "${HOME}/rustup-init" "https://static.rust-lang.org/rustup/dist/$(uname -m)-unknown-linux-gnu/rustup-init"
+            chmod +x "${HOME}/rustup-init"
+            "${HOME}/rustup-init" -y --no-modify-path --profile minimal --default-toolchain none
+          fi
+          export PATH="${cargo_bin}:${PATH}"
+          echo "${cargo_bin}" >> "${GITHUB_PATH}"
+          rustup toolchain install
+          cargo install --locked cbindgen@0.29.4
+          rustup show active-toolchain
+
       - name: Build JavaFX artifacts and run headless tests
         working-directory: jfx
         run: |
@@ -263,6 +289,38 @@ jobs:
           fi
           nm -D --defined-only "${so}" | grep gst_plugin_desc
 
+      - name: Verify the exports of jfxmedia, which links Rust
+        if: ${{ !cancelled() }}
+        working-directory: jfx
+        run: |
+          set -x
+          # jfxm_abi_version comes from a Rust staticlib (buildtools/rust/jfx_rust.cmake). The version
+          # script generated from jfxmedia_api.h exports exactly the names the header declares, so the
+          # two lists must be equal: any other name (C++, the Rust standard library's, a C helper's)
+          # means the script no longer applies. ldd -r must then resolve every symbol and library.
+          so=modules/javafx.media/target/native/bin/libjfxmedia.so
+          header=modules/javafx.media/src/main/native/jfxmedia/jfxmedia_api.h
+          if [ ! -f "${so}" ]; then
+            echo "::error::${so} was not built"
+            exit 1
+          fi
+          expected=$(grep -oP '^JFXM_EXPORT\b[^(]*?\K\w+(?=\s*\()' "${header}" | sort)
+          exported=$(nm -D --defined-only "${so}" | awk '{ print $NF }' | sort)
+          echo "$(echo "${expected}" | wc -l) names in the header, $(echo "${exported}" | wc -l) exported"
+          if [ -z "${expected}" ]; then
+            echo "::error::no JFXM_EXPORT line found in ${header}"
+            exit 1
+          fi
+          if ! diff <(echo "${expected}") <(echo "${exported}"); then
+            echo "::error::${so} must export exactly the JFXM_EXPORT names of ${header} (<: header, >: library)"
+            exit 1
+          fi
+          readelf -d "${so}" | grep NEEDED
+          if ldd -r "${so}" 2>&1 | grep -E 'undefined symbol|not found'; then
+            echo "::error::${so} has an unresolved symbol or library"
+            exit 1
+          fi
+
   linux_aarch64_build:
     name: Linux aarch64
     runs-on: "ubuntu-24.04-arm"
@@ -323,6 +381,26 @@ jobs:
           which java
           java -version
           mvn -version
+
+      - name: Set up the Rust toolchain
+        working-directory: jfx
+        run: |
+          set -x
+          # jfxmedia links a Rust staticlib (buildtools/rust/jfx_rust.cmake). In the repository root,
+          # rustup installs the toolchain that rust-toolchain.toml pins, and the lint of the build
+          # (jfx_rust_lint) needs the pinned cbindgen. An image without rustup gets rustup-init the
+          # way the boot JDK is fetched.
+          cargo_bin="${CARGO_HOME:-${HOME}/.cargo}/bin"
+          if ! command -v rustup > /dev/null; then
+            wget -O "${HOME}/rustup-init" "https://static.rust-lang.org/rustup/dist/$(uname -m)-unknown-linux-gnu/rustup-init"
+            chmod +x "${HOME}/rustup-init"
+            "${HOME}/rustup-init" -y --no-modify-path --profile minimal --default-toolchain none
+          fi
+          export PATH="${cargo_bin}:${PATH}"
+          echo "${cargo_bin}" >> "${GITHUB_PATH}"
+          rustup toolchain install
+          cargo install --locked cbindgen@0.29.4
+          rustup show active-toolchain
 
       - name: Build JavaFX artifacts and run headless tests
         working-directory: jfx
@@ -405,6 +483,38 @@ jobs:
             exit 1
           fi
           nm -D --defined-only "${so}" | grep gst_plugin_desc
+
+      - name: Verify the exports of jfxmedia, which links Rust
+        if: ${{ !cancelled() }}
+        working-directory: jfx
+        run: |
+          set -x
+          # jfxm_abi_version comes from a Rust staticlib (buildtools/rust/jfx_rust.cmake). The version
+          # script generated from jfxmedia_api.h exports exactly the names the header declares, so the
+          # two lists must be equal: any other name (C++, the Rust standard library's, a C helper's)
+          # means the script no longer applies. ldd -r must then resolve every symbol and library.
+          so=modules/javafx.media/target/native/bin/libjfxmedia.so
+          header=modules/javafx.media/src/main/native/jfxmedia/jfxmedia_api.h
+          if [ ! -f "${so}" ]; then
+            echo "::error::${so} was not built"
+            exit 1
+          fi
+          expected=$(grep -oP '^JFXM_EXPORT\b[^(]*?\K\w+(?=\s*\()' "${header}" | sort)
+          exported=$(nm -D --defined-only "${so}" | awk '{ print $NF }' | sort)
+          echo "$(echo "${expected}" | wc -l) names in the header, $(echo "${exported}" | wc -l) exported"
+          if [ -z "${expected}" ]; then
+            echo "::error::no JFXM_EXPORT line found in ${header}"
+            exit 1
+          fi
+          if ! diff <(echo "${expected}") <(echo "${exported}"); then
+            echo "::error::${so} must export exactly the JFXM_EXPORT names of ${header} (<: header, >: library)"
+            exit 1
+          fi
+          readelf -d "${so}" | grep NEEDED
+          if ldd -r "${so}" 2>&1 | grep -E 'undefined symbol|not found'; then
+            echo "::error::${so} has an unresolved symbol or library"
+            exit 1
+          fi
 
   macos_x64_build:
     name: macOS x64
@@ -557,6 +667,32 @@ jobs:
           & curl -L "$env:BOOT_JDK_URL" -o "$HOME/bootjdk/$env:BOOT_JDK_FILENAME"
           tar -xf "$HOME/bootjdk/$env:BOOT_JDK_FILENAME" -C "$HOME/bootjdk"
 
+      - name: Set up the Rust toolchain
+        working-directory: jfx
+        run: |
+          # jfxmedia links a Rust staticlib (buildtools/rust/jfx_rust.cmake). In the repository root,
+          # rustup installs the toolchain that rust-toolchain.toml pins, and the lint of the build
+          # (jfx_rust_lint) needs the pinned cbindgen. An image without rustup gets rustup-init the
+          # way the boot JDK is fetched. This step runs before "Setup environment" on purpose: the
+          # build step restores the Path saved there as THE_PATH, and the cargo bin directory that
+          # GITHUB_PATH adds is part of it only for steps that start after this one.
+          if ($env:CARGO_HOME) { $cargoBin = "$env:CARGO_HOME\bin" } else { $cargoBin = "$HOME\.cargo\bin" }
+          if (-not (Get-Command rustup -ErrorAction SilentlyContinue)) {
+            & curl -fL "https://static.rust-lang.org/rustup/dist/x86_64-pc-windows-msvc/rustup-init.exe" -o "$HOME/rustup-init.exe"
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+            & "$HOME/rustup-init.exe" -y --no-modify-path --profile minimal --default-toolchain none
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          }
+          $env:Path = "$cargoBin;$env:Path"
+          echo "$cargoBin" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+          # A failing native command does not stop a PowerShell step, so each one is checked
+          rustup toolchain install
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          cargo install --locked cbindgen@0.29.4
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          rustup show active-toolchain
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
       - name: Setup environment
         run: |
           $env:JAVA_HOME = "$HOME\bootjdk\jdk-$env:BOOT_JDK_VERSION" ;
@@ -583,3 +719,37 @@ jobs:
           # passed to its separate test run: after a failure Maven still builds and
           # tests every module that does not depend on the failed one.
           mvn -B -ntp -fae install "-Djfx.web.skipFfmTests=false"
+
+      - name: Verify the exports of jfxmedia, which links Rust
+        if: ${{ !cancelled() }}
+        working-directory: jfx
+        run: |
+          # jfxm_abi_version comes from a Rust staticlib that /EXPORT: exports
+          # (buildtools/rust/jfx_rust.cmake). The DLL must export exactly the names jfxmedia_api.h
+          # declares: a name missing from the DLL and a name the header does not declare both fail.
+          # The runner has no vcvars, so dumpbin is found through vswhere.
+          $dll = "modules\javafx.media\target\native\bin\jfxmedia.dll"
+          $header = "modules\javafx.media\src\main\native\jfxmedia\jfxmedia_api.h"
+          if (-not (Test-Path $dll)) { echo "::error::$dll was not built"; exit 1 }
+          $vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
+          $vcTools = "Microsoft.VisualStudio.Component.VC.Tools.x86.x64"
+          $vs = & $vswhere -latest -products * -requires $vcTools -property installationPath
+          $dumpbin = Get-ChildItem "$vs\VC\Tools\MSVC\*\bin\Hostx64\x64\dumpbin.exe" |
+            Sort-Object FullName | Select-Object -Last 1 -ExpandProperty FullName
+          if (-not $dumpbin) { echo "::error::no dumpbin.exe under $vs"; exit 1 }
+          & $dumpbin /NOLOGO /DEPENDENTS $dll
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $exports = & $dumpbin /NOLOGO /EXPORTS $dll
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $exports
+          $exported = @($exports |
+            Select-String -CaseSensitive -Pattern '^\s+\d+\s+[0-9A-F]+\s+[0-9A-F]+\s+(\w+)' |
+            ForEach-Object { $_.Matches[0].Groups[1].Value })
+          $expected = @(Select-String -CaseSensitive -Path $header -Pattern '^JFXM_EXPORT\b[^(]*?(\w+)\s*\(' |
+            ForEach-Object { $_.Matches[0].Groups[1].Value })
+          echo "$($expected.Count) names in the header, $($exported.Count) exported"
+          if ($expected.Count -eq 0) { echo "::error::no JFXM_EXPORT line found in $header"; exit 1 }
+          $missing = @($expected | Where-Object { $exported -cnotcontains $_ })
+          if ($missing.Count -ne 0) { echo "::error::$dll does not export: $($missing -join ', ')"; exit 1 }
+          $extra = @($exported | Where-Object { $expected -cnotcontains $_ })
+          if ($extra.Count -ne 0) { echo "::error::$dll exports names not in ${header}: $($extra -join ', ')"; exit 1 }

@@ -63,10 +63,13 @@ using namespace std;
 //********** ABI version guard and layout checks
 //*************************************************************************************************
 
+// With JFX_RUST on, the jfxmedia crate defines it (native-rust/jfxmedia/src/ffi.rs)
+#ifndef JFX_RUST_JFXMEDIA_ABI_VERSION
 uint32_t jfxm_abi_version(void)
 {
     return JFXM_ABI_VERSION;
 }
+#endif
 
 int32_t jfxm_sizeof_player_callbacks(void)
 {
