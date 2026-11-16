@@ -23,8 +23,9 @@ to line 474.
   `MaskSolid.jsl`, `MaskAlphaOne.jsl` and `PaintColor.jsl` goes into no program, and nothing parses it.
 - Their time still counts. A program's source time is the newer of its mask and paint times (`:407-408`), so a newer
   time of one of the three makes its programs out of date (US-023).
-- The pom runs the generator once for each of the 30 `.jsl` files of `src/main/jsl-prism` (`pom.xml:186-204`). The
-  generator reads 28 of them: `PaintTextureYUV422.jsl` and `PaintTextureYUV444.jsl` are never read (US-021).
+- The pom runs the generator once for each of the 28 `.jsl` files of `src/main/jsl-prism` (`pom.xml:186-204`), and
+  the generator reads all 28. Before US-021 there were 30, and `PaintTextureYUV422.jsl` and `PaintTextureYUV444.jsl`
+  were never read; US-021 deleted them.
 - The two omissions are in the first open-source version of the generator, `839a0d8349` (2013-02-25). `git log -S`
   on either comment finds only that commit and the 2016 directory rename `c420248b9b`.
 
@@ -57,10 +58,10 @@ unmodified inputs, and no Metal header.
   4. `java.lang.RuntimeException: A Prism program cannot have a glue block: FillPgram_Color` (US-020's check)
   5. `java.lang.RuntimeException: Unknown function mask(float2, float2)`
   6. `Input file not found: <file>.jsl`, then the generator's usage text, with no stack.
-- Edit 4 in each of the 30 files: the run fails with message 4 for 25 of the 28 files the generator reads, naming the
-  first program compiled with the file (for example `Solid_ImagePattern` for `PaintImagePattern.jsl`,
-  `AlphaOne_ImagePattern` for `PaintAlphaTextureImagePattern.jsl`). It passes for the three files and for the two
-  files that are never read.
+- Edit 4 in each of the 30 files (measured before US-021, with 30 files): the run fails with message 4 for 25 of the
+  28 files the generator reads, naming the first program compiled with the file (for example `Solid_ImagePattern` for
+  `PaintImagePattern.jsl`, `AlphaOne_ImagePattern` for `PaintAlphaTextureImagePattern.jsl`). It passes for the three
+  files and for the two files that were never read, which US-021 deleted.
 - A second run on the output tree that a run left behind: for the unmodified inputs, exit 0 and no file rewritten
   (file times compared to the nanosecond); for edit 1 in `MaskFillPgram.jsl`, exit 1 with the same output and no file
   rewritten, so the failure repeats until the file is fixed; for edit 1 in `MaskSolid.jsl`, exit 0 and nothing
@@ -97,8 +98,8 @@ These are the counts the end-to-end run of US-020 read from the code (28, 8 and 
   ```
 - One run per case is enough. The generator ignores `-name` and writes all 212 programs in every JVM (US-023): the
   one run of the unmodified inputs wrote the same 850 files, by name and md5, as the 30 JVMs of the end-to-end run.
-  With the pom's 30 JVMs, the first does all the work and `failonerror` stops the `<apply>` at the first JVM that
-  exits 1 (US-023).
+  With the pom's 28 JVMs (30 before US-021), the first does all the work and `failonerror` stops the `<apply>` at the
+  first JVM that exits 1 (US-023).
 - Files compared by name and md5: `find . -type f | sort | xargs md5 -r` in each output directory.
 
 ### Upstream too
@@ -153,8 +154,8 @@ generator was not run.
 ## Out of scope
 - What a valid edit of the three files does. Today edit 7 passes: the generated files do not change. This story asks
   only that an error fails the run.
-- The two files the generator never reads, `PaintTextureYUV422.jsl` and `PaintTextureYUV444.jsl`; edit 4 passes in
-  them too. US-021 removes them.
+- The two files the generator never read, `PaintTextureYUV422.jsl` and `PaintTextureYUV444.jsl`; edit 4 passed in
+  them too. US-021 deleted them.
 - Which file and line a message names: US-022.
 - Running the generator once per build: US-023.
 - Regenerating when the compiler or a generator changes, or when a file comes back with an older time: US-024.
@@ -169,14 +170,14 @@ generator was not run.
 
 ## Notes
 - Found by the end-to-end run of US-020 (2026-11-14, macOS, Maven 3.10.0, JDK 27.0.1.0.2). Its case P6 put the glue
-  block of edit 4 after line 25 of each of the three files. In each, all 30 JVMs exited 0 and wrote 850 files
-  identical to those of the unmodified inputs, before and after US-020 (quoted from that run's report). The rest of
-  the table was measured for this story, with the US-020 tree only.
+  block of edit 4 after line 25 of each of the three files. In each, all 30 JVMs (before US-021) exited 0 and wrote
+  850 files identical to those of the unmodified inputs, before and after US-020 (quoted from that run's report). The
+  rest of the table was measured for this story, with the US-020 tree only.
 - US-020 makes a glue block in a Prism program an error. The limit is in the generator, not in that check: a syntax
   error, an undefined function and text that is not JSL pass in the three files as well (edits 1 to 3).
 - US-019 met the same three files when it counted what the build parses ("What the build does not parse"). Parsed
   alone, each stops at EOF.
 - US-022 lists how the line of an error maps to the line of a Prism input; it already notes the three omissions.
-- US-023: with the pom's 30 JVMs, the first, started with `-name …/MaskAlphaOne.jsl`, reports any Prism error,
-  whatever file holds it. Its "A source time in the future" case also rewrote the 112 files of the 28
-  `<mask>_Color` programs for `PaintColor.jsl`.
+- US-023: with the pom's 28 JVMs (30 before US-021), the first, started with `-name …/MaskAlphaOne.jsl`, reports
+  any Prism error, whatever file holds it. Its "A source time in the future" case also rewrote the 112 files of the
+  28 `<mask>_Color` programs for `PaintColor.jsl`.

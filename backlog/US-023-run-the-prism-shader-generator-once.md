@@ -5,8 +5,9 @@
 ## Story
 As a developer who builds `javafx.graphics`, with or without `clean`,
 I want the Prism shader generator to run once per build,
-so that the build does not start 29 more JVMs that compose all 212 Prism shaders again and write nothing, which
-costs about 10 s of every Windows build of the module, clean or not, and 5 s of a clean Linux build.
+so that the build does not start 27 more JVMs that compose all 212 Prism shaders again and write nothing, which,
+measured with 29 of them before US-021, cost about 10 s of every Windows build of the module, clean or not, and 5 s of
+a clean Linux build.
 
 ## Problem
 Paths are relative to `modules/javafx.graphics`. `CompileJSL.java` is the Prism generator,
@@ -17,10 +18,11 @@ list.
 ### The pom starts one JVM per `.jsl` file, in every build
 - `<apply executable="${java.home}/bin/java" failonerror="true" parallel="false">` (`pom.xml:200-216`) runs
   `java -cp … CompileJSL -i src/main/jsl-prism -o target/gensrc/jsl-prism -t -pkg com/sun/prism <backends> -name
-  <file>` once for each file of the fileset `**/*.jsl` (`:213-215`), one after the other: 30 JVMs.
-- The `<apply>` has no mapper and no target file, so Ant compares nothing and runs all 30 in every build. On a
-  complete output tree Ant logs 30 starts and `Applied …\java to 30 files and 0 directories.` (measured). The antrun
-  execution has no up-to-date check of its own either.
+  <file>` once for each file of the fileset `**/*.jsl` (`:213-215`), one after the other: 28 JVMs since US-021
+  deleted 2 of the 30 files.
+- The `<apply>` has no mapper and no target file, so Ant compares nothing and runs all of them in every build. On a
+  complete output tree Ant logged 30 starts and `Applied …\java to 30 files and 0 directories.` (measured before
+  US-021, with 30 files). The antrun execution has no up-to-date check of its own either.
 - The backends are `jfx.jsl.backends`: `-es2` by default (Linux, `:48`), `-d3d` on Windows (`:635`), `-mtl -es2` on
   macOS (`:667`), and `-d3d -es2` or `-mtl` with `INCLUDE_ES2` (`:652`, `:685`).
 
@@ -50,7 +52,8 @@ list.
 
 ### What the loop costs
 Times of the Ant runs are wall times, about 0.44 s of Ant's own start included, on a machine that ran other work
-meanwhile; ranges are over 2 to 6 runs (Measured has the setup).
+meanwhile; ranges are over 2 to 6 runs (Measured has the setup). Everything in this section was measured before
+US-021, with 30 `.jsl` files and 30 JVMs; since US-021 the loop starts 28, the first and 27 that write nothing.
 - **Clean build.** The first JVM writes every Prism output and the Metal headers; the other 29 write nothing.
   - US-008's gate builds (Maven, read from file times): on Windows (JDK 26, `-d3d`) the last Prism output is written
     at 20:39:18.02 and `target/mods`, the next task (`pom.xml:220`), is created at 20:39:30.04: 12.0 s for the 29
@@ -83,10 +86,11 @@ meanwhile; ranges are over 2 to 6 runs (Measured has the setup).
 ### Logs
 - At the default level neither generator step logs anything. The gate's Maven log goes from
   `[javac] Compiling 1 source file to …\jsl-compilers\prism` straight to the second-pass `javac`.
-- The 30 starts and the `Applied … to 30 files` line are Ant verbose messages. maven-antrun-plugin 3.1.0 passes them
-  on only with `-X`, where it sets Ant's level to debug (read from its `AntRunMojo`, not run). At that level Ant logs
-  every start twice, `[apply] Executing '…java' with arguments:` and `Execute:Java13CommandLauncher: Executing …`
-  (measured with Ant: 60 such lines for today's step, 2 for one `<java>`).
+- The 30 starts and the `Applied … to 30 files` line (with 30 files, before US-021) are Ant verbose messages.
+  maven-antrun-plugin 3.1.0 passes them on only with `-X`, where it sets Ant's level to debug (read from its
+  `AntRunMojo`, not run). At that level Ant logs every start twice, `[apply] Executing '…java' with arguments:` and
+  `Execute:Java13CommandLauncher: Executing …` (measured with Ant: 60 such lines for the step with 30 files, 2 for one
+  `<java>`).
 
 ### The Metal headers of US-018 across the loop
 - Before US-018's fix, `MSLBackend` kept the header directory and the Objective-C header in static fields
@@ -179,12 +183,13 @@ Four options; the evidence decides for (a).
     (`JSLC.java:300-304`), which must not reach the Maven JVM.
   - No Java change: without `-name`, `shaderName` is null until `CompileJSL.java:421` sets it (measured: exit 0, the
     same files).
-  - Cost: about 25 pom lines replaced by 17, or 27 by 19 with `-mtlheaders`. Saves the 29 JVMs: about 10 s of every
-    Windows build of the module, clean or not, and 5 s of a clean Linux build.
+  - Cost: about 25 pom lines replaced by 17, or 27 by 19 with `-mtlheaders`. Saves the 27 later JVMs (29 when
+    measured, before US-021: about 10 s of every Windows build of the module, clean or not, and 5 s of a clean Linux
+    build).
 - **(b) `<apply parallel="true">`.** Fails today (above). It would need `CompileJSL` to accept file names and ignore
   them, for the same one JVM as (a).
 - **(c) (a) with a step-level up-to-date check,** an Ant `<uptodate>` as in the 2013 Ant build. It would save the
-  rest of a no-change build, about 0.3 to 0.6 s. The check must list every input of every output: the 30 `.jsl` files,
+  rest of a no-change build, about 0.3 to 0.6 s. The check must list every input of every output: the 28 `.jsl` files,
   the generator classes, `PrismLoaderGlue.stg`, and the JSL compiler's classes and templates on
   `maven.compile.classpath`. A missing one skips a needed run. It would not fix JDK-8090470, since the generator's own
   check still skips every output after a compiler change. Upstream closed the Decora version of this as Won't Fix
@@ -195,7 +200,7 @@ Four options; the evidence decides for (a).
   `PrismShaderCommon.h` before its fix (measured in US-018). It would save one more JVM start. Rejected.
 
 **Recommendation: (a).** In every case measured it writes the same files, rewrites the same files and fails the same
-way as the loop, and it removes 29 JVMs that do nothing, with a pom change only.
+way as the loop, and it removes 27 JVMs that do nothing (29 before US-021), with a pom change only.
 
 **Upstream.** Replacing the loop with one `javaexec` without `-name` in `generatePrismShaders` would save the same 29
 JVMs in upstream clean builds and after any `.jsl` change; no-op builds are skipped there already. Whether to propose
@@ -205,11 +210,11 @@ it is part of the story.
 - **One step.** `pom.xml` runs the Prism `CompileJSL` in one `<java fork="true" failonerror="true">` with every
   generator argument of today's `<apply>`, US-018's `-mtlheaders ${jfx.graphics.gensrc}/mtl-headers` included, except
   `-name` and the file. `git grep -n -e '<apply' -e '<srcfile' -e '"-name"' --
-  modules/javafx.graphics/pom.xml` finds nothing. The same search on the current tree finds `:200`, `:213` and `:214`,
-  so an empty result cannot come from a wrong path or pattern.
+  modules/javafx.graphics/pom.xml` finds nothing. The same search on the pom at `7a66c85e39` finds `:186`, `:201`
+  and `:202`, so an empty result cannot come from a wrong path or pattern.
 - **One JVM.** In the log of a clean `mvn -B -ntp -X -pl buildtools/jslc,modules/javafx.graphics clean compile`, the
   Prism step starts `CompileJSL` once: every start is logged with its arguments, `'-pkg'` followed by
-  `'com/sun/prism'`. Mutant proof: the same count with the current pom must give 30 starts.
+  `'com/sun/prism'`. Mutant proof: the same count with the current pom must give 28 starts (30 before US-021).
 - **Same files, clean.** The generators, run as the old and the new pom run them with `-d3d -es2 -mtl`, write 1,059
   files identical by name and md5, and with `-d3d` 532 files, identical to the old pom's.
 - **Same files, without `clean`.** After a clean build, `touch src/main/jsl-prism/MaskFillPgram.jsl` and build again
@@ -224,14 +229,17 @@ it is part of the story.
 - **Time recorded** (not gated): for the clean gate builds before and after, the time from the newest file under
   `target/gensrc/jsl-prism` to the creation of `target/mods`, and the time of the Prism step in a build without
   `clean` and without changes, on Windows and on Linux.
-- **Build gate,** with the two commands the US-008 gate ran:
-  - Windows: `mvn -B -ntp -pl buildtools/jslc,modules/javafx.graphics clean test -Djfx.parity.require=true`.
+- **Build gate,** with the two commands the US-008 gate ran, the Windows one with `-am` (amended 2026-11-15 from
+  US-021's review: without it the build takes `javafx-base` from the local repository, as US-019's and US-020's gates
+  say):
+  - Windows: `mvn -B -ntp -pl buildtools/jslc,modules/javafx.graphics -am clean test -Djfx.parity.require=true`.
   - Linux (WSL), from a fresh clone with no display:
     `mvn -B -ntp -pl buildtools/jslc,modules/javafx.graphics -am clean test`, without `-Djfx.parity.require=true`
     (the Linux font goldens were captured on another machine; see US-019's build gate).
-  - `target/gensrc/{jsl-decora,jsl-prism,headers,mtl-headers}` is identical by name and md5 before and after. In the
-    US-008 gate these held 108, 424, 46 and 0 files on each system; `mtl-headers` is empty there, so the Metal output
-    is covered only by the `-d3d -es2 -mtl` regeneration above.
+  - `target/gensrc/{jsl-decora,jsl-prism,mtl-headers}` is identical by name and md5 before and after. On each system
+    `jsl-decora` holds 108 files and `jsl-prism` 424, and there is no Metal header, so the Metal output is covered only
+    by the `-d3d -es2 -mtl` regeneration above (amended 2026-11-15 from US-021's review: `headers` and its 46 files
+    are dropped, because `9b02d6a602`, #57, removed the second-pass `javac -h` and the directory no longer exists).
   - `javafx.graphics` has the same test counts per class as before, and `javafx-jslc` runs its 276 tests with no
     failure.
 - **Upstream.** Repeat the JBS search when the story is picked up and decide whether to propose the change upstream. A
@@ -241,14 +249,14 @@ it is part of the story.
 - All acceptance criteria met, with the logs, md5 lists and modification-time lists of the runs kept with the change.
 - The chosen option and the reason recorded in this file.
 - An independent review repeated the clean, without-`clean` and failure comparisons with its own inputs.
-- Open stories that describe the loop updated, such as US-021 ("starts 2 Prism JVMs fewer"). A done story's record
-  of the loop stays as it is.
+- Open stories that describe the loop updated. A done or implemented story's record of the loop stays as it is,
+  such as US-021's ("starts 2 Prism JVMs fewer").
 - Status set to ✅ Done with the date and the PR, and the row moved to the done table of `backlog/README.md`.
 
 ## Notes
 - Filed rather than fixed in US-008: US-008 removed dead code from the JSL compiler without changing the build. This
   story changes a build step, so it needs its own change and its own gate.
-- Independent of US-018 and US-021, but it changes their numbers. US-018's fix was measured with the loop's 30 Prism
-  JVMs, and US-021's deletion of the two YUV shaders then saves no JVM.
+- Independent of US-018 and US-021. US-018's fix was measured with the loop's 30 Prism JVMs. US-021 (implemented
+  2026-11-15) deleted the two YUV shaders, so the loop starts 28 JVMs, and the one JVM of this change replaces 28.
 - The Ant build file, the scratch copies and the probe runs were not kept in the repository. The Measured section
   describes them fully enough to rebuild.
