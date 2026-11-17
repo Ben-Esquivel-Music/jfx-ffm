@@ -105,6 +105,9 @@ set(MEDIA_PROJECTS_SRC "${MEDIA_SRC}/gstreamer/projects")
 # The Windows version resource shared with the graphics natives
 set(JFX_VERSION_RC "${CMAKE_CURRENT_SOURCE_DIR}/../../javafx.graphics/src/main/resources/version.rc")
 
+# Rust slices of the libraries, the JFX_RUST option and the jfx_rust_test and jfx_rust_lint targets
+include("${CMAKE_CURRENT_SOURCE_DIR}/../../../buildtools/rust/jfx_rust.cmake")
+
 if(WIN32)
     include("${CMAKE_CURRENT_SOURCE_DIR}/win.cmake")
 elseif(APPLE)

@@ -1,0 +1,59 @@
+# Copyright (c) 2026, Oracle and/or its affiliates. All rights reserved.
+# DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
+#
+# This code is free software; you can redistribute it and/or modify it
+# under the terms of the GNU General Public License version 2 only, as
+# published by the Free Software Foundation.  Oracle designates this
+# particular file as subject to the "Classpath" exception as provided
+# by Oracle in the LICENSE file that accompanied this code.
+#
+# This code is distributed in the hope that it will be useful, but WITHOUT
+# ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
+# FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License
+# version 2 for more details (a copy is included in the LICENSE file that
+# accompanied this code).
+#
+# You should have received a copy of the GNU General Public License version
+# 2 along with this work; if not, write to the Free Software Foundation,
+# Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301 USA.
+#
+# Please contact Oracle, 500 Oracle Parkway, Redwood Shores, CA 94065 USA
+# or visit www.oracle.com if you need additional information or have any
+# questions.
+
+# The profiles of the Rust slices. buildtools/rust/jfx_rust.cmake passes this file with --config to every cargo call
+# that compiles and to the licence check's cargo metadata. A --config file outranks every cargo config file, so each
+# profile states every stable setting but two: incremental, which build.incremental decides for every profile, the
+# Debug build included, and split-debuginfo, which has no value that every host accepts: jfx_rust.cmake passes it as
+# two more --config arguments, "packed" on a *-windows-msvc host, else "off". The environment of these calls, and what
+# a cargo config file can still change, are in the comment of the cargo action in jfx_rust.cmake.
+
+[build]
+incremental = false
+# An empty string drops a wrapper that a cargo config file sets
+rustc-wrapper = ""
+rustc-workspace-wrapper = ""
+
+# panic is "unwind": every export catches panics through jfx_rust_support::guard and returns the C failure value,
+# which "abort" would turn into a process abort without an hs_err file.
+[profile.release]
+opt-level = 3
+debug = false
+strip = "debuginfo"
+debug-assertions = false
+overflow-checks = false
+lto = true
+panic = "unwind"
+codegen-units = 1
+rpath = false
+
+[profile.dev]
+opt-level = 0
+debug = true
+strip = "none"
+debug-assertions = true
+overflow-checks = true
+lto = false
+panic = "unwind"
+codegen-units = 256
+rpath = false

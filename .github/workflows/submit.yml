@@ -39,6 +39,18 @@
 # ffmpeg development packages) and jfxmedia_avf on macOS (the AVFoundation
 # backend).
 #
+# The Linux and Windows jobs also set up the Rust toolchain that
+# rust-toolchain.toml pins, plus cbindgen for the build's lint, because
+# jfxmedia links a Rust staticlib there (macOS builds no Rust yet); a step after
+# the build checks that jfxmedia exports exactly the JFXM_EXPORT names of
+# jfxmedia_api.h. An actions/cache entry holds the pinned toolchain and the
+# cbindgen binary. It is saved per branch, right after the toolchain setup, so
+# a job that fails later still saves it; a run restores the entry of its own
+# branch or of the default branch, which has one only after a manual run of
+# this workflow there. The cache saves only time: the setup step removes what a
+# restore left unless it was a complete hit, runs rustup either way and builds
+# cbindgen whenever the one it finds is not the pinned version.
+#
 # The Linux jobs then run the GTK glass display tests, which the build skips for
 # want of a display, on a private Xvfb: once without and once with a window
 # manager (.github/scripts/run-gtk-display-tests.sh).
@@ -128,6 +140,8 @@ jobs:
       BOOT_JDK_VERSION: "27+35"
       BOOT_JDK_FILENAME: "OpenJDK27U-jdk_x64_linux_hotspot_27_35.tar.gz"
       BOOT_JDK_URL: "https://github.com/adoptium/temurin27-binaries/releases/download/jdk-27%2B35/OpenJDK27U-jdk_x64_linux_hotspot_27_35.tar.gz"
+      # Must equal JFX_CBINDGEN_VERSION of buildtools/rust/jfx_rust.cmake: its lint fails on any other version.
+      CBINDGEN_VERSION: "0.29.4"
 
     steps:
       - name: Checkout the source
@@ -180,6 +194,89 @@ jobs:
           which java
           java -version
           mvn -version
+
+      - name: Locate the pinned Rust toolchain and the cargo and rustup homes
+        id: rust
+        # Feeds only the cache steps and the setup step's removal of what a restore left, which all do nothing
+        # when this step fails: the job goes on without a cache.
+        continue-on-error: true
+        working-directory: jfx
+        run: |
+          set -x
+          channel=$(grep -m 1 -oP '^\s*channel\s*=\s*"\K[^"]+' rust-toolchain.toml)
+          echo "channel=${channel}" >> "${GITHUB_OUTPUT}"
+          echo "cargo_home=${CARGO_HOME:-${HOME}/.cargo}" >> "${GITHUB_OUTPUT}"
+          echo "rustup_home=${RUSTUP_HOME:-${HOME}/.rustup}" >> "${GITHUB_OUTPUT}"
+
+      - name: Restore the pinned Rust toolchain and cbindgen from the cache
+        id: rust_cache
+        if: ${{ steps.rust.outcome == 'success' }}
+        continue-on-error: true
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          # Nothing else of the two homes: the image's own rustup and toolchains live there too.
+          path: |
+            ${{ steps.rust.outputs.rustup_home }}/toolchains/${{ steps.rust.outputs.channel }}-*
+            ${{ steps.rust.outputs.rustup_home }}/update-hashes/${{ steps.rust.outputs.channel }}-*
+            ${{ steps.rust.outputs.cargo_home }}/bin/cbindgen
+          key: >-
+            ${{ format('rust-{0}-{1}-{2}-cbindgen-{3}', runner.os, runner.arch,
+            hashFiles('jfx/rust-toolchain.toml'), env.CBINDGEN_VERSION) }}
+
+      - name: Set up the Rust toolchain
+        working-directory: jfx
+        env:
+          CACHE_HIT: ${{ steps.rust_cache.outputs.cache-hit }}
+          CACHE_CHANNEL: ${{ steps.rust.outputs.channel }}
+          CACHE_RUSTUP_HOME: ${{ steps.rust.outputs.rustup_home }}
+          CACHE_CARGO_HOME: ${{ steps.rust.outputs.cargo_home }}
+        run: |
+          set -x
+          # jfxmedia links a Rust staticlib (buildtools/rust/jfx_rust.cmake). In the repository root,
+          # rustup installs the toolchain that rust-toolchain.toml pins, and the lint of the build
+          # (jfx_rust_lint) needs the pinned cbindgen. An image without rustup gets rustup-init the
+          # way the boot JDK is fetched. A restore that was not a hit can still have written part of
+          # the toolchain (a failed extraction keeps its files and sets no cache-hit), which rustup
+          # may take for an installed toolchain or fail on, so whatever the restore step's three
+          # paths match is removed first. The cache thus saves only time: rustup toolchain install
+          # runs either way, and cargo builds cbindgen unless the one on PATH is the pinned version.
+          if [ -n "${CACHE_CHANNEL}" ] && [ -n "${CACHE_RUSTUP_HOME}" ] && [ -n "${CACHE_CARGO_HOME}" ] \
+            && [ "${CACHE_HIT}" != "true" ]; then
+            for cached in "${CACHE_RUSTUP_HOME}/toolchains/${CACHE_CHANNEL}"-* \
+              "${CACHE_RUSTUP_HOME}/update-hashes/${CACHE_CHANNEL}"-* "${CACHE_CARGO_HOME}/bin/cbindgen"; do
+              if [ -e "${cached}" ] || [ -L "${cached}" ]; then
+                rm -rf -- "${cached}"
+              fi
+            done
+          fi
+          cargo_bin="${CARGO_HOME:-${HOME}/.cargo}/bin"
+          if ! command -v rustup > /dev/null; then
+            wget -O "${HOME}/rustup-init" "https://static.rust-lang.org/rustup/dist/$(uname -m)-unknown-linux-gnu/rustup-init"
+            chmod +x "${HOME}/rustup-init"
+            "${HOME}/rustup-init" -y --no-modify-path --profile minimal --default-toolchain none
+          fi
+          export PATH="${cargo_bin}:${PATH}"
+          echo "${cargo_bin}" >> "${GITHUB_PATH}"
+          rustup toolchain install
+          if [ "$(cbindgen --version 2> /dev/null)" != "cbindgen ${CBINDGEN_VERSION}" ]; then
+            # A restored binary is not in cargo's install records, and cargo overwrites such a file
+            # only with --force.
+            cargo install --locked --force "cbindgen@${CBINDGEN_VERSION}"
+          fi
+          rustup show active-toolchain
+
+      - name: Save the pinned Rust toolchain and cbindgen to the cache
+        # Right after the setup, so that a job that fails later still saves it. The paths must be the
+        # restore step's, character for character: the version of a cache entry is a hash of them.
+        if: ${{ steps.rust_cache.outputs.cache-hit != 'true' && steps.rust_cache.outputs.cache-primary-key != '' }}
+        continue-on-error: true
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ${{ steps.rust.outputs.rustup_home }}/toolchains/${{ steps.rust.outputs.channel }}-*
+            ${{ steps.rust.outputs.rustup_home }}/update-hashes/${{ steps.rust.outputs.channel }}-*
+            ${{ steps.rust.outputs.cargo_home }}/bin/cbindgen
+          key: ${{ steps.rust_cache.outputs.cache-primary-key }}
 
       - name: Build JavaFX artifacts and run headless tests
         working-directory: jfx
@@ -263,6 +360,39 @@ jobs:
           fi
           nm -D --defined-only "${so}" | grep gst_plugin_desc
 
+      - name: Verify the exports of jfxmedia, which links Rust
+        if: ${{ !cancelled() }}
+        working-directory: jfx
+        run: |
+          set -x
+          # jfxm_abi_version comes from a Rust staticlib (buildtools/rust/jfx_rust.cmake). The version
+          # script generated from jfxmedia_api.h exports exactly the names the header declares, so the
+          # two lists must be equal: any other name (C++, the Rust standard library's, a C helper's)
+          # means the script no longer applies. ldd -r must then resolve every symbol and library.
+          # Like the build, a name the header declares twice (in two #if branches) counts once.
+          so=modules/javafx.media/target/native/bin/libjfxmedia.so
+          header=modules/javafx.media/src/main/native/jfxmedia/jfxmedia_api.h
+          if [ ! -f "${so}" ]; then
+            echo "::error::${so} was not built"
+            exit 1
+          fi
+          expected=$(grep -oP '^JFXM_EXPORT\b[^(]*?\K\w+(?=\s*\()' "${header}" | sort -u)
+          exported=$(nm -D --defined-only "${so}" | awk '{ print $NF }' | sort)
+          echo "$(echo "${expected}" | wc -l) names in the header, $(echo "${exported}" | wc -l) exported"
+          if [ -z "${expected}" ]; then
+            echo "::error::no JFXM_EXPORT line found in ${header}"
+            exit 1
+          fi
+          if ! diff <(echo "${expected}") <(echo "${exported}"); then
+            echo "::error::${so} must export exactly the JFXM_EXPORT names of ${header} (<: header, >: library)"
+            exit 1
+          fi
+          readelf -d "${so}" | grep NEEDED
+          if ldd -r "${so}" 2>&1 | grep -E 'undefined symbol|not found'; then
+            echo "::error::${so} has an unresolved symbol or library"
+            exit 1
+          fi
+
   linux_aarch64_build:
     name: Linux aarch64
     runs-on: "ubuntu-24.04-arm"
@@ -271,6 +401,8 @@ jobs:
       BOOT_JDK_VERSION: "27+35"
       BOOT_JDK_FILENAME: "OpenJDK27U-jdk_aarch64_linux_hotspot_27_35.tar.gz"
       BOOT_JDK_URL: "https://github.com/adoptium/temurin27-binaries/releases/download/jdk-27%2B35/OpenJDK27U-jdk_aarch64_linux_hotspot_27_35.tar.gz"
+      # Must equal JFX_CBINDGEN_VERSION of buildtools/rust/jfx_rust.cmake: its lint fails on any other version.
+      CBINDGEN_VERSION: "0.29.4"
 
     steps:
       - name: Checkout the source
@@ -323,6 +455,89 @@ jobs:
           which java
           java -version
           mvn -version
+
+      - name: Locate the pinned Rust toolchain and the cargo and rustup homes
+        id: rust
+        # Feeds only the cache steps and the setup step's removal of what a restore left, which all do nothing
+        # when this step fails: the job goes on without a cache.
+        continue-on-error: true
+        working-directory: jfx
+        run: |
+          set -x
+          channel=$(grep -m 1 -oP '^\s*channel\s*=\s*"\K[^"]+' rust-toolchain.toml)
+          echo "channel=${channel}" >> "${GITHUB_OUTPUT}"
+          echo "cargo_home=${CARGO_HOME:-${HOME}/.cargo}" >> "${GITHUB_OUTPUT}"
+          echo "rustup_home=${RUSTUP_HOME:-${HOME}/.rustup}" >> "${GITHUB_OUTPUT}"
+
+      - name: Restore the pinned Rust toolchain and cbindgen from the cache
+        id: rust_cache
+        if: ${{ steps.rust.outcome == 'success' }}
+        continue-on-error: true
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          # Nothing else of the two homes: the image's own rustup and toolchains live there too.
+          path: |
+            ${{ steps.rust.outputs.rustup_home }}/toolchains/${{ steps.rust.outputs.channel }}-*
+            ${{ steps.rust.outputs.rustup_home }}/update-hashes/${{ steps.rust.outputs.channel }}-*
+            ${{ steps.rust.outputs.cargo_home }}/bin/cbindgen
+          key: >-
+            ${{ format('rust-{0}-{1}-{2}-cbindgen-{3}', runner.os, runner.arch,
+            hashFiles('jfx/rust-toolchain.toml'), env.CBINDGEN_VERSION) }}
+
+      - name: Set up the Rust toolchain
+        working-directory: jfx
+        env:
+          CACHE_HIT: ${{ steps.rust_cache.outputs.cache-hit }}
+          CACHE_CHANNEL: ${{ steps.rust.outputs.channel }}
+          CACHE_RUSTUP_HOME: ${{ steps.rust.outputs.rustup_home }}
+          CACHE_CARGO_HOME: ${{ steps.rust.outputs.cargo_home }}
+        run: |
+          set -x
+          # jfxmedia links a Rust staticlib (buildtools/rust/jfx_rust.cmake). In the repository root,
+          # rustup installs the toolchain that rust-toolchain.toml pins, and the lint of the build
+          # (jfx_rust_lint) needs the pinned cbindgen. An image without rustup gets rustup-init the
+          # way the boot JDK is fetched. A restore that was not a hit can still have written part of
+          # the toolchain (a failed extraction keeps its files and sets no cache-hit), which rustup
+          # may take for an installed toolchain or fail on, so whatever the restore step's three
+          # paths match is removed first. The cache thus saves only time: rustup toolchain install
+          # runs either way, and cargo builds cbindgen unless the one on PATH is the pinned version.
+          if [ -n "${CACHE_CHANNEL}" ] && [ -n "${CACHE_RUSTUP_HOME}" ] && [ -n "${CACHE_CARGO_HOME}" ] \
+            && [ "${CACHE_HIT}" != "true" ]; then
+            for cached in "${CACHE_RUSTUP_HOME}/toolchains/${CACHE_CHANNEL}"-* \
+              "${CACHE_RUSTUP_HOME}/update-hashes/${CACHE_CHANNEL}"-* "${CACHE_CARGO_HOME}/bin/cbindgen"; do
+              if [ -e "${cached}" ] || [ -L "${cached}" ]; then
+                rm -rf -- "${cached}"
+              fi
+            done
+          fi
+          cargo_bin="${CARGO_HOME:-${HOME}/.cargo}/bin"
+          if ! command -v rustup > /dev/null; then
+            wget -O "${HOME}/rustup-init" "https://static.rust-lang.org/rustup/dist/$(uname -m)-unknown-linux-gnu/rustup-init"
+            chmod +x "${HOME}/rustup-init"
+            "${HOME}/rustup-init" -y --no-modify-path --profile minimal --default-toolchain none
+          fi
+          export PATH="${cargo_bin}:${PATH}"
+          echo "${cargo_bin}" >> "${GITHUB_PATH}"
+          rustup toolchain install
+          if [ "$(cbindgen --version 2> /dev/null)" != "cbindgen ${CBINDGEN_VERSION}" ]; then
+            # A restored binary is not in cargo's install records, and cargo overwrites such a file
+            # only with --force.
+            cargo install --locked --force "cbindgen@${CBINDGEN_VERSION}"
+          fi
+          rustup show active-toolchain
+
+      - name: Save the pinned Rust toolchain and cbindgen to the cache
+        # Right after the setup, so that a job that fails later still saves it. The paths must be the
+        # restore step's, character for character: the version of a cache entry is a hash of them.
+        if: ${{ steps.rust_cache.outputs.cache-hit != 'true' && steps.rust_cache.outputs.cache-primary-key != '' }}
+        continue-on-error: true
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ${{ steps.rust.outputs.rustup_home }}/toolchains/${{ steps.rust.outputs.channel }}-*
+            ${{ steps.rust.outputs.rustup_home }}/update-hashes/${{ steps.rust.outputs.channel }}-*
+            ${{ steps.rust.outputs.cargo_home }}/bin/cbindgen
+          key: ${{ steps.rust_cache.outputs.cache-primary-key }}
 
       - name: Build JavaFX artifacts and run headless tests
         working-directory: jfx
@@ -405,6 +620,39 @@ jobs:
             exit 1
           fi
           nm -D --defined-only "${so}" | grep gst_plugin_desc
+
+      - name: Verify the exports of jfxmedia, which links Rust
+        if: ${{ !cancelled() }}
+        working-directory: jfx
+        run: |
+          set -x
+          # jfxm_abi_version comes from a Rust staticlib (buildtools/rust/jfx_rust.cmake). The version
+          # script generated from jfxmedia_api.h exports exactly the names the header declares, so the
+          # two lists must be equal: any other name (C++, the Rust standard library's, a C helper's)
+          # means the script no longer applies. ldd -r must then resolve every symbol and library.
+          # Like the build, a name the header declares twice (in two #if branches) counts once.
+          so=modules/javafx.media/target/native/bin/libjfxmedia.so
+          header=modules/javafx.media/src/main/native/jfxmedia/jfxmedia_api.h
+          if [ ! -f "${so}" ]; then
+            echo "::error::${so} was not built"
+            exit 1
+          fi
+          expected=$(grep -oP '^JFXM_EXPORT\b[^(]*?\K\w+(?=\s*\()' "${header}" | sort -u)
+          exported=$(nm -D --defined-only "${so}" | awk '{ print $NF }' | sort)
+          echo "$(echo "${expected}" | wc -l) names in the header, $(echo "${exported}" | wc -l) exported"
+          if [ -z "${expected}" ]; then
+            echo "::error::no JFXM_EXPORT line found in ${header}"
+            exit 1
+          fi
+          if ! diff <(echo "${expected}") <(echo "${exported}"); then
+            echo "::error::${so} must export exactly the JFXM_EXPORT names of ${header} (<: header, >: library)"
+            exit 1
+          fi
+          readelf -d "${so}" | grep NEEDED
+          if ldd -r "${so}" 2>&1 | grep -E 'undefined symbol|not found'; then
+            echo "::error::${so} has an unresolved symbol or library"
+            exit 1
+          fi
 
   macos_x64_build:
     name: macOS x64
@@ -544,6 +792,8 @@ jobs:
       BOOT_JDK_VERSION: "27+35"
       BOOT_JDK_FILENAME: "OpenJDK27U-jdk_x64_windows_hotspot_27_35.zip"
       BOOT_JDK_URL: "https://github.com/adoptium/temurin27-binaries/releases/download/jdk-27%2B35/OpenJDK27U-jdk_x64_windows_hotspot_27_35.zip"
+      # Must equal JFX_CBINDGEN_VERSION of buildtools/rust/jfx_rust.cmake: its lint fails on any other version.
+      CBINDGEN_VERSION: "0.29.4"
 
     steps:
       - name: Checkout the source
@@ -556,6 +806,99 @@ jobs:
           mkdir -p "$HOME\bootjdk"
           & curl -L "$env:BOOT_JDK_URL" -o "$HOME/bootjdk/$env:BOOT_JDK_FILENAME"
           tar -xf "$HOME/bootjdk/$env:BOOT_JDK_FILENAME" -C "$HOME/bootjdk"
+
+      - name: Locate the pinned Rust toolchain and the cargo and rustup homes
+        id: rust
+        # Feeds only the cache steps and the setup step's removal of what a restore left, which all do nothing
+        # when this step fails: the job goes on without a cache.
+        continue-on-error: true
+        working-directory: jfx
+        run: |
+          $channel = Select-String -CaseSensitive -Path rust-toolchain.toml -Pattern '^\s*channel\s*=\s*"([^"]+)"' |
+            Select-Object -First 1 | ForEach-Object { $_.Matches[0].Groups[1].Value }
+          if (-not $channel) { exit 1 }
+          if ($env:CARGO_HOME) { $cargoHome = $env:CARGO_HOME } else { $cargoHome = "$HOME\.cargo" }
+          if ($env:RUSTUP_HOME) { $rustupHome = $env:RUSTUP_HOME } else { $rustupHome = "$HOME\.rustup" }
+          echo "channel=$channel" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+          echo "cargo_home=$cargoHome" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+          echo "rustup_home=$rustupHome" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+
+      - name: Restore the pinned Rust toolchain and cbindgen from the cache
+        id: rust_cache
+        if: ${{ steps.rust.outcome == 'success' }}
+        continue-on-error: true
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          # Nothing else of the two homes: the image's own rustup and toolchains live there too.
+          path: |
+            ${{ steps.rust.outputs.rustup_home }}/toolchains/${{ steps.rust.outputs.channel }}-*
+            ${{ steps.rust.outputs.rustup_home }}/update-hashes/${{ steps.rust.outputs.channel }}-*
+            ${{ steps.rust.outputs.cargo_home }}/bin/cbindgen.exe
+          key: >-
+            ${{ format('rust-{0}-{1}-{2}-cbindgen-{3}', runner.os, runner.arch,
+            hashFiles('jfx/rust-toolchain.toml'), env.CBINDGEN_VERSION) }}
+
+      - name: Set up the Rust toolchain
+        working-directory: jfx
+        env:
+          CACHE_HIT: ${{ steps.rust_cache.outputs.cache-hit }}
+          CACHE_CHANNEL: ${{ steps.rust.outputs.channel }}
+          CACHE_RUSTUP_HOME: ${{ steps.rust.outputs.rustup_home }}
+          CACHE_CARGO_HOME: ${{ steps.rust.outputs.cargo_home }}
+        run: |
+          # jfxmedia links a Rust staticlib (buildtools/rust/jfx_rust.cmake). In the repository root,
+          # rustup installs the toolchain that rust-toolchain.toml pins, and the lint of the build
+          # (jfx_rust_lint) needs the pinned cbindgen. An image without rustup gets rustup-init the
+          # way the boot JDK is fetched. A restore that was not a hit can still have written part of
+          # the toolchain (a failed extraction keeps its files and sets no cache-hit), which rustup
+          # may take for an installed toolchain or fail on, so whatever the restore step's three
+          # paths match is removed first. The cache thus saves only time: rustup toolchain install
+          # runs either way, and cargo builds cbindgen unless the one on Path is the pinned version.
+          # This step runs before "Setup environment" on purpose: the build step restores the Path
+          # saved there as THE_PATH, and the cargo bin directory that GITHUB_PATH adds is part of it
+          # only for steps that start after this one.
+          $located = $env:CACHE_CHANNEL -and $env:CACHE_RUSTUP_HOME -and $env:CACHE_CARGO_HOME
+          if ($located -and $env:CACHE_HIT -cne "true") {
+            $cached = "$env:CACHE_RUSTUP_HOME\toolchains\$env:CACHE_CHANNEL-*",
+              "$env:CACHE_RUSTUP_HOME\update-hashes\$env:CACHE_CHANNEL-*", "$env:CACHE_CARGO_HOME\bin\cbindgen.exe"
+            foreach ($item in @($cached | Where-Object { Test-Path -Path $_ } | Get-Item -Force)) {
+              Remove-Item -LiteralPath $item.FullName -Recurse -Force
+            }
+          }
+          if ($env:CARGO_HOME) { $cargoBin = "$env:CARGO_HOME\bin" } else { $cargoBin = "$HOME\.cargo\bin" }
+          if (-not (Get-Command rustup -ErrorAction SilentlyContinue)) {
+            & curl -fL "https://static.rust-lang.org/rustup/dist/x86_64-pc-windows-msvc/rustup-init.exe" -o "$HOME/rustup-init.exe"
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+            & "$HOME/rustup-init.exe" -y --no-modify-path --profile minimal --default-toolchain none
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          }
+          $env:Path = "$cargoBin;$env:Path"
+          echo "$cargoBin" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+          # A failing native command does not stop a PowerShell step, so each one is checked
+          rustup toolchain install
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $cbindgenVersion = try { "$(& cbindgen --version 2> $null)" } catch { "" }
+          if ($cbindgenVersion -cne "cbindgen $env:CBINDGEN_VERSION") {
+            # A restored binary is not in cargo's install records, and cargo overwrites such a file
+            # only with --force.
+            cargo install --locked --force "cbindgen@$env:CBINDGEN_VERSION"
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          }
+          rustup show active-toolchain
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Save the pinned Rust toolchain and cbindgen to the cache
+        # Right after the setup, so that a job that fails later still saves it. The paths must be the
+        # restore step's, character for character: the version of a cache entry is a hash of them.
+        if: ${{ steps.rust_cache.outputs.cache-hit != 'true' && steps.rust_cache.outputs.cache-primary-key != '' }}
+        continue-on-error: true
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ${{ steps.rust.outputs.rustup_home }}/toolchains/${{ steps.rust.outputs.channel }}-*
+            ${{ steps.rust.outputs.rustup_home }}/update-hashes/${{ steps.rust.outputs.channel }}-*
+            ${{ steps.rust.outputs.cargo_home }}/bin/cbindgen.exe
+          key: ${{ steps.rust_cache.outputs.cache-primary-key }}
 
       - name: Setup environment
         run: |
@@ -583,3 +926,54 @@ jobs:
           # passed to its separate test run: after a failure Maven still builds and
           # tests every module that does not depend on the failed one.
           mvn -B -ntp -fae install "-Djfx.web.skipFfmTests=false"
+
+      - name: Verify the exports of jfxmedia, which links Rust
+        if: ${{ !cancelled() }}
+        working-directory: jfx
+        run: |
+          # jfxm_abi_version comes from a Rust staticlib that /EXPORT: exports
+          # (buildtools/rust/jfx_rust.cmake). The DLL must export exactly the names jfxmedia_api.h
+          # declares: a name missing from the DLL and a name the header does not declare both fail.
+          # dumpbin's own count of names must equal the names read, so that an export line this step
+          # cannot read fails too, and so must its count of functions, so that an export by ordinal
+          # only (NONAME), which Java cannot look up by name, fails as well. The runner has no
+          # vcvars, so dumpbin is found through vswhere.
+          $dll = "modules\javafx.media\target\native\bin\jfxmedia.dll"
+          $header = "modules\javafx.media\src\main\native\jfxmedia\jfxmedia_api.h"
+          if (-not (Test-Path $dll)) { echo "::error::$dll was not built"; exit 1 }
+          $vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
+          $vcTools = "Microsoft.VisualStudio.Component.VC.Tools.x86.x64"
+          $vs = & $vswhere -latest -products * -requires $vcTools -property installationPath
+          $dumpbin = Get-ChildItem "$vs\VC\Tools\MSVC\*\bin\Hostx64\x64\dumpbin.exe" |
+            Sort-Object FullName | Select-Object -Last 1 -ExpandProperty FullName
+          if (-not $dumpbin) { echo "::error::no dumpbin.exe under $vs"; exit 1 }
+          & $dumpbin /NOLOGO /DEPENDENTS $dll
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $exports = & $dumpbin /NOLOGO /EXPORTS $dll
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $exports
+          $exported = @($exports |
+            Select-String -CaseSensitive -Pattern '^\s+\d+\s+[0-9A-F]+\s+[0-9A-F]+\s+(\S+)' |
+            ForEach-Object { $_.Matches[0].Groups[1].Value })
+          $counted = @($exports | Select-String -CaseSensitive -Pattern '^\s+(\d+) number of names$' |
+            ForEach-Object { [int]$_.Matches[0].Groups[1].Value })
+          if ($counted.Count -ne 1 -or $counted[0] -ne $exported.Count) {
+            $counts = "dumpbin counts $($counted -join ', ') names in $dll, this step read $($exported.Count)"
+            echo "::error::${counts}: the export table has lines this step could not read"
+            exit 1
+          }
+          $functions = @($exports | Select-String -CaseSensitive -Pattern '^\s+(\d+) number of functions$' |
+            ForEach-Object { [int]$_.Matches[0].Groups[1].Value })
+          if ($functions.Count -ne 1 -or $functions[0] -ne $exported.Count) {
+            $counts = "dumpbin counts $($functions -join ', ') functions in $dll and $($exported.Count) names"
+            echo "::error::${counts}: every exported function must have a name"
+            exit 1
+          }
+          $expected = @(Select-String -CaseSensitive -Path $header -Pattern '^JFXM_EXPORT\b[^(]*?(\w+)\s*\(' |
+            ForEach-Object { $_.Matches[0].Groups[1].Value } | Select-Object -Unique)
+          echo "$($expected.Count) names in the header, $($exported.Count) exported"
+          if ($expected.Count -eq 0) { echo "::error::no JFXM_EXPORT line found in $header"; exit 1 }
+          $missing = @($expected | Where-Object { $exported -cnotcontains $_ })
+          if ($missing.Count -ne 0) { echo "::error::$dll does not export: $($missing -join ', ')"; exit 1 }
+          $extra = @($exported | Where-Object { $expected -cnotcontains $_ })
+          if ($extra.Count -ne 0) { echo "::error::$dll exports names not in ${header}: $($extra -join ', ')"; exit 1 }

@@ -474,12 +474,24 @@ set(JFXMEDIA_LIBRARY_ARGS
 
 add_media_library(jfxmedia ${JFXMEDIA_LIBRARY_ARGS})
 
+# jfxm_abi_version comes from the jfxmedia crate (buildtools/rust/jfx_rust.cmake); with -DJFX_RUST=false
+# from ffi/jfxmedia_api.cpp. The shipped library exports what jfxmedia_api.h declares.
+set(JFXMEDIA_RUST_SLICE_ARGS
+    CRATE "${CMAKE_CURRENT_SOURCE_DIR}/../src/main/native-rust/jfxmedia"
+    SLICE JFXMEDIA_ABI_VERSION
+    EXPORTS jfxm_abi_version)
+jfx_add_rust_slice(jfxmedia ${JFXMEDIA_RUST_SLICE_ARGS}
+    HEADERS "${JFXMEDIA_SRC}/jfxmedia_api.h")
+
 # The hooks build (JFXM_TEST_HOOKS, see CMakeLists.txt)
 if(JFXM_TEST_HOOKS)
     add_media_library(jfxmedia_test ${JFXMEDIA_LIBRARY_ARGS}
         OUTPUT_DIR "${JFXM_TEST_BIN_DIR}")
     target_sources(jfxmedia_test PRIVATE "${JFXMEDIA_SRC}/ffi/jfxmedia_test_hooks.cpp")
     target_compile_definitions(jfxmedia_test PRIVATE JFXM_TEST_HOOKS=1)
+    # Its export list adds the jfxm_test_* names of the hooks header
+    jfx_add_rust_slice(jfxmedia_test ${JFXMEDIA_RUST_SLICE_ARGS}
+        HEADERS "${JFXMEDIA_SRC}/jfxmedia_api.h" "${JFXMEDIA_SRC}/ffi/jfxmedia_test_hooks.h")
     # libgstreamer-lite.so stays in BIN_DIR, not next to this library; reach it from $ORIGIN, not by a build-tree path
     file(RELATIVE_PATH jfxm_bin_from_test_bin "${JFXM_TEST_BIN_DIR}" "${BIN_DIR}")
     target_link_options(jfxmedia_test PRIVATE "LINKER:-rpath,$ORIGIN/${jfxm_bin_from_test_bin}")

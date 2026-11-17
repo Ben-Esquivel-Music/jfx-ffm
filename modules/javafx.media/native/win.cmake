@@ -860,6 +860,15 @@ set(JFXMEDIA_LIBRARY_ARGS
 
 add_media_library(jfxmedia ${JFXMEDIA_LIBRARY_ARGS})
 
+# jfxm_abi_version comes from the jfxmedia crate (buildtools/rust/jfx_rust.cmake); with -DJFX_RUST=false
+# from ffi/jfxmedia_api.cpp. The shipped library exports what jfxmedia_api.h declares.
+set(JFXMEDIA_RUST_SLICE_ARGS
+    CRATE "${CMAKE_CURRENT_SOURCE_DIR}/../src/main/native-rust/jfxmedia"
+    SLICE JFXMEDIA_ABI_VERSION
+    EXPORTS jfxm_abi_version)
+jfx_add_rust_slice(jfxmedia ${JFXMEDIA_RUST_SLICE_ARGS}
+    HEADERS "${JFXMEDIA_SRC}/jfxmedia_api.h")
+
 # The hooks build (JFXM_TEST_HOOKS, see CMakeLists.txt). RC_INTERNAL_NAME above keeps its version
 # resource the shipped DLL's rather than one named after the target.
 if(JFXM_TEST_HOOKS)
@@ -867,6 +876,9 @@ if(JFXM_TEST_HOOKS)
         OUTPUT_DIR "${JFXM_TEST_BIN_DIR}")
     target_sources(jfxmedia_test PRIVATE "${JFXMEDIA_SRC}/ffi/jfxmedia_test_hooks.cpp")
     target_compile_definitions(jfxmedia_test PRIVATE JFXM_TEST_HOOKS=1)
+    # Its export list adds the jfxm_test_* names of the hooks header
+    jfx_add_rust_slice(jfxmedia_test ${JFXMEDIA_RUST_SLICE_ARGS}
+        HEADERS "${JFXMEDIA_SRC}/jfxmedia_api.h" "${JFXMEDIA_SRC}/ffi/jfxmedia_test_hooks.h")
     # A build of jfxmedia alone must not leave an older hooks library behind for the tests
     add_dependencies(jfxmedia jfxmedia_test)
 endif()
