@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2008, 2013, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2008, 2026, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -28,6 +28,7 @@ package com.sun.scenario.effect.compiler.backend.sw.java;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
+import com.sun.scenario.effect.compiler.JSLSourceException;
 import com.sun.scenario.effect.compiler.model.BaseType;
 import com.sun.scenario.effect.compiler.model.FuncImpl;
 import com.sun.scenario.effect.compiler.model.Function;
@@ -146,7 +147,8 @@ class JSWCallScanner extends TreeScanner {
     @Override
     public void visitCallExpr(CallExpr e) {
         if (inCallExpr) {
-            throw new InternalError("Nested function calls not yet supported");
+            throw new JSLSourceException(e.getPosition(),
+                    "nested function calls are not supported by the Java software peer (-java)");
         }
 
         Function func = e.getFunction();
@@ -262,7 +264,8 @@ class JSWCallScanner extends TreeScanner {
                 output(" * " + ve.getVariable().getType().getNumFields());
                 output(" + " + getFieldIndex(selectedField) + "]");
             } else {
-                throw new InternalError("Array access only supports variable expr/index (for now)");
+                throw new JSLSourceException(e.getPosition(), "array access other than variable[variable]"
+                        + " is not supported by the Java software peer (-java)");
             }
         } else {
             super.visitArrayAccessExpr(e);
@@ -354,7 +357,8 @@ class JSWCallScanner extends TreeScanner {
                 } else if (inVectorOp) {
                     output(getSuffix(vectorIndex));
                 } else {
-                    throw new InternalError("TBD");
+                    throw new JSLSourceException(e.getPosition(), "the Java software peer (-java) does not support"
+                            + " vector '" + var.getName() + "' here: it cannot tell which component to use");
                 }
             }
         } else {

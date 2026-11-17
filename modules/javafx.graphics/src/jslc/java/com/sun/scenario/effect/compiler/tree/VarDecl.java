@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2008, 2013, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2008, 2026, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -33,10 +33,12 @@ public class VarDecl extends ExtDecl {
 
     private final Variable var;
     private final Expr init;
+    private final SourcePosition position;
 
-    VarDecl(Variable var, Expr init) {
+    VarDecl(Variable var, Expr init, SourcePosition position) {
         this.var = var;
         this.init = init;
+        this.position = position;
     }
 
     public Variable getVariable() {
@@ -45,6 +47,10 @@ public class VarDecl extends ExtDecl {
 
     public Expr getInit() {
         return init;
+    }
+
+    public SourcePosition getPosition() {
+        return position;
     }
 
     public void accept(TreeVisitor tv) {

@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2008, 2013, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2008, 2026, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -30,13 +30,19 @@ package com.sun.scenario.effect.compiler.tree;
 public class GlueBlock extends ExtDecl {
 
     private final String text;
+    private final SourcePosition position;
 
-    GlueBlock(String text) {
+    GlueBlock(String text, SourcePosition position) {
         this.text = text;
+        this.position = position;
     }
 
     public String getText() {
         return text;
+    }
+
+    public SourcePosition getPosition() {
+        return position;
     }
 
     public void accept(TreeVisitor tv) {

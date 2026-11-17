@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2019, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2019, 2026, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -27,6 +27,7 @@ package com.sun.scenario.effect.compiler.tree;
 
 import com.sun.scenario.effect.compiler.JSLBaseVisitor;
 import com.sun.scenario.effect.compiler.JSLParser;
+import com.sun.scenario.effect.compiler.JSLSourceException;
 import com.sun.scenario.effect.compiler.model.BinaryOpType;
 import com.sun.scenario.effect.compiler.model.Function;
 import com.sun.scenario.effect.compiler.model.Param;
@@ -36,9 +37,12 @@ import com.sun.scenario.effect.compiler.model.SymbolTable;
 import com.sun.scenario.effect.compiler.model.Type;
 import com.sun.scenario.effect.compiler.model.UnaryOpType;
 import com.sun.scenario.effect.compiler.model.Variable;
+import org.antlr.v4.runtime.ParserRuleContext;
+import org.antlr.v4.runtime.Token;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.function.Supplier;
 
 public class JSLVisitor extends JSLBaseVisitor<Tree> {
     private SymbolTable symbols = new SymbolTable();
@@ -174,569 +178,692 @@ public class JSLVisitor extends JSLBaseVisitor<Tree> {
         public void accept(TreeVisitor tv) {}
     }
 
+    /**
+     * Visits a context, so that an error of the input raised while it is visited, and not already located at an
+     * inner context, reports the start of this context.
+     */
+    private static <T> T locating(ParserRuleContext ctx, Supplier<T> visit) {
+        try {
+            return visit.get();
+        } catch (RuntimeException e) {
+            // TreeMaker, SymbolTable, the tree nodes and this visitor report a mistake in the input as exactly a
+            // RuntimeException. Any other type is a fault of the compiler and must not read as a mistake in the file.
+            if (e.getClass() != RuntimeException.class) {
+                throw e;
+            }
+            Token start = ctx.getStart();
+            throw new JSLSourceException(start.getLine(), start.getCharPositionInLine(), e.getMessage(), e);
+        }
+    }
+
+    private static SourcePosition positionOf(ParserRuleContext ctx) {
+        Token start = ctx.getStart();
+        return new SourcePosition(start.getLine(), start.getCharPositionInLine());
+    }
+
+    private static Type typeOf(JSLParser.Type_specifierContext ctx) {
+        if (ctx.array_brackets() != null) {
+            throw new RuntimeException("array types are not supported: " + ctx.getText());
+        }
+        return Type.fromToken(ctx.getText());
+    }
+
+    private static int intConstant(String text) {
+        try {
+            return Integer.parseInt(text);
+        } catch (NumberFormatException e) {
+            // The lexer gives an integer constant only decimal digits, so the only way it can fail to parse is
+            // by being too large.
+            throw new RuntimeException("integer constant " + text + " is too large (the largest is "
+                    + Integer.MAX_VALUE + ")", e);
+        }
+    }
+
     @Override
     public StringExpr visitField_selection(JSLParser.Field_selectionContext ctx) {
-        if (ctx.RGBA_FIELDS() != null) {
-            return new StringExpr(ctx.r.getText());
-        } else if (ctx.XYZW_FIELDS() != null) {
-            return new StringExpr(ctx.x.getText());
-        }
-        throw new RuntimeException("invalid field selection");
+        return locating(ctx, () -> {
+            if (ctx.RGBA_FIELDS() != null) {
+                return new StringExpr(ctx.r.getText());
+            } else if (ctx.XYZW_FIELDS() != null) {
+                return new StringExpr(ctx.x.getText());
+            }
+            throw new RuntimeException("invalid field selection");
+        });
     }
 
     @Override
     public Expr visitPrimary_expression(JSLParser.Primary_expressionContext ctx) {
-        if (ctx.IDENTIFIER() != null) {
-            return tm.variable(ctx.IDENTIFIER().getText());
-        } else if (ctx.INTCONSTANT() != null) {
-            return tm.literal(Type.INT, Integer.valueOf(ctx.INTCONSTANT().getText()));
-        } else if (ctx.FLOATCONSTANT() != null) {
-            return tm.literal(Type.FLOAT, Float.valueOf(ctx.FLOATCONSTANT().getText()));
-        } else if (ctx.BOOLCONSTANT() != null) {
-            return tm.literal(Type.BOOL, Boolean.valueOf(ctx.BOOLCONSTANT().getText()));
-        } else if (ctx.e != null) {
-            return tm.parenExpr(visitExpression(ctx.e));
-        }
+        return locating(ctx, () -> {
+            if (ctx.IDENTIFIER() != null) {
+                return tm.variable(ctx.IDENTIFIER().getText(), positionOf(ctx));
+            } else if (ctx.INTCONSTANT() != null) {
+                return tm.literal(Type.INT, intConstant(ctx.INTCONSTANT().getText()));
+            } else if (ctx.FLOATCONSTANT() != null) {
+                return tm.literal(Type.FLOAT, Float.valueOf(ctx.FLOATCONSTANT().getText()));
+            } else if (ctx.BOOLCONSTANT() != null) {
+                return tm.literal(Type.BOOL, Boolean.valueOf(ctx.BOOLCONSTANT().getText()));
+            } else if (ctx.e != null) {
+                return tm.parenExpr(visitExpression(ctx.e));
+            }
 
-        throw new RuntimeException("invalid primary expression");
+            throw new RuntimeException("invalid primary expression");
+        });
     }
 
     @Override
     public Expr visitPrimary_or_call(JSLParser.Primary_or_callContext ctx) {
-        if (ctx.primary_expression() != null) {
-            return visitPrimary_expression(ctx.e);
-        } else if (ctx.function_call() != null) {
-            return visitFunction_call(ctx.f);
-        }
+        return locating(ctx, () -> {
+            if (ctx.primary_expression() != null) {
+                return visitPrimary_expression(ctx.e);
+            } else if (ctx.function_call() != null) {
+                return visitFunction_call(ctx.f);
+            }
 
-        throw new RuntimeException("invalid primary or call");
+            throw new RuntimeException("invalid primary or call");
+        });
     }
 
     @Override
     public Expr visitPostfix_expression(JSLParser.Postfix_expressionContext ctx) {
-        if (ctx.expression() != null) {
-            if (ctx.field_selection() != null) {
-                return tm.fieldSelect(tm.arrayAccess(visitPrimary_or_call(ctx.e), visitExpression(ctx.ae)),
-                        visitField_selection(ctx.fs).getString());
-            } else {
-                return tm.arrayAccess(visitPrimary_or_call(ctx.e), visitExpression(ctx.ae));
+        return locating(ctx, () -> {
+            if (ctx.expression() != null) {
+                if (ctx.field_selection() != null) {
+                    return tm.fieldSelect(
+                            tm.arrayAccess(visitPrimary_or_call(ctx.e), visitExpression(ctx.ae), positionOf(ctx)),
+                            visitField_selection(ctx.fs).getString());
+                } else {
+                    return tm.arrayAccess(visitPrimary_or_call(ctx.e), visitExpression(ctx.ae), positionOf(ctx));
+                }
+            } else if (ctx.field_selection() != null) {
+                return tm.fieldSelect(visitPrimary_or_call(ctx.e), visitField_selection(ctx.fs).getString());
+            } else if (ctx.INC() != null) {
+                return tm.unary(UnaryOpType.INC, visitPrimary_or_call(ctx.e));
+            } else if (ctx.DEC() != null) {
+                return tm.unary(UnaryOpType.DEC, visitPrimary_or_call(ctx.e));
+            } else if (ctx.e != null){
+                return visitPrimary_or_call(ctx.e);
             }
-        } else if (ctx.field_selection() != null) {
-            return tm.fieldSelect(visitPrimary_or_call(ctx.e), visitField_selection(ctx.fs).getString());
-        } else if (ctx.INC() != null) {
-            return tm.unary(UnaryOpType.INC, visitPrimary_or_call(ctx.e));
-        } else if (ctx.DEC() != null) {
-            return tm.unary(UnaryOpType.DEC, visitPrimary_or_call(ctx.e));
-        } else if (ctx.e != null){
-            return visitPrimary_or_call(ctx.e);
-        }
 
-        throw new RuntimeException("invalid postfix expression");
+            throw new RuntimeException("invalid postfix expression");
+        });
     }
 
     @Override
     public Expr visitFunction_call(JSLParser.Function_callContext ctx) {
-        if (ctx.IDENTIFIER() != null) {
-            return tm.call(ctx.IDENTIFIER().getText(), ctx.function_call_parameter_list() != null ?
-                    visitFunction_call_parameter_list(ctx.p).getParams() : null);
-        } else if (ctx.type_specifier() != null) {
-            Type type = Type.fromToken(ctx.ts.getText());
-            return tm.vectorCtor(type, ctx.function_call_parameter_list() != null ?
-                    visitFunction_call_parameter_list(ctx.p).getParams() : null);
-        }
+        return locating(ctx, () -> {
+            if (ctx.IDENTIFIER() != null) {
+                return tm.call(ctx.IDENTIFIER().getText(), ctx.function_call_parameter_list() != null ?
+                        visitFunction_call_parameter_list(ctx.p).getParams() : null, positionOf(ctx));
+            } else if (ctx.type_specifier() != null) {
+                Type type = typeOf(ctx.ts);
+                return tm.vectorCtor(type, ctx.function_call_parameter_list() != null ?
+                        visitFunction_call_parameter_list(ctx.p).getParams() : List.of());
+            }
 
-        throw new RuntimeException("invalid function call");
+            throw new RuntimeException("invalid function call");
+        });
     }
 
     @Override
     public CallExpr visitFunction_call_parameter_list(JSLParser.Function_call_parameter_listContext ctx) {
-        List<Expr> list = new ArrayList<>();
-        for (JSLParser.Assignment_expressionContext aeCtx : ctx.assignment_expression()) {
-            list.add(visitAssignment_expression(aeCtx));
-        }
-        return new CallExpr(null, list);
+        return locating(ctx, () -> {
+            List<Expr> list = new ArrayList<>();
+            for (JSLParser.Assignment_expressionContext aeCtx : ctx.assignment_expression()) {
+                list.add(visitAssignment_expression(aeCtx));
+            }
+            return new CallExpr(null, list, null);
+        });
     }
 
     @Override
     public Expr visitUnary_expression(JSLParser.Unary_expressionContext ctx) {
-        if (ctx.INC() != null) {
-            return tm.unary(UnaryOpType.INC, visitUnary_expression(ctx.u));
-        } else if (ctx.DEC() != null) {
-            return tm.unary(UnaryOpType.DEC, visitUnary_expression(ctx.u));
-        } else if (ctx.PLUS() != null) {
-            return tm.unary(UnaryOpType.PLUS, visitUnary_expression(ctx.u));
-        } else if (ctx.DASH() != null) {
-            return tm.unary(UnaryOpType.MINUS, visitUnary_expression(ctx.u));
-        } else if (ctx.BANG() != null) {
-            return tm.unary(UnaryOpType.NOT, visitUnary_expression(ctx.u));
-        } else if (ctx.postfix_expression() != null){
-            return visitPostfix_expression(ctx.p);
-        }
+        return locating(ctx, () -> {
+            if (ctx.INC() != null) {
+                return tm.unary(UnaryOpType.INC, visitUnary_expression(ctx.u));
+            } else if (ctx.DEC() != null) {
+                return tm.unary(UnaryOpType.DEC, visitUnary_expression(ctx.u));
+            } else if (ctx.PLUS() != null) {
+                return tm.unary(UnaryOpType.PLUS, visitUnary_expression(ctx.u));
+            } else if (ctx.DASH() != null) {
+                return tm.unary(UnaryOpType.MINUS, visitUnary_expression(ctx.u));
+            } else if (ctx.BANG() != null) {
+                return tm.unary(UnaryOpType.NOT, visitUnary_expression(ctx.u));
+            } else if (ctx.postfix_expression() != null){
+                return visitPostfix_expression(ctx.p);
+            }
 
-        throw new RuntimeException("invalid unary expression");
+            throw new RuntimeException("invalid unary expression");
+        });
     }
 
     @Override
     public Expr visitMultiplicative_expression(JSLParser.Multiplicative_expressionContext ctx) {
-        Expr expr = visitUnary_expression(ctx.a);
+        return locating(ctx, () -> {
+            Expr expr = visitUnary_expression(ctx.a);
 
-        if (ctx.multiplicative_operator() != null) {
-            for (int i = 0; i < ctx.multiplicative_expression().size(); i++) {
-                JSLParser.Multiplicative_expressionContext context = ctx.multiplicative_expression(i);
-                if (ctx.multiplicative_operator(i).STAR() != null) {
-                    expr = tm.binary(BinaryOpType.MUL, expr, visitMultiplicative_expression(context));
-                } else if (ctx.multiplicative_operator(i).SLASH() != null) {
-                    expr = tm.binary(BinaryOpType.DIV, expr, visitMultiplicative_expression(context));
-                } else {
-                    throw new RuntimeException("unexpected multiplicative operator");
+            if (ctx.multiplicative_operator() != null) {
+                for (int i = 0; i < ctx.multiplicative_expression().size(); i++) {
+                    JSLParser.Multiplicative_expressionContext context = ctx.multiplicative_expression(i);
+                    if (ctx.multiplicative_operator(i).STAR() != null) {
+                        expr = tm.binary(BinaryOpType.MUL, expr, visitMultiplicative_expression(context));
+                    } else if (ctx.multiplicative_operator(i).SLASH() != null) {
+                        expr = tm.binary(BinaryOpType.DIV, expr, visitMultiplicative_expression(context));
+                    } else {
+                        throw new RuntimeException("unexpected multiplicative operator");
+                    }
                 }
             }
-        }
-        return expr;
+            return expr;
+        });
     }
 
     @Override
     public Expr visitAdditive_expression(JSLParser.Additive_expressionContext ctx) {
-        Expr expr = visitMultiplicative_expression(ctx.a);
+        return locating(ctx, () -> {
+            Expr expr = visitMultiplicative_expression(ctx.a);
 
-        if (ctx.additive_operator() != null) {
-            for (int i = 1; i < ctx.multiplicative_expression().size(); i++) {
-                JSLParser.Multiplicative_expressionContext context = ctx.multiplicative_expression(i);
-                if (ctx.additive_operator(i - 1).PLUS() != null) {
-                    expr = tm.binary(BinaryOpType.ADD, expr, visitMultiplicative_expression(context));
-                } else if (ctx.additive_operator(i - 1).DASH() != null) {
-                    expr = tm.binary(BinaryOpType.SUB, expr, visitMultiplicative_expression(context));
-                } else {
-                    throw new RuntimeException("unexpected additive operator");
+            if (ctx.additive_operator() != null) {
+                for (int i = 1; i < ctx.multiplicative_expression().size(); i++) {
+                    JSLParser.Multiplicative_expressionContext context = ctx.multiplicative_expression(i);
+                    if (ctx.additive_operator(i - 1).PLUS() != null) {
+                        expr = tm.binary(BinaryOpType.ADD, expr, visitMultiplicative_expression(context));
+                    } else if (ctx.additive_operator(i - 1).DASH() != null) {
+                        expr = tm.binary(BinaryOpType.SUB, expr, visitMultiplicative_expression(context));
+                    } else {
+                        throw new RuntimeException("unexpected additive operator");
+                    }
                 }
             }
-        }
-        return expr;
+            return expr;
+        });
     }
 
     @Override
     public Expr visitRelational_expression(JSLParser.Relational_expressionContext ctx) {
-        Expr expr = visitAdditive_expression(ctx.a);
+        return locating(ctx, () -> {
+            Expr expr = visitAdditive_expression(ctx.a);
 
-        if (ctx.relational_operator() != null) {
-            for (int i = 1; i < ctx.additive_expression().size(); i++) {
-                JSLParser.Additive_expressionContext context = ctx.additive_expression(i);
-                if (ctx.relational_operator(i - 1).LTEQ() != null) {
-                    expr = tm.binary(BinaryOpType.LTEQ, expr, visitAdditive_expression(context));
-                } else if (ctx.relational_operator(i - 1).GTEQ() != null) {
-                    expr = tm.binary(BinaryOpType.GTEQ, expr, visitAdditive_expression(context));
-                } else if (ctx.relational_operator(i - 1).LT() != null) {
-                    expr = tm.binary(BinaryOpType.LT, expr, visitAdditive_expression(context));
-                } else if (ctx.relational_operator(i - 1).GT() != null) {
-                    expr = tm.binary(BinaryOpType.GT, expr, visitAdditive_expression(context));
-                } else {
-                    throw new RuntimeException("unexpected relational operator");
+            if (ctx.relational_operator() != null) {
+                for (int i = 1; i < ctx.additive_expression().size(); i++) {
+                    JSLParser.Additive_expressionContext context = ctx.additive_expression(i);
+                    if (ctx.relational_operator(i - 1).LTEQ() != null) {
+                        expr = tm.binary(BinaryOpType.LTEQ, expr, visitAdditive_expression(context));
+                    } else if (ctx.relational_operator(i - 1).GTEQ() != null) {
+                        expr = tm.binary(BinaryOpType.GTEQ, expr, visitAdditive_expression(context));
+                    } else if (ctx.relational_operator(i - 1).LT() != null) {
+                        expr = tm.binary(BinaryOpType.LT, expr, visitAdditive_expression(context));
+                    } else if (ctx.relational_operator(i - 1).GT() != null) {
+                        expr = tm.binary(BinaryOpType.GT, expr, visitAdditive_expression(context));
+                    } else {
+                        throw new RuntimeException("unexpected relational operator");
+                    }
                 }
+
+                return expr;
             }
 
             return expr;
-        }
-
-        return expr;
+        });
     }
 
     @Override
     public Expr visitEquality_expression(JSLParser.Equality_expressionContext ctx){
-        Expr expr = visitRelational_expression(ctx.a);
+        return locating(ctx, () -> {
+            Expr expr = visitRelational_expression(ctx.a);
 
-        for (int i = 1; i < ctx.relational_expression().size(); i++) {
-            JSLParser.Relational_expressionContext context = ctx.relational_expression(i);
-            if (ctx.equality_operator(i - 1).EQEQ() != null) {
-                expr = tm.binary(BinaryOpType.EQEQ, expr, visitRelational_expression(context));
-            } else if (ctx.equality_operator(i - 1).NEQ() != null) {
-                expr = tm.binary(BinaryOpType.NEQ, expr, visitRelational_expression(context));
-            } else {
-                throw new RuntimeException("unexpected equality operator");
+            for (int i = 1; i < ctx.relational_expression().size(); i++) {
+                JSLParser.Relational_expressionContext context = ctx.relational_expression(i);
+                if (ctx.equality_operator(i - 1).EQEQ() != null) {
+                    expr = tm.binary(BinaryOpType.EQEQ, expr, visitRelational_expression(context));
+                } else if (ctx.equality_operator(i - 1).NEQ() != null) {
+                    expr = tm.binary(BinaryOpType.NEQ, expr, visitRelational_expression(context));
+                } else {
+                    throw new RuntimeException("unexpected equality operator");
+                }
             }
-        }
 
-        return expr;
+            return expr;
+        });
     }
 
     @Override
     public Expr visitLogical_and_expression(JSLParser.Logical_and_expressionContext ctx) {
-        Expr expr = visitEquality_expression(ctx.a);
-        for (JSLParser.Equality_expressionContext eqContext :
-                ctx.equality_expression().subList(1, ctx.equality_expression().size())) {
-            expr = tm.binary(BinaryOpType.AND, expr, visitEquality_expression(eqContext));
-        }
-        return expr;
+        return locating(ctx, () -> {
+            Expr expr = visitEquality_expression(ctx.a);
+            for (JSLParser.Equality_expressionContext eqContext :
+                    ctx.equality_expression().subList(1, ctx.equality_expression().size())) {
+                expr = tm.binary(BinaryOpType.AND, expr, visitEquality_expression(eqContext));
+            }
+            return expr;
+        });
     }
 
     @Override
     public Expr visitLogical_xor_expression(JSLParser.Logical_xor_expressionContext ctx) {
-        Expr expr = visitLogical_and_expression(ctx.a);
+        return locating(ctx, () -> {
+            Expr expr = visitLogical_and_expression(ctx.a);
 
-        for (JSLParser.Logical_and_expressionContext andContext :
-                ctx.logical_and_expression().subList(1, ctx.logical_and_expression().size())) {
-            expr = tm.binary(BinaryOpType.XOR, expr, visitLogical_and_expression(andContext));
-        }
-        return expr;
+            for (JSLParser.Logical_and_expressionContext andContext :
+                    ctx.logical_and_expression().subList(1, ctx.logical_and_expression().size())) {
+                expr = tm.binary(BinaryOpType.XOR, expr, visitLogical_and_expression(andContext));
+            }
+            return expr;
+        });
     }
 
     @Override
     public Expr visitLogical_or_expression(JSLParser.Logical_or_expressionContext ctx) {
-        Expr expr = visitLogical_xor_expression(ctx.a);
-        for (JSLParser.Logical_xor_expressionContext xorContext :
-                ctx.logical_xor_expression().subList(1, ctx.logical_xor_expression().size())) {
-            expr = tm.binary(BinaryOpType.OR, expr, visitLogical_xor_expression(xorContext));
-        }
-        return expr;
+        return locating(ctx, () -> {
+            Expr expr = visitLogical_xor_expression(ctx.a);
+            for (JSLParser.Logical_xor_expressionContext xorContext :
+                    ctx.logical_xor_expression().subList(1, ctx.logical_xor_expression().size())) {
+                expr = tm.binary(BinaryOpType.OR, expr, visitLogical_xor_expression(xorContext));
+            }
+            return expr;
+        });
     }
 
     @Override
     public Expr visitConditional_expression(JSLParser.Conditional_expressionContext ctx) {
-        return visitLogical_or_expression(ctx.a);
+        return locating(ctx, () -> visitLogical_or_expression(ctx.a));
     }
 
     @Override
     public Expr visitAssignment_expression(JSLParser.Assignment_expressionContext ctx) {
-        if (ctx.conditional_expression() != null) {
-            return visitConditional_expression(ctx.c);
-        } else {
-            return tm.binary(BinaryOpType.forSymbol(ctx.op.getText()),
-                    visitUnary_expression(ctx.a), visitAssignment_expression(ctx.b));
-        }
+        return locating(ctx, () -> {
+            if (ctx.conditional_expression() != null) {
+                return visitConditional_expression(ctx.c);
+            } else {
+                return tm.binary(BinaryOpType.forSymbol(ctx.op.getText()),
+                        visitUnary_expression(ctx.a), visitAssignment_expression(ctx.b));
+            }
+        });
     }
 
     @Override
     public Expr visitExpression(JSLParser.ExpressionContext ctx) {
-        return visitAssignment_expression(ctx.e);
+        return locating(ctx, () -> visitAssignment_expression(ctx.e));
     }
 
     @Override
     public Stmt visitJump_statement(JSLParser.Jump_statementContext ctx) {
-        if (ctx.CONTINUE() != null) {
-            return tm.continueStmt();
-        } else if (ctx.BREAK() != null) {
-            return tm.breakStmt();
-        } else if (ctx.DISCARD() != null) {
-            return tm.discardStmt();
-        } else if (ctx.RETURN() != null) {
-            if (ctx.e != null) {
-                return tm.returnStmt(visitExpression(ctx.e));
-            } else {
-                return tm.returnStmt(null);
+        return locating(ctx, () -> {
+            if (ctx.CONTINUE() != null) {
+                return tm.continueStmt();
+            } else if (ctx.BREAK() != null) {
+                return tm.breakStmt();
+            } else if (ctx.DISCARD() != null) {
+                return tm.discardStmt();
+            } else if (ctx.RETURN() != null) {
+                if (ctx.e != null) {
+                    return tm.returnStmt(visitExpression(ctx.e), positionOf(ctx));
+                } else {
+                    return tm.returnStmt(null, positionOf(ctx));
+                }
             }
-        }
 
-        throw new RuntimeException("invalid jump statement");
+            throw new RuntimeException("invalid jump statement");
+        });
     }
 
     @Override
     public FullySpecifiedTypeExpr visitFully_specified_type(JSLParser.Fully_specified_typeContext ctx) {
-        return new FullySpecifiedTypeExpr(
+        return locating(ctx, () -> new FullySpecifiedTypeExpr(
                 ctx.type_qualifier() != null ? Qualifier.fromToken(ctx.tq.getText()) : null,
                 ctx.type_precision() != null ? Precision.fromToken(ctx.tp.getText()) : null,
-                ctx.type_specifier() != null ? Type.fromToken(ctx.ts.getText()) : null);
+                ctx.type_specifier() != null ? typeOf(ctx.ts) : null));
     }
 
     @Override
     public Stmt visitSelection_statement(JSLParser.Selection_statementContext ctx) {
-        return tm.selectStmt(visitExpression(ctx.e), visitStatement(ctx.a),
-                ctx.b != null ? visitStatement(ctx.b) : null);
+        return locating(ctx, () -> tm.selectStmt(visitExpression(ctx.e), visitStatement(ctx.a),
+                ctx.b != null ? visitStatement(ctx.b) : null));
     }
 
     @Override
     public Stmt visitExpression_statement(JSLParser.Expression_statementContext ctx) {
-        if (ctx.e != null) {
-            return tm.exprStmt(visitExpression(ctx.e));
-        } else if (ctx.SEMICOLON() != null) {
-            return tm.exprStmt(null);
-        }
-        throw new RuntimeException("invalid expression statement");
+        return locating(ctx, () -> {
+            if (ctx.e != null) {
+                return tm.exprStmt(visitExpression(ctx.e));
+            } else if (ctx.SEMICOLON() != null) {
+                return tm.exprStmt(null);
+            }
+            throw new RuntimeException("invalid expression statement");
+        });
     }
 
     @Override
     public Expr visitConstant_expression(JSLParser.Constant_expressionContext ctx) {
-        return visitConditional_expression(ctx.c);
+        return locating(ctx, () -> visitConditional_expression(ctx.c));
     }
 
     @Override
     public Stmt visitFor_init_statement(JSLParser.For_init_statementContext ctx) {
-        if (ctx.expression_statement() != null) {
-            return visitExpression_statement(ctx.e);
-        } else if (ctx.declaration_statement() != null) {
-            return visitDeclaration_statement(ctx.d);
-        }
-        throw new RuntimeException("invalid for init statement");
+        return locating(ctx, () -> {
+            if (ctx.expression_statement() != null) {
+                return visitExpression_statement(ctx.e);
+            } else if (ctx.declaration_statement() != null) {
+                return visitDeclaration_statement(ctx.d);
+            }
+            throw new RuntimeException("invalid for init statement");
+        });
     }
 
     @Override
     public Expr visitCondition(JSLParser.ConditionContext ctx) {
-        if (ctx.expression() != null) {
-            return visitExpression(ctx.e);
-        }
-        throw new RuntimeException("invalid condition");
+        return locating(ctx, () -> {
+            if (ctx.expression() != null) {
+                return visitExpression(ctx.e);
+            }
+            throw new RuntimeException("invalid condition");
+        });
     }
 
     @Override
     public Stmt visitSimple_statement(JSLParser.Simple_statementContext ctx) {
-        if (ctx.declaration_statement() != null) {
-            return visitDeclaration_statement(ctx.d);
-        } else if (ctx.expression_statement() != null) {
-            return visitExpression_statement(ctx.e);
-        } else if (ctx.selection_statement() != null) {
-            return visitSelection_statement(ctx.s);
-        } else if (ctx.iteration_statement() != null) {
-            return visitIteration_statement(ctx.i);
-        } else if (ctx.jump_statement() != null) {
-            return visitJump_statement(ctx.j);
-        }
+        return locating(ctx, () -> {
+            if (ctx.declaration_statement() != null) {
+                return visitDeclaration_statement(ctx.d);
+            } else if (ctx.expression_statement() != null) {
+                return visitExpression_statement(ctx.e);
+            } else if (ctx.selection_statement() != null) {
+                return visitSelection_statement(ctx.s);
+            } else if (ctx.iteration_statement() != null) {
+                return visitIteration_statement(ctx.i);
+            } else if (ctx.jump_statement() != null) {
+                return visitJump_statement(ctx.j);
+            }
 
-        throw new RuntimeException("invalid simple statement");
+            throw new RuntimeException("invalid simple statement");
+        });
     }
 
     @Override
     public Stmt visitStatement(JSLParser.StatementContext ctx) {
-        if (ctx.compound_statement() != null) {
-            return visitCompound_statement(ctx.c);
-        } else if (ctx.simple_statement() != null) {
-            return visitSimple_statement(ctx.s);
-        }
+        return locating(ctx, () -> {
+            if (ctx.compound_statement() != null) {
+                return visitCompound_statement(ctx.c);
+            } else if (ctx.simple_statement() != null) {
+                return visitSimple_statement(ctx.s);
+            }
 
-        throw new RuntimeException("invalid statement");
+            throw new RuntimeException("invalid statement");
+        });
     }
 
     @Override
     public Stmt visitDeclaration_statement(JSLParser.Declaration_statementContext ctx) {
-        if (ctx.declaration() != null) {
-            return tm.declStmt(visitDeclaration(ctx.d).getDecls());
-        }
+        return locating(ctx, () -> {
+            if (ctx.declaration() != null) {
+                return tm.declStmt(visitDeclaration(ctx.d).getDecls());
+            }
 
-        throw new RuntimeException("invalid declaration statement");
+            throw new RuntimeException("invalid declaration statement");
+        });
     }
 
     @Override
     public Expr visitInitializer(JSLParser.InitializerContext ctx) {
-        if (ctx.assignment_expression() != null) {
-            return visitAssignment_expression(ctx.e);
-        }
+        return locating(ctx, () -> {
+            if (ctx.assignment_expression() != null) {
+                return visitAssignment_expression(ctx.e);
+            }
 
-        throw new RuntimeException("invalid initializer");
+            throw new RuntimeException("invalid initializer");
+        });
     }
 
     @Override
     public VarDecl visitSingle_declaration(JSLParser.Single_declarationContext ctx) {
-        if (ctx.fully_specified_type() != null && ctx.declaration_identifier_and_init() != null) {
-            int arraySize = -1;
-            DeclIdInitExpr initExpr = visitDeclaration_identifier_and_init(ctx.d);
-            FullySpecifiedTypeExpr typeExpr = visitFully_specified_type(ctx.t);
-            Expr ainit = initExpr.arrayInit;
-            if (ainit != null) {
-                if (ainit instanceof LiteralExpr) {
-                    Object val = ((LiteralExpr)ainit).getValue();
-                    if (!(val instanceof Integer)) {
-                        throw new RuntimeException("Array size must be an integer");
+        return locating(ctx, () -> {
+            if (ctx.fully_specified_type() != null && ctx.declaration_identifier_and_init() != null) {
+                DeclIdInitExpr initExpr = visitDeclaration_identifier_and_init(ctx.d);
+                FullySpecifiedTypeExpr typeExpr = visitFully_specified_type(ctx.t);
+                return locating(ctx.d, () -> {
+                    int arraySize = -1;
+                    Expr ainit = initExpr.arrayInit;
+                    if (ainit != null) {
+                        if (ainit instanceof LiteralExpr) {
+                            Object val = ((LiteralExpr)ainit).getValue();
+                            if (!(val instanceof Integer)) {
+                                throw new RuntimeException("Array size must be an integer");
+                            }
+                            arraySize = (Integer) val;
+                        } else if (ainit instanceof VariableExpr) {
+                            Variable var = ((VariableExpr)ainit).getVariable();
+                            Object val = var.getConstValue();
+                            if (!(val instanceof Integer) || var.getQualifier() != Qualifier.CONST) {
+                                throw new RuntimeException("Array size must be a constant integer");
+                            }
+                            arraySize = (Integer) val;
+                        }
                     }
-                    arraySize = (Integer) val;
-                } else if (ainit instanceof VariableExpr) {
-                    Variable var = ((VariableExpr)ainit).getVariable();
-                    Object val = var.getConstValue();
-                    if (!(val instanceof Integer) || var.getQualifier() != Qualifier.CONST) {
-                        throw new RuntimeException("Array size must be a constant integer");
+
+                    Object constValue = null;
+                    if (typeExpr.qual == Qualifier.CONST) {
+                        Expr cinit = initExpr.init;
+                        if (cinit == null) {
+                            throw new RuntimeException("Constant value must be initialized");
+                        }
+                        // TODO: for now, allow some basic expressions on the rhs
+                        // of the constant declaration...
+                        //if (!(cinit instanceof LiteralExpr)) {
+                        //    throw new RuntimeException("Constant initializer must be a literal (for now)");
+                        //}
+                        Type ctype = cinit.getResultType();
+                        if (ctype != typeExpr.type) {
+                            throw new RuntimeException("Constant type must match that of initializer");
+                        }
+                        if (cinit instanceof LiteralExpr) {
+                            constValue = ((LiteralExpr)cinit).getValue();
+                        } else {
+                            // TODO: This is gross, but to support complex constant
+                            // initializers (such as "const FOO = BAR / 42.0;") we
+                            // will just save the full text of the rhs and hope that
+                            // the backend does the right thing with it.  The real
+                            // solution obviously would be to evaluate the expression
+                            // now and reduce it to a single value.
+                            constValue = initExpr.init.toString();
+                        }
                     }
-                    arraySize = (Integer) val;
-                }
+
+                    Variable var = symbols.declareVariable(initExpr.name, typeExpr.type, typeExpr.qual,
+                            typeExpr.precision, arraySize, constValue);
+                    return tm.varDecl(var, initExpr.init, positionOf(ctx.d));
+                });
             }
 
-            Object constValue = null;
-            if (typeExpr.qual == Qualifier.CONST) {
-                Expr cinit = initExpr.init;
-                if (cinit == null) {
-                    throw new RuntimeException("Constant value must be initialized");
-                }
-                // TODO: for now, allow some basic expressions on the rhs
-                // of the constant declaration...
-                //if (!(cinit instanceof LiteralExpr)) {
-                //    throw new RuntimeException("Constant initializer must be a literal (for now)");
-                //}
-                Type ctype = cinit.getResultType();
-                if (ctype != typeExpr.type) {
-                    throw new RuntimeException("Constant type must match that of initializer");
-                }
-                if (cinit instanceof LiteralExpr) {
-                    constValue = ((LiteralExpr)cinit).getValue();
-                } else {
-                    // TODO: This is gross, but to support complex constant
-                    // initializers (such as "const FOO = BAR / 42.0;") we
-                    // will just save the full text of the rhs and hope that
-                    // the backend does the right thing with it.  The real
-                    // solution obviously would be to evaluate the expression
-                    // now and reduce it to a single value.
-                    constValue = initExpr.init.toString();
-                }
-            }
-
-            Variable var = symbols.declareVariable(initExpr.name, typeExpr.type, typeExpr.qual,
-                    typeExpr.precision, arraySize, constValue);
-            return tm.varDecl(var, initExpr.init);
-        }
-
-        throw new RuntimeException("invalid single declaration");
+            throw new RuntimeException("invalid single declaration");
+        });
     }
 
     @Override
     public Stmt visitIteration_statement(JSLParser.Iteration_statementContext ctx) {
-        if (ctx.WHILE() != null) {
-            if (ctx.DO() != null) {
-                return tm.doWhileStmt(visitStatement(ctx.s), visitExpression(ctx.e));
-            } else if (ctx.condition() != null) {
+        return locating(ctx, () -> {
+            if (ctx.WHILE() != null) {
+                if (ctx.DO() != null) {
+                    return tm.doWhileStmt(visitStatement(ctx.s), visitExpression(ctx.e));
+                } else if (ctx.condition() != null) {
+                    return tm.whileStmt(visitCondition(ctx.c), visitStatement_no_new_scope(ctx.snns));
+                }
                 return tm.whileStmt(visitCondition(ctx.c), visitStatement_no_new_scope(ctx.snns));
-            }
-            return tm.whileStmt(visitCondition(ctx.c), visitStatement_no_new_scope(ctx.snns));
-        } else if (ctx.FOR() != null) {
-            ForRestExpr forRestExpr = visitFor_rest_statement(ctx.rem);
-            if (ctx.unroll_modifier() != null) {
-                ForStmt unrollStmt = visitUnroll_modifier(ctx.u);
-                return tm.forStmt(visitFor_init_statement(ctx.init),
-                        forRestExpr.cond, forRestExpr.expr,
-                        visitStatement_no_new_scope(ctx.snns), unrollStmt.getUnrollMax(), unrollStmt.getUnrollCheck());
-            } else {
-                return tm.forStmt(visitFor_init_statement(ctx.init),
-                        forRestExpr.cond, forRestExpr.expr,
-                        visitStatement_no_new_scope(ctx.snns), -1, -1);
+            } else if (ctx.FOR() != null) {
+                ForRestExpr forRestExpr = visitFor_rest_statement(ctx.rem);
+                if (ctx.unroll_modifier() != null) {
+                    ForStmt unrollStmt = visitUnroll_modifier(ctx.u);
+                    return tm.forStmt(visitFor_init_statement(ctx.init),
+                            forRestExpr.cond, forRestExpr.expr,
+                            visitStatement_no_new_scope(ctx.snns),
+                            unrollStmt.getUnrollMax(), unrollStmt.getUnrollCheck(), positionOf(ctx));
+                } else {
+                    return tm.forStmt(visitFor_init_statement(ctx.init),
+                            forRestExpr.cond, forRestExpr.expr,
+                            visitStatement_no_new_scope(ctx.snns), -1, -1, positionOf(ctx));
 
+                }
             }
-        }
 
-        throw new RuntimeException("invalid iteration statement");
+            throw new RuntimeException("invalid iteration statement");
+        });
     }
 
     @Override
     public Stmt visitCompound_statement(JSLParser.Compound_statementContext ctx) {
-        List<Stmt> stmtList = new ArrayList<>();
-        for (JSLParser.StatementContext sCtx : ctx.statement()) {
-            stmtList.add(visitStatement(sCtx));
-        }
-        return tm.compoundStmt(stmtList);
+        return locating(ctx, () -> {
+            List<Stmt> stmtList = new ArrayList<>();
+            for (JSLParser.StatementContext sCtx : ctx.statement()) {
+                stmtList.add(visitStatement(sCtx));
+            }
+            return tm.compoundStmt(stmtList);
+        });
     }
 
     @Override
     public Stmt visitStatement_no_new_scope(JSLParser.Statement_no_new_scopeContext ctx) {
-        if (ctx.compound_statement_no_new_scope() != null) {
-            return visitCompound_statement_no_new_scope(ctx.c);
-        } else if (ctx.simple_statement() != null) {
-            return visitSimple_statement(ctx.s);
-        }
-        throw new RuntimeException("invalid statement no new scope");
+        return locating(ctx, () -> {
+            if (ctx.compound_statement_no_new_scope() != null) {
+                return visitCompound_statement_no_new_scope(ctx.c);
+            } else if (ctx.simple_statement() != null) {
+                return visitSimple_statement(ctx.s);
+            }
+            throw new RuntimeException("invalid statement no new scope");
+        });
     }
 
     @Override
     public Stmt visitCompound_statement_no_new_scope(JSLParser.Compound_statement_no_new_scopeContext ctx) {
-        List<Stmt> stmtList = new ArrayList<>();
-        for (JSLParser.StatementContext sCtx : ctx.statement()) {
-            stmtList.add(visitStatement(sCtx));
-        }
-        return tm.compoundStmt(stmtList);
+        return locating(ctx, () -> {
+            List<Stmt> stmtList = new ArrayList<>();
+            for (JSLParser.StatementContext sCtx : ctx.statement()) {
+                stmtList.add(visitStatement(sCtx));
+            }
+            return tm.compoundStmt(stmtList);
+        });
     }
 
     @Override
     public ForStmt visitUnroll_modifier(JSLParser.Unroll_modifierContext ctx) {
-        return new ForStmt(null, null, null, null, Integer.valueOf(ctx.m.getText()), Integer.valueOf(ctx.c.getText()));
+        return locating(ctx, () -> new ForStmt(null, null, null, null,
+                intConstant(ctx.m.getText()), intConstant(ctx.c.getText()), null));
     }
 
     @Override
     public ForRestExpr visitFor_rest_statement(JSLParser.For_rest_statementContext ctx) {
-        if (ctx.condition() != null) {
-            return new ForRestExpr(visitCondition(ctx.c), ctx.expression() != null ? visitExpression(ctx.e) : null);
-        } else {
-            return new ForRestExpr(null, ctx.expression() != null ? visitExpression(ctx.e) : null);
-        }
+        return locating(ctx, () -> {
+            if (ctx.condition() != null) {
+                return new ForRestExpr(visitCondition(ctx.c), ctx.expression() != null ? visitExpression(ctx.e) : null);
+            } else {
+                return new ForRestExpr(null, ctx.expression() != null ? visitExpression(ctx.e) : null);
+            }
+        });
     }
 
     @Override
     public ProgramUnit visitTranslation_unit(JSLParser.Translation_unitContext ctx) {
-        List<ExtDecl> declList = new ArrayList<>();
-        for (JSLParser.External_declarationContext eDeclCtx : ctx.external_declaration()) {
-            declList.addAll(visitExternal_declaration(eDeclCtx).getDecls());
-        }
-        return tm.programUnit(declList);
+        return locating(ctx, () -> {
+            List<ExtDecl> declList = new ArrayList<>();
+            for (JSLParser.External_declarationContext eDeclCtx : ctx.external_declaration()) {
+                declList.addAll(visitExternal_declaration(eDeclCtx).getDecls());
+            }
+            return tm.programUnit(declList);
+        });
     }
 
     @Override
     public ProgramUnit visitExternal_declaration(JSLParser.External_declarationContext ctx) {
-        List<ExtDecl> res = new ArrayList<>();
-        if (ctx.function_definition() != null) {
-            res.add(visitFunction_definition(ctx.f));
-        } else if (ctx.declaration() != null) {
-            res.addAll(visitDeclaration(ctx.d).getDecls());
-        } else if (ctx.glue_block() != null) {
-            res.add(visitGlue_block(ctx.g));
-        }
-        return new ProgramUnit(res);
+        return locating(ctx, () -> {
+            List<ExtDecl> res = new ArrayList<>();
+            if (ctx.function_definition() != null) {
+                res.add(visitFunction_definition(ctx.f));
+            } else if (ctx.declaration() != null) {
+                res.addAll(visitDeclaration(ctx.d).getDecls());
+            } else if (ctx.glue_block() != null) {
+                res.add(visitGlue_block(ctx.g));
+            }
+            return new ProgramUnit(res);
+        });
     }
 
     @Override
     public FuncDef visitFunction_definition(JSLParser.Function_definitionContext ctx) {
-        symbols.enterFrame();
-        FuncDef funcDef = tm.funcDef(visitFunction_prototype(ctx.p).getFunction(),
-                visitCompound_statement_no_new_scope(ctx.s));
-        symbols.exitFrame();
-        return funcDef;
+        return locating(ctx, () -> {
+            symbols.enterFrame();
+            FuncDef funcDef = tm.funcDef(visitFunction_prototype(ctx.p).getFunction(),
+                    visitCompound_statement_no_new_scope(ctx.s));
+            symbols.exitFrame();
+            return funcDef;
+        });
     }
 
     @Override
     public CallExpr visitFunction_prototype(JSLParser.Function_prototypeContext ctx) {
-        Type type = Type.fromToken(ctx.t.getText());
-        List<Param> params = ctx.parameter_declaration_list() != null ?
-                visitParameter_declaration_list(ctx.p).paramList : null;
-        Function func = symbols.declareFunction(ctx.id.getText(), type, params);
-        return new CallExpr(func, null);
+        return locating(ctx, () -> {
+            Type type = typeOf(ctx.t);
+            List<Param> params = ctx.parameter_declaration_list() != null ?
+                    visitParameter_declaration_list(ctx.p).paramList : null;
+            Function func = symbols.declareFunction(ctx.id.getText(), type, params);
+            return new CallExpr(func, null, null);
+        });
     }
 
     @Override
     public ParamExpr visitParameter_declaration(JSLParser.Parameter_declarationContext ctx) {
-        Type type = Type.fromToken(ctx.t.getText());
-        return new ParamExpr(new Param(ctx.IDENTIFIER().getText(), type));
+        return locating(ctx, () -> {
+            Type type = typeOf(ctx.t);
+            return new ParamExpr(new Param(ctx.IDENTIFIER().getText(), type));
+        });
     }
 
     @Override
     public ParamListExpr visitParameter_declaration_list(JSLParser.Parameter_declaration_listContext ctx) {
-        List<Param> paramList = new ArrayList<>();
-        for (JSLParser.Parameter_declarationContext pdCtx : ctx.parameter_declaration()) {
-            paramList.add(visitParameter_declaration(pdCtx).param);
-        }
-        return new ParamListExpr(paramList);
+        return locating(ctx, () -> {
+            List<Param> paramList = new ArrayList<>();
+            for (JSLParser.Parameter_declarationContext pdCtx : ctx.parameter_declaration()) {
+                paramList.add(visitParameter_declaration(pdCtx).param);
+            }
+            return new ParamListExpr(paramList);
+        });
     }
 
     @Override
     public DeclStmt visitDeclaration(JSLParser.DeclarationContext ctx) {
-        List<VarDecl> declList = new ArrayList<>();
-        VarDecl varDecl = visitSingle_declaration(ctx.s);
-        declList.add(varDecl);
-        for (JSLParser.Declaration_identifier_and_initContext dCtx : ctx.declaration_identifier_and_init()) {
-            DeclIdInitExpr initExpr = visitDeclaration_identifier_and_init(dCtx);
-            Variable base = varDecl.getVariable();
-            Variable var = symbols.declareVariable(initExpr.name, base.getType(),
-                    base.getQualifier(), base.getPrecision());
-            declList.add(tm.varDecl(var, initExpr.init));
-        }
-        return new DeclStmt(declList);
+        return locating(ctx, () -> {
+            List<VarDecl> declList = new ArrayList<>();
+            VarDecl varDecl = visitSingle_declaration(ctx.s);
+            declList.add(varDecl);
+            for (JSLParser.Declaration_identifier_and_initContext dCtx : ctx.declaration_identifier_and_init()) {
+                DeclIdInitExpr initExpr = visitDeclaration_identifier_and_init(dCtx);
+                Variable base = varDecl.getVariable();
+                declList.add(locating(dCtx, () -> {
+                    Variable var = symbols.declareVariable(initExpr.name, base.getType(),
+                            base.getQualifier(), base.getPrecision());
+                    return tm.varDecl(var, initExpr.init, positionOf(dCtx));
+                }));
+            }
+            return new DeclStmt(declList);
+        });
     }
 
     @Override
     public DeclIdInitExpr visitDeclaration_identifier_and_init(JSLParser.Declaration_identifier_and_initContext ctx) {
-        String name = ctx.IDENTIFIER().getText();
-        Expr arrayInit = null;
-        Expr init = null;
-        if (ctx.constant_expression() != null) {
-            arrayInit = visitConstant_expression(ctx.ae);
-        }
-        if (ctx.initializer() != null) {
-            init = visitInitializer(ctx.e);
-        }
-        return new DeclIdInitExpr(name, arrayInit, init);
+        return locating(ctx, () -> {
+            String name = ctx.IDENTIFIER().getText();
+            Expr arrayInit = null;
+            Expr init = null;
+            if (ctx.constant_expression() != null) {
+                arrayInit = visitConstant_expression(ctx.ae);
+            }
+            if (ctx.initializer() != null) {
+                init = visitInitializer(ctx.e);
+            }
+            return new DeclIdInitExpr(name, arrayInit, init);
+        });
     }
 
     @Override
     public GlueBlock visitGlue_block(JSLParser.Glue_blockContext ctx) {
-        return tm.glueBlock(ctx.g.getText().substring(2, ctx.g.getText().length() - 2));
+        return locating(ctx, () -> tm.glueBlock(ctx.g.getText().substring(2, ctx.g.getText().length() - 2),
+                positionOf(ctx)));
     }
 
 }

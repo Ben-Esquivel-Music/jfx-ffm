@@ -24,6 +24,7 @@
  */
 
 import com.sun.scenario.effect.compiler.backend.hw.MetalHeaders;
+import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
 import java.util.Arrays;
 
@@ -93,7 +94,19 @@ public class GenAllDecoraShaders {
             shaderArgs[shaderArgs.length - 1] = shader.name();
             Class<?> cls = Class.forName(shader.compiler());
             Method meth = cls.getMethod("compile", String[].class, MetalHeaders.class);
-            meth.invoke(null, shaderArgs, metalHeaders);
+            try {
+                meth.invoke(null, shaderArgs, metalHeaders);
+            } catch (InvocationTargetException e) {
+                // The wrapper has no message of its own, so the generator's exception would show only on a
+                // "Caused by:" line.
+                if (e.getCause() instanceof Exception cause) {
+                    throw cause;
+                }
+                if (e.getCause() instanceof Error cause) {
+                    throw cause;
+                }
+                throw e;
+            }
         }
         metalHeaders.write();
     }

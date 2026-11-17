@@ -33,7 +33,16 @@ import org.antlr.v4.runtime.misc.ParseCancellationException;
 
 public class ThrowingErrorListener extends BaseErrorListener {
 
-    public static final ThrowingErrorListener INSTANCE = new ThrowingErrorListener();
+    /** Reports an error at the line and column of the parsed text alone, which has no source name. */
+    public static final ThrowingErrorListener INSTANCE = new ThrowingErrorListener(JSLSource.unnamed(""), null);
+
+    private final JSLSource source;
+    private final String programName;
+
+    ThrowingErrorListener(JSLSource source, String programName) {
+        this.source = source;
+        this.programName = programName;
+    }
 
     @Override
     public void syntaxError(Recognizer<?, ?> recognizer, Object offendingSymbol, int line, int charPositionInLine, String msg, RecognitionException e)
@@ -41,7 +50,7 @@ public class ThrowingErrorListener extends BaseErrorListener {
         // ANTLR's message would quote the whole rest of the input, which the unterminated comment token holds.
         String text = isUnterminatedComment(offendingSymbol) ? "unterminated comment" : msg;
         // We cannot throw a RecognitionException here because it would be swallowed by DefaultErrorStrategy.
-        throw new ParseCancellationException("line " + line + ":" + charPositionInLine + " " + text);
+        throw new ParseCancellationException(source.describe(line, charPositionInLine, programName, text));
     }
 
     private static boolean isUnterminatedComment(Object offendingSymbol) {

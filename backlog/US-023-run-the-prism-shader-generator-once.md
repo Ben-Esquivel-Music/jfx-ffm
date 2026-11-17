@@ -76,12 +76,17 @@ US-021, with 30 `.jsl` files and 30 JVMs; since US-021 the loop starts 28, the f
   fails with `ParseCancellationException: line 109:4 missing ';' at 'return'` after writing the 16 `Solid_*` and
   `Texture_*` shaders that come before `FillPgram_Color` (66 files with all three backends, 32 with `-d3d`).
   `failonerror` stops the `<apply>` there (`apply returned: 1`): no other JVM starts (measured, Ant verbose log).
+  Since US-022 (amended 2026-11-17) the message is
+  `MaskFillPgram.jsl:109:4: in program FillPgram_Color: missing ';' at 'return'`: the mask's text starts the program,
+  so the line is the file's, as US-022's case S08 measured for an error on line 101 of this file (this case was not
+  rerun).
 - One `<java>` step prints the same message, writes the same files and stops with `Java returned: 1`.
 - Built again unfixed, both fail the same way and rewrite nothing. Fixed and built without `clean`, both complete;
   the `-d3d` output then equals a clean build's by name and md5. With `-mtl`, `PrismShaderCommon.h` listed 196 of the
   212 shaders in both before US-018's fix (below).
-- The message names no file (US-022). The loop adds a misleading one: the failing JVM was started with
-  `-name …/MaskAlphaOne.jsl`, visible in a verbose log only.
+- The message named no file before US-022; since US-022 it names `MaskFillPgram.jsl` and the program (amended
+  2026-11-17). The loop adds a misleading file: the failing JVM was started with `-name …/MaskAlphaOne.jsl`, visible
+  in a verbose log only.
 
 ### Logs
 - At the default level neither generator step logs anything. The gate's Maven log goes from
@@ -223,9 +228,10 @@ it is part of the story.
   alike, and no file changes content. Mutant proof: with `-force` added to the Prism step's arguments the check must
   fail (all 424 files rewritten).
 - **Same failure.** With the `;` at the end of `MaskFillPgram.jsl:108` removed in a scratch copy of the tree, a clean
-  build fails in `jsl-codegen` with `line 109:4 missing ';' at 'return'` after writing the same 32 files as the old
-  pom. With the `;` restored, the next build without `clean` passes and `target/gensrc/jsl-prism` equals a clean
-  build's by name and md5.
+  build fails in `jsl-codegen` with `MaskFillPgram.jsl:109:4: in program FillPgram_Color: missing ';' at 'return'`
+  after writing the same 32 files as the old pom (amended 2026-11-17: the message was `line 109:4 missing ';' at
+  'return'` before US-022). With the `;` restored, the next build without `clean` passes and
+  `target/gensrc/jsl-prism` equals a clean build's by name and md5.
 - **Time recorded** (not gated): for the clean gate builds before and after, the time from the newest file under
   `target/gensrc/jsl-prism` to the creation of `target/mods`, and the time of the Prism step in a build without
   `clean` and without changes, on Windows and on Linux.
@@ -240,8 +246,8 @@ it is part of the story.
     `jsl-decora` holds 108 files and `jsl-prism` 424, and there is no Metal header, so the Metal output is covered only
     by the `-d3d -es2 -mtl` regeneration above (amended 2026-11-15 from US-021's review: `headers` and its 46 files
     are dropped, because `9b02d6a602`, #57, removed the second-pass `javac -h` and the directory no longer exists).
-  - `javafx.graphics` has the same test counts per class as before, and `javafx-jslc` runs its 276 tests with no
-    failure.
+  - `javafx.graphics` has the same test counts per class as before, and `javafx-jslc` runs its 405 tests with no
+    failure (amended 2026-11-17: 276 before US-022).
 - **Upstream.** Repeat the JBS search when the story is picked up and decide whether to propose the change upstream. A
   draft stays outside the repository.
 

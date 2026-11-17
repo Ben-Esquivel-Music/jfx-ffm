@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2008, 2013, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2008, 2026, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -30,13 +30,19 @@ package com.sun.scenario.effect.compiler.tree;
 public class ReturnStmt extends Stmt {
 
     private final Expr expr;
+    private final SourcePosition position;
 
-    ReturnStmt(Expr expr) {
+    ReturnStmt(Expr expr, SourcePosition position) {
         this.expr = expr;
+        this.position = position;
     }
 
     public Expr getExpr() {
         return expr;
+    }
+
+    public SourcePosition getPosition() {
+        return position;
     }
 
     public void accept(TreeVisitor tv) {

@@ -25,6 +25,7 @@
 
 import com.sun.scenario.effect.compiler.JSLC;
 import com.sun.scenario.effect.compiler.JSLC.JSLCInfo;
+import com.sun.scenario.effect.compiler.JSLSource;
 import com.sun.scenario.effect.compiler.backend.hw.MetalHeaders;
 import com.sun.scenario.effect.light.Light;
 import java.io.File;
@@ -37,33 +38,35 @@ import java.io.File;
 public class CompilePhong {
 
     // light position is constant for distant lights
-    private static final String declPosConst =
-        "param float3 normalizedLightPosition;";
-    private static final String funcPosConst =
-        "float3 Lxyz = normalizedLightPosition;";
+    private static final JSLSource declPosConst = JSLSource.named("<CompilePhong declPosConst>",
+        "param float3 normalizedLightPosition;");
+    private static final JSLSource funcPosConst = JSLSource.named("<CompilePhong funcPosConst>",
+        "float3 Lxyz = normalizedLightPosition;");
 
     // light position depends on fragment location for point/spot lights
-    private static final String declPosVar =
+    private static final JSLSource declPosVar = JSLSource.named("<CompilePhong declPosVar>",
         "param float surfaceScale;\n" +
-        "param float3 lightPosition;";
-    private static final String funcPosVar =
+        "param float3 lightPosition;");
+    private static final JSLSource funcPosVar = JSLSource.named("<CompilePhong funcPosVar>",
         "float bumpA = sample(bumpImg, pos0).a;\n" +
         "float3 tmp = float3(pixcoord.x, pixcoord.y, surfaceScale*bumpA);\n" +
-        "float3 Lxyz = normalize(lightPosition - tmp);";
+        "float3 Lxyz = normalize(lightPosition - tmp);");
 
     // light color is constant for distant/point lights
-    private static final String declRgbConst = "";
-    private static final String funcRgbConst =
-        "float3 Lrgb = lightColor;";
+    private static final JSLSource declRgbConst = JSLSource.named("<CompilePhong declRgbConst>", "");
+    private static final JSLSource funcRgbConst = JSLSource.named("<CompilePhong funcRgbConst>",
+        "float3 Lrgb = lightColor;");
 
     // light color depends on fragment location for spot lights
-    private static final String declRgbVar =
+    private static final JSLSource declRgbVar = JSLSource.named("<CompilePhong declRgbVar>",
         "param float3 normalizedLightDirection;\n" +
-        "param float lightSpecularExponent;";
-    private static final String funcRgbVar =
+        "param float lightSpecularExponent;");
+    private static final JSLSource funcRgbVar = JSLSource.named("<CompilePhong funcRgbVar>",
         "float LdotS = dot(Lxyz, normalizedLightDirection);\n" +
         "LdotS = min(LdotS, 0.0);\n" +
-        "float3 Lrgb = lightColor * pow(-LdotS, lightSpecularExponent);";
+        "float3 Lrgb = lightColor * pow(-LdotS, lightSpecularExponent);");
+
+    private static final JSLSource positionAndColor = JSLSource.named("<CompilePhong>", "%s\n%s");
 
     public static void main(String[] args) throws Exception {
         MetalHeaders metalHeaders = new MetalHeaders();
@@ -85,10 +88,10 @@ public class CompilePhong {
         }
 
         File baseFile = jslcinfo.getJSLFile();
-        String base = CompileJSL.readFile(baseFile);
+        JSLSource base = JSLSource.file(baseFile);
         long basetime = baseFile.lastModified();
         for (Light.Type type : Light.Type.values()) {
-            String posDecl, posFunc, rgbFunc, rgbDecl;
+            JSLSource posDecl, posFunc, rgbFunc, rgbDecl;
             switch (type) {
             case DISTANT:
                 posDecl = declPosConst;
@@ -111,9 +114,9 @@ public class CompilePhong {
             default:
                 throw new InternalError();
             }
-            String decls = posDecl + "\n" + rgbDecl;
-            String funcs = posFunc + "\n" + rgbFunc;
-            String source = String.format(base, decls, funcs);
+            JSLSource decls = positionAndColor.format(posDecl, rgbDecl);
+            JSLSource funcs = positionAndColor.format(posFunc, rgbFunc);
+            JSLSource source = base.format(decls, funcs);
             jslcinfo.peerName = jslcinfo.shaderName + "_" + type.name();
             JSLC.compile(jslcinfo, source, basetime);
         }
