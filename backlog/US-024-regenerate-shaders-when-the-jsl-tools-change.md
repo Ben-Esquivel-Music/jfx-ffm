@@ -10,12 +10,14 @@ comparison of the generated files compares what the new code writes.
 
 ## Problem
 Paths are relative to `modules/javafx.graphics`. `JSLC.java` is
-`src/jslc/java/com/sun/scenario/effect/compiler/JSLC.java`.
+`src/jslc/java/com/sun/scenario/effect/compiler/JSLC.java`. Line numbers are those of the tree with US-022 (amended
+2026-11-17; as filed they were those of `b5b00d4416`).
 - `JSLC.compile` writes each output only when `jslcinfo.force` is set or `JSLC.outOfDate(outFile, sourceTime)` holds
-  (`JSLC.java:193-244`), and `outOfDate` is `sourceTime >= outFile.lastModified()` (`:249-251`). The pom passes no
+  (`JSLC.java:229-289`), and `outOfDate` is `sourceTime >= outFile.lastModified()` (`:294-296`). The pom passes no
   `-force` (US-023).
-- The source time is the time of the `.jsl` text only: the file's for the Decora single files (`JSLC.java:140-144`),
-  the newer of the mask and paint files for a Prism program (US-023, `src/main/jsl-prism/CompileJSL.java:406-408`).
+- The source time is the time of the `.jsl` text only: the file's for the Decora single files (`JSLC.java:170-176`,
+  the time at `:174`), the newer of the mask and paint files for a Prism program (US-023,
+  `src/main/jsl-prism/CompileJSL.java:401-402`).
   The JSL compiler (`buildtools/jslc`, its classes and `.stg` templates), the generators (`target/jsl-compilers`)
   and their text count for nothing.
 - Measured (US-023): the Prism generator with its alpha test changed from `== 0.0` to `<= 0.0`, run on a complete

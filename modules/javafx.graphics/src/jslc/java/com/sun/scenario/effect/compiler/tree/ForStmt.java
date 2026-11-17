@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2008, 2013, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2008, 2026, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -35,9 +35,10 @@ public class ForStmt extends Stmt {
     private final Stmt stmt;
     private final int unrollMax;
     private final int unrollCheck;
+    private final SourcePosition position;
 
     ForStmt(Stmt init, Expr cond, Expr expr, Stmt stmt,
-            int unrollMax, int unrollCheck)
+            int unrollMax, int unrollCheck, SourcePosition position)
     {
         this.init = init;
         this.cond = cond;
@@ -45,6 +46,7 @@ public class ForStmt extends Stmt {
         this.stmt = stmt;
         this.unrollMax = unrollMax;
         this.unrollCheck = unrollCheck;
+        this.position = position;
     }
 
     public Stmt getInit() {
@@ -69,6 +71,10 @@ public class ForStmt extends Stmt {
 
     public int getUnrollCheck() {
         return unrollCheck;
+    }
+
+    public SourcePosition getPosition() {
+        return position;
     }
 
     public void accept(TreeVisitor tv) {

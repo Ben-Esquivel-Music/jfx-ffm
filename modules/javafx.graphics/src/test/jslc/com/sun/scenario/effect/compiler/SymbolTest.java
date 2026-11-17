@@ -66,6 +66,6 @@ public class SymbolTest {
                 "}\n";
             compile(s);
         });
-        assertEquals("Unknown variable pos0", e.getMessage());
+        assertEquals("line 3:11 Unknown variable pos0", e.getMessage());
     }
 }

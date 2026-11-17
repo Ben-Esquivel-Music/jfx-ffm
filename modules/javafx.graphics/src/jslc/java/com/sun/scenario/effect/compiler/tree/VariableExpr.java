@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2008, 2013, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2008, 2026, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -32,14 +32,20 @@ import com.sun.scenario.effect.compiler.model.Variable;
 public class VariableExpr extends Expr {
 
     private final Variable var;
+    private final SourcePosition position;
 
-    VariableExpr(Variable var) {
+    VariableExpr(Variable var, SourcePosition position) {
         super(var.getType());
         this.var = var;
+        this.position = position;
     }
 
     public Variable getVariable() {
         return var;
+    }
+
+    public SourcePosition getPosition() {
+        return position;
     }
 
     public void accept(TreeVisitor tv) {

@@ -26,6 +26,7 @@
 import com.sun.scenario.effect.compiler.JSLC;
 import com.sun.scenario.effect.compiler.JSLC.JSLCInfo;
 import com.sun.scenario.effect.compiler.JSLParser;
+import com.sun.scenario.effect.compiler.JSLSource;
 import com.sun.scenario.effect.compiler.backend.hw.MetalHeaders;
 import com.sun.scenario.effect.compiler.model.BaseType;
 import com.sun.scenario.effect.compiler.model.Qualifier;
@@ -34,12 +35,7 @@ import com.sun.scenario.effect.compiler.tree.JSLVisitor;
 import com.sun.scenario.effect.compiler.tree.ProgramUnit;
 import com.sun.scenario.effect.compiler.tree.TreeScanner;
 import com.sun.scenario.effect.compiler.tree.VariableExpr;
-import java.io.BufferedReader;
 import java.io.File;
-import java.io.FileInputStream;
-import java.io.IOException;
-import java.io.InputStream;
-import java.io.InputStreamReader;
 import java.io.Reader;
 import java.util.Map;
 import org.stringtemplate.v4.ST;
@@ -176,11 +172,11 @@ public class CompileJSL {
 
     private static class ShaderInfo {
         private String name;
-        private String sourceCode;
+        private JSLSource sourceCode;
         private long sourceTime;
         private InputParam[] inputParams;
 
-        ShaderInfo(String name, String sourceCode, long sourceTime,
+        ShaderInfo(String name, JSLSource sourceCode, long sourceTime,
                    InputParam... inputParams)
         {
             this.name = name;
@@ -193,7 +189,7 @@ public class CompileJSL {
             return name;
         }
 
-        public String getSourceCode() {
+        public JSLSource getSourceCode() {
             return sourceCode;
         }
 
@@ -224,7 +220,7 @@ public class CompileJSL {
     {
         String shaderName = "Mask" + maskName;
         File maskFile = jslcinfo.getJSLFile(shaderName);
-        String maskSource = readFile(maskFile);
+        JSLSource maskSource = JSLSource.file(maskFile);
         long maskTime = maskFile.lastModified();
         return new ShaderInfo(maskName, maskSource, maskTime, inputParams);
     }
@@ -235,7 +231,7 @@ public class CompileJSL {
     {
         String shaderName = "Paint" + paintName;
         File paintFile = jslcinfo.getJSLFile(shaderName);
-        String paintSource = readFile(paintFile);
+        JSLSource paintSource = JSLSource.file(paintFile);
         long paintTime = paintFile.lastModified();
         return new ShaderInfo(paintName, paintSource, paintTime, inputParams);
     }
@@ -257,12 +253,12 @@ public class CompileJSL {
         throws Exception
     {
         String paintName = paintType.getName() + "Gradient";
-        String multiSource = readShaderFile(jslcinfo, "PaintMultiGradient");
+        JSLSource multiSource = readShaderFile(jslcinfo, "PaintMultiGradient");
         long multiTime = shaderFileTime(jslcinfo, "PaintMultiGradient");
-        String paintSource = readShaderFile(jslcinfo, "Paint" + paintName);
+        JSLSource paintSource = readShaderFile(jslcinfo, "Paint" + paintName);
         long paintTime = shaderFileTime(jslcinfo, "Paint" + paintName);
-        paintSource = String.format(paintSource, cycleType.getMethodSuffix());
-        String gradSource = multiSource + "\n" + paintSource;
+        JSLSource gradSource = JSLSource.named("<Prism CompileJSL gradient paint>", "%s\n%s")
+                .format(multiSource, paintSource.format(cycleType.getMethodSuffix()));
         long gradTime = Math.max(multiTime, paintTime);
         ShaderInfo gradInfo = new ShaderInfo(paintName, gradSource, gradTime, InputParam.WINCOORD);
         String outputName =
@@ -357,24 +353,24 @@ public class CompileJSL {
                                             boolean alphaTest)
         throws Exception
     {
-        String maskSource;
+        JSLSource maskSource;
         String maskCall;
         if (maskInfo.getName().equals("Solid") ||
             maskInfo.getName().equals("AlphaOne"))
         {
             // can omit trivial mask() call
-            maskSource = "";
+            maskSource = JSLSource.named("<Prism CompileJSL omitted mask>", "");
             maskCall = "";
         } else {
             maskSource = maskInfo.getSourceCode();
             maskCall = "mask(" + getParamString(maskInfo) + ") *";
         }
-        String paintSource;
+        JSLSource paintSource;
         String paintCall;
         String vertexColor = InputParam.VERTEXCOLOR.getVarName();
         if (paintInfo.getName().equals("Color")) {
             // can omit trivial paint() call
-            paintSource = "";
+            paintSource = JSLSource.named("<Prism CompileJSL omitted paint>", "");
             paintCall = "";
         } else {
             paintSource = paintInfo.getSourceCode();
@@ -400,10 +396,8 @@ public class CompileJSL {
             outputName += "_AlphaTest";
         }
         mainTemplate += "}\n";
-        String fullSource =
-            String.format(mainTemplate,
-                          maskSource, paintSource,
-                          maskCall, paintCall);
+        JSLSource fullSource = JSLSource.named("<Prism CompileJSL main>", mainTemplate)
+                .format(maskSource, paintSource, maskCall, paintCall);
         long fullTime = Math.max(maskInfo.getSourceTime(),
                                  paintInfo.getSourceTime());
         return new ShaderInfo(outputName, fullSource, fullTime);
@@ -416,7 +410,7 @@ public class CompileJSL {
     }
 
     private static void compileShader(JSLCInfo jslcinfo,
-                                      String source, long sourcetime, String name)
+                                      JSLSource source, long sourcetime, String name)
         throws Exception
     {
         jslcinfo.shaderName = name;
@@ -430,35 +424,10 @@ public class CompileJSL {
         }
     }
 
-    private static String readStream(InputStream in) {
-        StringBuilder sb = new StringBuilder(1024);
-        BufferedReader reader = new BufferedReader(new InputStreamReader(in));
-        try {
-            char[] chars = new char[1024];
-            int numRead = 0;
-            while ((numRead = reader.read(chars)) > -1) {
-                sb.append(String.valueOf(chars, 0, numRead));
-            }
-        } catch (IOException e) {
-            System.err.println("Error reading stream");
-        } finally {
-            try {
-                reader.close();
-            } catch (IOException e) {
-                System.err.println("Error closing reader");
-            }
-        }
-        return sb.toString();
-    }
-
-    private static String readFile(File file) throws Exception {
-        return readStream(new FileInputStream(file));
-    }
-
-    private static String readShaderFile(JSLCInfo jslcinfo, String name)
+    private static JSLSource readShaderFile(JSLCInfo jslcinfo, String name)
         throws Exception
     {
-        return readFile(jslcinfo.getJSLFile(name));
+        return JSLSource.file(jslcinfo.getJSLFile(name));
     }
 
     private static long shaderFileTime(JSLCInfo jslcinfo, String name) {

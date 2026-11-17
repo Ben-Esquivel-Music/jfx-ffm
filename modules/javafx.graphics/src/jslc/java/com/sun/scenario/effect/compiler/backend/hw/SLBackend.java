@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2008, 2019, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2008, 2026, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -26,6 +26,7 @@
 package com.sun.scenario.effect.compiler.backend.hw;
 
 import com.sun.scenario.effect.compiler.JSLParser;
+import com.sun.scenario.effect.compiler.JSLSourceException;
 import com.sun.scenario.effect.compiler.model.BinaryOpType;
 import com.sun.scenario.effect.compiler.model.Function;
 import com.sun.scenario.effect.compiler.model.Param;
@@ -213,7 +214,7 @@ public abstract class SLBackend extends TreeScanner {
         boolean unroll = s.getUnrollMax() > 0;
         if (unroll) {
             if (unrollVar != null) {
-                throw new RuntimeException("Unrolling of nested 'for' loops not yet supported");
+                throw new JSLSourceException(s.getPosition(), "Unrolling of nested 'for' loops not yet supported");
             }
 
             // TODO: This is very flimsy code; to make this work for real we
@@ -223,18 +224,21 @@ public abstract class SLBackend extends TreeScanner {
             if (cond instanceof BinaryExpr) {
                 BinaryExpr bcond = (BinaryExpr)cond;
                 if (bcond.getOp() != BinaryOpType.LT) {
-                    throw new RuntimeException("Condition must be '<' in order to unroll 'for' loop (for now)");
+                    throw new JSLSourceException(s.getPosition(),
+                            "Condition must be '<' in order to unroll 'for' loop (for now)");
                 }
                 Expr left = bcond.getLeft();
                 if (left instanceof VariableExpr) {
                     VariableExpr vexpr = (VariableExpr)left;
                     Variable var = vexpr.getVariable();
                     if (var.getType() != Type.INT) {
-                        throw new RuntimeException("Condition LHS must be integer variable in order to unroll 'for' loop (for now)");
+                        throw new JSLSourceException(s.getPosition(),
+                                "Condition LHS must be integer variable in order to unroll 'for' loop (for now)");
                     }
                     unrollVar = var;
                 } else {
-                    throw new RuntimeException("Condition LHS must be integer variable in order to unroll 'for' loop (for now)");
+                    throw new JSLSourceException(s.getPosition(),
+                            "Condition LHS must be integer variable in order to unroll 'for' loop (for now)");
                 }
                 Expr right = bcond.getRight();
                 if (right instanceof VariableExpr) {
@@ -242,11 +246,12 @@ public abstract class SLBackend extends TreeScanner {
                     Variable var = vexpr.getVariable();
                     maxName = var.getName();
                 } else if (s.getUnrollCheck() > 0) {
-                    throw new RuntimeException("Condition RHS must be variable in order to unroll 'for' loop");
+                    throw new JSLSourceException(s.getPosition(),
+                            "Condition RHS must be variable in order to unroll 'for' loop");
                 }
                 // TODO: verify that last expression is postfix-increment
             } else {
-                throw new RuntimeException("Invalid unrollable 'for' loop condition");
+                throw new JSLSourceException(s.getPosition(), "Invalid unrollable 'for' loop condition");
             }
             int max = s.getUnrollMax();
             int check = max - s.getUnrollCheck();

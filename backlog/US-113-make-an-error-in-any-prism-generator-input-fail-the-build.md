@@ -58,6 +58,13 @@ unmodified inputs, and no Metal header.
   4. `java.lang.RuntimeException: A Prism program cannot have a glue block: FillPgram_Color` (US-020's check)
   5. `java.lang.RuntimeException: Unknown function mask(float2, float2)`
   6. `Input file not found: <file>.jsl`, then the generator's usage text, with no stack.
+- Since US-022 (amended 2026-11-17), messages 1 to 5 start with the file, or the generator's own text, its line and
+  column and the program, `<piece>:<line>:<column>: in program FillPgram_Color: `, and messages 2, 4 and 5 are a
+  `com.sun.scenario.effect.compiler.JSLSourceException`. The text after the location is that of the list, except that
+  message 4 no longer ends in the program's name. Not rerun for this story: US-022's generator case S08 measured the
+  form for an error in `MaskFillPgram.jsl` (`MaskFillPgram.jsl:101:4: in program FillPgram_Color: …`), and its review
+  measured message 5's text, with `mask` renamed in that file, at
+  `<Prism CompileJSL main>:5:12: in program FillPgram_Color: Unknown function mask(float2, float2)`.
 - Edit 4 in each of the 30 files (measured before US-021, with 30 files): the run fails with message 4 for 25 of the
   28 files the generator reads, naming the first program compiled with the file (for example `Solid_ImagePattern` for
   `PaintImagePattern.jsl`, `AlphaOne_ImagePattern` for `PaintAlphaTextureImagePattern.jsl`). It passes for the three
@@ -178,6 +185,9 @@ generator was not run.
 - US-019 met the same three files when it counted what the build parses ("What the build does not parse"). Parsed
   alone, each stops at EOF.
 - US-022 lists how the line of an error maps to the line of a Prism input; it already notes the three omissions.
+- US-022 (amended 2026-11-17): since US-022 the generators read their `.jsl` files with `JSLSource.file`, so an error
+  names the file, its line and column and the program. An error in the three files is to be named the same way; the
+  requirement and the criteria above hold with US-022's message forms.
 - US-023: with the pom's 28 JVMs (30 before US-021), the first, started with `-name …/MaskAlphaOne.jsl`, reports
   any Prism error, whatever file holds it. Its "A source time in the future" case also rewrote the 112 files of the
   28 `<mask>_Color` programs for `PaintColor.jsl`.

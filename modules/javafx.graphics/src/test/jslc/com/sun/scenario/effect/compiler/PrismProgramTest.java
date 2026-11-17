@@ -56,7 +56,9 @@ public class PrismProgramTest extends ProgramBase {
 
     private static final String GLUE_AFTER_MAIN_PROGRAM = VALID_PROGRAM + BLOCK_A;
 
-    private static final String PRISM_GLUE_BLOCK_ERROR = "A Prism program cannot have a glue block: Probe";
+    private static final String GLUE_PROGRAM_ERROR = "line 1:0 A Prism program cannot have a glue block";
+
+    private static final String GLUE_AFTER_MAIN_PROGRAM_ERROR = "line 3:0 A Prism program cannot have a glue block";
 
     private static final List<String> SHADER_FILES = List.of("Probe.frag", "Probe.hlsl", "Probe.metal");
 
@@ -68,10 +70,10 @@ public class PrismProgramTest extends ProgramBase {
     public void compilingAPrismProgramWithAGlueBlockIsAnErrorThatWritesNoFile(int outType) throws Exception {
         JSLCInfo run = prismProgramRun(outType);
 
-        RuntimeException e = assertThrowsExactly(RuntimeException.class,
+        JSLSourceException e = assertThrowsExactly(JSLSourceException.class,
                 () -> JSLC.compile(run, GLUE_PROGRAM, OUT_OF_DATE));
 
-        assertEquals(PRISM_GLUE_BLOCK_ERROR, e.getMessage());
+        assertEquals(GLUE_PROGRAM_ERROR, e.getMessage());
         assertEquals(List.of(), regularFileNamesUnder(tmp));
     }
 
@@ -86,10 +88,10 @@ public class PrismProgramTest extends ProgramBase {
     public void compilingAPrismProgramWithAGlueBlockAfterMainIsAnError() throws Exception {
         JSLCInfo run = prismShaderRun();
 
-        RuntimeException e = assertThrowsExactly(RuntimeException.class,
+        JSLSourceException e = assertThrowsExactly(JSLSourceException.class,
                 () -> JSLC.compile(run, GLUE_AFTER_MAIN_PROGRAM, OUT_OF_DATE));
 
-        assertEquals(PRISM_GLUE_BLOCK_ERROR, e.getMessage());
+        assertEquals(GLUE_AFTER_MAIN_PROGRAM_ERROR, e.getMessage());
         assertEquals(List.of(), regularFileNamesUnder(tmp));
     }
 
@@ -121,10 +123,10 @@ public class PrismProgramTest extends ProgramBase {
     public void parsingAPrismProgramWithAGlueBlockIsAnError() {
         JSLCInfo prismProgram = prismShaderRun();
 
-        RuntimeException e = assertThrowsExactly(RuntimeException.class,
+        JSLSourceException e = assertThrowsExactly(JSLSourceException.class,
                 () -> JSLC.getParserInfo(prismProgram, GLUE_PROGRAM));
 
-        assertEquals(PRISM_GLUE_BLOCK_ERROR, e.getMessage());
+        assertEquals(GLUE_PROGRAM_ERROR, e.getMessage());
     }
 
     @Test

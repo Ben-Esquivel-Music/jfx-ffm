@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2008, 2019, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2008, 2026, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -27,8 +27,11 @@ package com.sun.scenario.effect.compiler.backend.prism;
 
 import java.io.InputStreamReader;
 import java.io.Reader;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Map;
 import com.sun.scenario.effect.compiler.JSLParser;
+import com.sun.scenario.effect.compiler.JSLSourceException;
 import com.sun.scenario.effect.compiler.model.BaseType;
 import com.sun.scenario.effect.compiler.model.Qualifier;
 import com.sun.scenario.effect.compiler.model.Type;
@@ -37,6 +40,7 @@ import com.sun.scenario.effect.compiler.tree.GlueBlock;
 import com.sun.scenario.effect.compiler.tree.JSLVisitor;
 import com.sun.scenario.effect.compiler.tree.ProgramUnit;
 import com.sun.scenario.effect.compiler.tree.TreeScanner;
+import com.sun.scenario.effect.compiler.tree.VarDecl;
 import com.sun.scenario.effect.compiler.tree.VariableExpr;
 import org.stringtemplate.v4.ST;
 import org.stringtemplate.v4.STGroup;
@@ -52,6 +56,7 @@ public class PrismBackend extends TreeScanner {
     private JSLVisitor visitor;
     private StringBuilder usercode = new StringBuilder();
     private boolean isPixcoordReferenced = false;
+    private final List<VarDecl> samplerDecls = new ArrayList<>();
 
     public PrismBackend(JSLParser parser, JSLVisitor visitor, ProgramUnit program) {
         this.parser = parser;
@@ -119,7 +124,8 @@ public class PrismBackend extends TreeScanner {
         } else if (numSamplers == 2) {
             superClass = "PPSTwoSamplerPeer";
         } else {
-            throw new RuntimeException("Must use zero, one, or two samplers (for now)");
+            throw new JSLSourceException(samplerDecls.get(2).getPosition(),
+                    "Must use zero, one, or two samplers (for now)");
         }
 
         if (genericsName != null) {
@@ -148,6 +154,15 @@ public class PrismBackend extends TreeScanner {
     @Override
     public void visitGlueBlock(GlueBlock b) {
         usercode.append(b.getText());
+    }
+
+    @Override
+    public void visitVarDecl(VarDecl d) {
+        Variable var = d.getVariable();
+        if (var.getQualifier() == Qualifier.PARAM && var.getType().getBaseType() == BaseType.SAMPLER) {
+            samplerDecls.add(d);
+        }
+        super.visitVarDecl(d);
     }
 
     @Override

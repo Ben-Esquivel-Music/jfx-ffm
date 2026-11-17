@@ -50,7 +50,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 public class AssignmentExprTest extends ParserBase {
 
     private static final String CONST_LEFT_HAND_SIDE =
-            "Left-hand side of assignment expression cannot be const variable";
+            "line 1:0 Left-hand side of assignment expression cannot be const variable";
 
     @Test
     public void userVar() {

@@ -25,6 +25,7 @@
 
 import com.sun.scenario.effect.compiler.JSLC;
 import com.sun.scenario.effect.compiler.JSLC.JSLCInfo;
+import com.sun.scenario.effect.compiler.JSLSource;
 import com.sun.scenario.effect.compiler.backend.hw.MetalHeaders;
 import com.sun.scenario.effect.Blend;
 import java.io.File;
@@ -50,15 +51,15 @@ public class CompileBlend {
         jslcinfo.parseArgs(args);
 
         File mainFile = jslcinfo.getJSLFile();
-        String main = CompileJSL.readFile(mainFile);
+        JSLSource main = JSLSource.file(mainFile);
         long blendtime = mainFile.lastModified();
         for (Blend.Mode mode : Blend.Mode.values()) {
             String funcname = mode.name().toLowerCase(Locale.ENGLISH);
             String modename = jslcinfo.shaderName + "_" + mode.name();
             File funcFile = jslcinfo.getJSLFile(modename);
-            String func = CompileJSL.readFile(funcFile);
+            JSLSource func = JSLSource.file(funcFile);
             long modeTime = funcFile.lastModified();
-            String source = String.format(main, func, funcname);
+            JSLSource source = main.format(func, funcname);
             long sourcetime = Math.max(blendtime, modeTime);
             jslcinfo.peerName = modename;
             JSLC.compile(jslcinfo, source, sourcetime);

@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2008, 2013, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2008, 2026, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -31,11 +31,13 @@ public class ArrayAccessExpr extends Expr {
 
     private final Expr expr;
     private final Expr index;
+    private final SourcePosition position;
 
-    public ArrayAccessExpr(Expr expr, Expr index) {
+    public ArrayAccessExpr(Expr expr, Expr index, SourcePosition position) {
         super(expr.getResultType());
         this.expr = expr;
         this.index = index;
+        this.position = position;
     }
 
     public Expr getExpr() {
@@ -44,6 +46,10 @@ public class ArrayAccessExpr extends Expr {
 
     public Expr getIndex() {
         return index;
+    }
+
+    public SourcePosition getPosition() {
+        return position;
     }
 
     public void accept(TreeVisitor tv) {

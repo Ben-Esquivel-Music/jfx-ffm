@@ -25,6 +25,7 @@
 
 import com.sun.scenario.effect.compiler.JSLC;
 import com.sun.scenario.effect.compiler.JSLC.JSLCInfo;
+import com.sun.scenario.effect.compiler.JSLSource;
 import com.sun.scenario.effect.compiler.backend.hw.MetalHeaders;
 import com.sun.scenario.effect.impl.state.LinearConvolveRenderState;
 import java.io.File;
@@ -48,7 +49,7 @@ public class CompileLinearConvolve {
         int outTypes = jslcinfo.outTypes;
         jslcinfo.shaderName = "Effect";
         File baseFile = jslcinfo.getJSLFile(name);
-        String base = CompileJSL.readFile(baseFile);
+        JSLSource base = JSLSource.file(baseFile);
         long basetime = baseFile.lastModified();
 
         // output one hardware shader for each unrolled size (as determined
@@ -58,7 +59,7 @@ public class CompileLinearConvolve {
         for (int i = 1; i < LinearConvolveRenderState.MAX_COMPILED_KERNEL_SIZE; i += 4) {
             int peersize = LinearConvolveRenderState.getPeerSize(i);
             if (peersize != lastpeersize) {
-                String source = String.format(base, peersize/4, peersize/4);
+                JSLSource source = base.format(peersize/4, peersize/4);
                 jslcinfo.peerName = name + "_" + peersize;
                 JSLC.compile(jslcinfo, source, basetime);
                 lastpeersize = peersize;
@@ -72,7 +73,7 @@ public class CompileLinearConvolve {
         jslcinfo.genericsName = "LinearConvolveRenderState";
         jslcinfo.interfaceName = null; // "LinearConvolvePeer";
         int peersize = LinearConvolveRenderState.MAX_COMPILED_KERNEL_SIZE / 4;
-        String genericbase = String.format(base, peersize, 0);
+        JSLSource genericbase = base.format(peersize, 0);
         JSLC.compile(jslcinfo, genericbase, basetime);
 
         // output a single version of the software peer (there's

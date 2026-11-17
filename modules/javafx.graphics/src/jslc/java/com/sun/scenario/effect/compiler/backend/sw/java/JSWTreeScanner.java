@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2008, 2013, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2008, 2026, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -25,6 +25,7 @@
 
 package com.sun.scenario.effect.compiler.backend.sw.java;
 
+import com.sun.scenario.effect.compiler.JSLSourceException;
 import com.sun.scenario.effect.compiler.model.Function;
 import com.sun.scenario.effect.compiler.model.Type;
 import com.sun.scenario.effect.compiler.model.Variable;
@@ -72,7 +73,8 @@ class JSWTreeScanner extends TreeScanner {
             output(" * " + ve.getVariable().getType().getNumFields());
             output(" + " + getFieldIndex(selectedField) + "]");
         } else {
-            throw new InternalError("Array access only supports variable expr/index (for now)");
+            throw new JSLSourceException(e.getPosition(),
+                    "array access other than variable[variable] is not supported by the Java software peer (-java)");
         }
     }
 
@@ -99,7 +101,8 @@ class JSWTreeScanner extends TreeScanner {
             } else if (inVectorOp) {
                 output(getSuffix(vectorIndex));
             } else {
-                throw new InternalError("TBD");
+                throw new JSLSourceException(e.getPosition(), "the Java software peer (-java) does not support the"
+                        + " vector result of " + func.getName() + "(...) here: it cannot tell which component to use");
             }
         }
     }
@@ -220,10 +223,11 @@ class JSWTreeScanner extends TreeScanner {
     public void visitReturnStmt(ReturnStmt s) {
         Expr expr = s.getExpr();
         if (expr == null) {
-            throw new InternalError("Empty return not yet implemented");
+            throw new JSLSourceException(s.getPosition(),
+                    "return without a value is not supported by the Java software peer (-java)");
         }
         if (funcName == null) {
-            throw new RuntimeException("Return statement not expected");
+            throw new JSLSourceException(s.getPosition(), "Return statement not expected");
         }
 
         Type t = expr.getResultType();
@@ -311,7 +315,8 @@ class JSWTreeScanner extends TreeScanner {
             } else if (inVectorOp) {
                 output(getSuffix(vectorIndex));
             } else {
-                throw new InternalError("TBD");
+                throw new JSLSourceException(e.getPosition(), "the Java software peer (-java) does not support vector '"
+                        + var.getName() + "' here: it cannot tell which component to use");
             }
         }
     }

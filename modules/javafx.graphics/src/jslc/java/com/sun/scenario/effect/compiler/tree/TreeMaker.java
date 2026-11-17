@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2008, 2013, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2008, 2026, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -99,7 +99,7 @@ public class TreeMaker {
         return new LiteralExpr(type, value);
     }
 
-    public VariableExpr variable(String id) {
+    public VariableExpr variable(String id, SourcePosition position) {
         Map<String, Variable> vars = symbols.getVariablesForScope();
         Variable var = vars.get(id);
         if (var == null) {
@@ -109,7 +109,7 @@ public class TreeMaker {
             }
         }
         var.incrementRefCount();
-        return new VariableExpr(var);
+        return new VariableExpr(var, position);
     }
 
     public VectorCtorExpr vectorCtor(Type type, List<Expr> params) {
@@ -148,14 +148,14 @@ public class TreeMaker {
         return new FieldSelectExpr(expr, fields.substring(1));
     }
 
-    public ArrayAccessExpr arrayAccess(Expr expr, Expr index) {
+    public ArrayAccessExpr arrayAccess(Expr expr, Expr index, SourcePosition position) {
         if (index.getResultType() != Type.INT) {
             throw new RuntimeException("Array index must be an integer");
         }
-        return new ArrayAccessExpr(expr, index);
+        return new ArrayAccessExpr(expr, index, position);
     }
 
-    public CallExpr call(String id, List<Expr> params) {
+    public CallExpr call(String id, List<Expr> params, SourcePosition position) {
         if (params == null) {
             params = new ArrayList<Expr>();
         }
@@ -178,7 +178,7 @@ public class TreeMaker {
             paramString += ")";
             throw new RuntimeException("Unknown function " + id + paramString);
         }
-        return new CallExpr(func, params);
+        return new CallExpr(func, params, position);
     }
 
     public ContinueStmt continueStmt() {
@@ -193,8 +193,8 @@ public class TreeMaker {
         return new DiscardStmt();
     }
 
-    public ReturnStmt returnStmt(Expr expr) {
-        return new ReturnStmt(expr);
+    public ReturnStmt returnStmt(Expr expr, SourcePosition position) {
+        return new ReturnStmt(expr, position);
     }
 
     public SelectStmt selectStmt(Expr ifExpr, Stmt thenStmt, Stmt elseStmt) {
@@ -216,7 +216,7 @@ public class TreeMaker {
     }
 
     public ForStmt forStmt(Stmt init, Expr cond, Expr expr, Stmt stmt,
-                           int unrollMax, int unrollCheck)
+                           int unrollMax, int unrollCheck, SourcePosition position)
     {
         if (cond != null && cond.getResultType() != Type.BOOL) {
             throw new RuntimeException("Condition for 'for' loop must be a boolean expression");
@@ -224,7 +224,7 @@ public class TreeMaker {
         if (expr != null && expr.getResultType().isVector()) {
             throw new RuntimeException("Expression for 'for' loop must be scalar");
         }
-        return new ForStmt(init, cond, expr, stmt, unrollMax, unrollCheck);
+        return new ForStmt(init, cond, expr, stmt, unrollMax, unrollCheck, position);
     }
 
     public ExprStmt exprStmt(Expr expr) {
@@ -243,18 +243,18 @@ public class TreeMaker {
         return new FuncDef(func, stmt);
     }
 
-    public VarDecl varDecl(Variable var, Expr init) {
+    public VarDecl varDecl(Variable var, Expr init, SourcePosition position) {
         if (init != null && init.getResultType() != var.getType()) {
             throw new RuntimeException("Initializer result type must match that of variable");
         }
         if (var.getQualifier() == Qualifier.PARAM && init != null) {
             throw new RuntimeException("Param variable cannot have an initializer");
         }
-        return new VarDecl(var, init);
+        return new VarDecl(var, init, position);
     }
 
-    public GlueBlock glueBlock(String text) {
-        return new GlueBlock(text);
+    public GlueBlock glueBlock(String text, SourcePosition position) {
+        return new GlueBlock(text, position);
     }
 
     public ProgramUnit programUnit(List<ExtDecl> decls) {
