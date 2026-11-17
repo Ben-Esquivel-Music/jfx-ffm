@@ -26,15 +26,18 @@
 
 # Licence gate of the Rust crates linked into the shipped native libraries.
 #
-#   perl buildtools/rust/check-crate-licences.pl [--cargo <cargo>] [--metadata <file>]
+#   perl buildtools/rust/check-crate-licences.pl [--cargo <cargo>] [--config <cargo config>] [--metadata <file>]
+#       [--linked <package>]...
 #   perl buildtools/rust/check-crate-licences.pl --self-test
 #
 # Reads "cargo metadata --locked --offline --format-version 1", run in the repository root (two directories
 # above this file) with <cargo>, else the first cargo on PATH, else the one in $CARGO_HOME/bin when CARGO_HOME
-# is set and not empty, else the one in ~/.cargo/bin (the lookup of buildtools/rust/jfx_rust.cmake), or reads
-# that JSON from <file>. The shipped crates are the workspace members with a staticlib target; for each, the
-# crates it links are those reached through normal dependencies (resolve graph, dep_kinds), proc macros
-# excluded:
+# is set and not empty, else the one in ~/.cargo/bin (the lookup of buildtools/rust/jfx_rust.cmake), and with
+# --config <cargo config> when given, as jfx_rust_lint passes the build's; or reads that JSON from <file>.
+# The shipped crates are the workspace members with a staticlib target. The build links a crate whatever its
+# Cargo.toml lists, so jfx_rust_lint names each crate it links with --linked, and one that is not a workspace
+# member with a staticlib target is a violation. For each shipped crate, the crates it links are those reached
+# through normal dependencies (resolve graph, dep_kinds), proc macros excluded:
 #   - a workspace member must be licensed exactly GPL-2.0-only WITH Classpath-exception-2.0;
 #   - a third-party crate's SPDX expression must allow MIT, BSD-2-Clause, BSD-3-Clause, ISC, Zlib or
 #     Unicode-3.0 (of an OR, the option taken is printed); MPL-2.0 and LGPL-2.1 pass only with a line
@@ -55,15 +58,36 @@ use Config;
 use Cwd qw(abs_path);
 use File::Basename qw(dirname);
 use File::Spec;
+use File::Temp;
 use JSON::PP;
 
 my $OWN_LICENCE = 'GPL-2.0-only WITH Classpath-exception-2.0';
 my %ALLOWED = map { $_ => 1 } qw(MIT BSD-2-Clause BSD-3-Clause ISC Zlib Unicode-3.0);
 my %SIGN_OFF = map { $_ => 1 } qw(MPL-2.0 LGPL-2.1 LGPL-2.1-only LGPL-2.1-or-later);
 
-sub usage {
-    print STDERR "usage: perl check-crate-licences.pl [--cargo <cargo>] [--metadata <file>] | --self-test\n";
-    exit 2;
+my $USAGE = "usage: perl check-crate-licences.pl [--cargo <cargo>] [--config <cargo config>] [--metadata <file>]"
+    . " [--linked <package>]... | --self-test\n";
+
+sub parse_args {
+    my @args = @_;
+    my %opt = (linked => []);
+    while (@args) {
+        my $arg = shift @args;
+        if ($arg eq '--self-test') {
+            $opt{self_test} = 1;
+        } elsif ($arg eq '--cargo' && @args) {
+            $opt{cargo} = shift @args;
+        } elsif ($arg eq '--config' && @args) {
+            $opt{config} = shift @args;
+        } elsif ($arg eq '--metadata' && @args) {
+            $opt{metadata} = shift @args;
+        } elsif ($arg eq '--linked' && @args) {
+            push @{ $opt{linked} }, shift @args;
+        } else {
+            die $USAGE;
+        }
+    }
+    return \%opt;
 }
 
 # ---------------------------------------------------------------------------------------------------------
@@ -166,14 +190,13 @@ sub require_resolve_graph {
     }
 }
 
-# The channel = "..." of rust-toolchain.toml, or undef
 sub pinned_channel {
     my ($toml) = @_;
     return defined $toml && $toml =~ /^[ \t]*channel[ \t]*=[ \t]*"([^"]+)"/m ? $1 : undef;
 }
 
 sub check {
-    my ($meta, $read_legal, $channel) = @_;
+    my ($meta, $read_legal, $channel, $linked) = @_;
     require_resolve_graph($meta);
     my (%pkg, %deps, %member);
     $pkg{ $_->{id} } = $_ for @{ $meta->{packages} };
@@ -188,6 +211,18 @@ sub check {
     my @shipped = grep { my $p = $pkg{$_};
                          $p && grep { grep { $_ eq 'staticlib' } @{ $_->{crate_types} } } @{ $p->{targets} } }
                   sort @{ $meta->{workspace_members} };
+    my %is_shipped = map { $_ => 1 } @shipped;
+    my %member_named = map { $pkg{$_} ? ($pkg{$_}{name} => $_) : () } @{ $meta->{workspace_members} };
+    for my $name (@{ $linked || [] }) {
+        my $id = $member_named{$name};
+        if (!defined $id) {
+            push @violations, "$name is linked by the build, but is no workspace member: it must be one, and its "
+                . "Cargo.toml must list the staticlib crate type, so that this gate covers it";
+        } elsif (!$is_shipped{$id}) {
+            push @violations, "$name $pkg{$id}{version} is linked by the build, but its Cargo.toml lists no "
+                . "staticlib crate type: it must, so that this gate covers it";
+        }
+    }
     for my $root (@shipped) {
         my $rp = $pkg{$root};
         my $module = module_of($rp->{manifest_path});
@@ -318,8 +353,14 @@ sub find_cargo {
     return undef;
 }
 
+sub metadata_command {
+    my ($cargo, $config) = @_;
+    return ($cargo, 'metadata', '--locked', '--offline', (defined $config ? ('--config', $config) : ()),
+        '--format-version', '1');
+}
+
 sub real_check {
-    my ($cargo, $metadata_file) = @_;
+    my ($cargo, $metadata_file, $config, $linked) = @_;
     my $root = abs_path(File::Spec->catdir(dirname(abs_path(__FILE__)), '..', '..'));
     my $json;
     if (defined $metadata_file) {
@@ -339,7 +380,7 @@ sub real_check {
         chdir $root or die "check-crate-licences: cannot enter $root: $!\n";
         # A missing pinned toolchain must fail here, not be downloaded by the rustup proxy
         local $ENV{RUSTUP_AUTO_INSTALL} = '0';
-        my @command = ($cargo, 'metadata', '--locked', '--offline', '--format-version', '1');
+        my @command = metadata_command($cargo, $config);
         open(my $out, '-|', @command) or die "check-crate-licences: cannot run $cargo: $!\n";
         binmode $out;
         local $/;
@@ -374,7 +415,7 @@ sub real_check {
         print STDERR "check-crate-licences: no channel = \"...\" line in $toolchain_file\n";
         exit 2;
     }
-    my ($rows, $build_rows, $violations, $shipped) = eval { check($meta, $read_legal, $channel) };
+    my ($rows, $build_rows, $violations, $shipped) = eval { check($meta, $read_legal, $channel, $linked) };
     if ($@) {
         print STDERR "check-crate-licences: the cargo metadata cannot be checked: $@";
         exit 2;
@@ -391,7 +432,8 @@ sub real_check {
 }
 
 # ---------------------------------------------------------------------------------------------------------
-# --self-test: canned metadata, one case per rule, each rule shown passing and failing
+# --self-test: canned metadata, one case per rule, each rule shown passing and failing; also the command line
+# and the cargo metadata call it leads to
 # ---------------------------------------------------------------------------------------------------------
 my $REGISTRY = 'registry+https://github.com/rust-lang/crates.io-index';
 
@@ -432,6 +474,22 @@ sub canned {
     return JSON::PP->new->decode(JSON::PP->new->encode($meta));
 }
 
+# Runs this script itself, so that the way from its command line to check() is tested too. The metadata goes in a
+# temporary file, which is removed when this returns.
+sub run_script {
+    my ($meta, @args) = @_;
+    my $json = File::Temp->new(TEMPLATE => 'check-crate-licences-XXXXXX', SUFFIX => '.json', TMPDIR => 1);
+    binmode $json;
+    print $json JSON::PP->new->encode($meta);
+    close $json;
+    open(my $out, '-|', $^X, abs_path(__FILE__), '--metadata', $json->filename, @args)
+        or return (undef, "cannot run $^X: $!\n");
+    local $/;
+    my $output = <$out>;
+    close $out;
+    return ($? >> 8, defined $output ? $output : '');
+}
+
 sub self_test {
     my $own = $OWN_LICENCE;
     my @base = (['mylib', '0.0.0', $own, own => 1, types => ['staticlib', 'rlib']],
@@ -460,6 +518,20 @@ sub self_test {
             { crates => [@base, ['tool', '0.0.0', 'Apache-2.0', own => 1, types => ['rlib']]],
               edges => \@base_edges },
             $std, []],
+        ['a member with a staticlib target that the build links passes',
+            { crates => \@base, edges => \@base_edges, linked => ['mylib'] },
+            $std, [], qr/mylib .*own crate/],
+        ['an rlib-only member that the build links fails',
+            { crates => [['mylib', '0.0.0', $own, own => 1, types => ['rlib']], $base[1]],
+              edges => \@base_edges, linked => ['mylib'] },
+            $std, [qr/^mylib 0\.0\.0 is linked by the build, but its Cargo\.toml lists no staticlib crate type/]],
+        ['a linked name that no package has fails',
+            { crates => \@base, edges => \@base_edges, linked => ['mylib', 'nosuch'] },
+            $std, [qr/^nosuch is linked by the build, but is no workspace member: .*staticlib crate type/]],
+        ['a linked name of a third-party crate is no workspace member and fails',
+            { crates => [@base, ['dep', '1.2.3', 'MIT']], edges => [@base_edges, ['mylib', 'dep', 'normal']],
+              linked => ['dep'] },
+            $listed->('dep 1.2.3'), [qr/^dep is linked by the build, but is no workspace member/]],
         ['a module that ships Rust without rust-std.md fails', { crates => \@base, edges => \@base_edges },
             {}, [qr{modules/javafx\.media/src/main/legal/rust-std\.md is missing}]],
         ['a shipped crate outside modules/<module>/src/main/native-rust fails',
@@ -594,11 +666,52 @@ sub self_test {
             print "not ok $n - $name: got " . (defined $got ? $got : '(none)') . "\n";
         }
     }
+    my $options = sub {
+        my ($opt) = @_;
+        return 'the usage text' unless ref $opt;
+        return join(' ', map { my $v = $opt->{$_}; "$_=" . (ref $v ? '[' . join(',', @$v) . ']' : $v) }
+            sort keys %$opt);
+    };
+    my @command_lines = ([[qw(--cargo c --config f.toml --metadata m.json --linked a --linked b)],
+                          { cargo => 'c', config => 'f.toml', metadata => 'm.json', linked => ['a', 'b'] }],
+                         [[], { linked => [] }],
+                         [['--self-test'], { self_test => 1, linked => [] }],
+                         [['--linked'], undef],
+                         [['--config'], undef],
+                         [[qw(--linked a --config)], undef]);
+    for my $command_line (@command_lines) {
+        my ($args, $want) = @$command_line;
+        $n++;
+        my $got = eval { parse_args(@$args) };
+        my $stopped = $@;
+        my $name = "the command line \"@$args\" gives " . $options->($want);
+        if ($options->($got) eq $options->($want) && (ref $got || $stopped eq $USAGE)) {
+            print "ok $n - $name\n";
+        } else {
+            $failed++;
+            print "not ok $n - $name: got " . $options->($got) . "\n";
+        }
+    }
+    my @metadata_commands = ([['c', 'f.toml'], 'c metadata --locked --offline --config f.toml --format-version 1'],
+                             [['c', undef], 'c metadata --locked --offline --format-version 1']);
+    for my $metadata_command (@metadata_commands) {
+        my ($args, $want) = @$metadata_command;
+        $n++;
+        my $got = join(' ', metadata_command(@$args));
+        my $name = 'cargo metadata runs as "' . $want . '"';
+        if ($got eq $want) {
+            print "ok $n - $name\n";
+        } else {
+            $failed++;
+            print "not ok $n - $name: got \"$got\"\n";
+        }
+    }
     for my $case (@cases) {
         my ($name, $spec, $legal, $expected, $report_re) = @$case;
         $n++;
         my $meta = canned(%$spec);
-        my ($rows, $build_rows, $violations) = eval { check($meta, sub { $legal->{ $_[1] } }, $channel) };
+        my ($rows, $build_rows, $violations)
+            = eval { check($meta, sub { $legal->{ $_[1] } }, $channel, $spec->{linked}) };
         my $died = $@;
         if (ref $expected eq 'HASH') {
             if ($died =~ $expected->{dies}) {
@@ -636,23 +749,34 @@ sub self_test {
             print "ok $n - $name ($shown)\n";
         }
     }
+    my $violation = 'check-crate-licences: mylib 0.0.0 is linked by the build, but its Cargo.toml lists no staticlib '
+        . 'crate type';
+    my @runs = (['the script run with --linked mylib, an rlib-only member, exits 1 with the --linked violation',
+                 [['mylib', '0.0.0', $own, own => 1, types => ['rlib']], $base[1]], 1],
+                ['the script run with --linked mylib, a member with a staticlib target, prints no such violation',
+                 \@base, 0]);
+    for my $run (@runs) {
+        my ($name, $crates, $fails) = @$run;
+        $n++;
+        my ($status, $output) = run_script(canned(crates => $crates, edges => \@base_edges), '--linked', 'mylib');
+        my $printed = $output =~ /^\Q$violation\E/m;
+        if (defined $status && ($fails ? $printed && $status == 1 : !$printed && $status <= 1)) {
+            print "ok $n - $name (exit $status)\n";
+        } else {
+            $failed++;
+            print "not ok $n - $name: exit status " . (defined $status ? $status : '(none)') . "\n";
+            print "    output: $_\n" for split /\n/, $output;
+        }
+    }
     print $failed ? "check-crate-licences --self-test: $failed of $n cases FAILED\n"
                   : "check-crate-licences --self-test: all $n cases passed\n";
     exit($failed ? 1 : 0);
 }
 
 # ---------------------------------------------------------------------------------------------------------
-my ($cargo, $metadata_file, $self_test);
-while (@ARGV) {
-    my $arg = shift @ARGV;
-    if ($arg eq '--self-test') {
-        $self_test = 1;
-    } elsif ($arg eq '--cargo' && @ARGV) {
-        $cargo = shift @ARGV;
-    } elsif ($arg eq '--metadata' && @ARGV) {
-        $metadata_file = shift @ARGV;
-    } else {
-        usage();
-    }
+my $opt = eval { parse_args(@ARGV) };
+unless ($opt) {
+    print STDERR $@;
+    exit 2;
 }
-$self_test ? self_test() : real_check($cargo, $metadata_file);
+$opt->{self_test} ? self_test() : real_check($opt->{cargo}, $opt->{metadata}, $opt->{config}, $opt->{linked});

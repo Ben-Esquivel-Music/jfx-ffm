@@ -1,4 +1,4 @@
-# US-121 — Keep the output of the native build tools readable in the Maven log
+# US-125 — Keep the output of the native build tools readable in the Maven log
 
 **Status:** 📋 Ready (filed 2026-11-16 from US-027) · **Found:** US-027's native builds on Windows 10 and WSL Ubuntu;
 quoted from its final gate of 2026-11-16, whose logs were re-read for this story; nothing built or run for it
@@ -97,4 +97,4 @@ The output of Java tools (`javac`, surefire, antrun steps such as the shader gen
 
 ## Notes
 - Found while US-027's poms and native build were wired, and seen again in its final gate runs; it is the one story
-  filed from US-027.
+  filed from US-027 before its review fixes (US-126 came from their gate).

@@ -45,8 +45,9 @@ The PR is merged and both macOS CI jobs are green. The PR states that no local m
 `backlog/README.md` is updated.
 
 ## macOS linking facts from US-027 (2026-11-16)
-US-027 is implemented, uncommitted on `7a66c85e39` at the time of writing; its "Implementation" section has the
-detail. Each fact is marked: measured on Windows, measured on Linux (WSL Ubuntu), or read in the code.
+US-027 is commit `924047c8b0` (PR #66), with the fixes of its code review uncommitted on top at the time of writing;
+its "Implementation" and "Review fixes" sections have the detail. Each fact is marked: measured on Windows, measured
+on Linux (WSL Ubuntu), or read in the code.
 
 What the build does on macOS today:
 - `buildtools/rust/jfx_rust.cmake` stops the configure when `jfx_add_rust_slice` is called on an Apple host while
@@ -55,7 +56,8 @@ What the build does on macOS today:
 - Nothing switches the slice off in the pom: the `native-mac` profiles pass `-DJFX_RUST=${JFX_RUST}` (default
   `true`) like the other profiles. The macOS build needs no Rust because `native/mac.cmake` registers no slice and
   is unchanged; its `jfx_rust_test` and `jfx_rust_lint` targets only print that no slice is enabled, and no Rust tool
-  is looked up (read in the code). The macOS CI jobs got no Rust setup step.
+  is looked up (read in the code). The macOS CI jobs have no Rust setup step and no Rust cache step; the cache key of
+  the three Rust jobs holds `runner.os` and `runner.arch` (read in the workflow).
 
 What a macOS slice will meet, from the Windows and Linux work:
 - **LTO needs `cargo rustc ... --crate-type staticlib`.** With `crate-type = ["staticlib", "rlib"]` built in one rustc
@@ -63,8 +65,23 @@ What a macOS slice will meet, from the Windows and Linux work:
   13.1 MB to 4.0 MB measured on Windows, 23.7 MB to 8.1 MB measured on Linux).
 - **std's prebuilt objects carry debug information.** On Linux they added 6 `.debug_*` sections to a Release
   library that has none in C (557,472 to 4,705,776 bytes); cargo's `strip` setting does not reach a staticlib, so the
-  helper links with `--strip-debug` outside `Debug` (measured on Linux). Not looked at on Windows, where the Release
-  link writes no PDB.
+  helper links with `--strip-debug` in `Release` only, as the other configurations are built to be debugged (measured
+  on Linux). Not looked at on Windows, where the Release link writes no PDB.
+- **The profiles and the archive.** The release and dev profiles are in `buildtools/rust/cargo-config.toml`, not in
+  `Cargo.toml`: every stable setting but `incremental` (`[build] incremental = false` for both) and `split-debuginfo`.
+  The helper passes the file with `--config` to every cargo call that compiles, then `--target <host>`, the `host:`
+  line of `rustc -vV` at configure time, so the archive lies in `<build tree>/cargo/<host>/{release,debug}/` (read in
+  the code; measured on Windows and Linux).
+- **`split-debuginfo`.** The helper passes `packed` for a host that ends in `-windows-msvc` and `off` for every other
+  host, so an `*-apple-darwin` host would get `off` (read in the code). The release profile has `debug = false`, and
+  then no `-C split-debuginfo` reaches rustc (measured on Windows and Linux); the dev profile's rustc line gets it.
+  Cargo's default on macOS is `unpacked` for a profile with debug information, rustc's is `packed`, and on macOS
+  `off` skips the final run of `dsymutil` (cargo and rustc reference).
+- **The cargo environment.** The cargo action removes every variable named `CARGO`, `RUSTC`, `RUSTDOC`, `RUSTFMT`,
+  `RUSTFLAGS` or `RUSTDOCFLAGS` or starting with `CARGO_`, `__CARGO_` or `RUSTC_` (but `CARGO_HOME`,
+  `CARGO_BUILD_JOBS`, `CARGO_TERM_*`), then sets `RUSTFLAGS` to one blank, `RUSTUP_TOOLCHAIN` to the pin and `RUSTC`
+  to the rustc configure checked. A setting a macOS slice needs cannot reach cargo through such a variable (read in
+  the code; measured on Windows and Linux).
 - **The platform libraries** come from `rustc --print native-static-libs` on an empty staticlib; the helper drops
   `-lgcc_s` on Linux and `/defaultlib:msvcrt` on Windows (read in the code; lists measured on both).
 - **Exports.** `/EXPORT:` on Windows pulls the Rust member out of the archive (measured on Windows). On Linux
@@ -73,7 +90,8 @@ What a macOS slice will meet, from the Windows and Linux work:
 - **A C definition wins silently.** Both linkers take a C definition left in an object file over the archive member
   (measured on Windows and Linux). The helper's post-link origin check therefore reads the linker map and fails unless
   each Rust export comes from the crate's archive. It knows two map formats, MSVC's `/map` and GNU ld's `-Map` with
-  `--cref`, and not ld64's (read in the code).
+  `--cref`, and not ld64's; it adds the GNU options (`LINKER:-Map=<file>`, `LINKER:--cref`) on every host that is not
+  Windows (read in the code).
 - **New system dependencies.** With std linked, `jfxmedia.dll` gained `ntdll.dll` and
   `api-ms-win-core-synch-l1-2-0.dll` (std's stderr write and its `Once`, `Mutex` and `RwLock`), measured on Windows;
   `libjfxmedia.so` kept its `NEEDED` list but lost the `.note.gnu.property` marking `x86 feature: IBT, SHSTK`,
@@ -92,7 +110,7 @@ What a macOS slice will meet, from the Windows and Linux work:
 - **Stale archive.** cargo's freshness check uses file times: a crate source restored with an older time (`tar`,
   `cp -p`) left the old archive linked (measured on Linux).
 - **Output.** Every cargo step writes one merged log, `<build tree>/jfx-rust/logs/<step>.log`, because a tool's two
-  streams come out interleaved in the Maven log (US-121; measured on Windows and Linux).
+  streams come out interleaved in the Maven log (US-125; measured on Windows and Linux).
 
 Not known for macOS:
 - what `rustc --print native-static-libs` prints for `x86_64-apple-darwin` and `aarch64-apple-darwin`;

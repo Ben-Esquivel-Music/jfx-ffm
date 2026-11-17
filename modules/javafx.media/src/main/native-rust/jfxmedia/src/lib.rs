@@ -29,13 +29,3 @@ mod ffi;
 
 /// `JFXM_ABI_VERSION` of `jfxmedia_api.h`; abi_check.cpp asserts that the two are equal.
 pub const JFXM_ABI_VERSION: u32 = 4;
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn the_abi_version_is_4() {
-        assert_eq!(JFXM_ABI_VERSION, 4);
-    }
-}

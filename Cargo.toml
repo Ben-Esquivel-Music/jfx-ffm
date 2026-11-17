@@ -46,13 +46,5 @@ unsafe_op_in_unsafe_fn = "deny"
 [workspace.lints.clippy]
 undocumented_unsafe_blocks = "warn"
 
-# panic is left at Cargo's default "unwind": every export catches panics through jfx_rust_support::guard and
-# returns the C failure value, which "abort" would turn into a process abort without an hs_err file.
-[profile.release]
-opt-level = 3
-debug = false
-lto = true
-codegen-units = 1
-
-[profile.dev]
-debug = true
+# The profiles are in buildtools/rust/cargo-config.toml, which the build passes with --config. A profile here would rank
+# below every cargo config file and the environment; a cargo run by hand without that --config does not get them.

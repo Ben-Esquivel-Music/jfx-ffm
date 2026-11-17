@@ -34,20 +34,21 @@
 #       [C_DELETED])                      # the slice's C is gone: JFX_RUST=OFF is then a configure error
 #
 # With JFX_RUST on, the crate's staticlib (cargo's default name, built by "cargo rustc --locked --offline
-# --crate-type staticlib" in the repository root, so that rust-toolchain.toml applies, into
-# CARGO_TARGET_DIR=<build tree>/cargo) is linked into <target>. Only the staticlib is built there: with the
-# rlib in the same rustc call, cargo would not apply the profile's lto. Two targets that register the same
-# crate share one cargo step and one IMPORTED library. Windows exports the Rust symbols with /EXPORT:, which
-# also pulls them out of the archive, since no C code references them. Linux pulls them in with
-# --require-defined= and links every target that has a slice, with JFX_RUST on or off, with a version script
-# that exports exactly the headers' names, which also keeps the Rust standard library's symbols local.
-# Both linkers take a C definition left in an object file over the archive member without a word, so after
-# each link the linker map must show every EXPORTS symbol defined by the crate's archive. macOS links no Rust
-# yet (US-028).
+# --crate-type staticlib" in the repository root with the toolchain rust-toolchain.toml pins, the profiles of
+# cargo-config.toml plus a host-dependent split-debuginfo, and --target <host>, into
+# <build tree>/cargo/<host>/<profile directory>) is linked into <target>. Only the staticlib is built there: with the
+# rlib in the same rustc call, cargo would not apply the profile's lto. Two targets that register the same crate share
+# one cargo step and one IMPORTED library. Windows exports the Rust symbols with /EXPORT:, which also pulls them out of
+# the archive, since no C code references them. Linux pulls them in with --require-defined= and links every target that
+# has a slice, with JFX_RUST on or off, with a version script that exports exactly the headers' names, which also keeps
+# the Rust standard library's symbols local. Both linkers take a C definition left in an object file over the archive
+# member without a word, so after each link the linker map must show every EXPORTS symbol defined by the
+# crate's archive. macOS links no Rust yet (US-028).
 #
 # The targets jfx_rust_test (cargo test) and jfx_rust_lint (cargo fmt --check, clippy -D warnings, the ABI
-# check of each library crate and buildtools/rust/check-crate-licences.pl) exist in every tree; with no
-# enabled slice they only print that there is nothing to do, and need no Rust tool.
+# check of each library crate, then buildtools/rust/check-crate-licences.pl --self-test and the licence check
+# itself) exist in every tree; with no enabled slice they only print that there is nothing to do, and need no
+# Rust tool.
 #
 # Every cargo call writes stdout and stderr into one log file, printed when cargo ends: exec-maven-plugin
 # copies a child's two streams into the Maven log concurrently, which garbles both. The log of a running
@@ -67,7 +68,6 @@ if(CMAKE_SCRIPT_MODE_FILE)
     cmake_policy(VERSION 3.20)
 endif()
 
-# One element per line of text, empty lines dropped
 function(_jfx_rust_lines text out_var)
     string(REPLACE "\r" "" text "${text}")
     string(REPLACE ";" "\\;" text "${text}")
@@ -103,7 +103,6 @@ function(_jfx_rust_declared_functions header out_var)
     set(${out_var} "${names}" PARENT_SCOPE)
 endfunction()
 
-# Ends the origin check: its failure text replaces the target's origin log
 function(_jfx_rust_origin_fail text)
     file(WRITE "${JFX_RUST_LOG}" "${text}\n")
     message(FATAL_ERROR "${text}\nThis text is also in ${JFX_RUST_LOG}.")
@@ -113,14 +112,47 @@ if(CMAKE_SCRIPT_MODE_FILE)
     if(JFX_RUST_ACTION STREQUAL "fail")
         message(FATAL_ERROR "${JFX_RUST_MESSAGE}")
     elseif(JFX_RUST_ACTION STREQUAL "cargo")
-        # A developer's cargo environment must neither reach the shipped code nor move the archive the link
-        # reads, and a missing pinned toolchain must fail instead of being downloaded
-        foreach(name CARGO_BUILD_TARGET RUSTFLAGS CARGO_ENCODED_RUSTFLAGS CARGO_BUILD_RUSTFLAGS
-                CARGO_BUILD_TARGET_DIR)
-            unset(ENV{${name}})
+        # Every process of the build that runs cargo starts here. Removed from its environment: each variable whose
+        # upper-cased name (Windows compares names without case) is CARGO, RUSTC, RUSTDOC, RUSTFMT, RUSTFLAGS or
+        # RUSTDOCFLAGS, or starts with CARGO_, __CARGO_ or RUSTC_, except CARGO_HOME, CARGO_BUILD_JOBS and
+        # CARGO_TERM_*. That takes CARGO_INCREMENTAL, which outranks even --config, every CARGO_PROFILE_* and
+        # CARGO_TARGET_<triple>_*, and RUSTC_BOOTSTRAP, which would turn on cargo's unstable features, profile
+        # rustflags among them. The names are read from the raw listing, as a value may hold anything.
+        # Then set: the pinned toolchain (a missing one fails, it is never downloaded); the rustc that configure
+        # checked against the pin (RUSTC outranks a config file's build.rustc); RUSTFLAGS of one blank, an empty list
+        # that outranks the rustflags of every config file (set(ENV) of "" would unset it); the build tree's target
+        # and build directories. The release and dev profiles and the [build] keys of cargo-config.toml are --config
+        # arguments of every cargo call that compiles, and these outrank config files. Whatever a cargo config file
+        # sets that neither these variables nor the commands' arguments override still applies, and cargo has no
+        # switch that ignores config files. Examples, not the whole set: a config file can reach the staticlib by
+        # replacing sources or tuning one package (paths, [patch], [source], [env], [profile.<name>.package.<spec>],
+        # [profile.<name>.build-override], [target.<triple>.<links>], resolver.lockfile-path); it can change what
+        # jfx_rust_test and jfx_rust_lint run, and so their result ([profile.test], a target's linker and runner,
+        # rustdoc and its flags, an [alias] named clippy or fmt), as can a clippy.toml above the repository.
+        if(NOT JFX_RUST_TOOLCHAIN OR NOT JFX_RUST_RUSTC OR NOT JFX_RUST_CARGO_TARGET_DIR)
+            message(FATAL_ERROR "jfx_rust.cmake: the cargo action needs -DJFX_RUST_TOOLCHAIN=<pinned channel>, "
+                "-DJFX_RUST_RUSTC=<rustc> and -DJFX_RUST_CARGO_TARGET_DIR=<directory>")
+        endif()
+        execute_process(COMMAND "${CMAKE_COMMAND}" -E environment
+            RESULT_VARIABLE jfx_rust_rc OUTPUT_VARIABLE jfx_rust_env)
+        if(NOT jfx_rust_rc EQUAL 0)
+            message(FATAL_ERROR "jfx_rust: \"${CMAKE_COMMAND} -E environment\" failed (${jfx_rust_rc})")
+        endif()
+        string(REGEX MATCHALL "\n[A-Za-z0-9_]+=" jfx_rust_names "\n${jfx_rust_env}")
+        foreach(jfx_rust_name IN LISTS jfx_rust_names)
+            string(REGEX MATCH "[A-Za-z0-9_]+" jfx_rust_name "${jfx_rust_name}")
+            string(TOUPPER "${jfx_rust_name}" jfx_rust_upper)
+            if(jfx_rust_upper MATCHES "^(CARGO|RUSTC|RUSTDOC|RUSTFMT|RUSTFLAGS|RUSTDOCFLAGS|(__)?CARGO_.*|RUSTC_.*)$"
+                    AND NOT jfx_rust_upper MATCHES "^(CARGO_HOME|CARGO_BUILD_JOBS|CARGO_TERM_.*)$")
+                unset(ENV{${jfx_rust_name}})
+            endif()
         endforeach()
+        set(ENV{RUSTFLAGS} " ")
+        set(ENV{RUSTUP_TOOLCHAIN} "${JFX_RUST_TOOLCHAIN}")
         set(ENV{RUSTUP_AUTO_INSTALL} 0)
+        set(ENV{RUSTC} "${JFX_RUST_RUSTC}")
         set(ENV{CARGO_TARGET_DIR} "${JFX_RUST_CARGO_TARGET_DIR}")
+        set(ENV{CARGO_BUILD_BUILD_DIR} "${JFX_RUST_CARGO_TARGET_DIR}")
         get_filename_component(jfx_rust_log_dir "${JFX_RUST_LOG}" DIRECTORY)
         file(MAKE_DIRECTORY "${jfx_rust_log_dir}")
         execute_process(COMMAND ${JFX_RUST_COMMAND}
@@ -228,10 +260,28 @@ if(CMAKE_SCRIPT_MODE_FILE)
             _jfx_rust_origin_fail("${jfx_rust_text}")
         endif()
         if(JFX_RUST_MAP_FORMAT STREQUAL "msvc")
-            # An archive member is <archive name>:<member>
+            # An archive member is <archive name>:<member>, and the map names the archive without its directory,
+            # so a C object in another archive of the same name would match the name alone. The member must
+            # therefore end in .rcgu.o, as rustc's codegen units do, and be one that the librarian lists in the
+            # crate's archive itself.
             get_filename_component(jfx_rust_member_prefix "${JFX_RUST_ARCHIVE}" NAME_WLE)
             string(APPEND jfx_rust_member_prefix ":")
             string(LENGTH "${jfx_rust_member_prefix}" jfx_rust_prefix_length)
+            # lib.exe lists nothing and exits 0 for an archive that does not exist
+            execute_process(COMMAND "${JFX_RUST_AR}" /NOLOGO /LIST "${JFX_RUST_ARCHIVE}"
+                RESULT_VARIABLE jfx_rust_rc OUTPUT_VARIABLE jfx_rust_members ERROR_VARIABLE jfx_rust_err)
+            string(STRIP "${jfx_rust_members}" jfx_rust_listed)
+            if(NOT jfx_rust_rc EQUAL 0 OR jfx_rust_listed STREQUAL "")
+                string(CONCAT jfx_rust_text "jfx_rust: the librarian \"${JFX_RUST_AR}\" could not list the members "
+                    "of ${JFX_RUST_ARCHIVE} (${jfx_rust_rc}), so the origin of the Rust exports of ${JFX_RUST_TARGET} "
+                    "cannot be checked")
+                string(STRIP "${jfx_rust_members}${jfx_rust_err}" jfx_rust_output)
+                if(NOT jfx_rust_output STREQUAL "")
+                    string(APPEND jfx_rust_text ":\n${jfx_rust_output}")
+                endif()
+                _jfx_rust_origin_fail("${jfx_rust_text}")
+            endif()
+            string(REPLACE "\r" "" jfx_rust_members "\n${jfx_rust_members}\n")
         else()
             # GNU ld's cross reference table lists the defining file first, an archive member as
             # <archive>(<member>) with the archive as the link command names it, maybe relative to the
@@ -271,8 +321,12 @@ if(CMAKE_SCRIPT_MODE_FILE)
                 set(jfx_rust_from_archive FALSE)
                 if(JFX_RUST_MAP_FORMAT STREQUAL "msvc")
                     string(SUBSTRING "${jfx_rust_object}" 0 ${jfx_rust_prefix_length} jfx_rust_head)
-                    if(jfx_rust_head STREQUAL jfx_rust_member_prefix)
-                        set(jfx_rust_from_archive TRUE)
+                    if(jfx_rust_head STREQUAL jfx_rust_member_prefix AND jfx_rust_object MATCHES "[.]rcgu[.]o$")
+                        string(SUBSTRING "${jfx_rust_object}" ${jfx_rust_prefix_length} -1 jfx_rust_member)
+                        string(FIND "${jfx_rust_members}" "\n${jfx_rust_member}\n" jfx_rust_at)
+                        if(NOT jfx_rust_at EQUAL -1)
+                            set(jfx_rust_from_archive TRUE)
+                        endif()
                     endif()
                 elseif(jfx_rust_object MATCHES "^(.+)[(][^()]+[)]$")
                     set(jfx_rust_named "${CMAKE_MATCH_1}")
@@ -321,11 +375,11 @@ get_filename_component(JFX_RUST_REPO_ROOT "${CMAKE_CURRENT_LIST_DIR}/../.." ABSO
 set(JFX_RUST_HELPER "${CMAKE_CURRENT_LIST_FILE}")
 set(JFX_RUST_SUPPORT_CRATE "${CMAKE_CURRENT_LIST_DIR}/jfx-rust-support")
 set(JFX_RUST_LICENCE_SCRIPT "${CMAKE_CURRENT_LIST_DIR}/check-crate-licences.pl")
+set(JFX_RUST_CARGO_CONFIG "${CMAKE_CURRENT_LIST_DIR}/cargo-config.toml")
 set(JFX_RUST_BINARY_DIR "${CMAKE_BINARY_DIR}/jfx-rust")
 set(JFX_RUST_CARGO_TARGET_DIR "${CMAKE_BINARY_DIR}/cargo")
 get_property(JFX_RUST_MULTI_CONFIG GLOBAL PROPERTY GENERATOR_IS_MULTI_CONFIG)
 
-# The library name a message names: what the target builds, not the CMake target
 function(_jfx_rust_library_name target out_var)
     get_target_property(name ${target} OUTPUT_NAME)
     if(NOT name)
@@ -334,32 +388,116 @@ function(_jfx_rust_library_name target out_var)
     set(${out_var} "${name}" PARENT_SCOPE)
 endfunction()
 
-# Every name declared on a line that starts with the export macro: the identifier before the first "(".
-# Lines, not the preprocessor: a declaration under #if counts, which is why each target passes exactly
-# the headers that make up its export list.
+# The names the headers export. An export is a line that starts with the export macro (<UPPER>_EXPORT) in
+# column 0 and holds the function's name and its "("; its parameters may go on. The name is the identifier
+# before the line's first "(", so these are configure errors, as a type, an attribute or a macro could be read
+# as the name: a "*" or "(" as the first non-blank character after that "(", outside comments (a function
+# pointer type); a "(" in the code after the parameter list when the list closes on the line (an attribute, or a
+# macro with arguments before the name whose "(" was taken for the list); a name with no lower-case letter or
+# one that starts with "__". So is any other line that names an export macro and is no preprocessor line, a
+# comment too: the Linux version script made from this list, and the CI export checks, which grep the headers
+# for the same form, would miss its function. Lines, not the preprocessor: a declaration under #if counts, once
+# if it is repeated under #else, which is why each target passes exactly the headers that make up its export
+# list.
 function(_jfx_rust_header_exports out_var)
+    set(macro_word "(^|[^A-Za-z0-9_])[A-Z][A-Z0-9_]*_EXPORT([^A-Za-z0-9_]|$)")
+    # Stands for a closed pair of parentheses; no header line holds it
+    string(ASCII 1 group)
     set(names)
+    set(problems "")
     foreach(header ${ARGN})
         if(NOT EXISTS "${header}")
             message(FATAL_ERROR "jfx_add_rust_slice: header ${header} does not exist")
         endif()
         file(READ "${header}" text)
-        set(text "\n${text}")
-        string(REGEX MATCHALL "\n[A-Z][A-Z0-9_]*_EXPORT[ \t]" export_lines "${text}")
-        string(REGEX MATCHALL "\n[A-Z][A-Z0-9_]*_EXPORT[ \t][^\n(]*[(]" declarations "${text}")
-        list(LENGTH export_lines line_count)
-        list(LENGTH declarations declaration_count)
-        if(NOT line_count EQUAL declaration_count)
-            message(FATAL_ERROR "jfx_add_rust_slice: ${header} has ${line_count} lines that start with an "
-                "export macro, but only ${declaration_count} of them declare a function on that line")
-        endif()
-        foreach(declaration ${declarations})
-            if(NOT declaration MATCHES "([A-Za-z_][A-Za-z0-9_]*)[ \t]*[(]$")
-                message(FATAL_ERROR "jfx_add_rust_slice: cannot read the function name in ${header}:${declaration}")
+        string(REPLACE "\r" "" text "${text}")
+        # Cut off line by line, never made a list: a line may hold ";", "[" or "]"
+        set(line_number 0)
+        while(NOT text STREQUAL "")
+            string(FIND "${text}" "\n" end)
+            if(end EQUAL -1)
+                set(line "${text}")
+                set(text "")
+            else()
+                string(SUBSTRING "${text}" 0 ${end} line)
+                math(EXPR end "${end} + 1")
+                string(SUBSTRING "${text}" ${end} -1 text)
             endif()
-            list(APPEND names "${CMAKE_MATCH_1}")
-        endforeach()
+            math(EXPR line_number "${line_number} + 1")
+            if(line MATCHES "^[ \t]*#" OR NOT line MATCHES "${macro_word}")
+                continue()
+            endif()
+            string(REGEX MATCH "^[A-Z][A-Z0-9_]*_EXPORT[ \t][^(]*[(]" declaration "${line}")
+            string(REGEX REPLACE "^[A-Z][A-Z0-9_]*_EXPORT" "" rest "${line}")
+            set(name "")
+            if(NOT rest MATCHES "${macro_word}" AND declaration MATCHES "([A-Za-z_][A-Za-z0-9_]*)[ \t]*[(]$")
+                set(name "${CMAKE_MATCH_1}")
+                string(LENGTH "${declaration}" length)
+                string(SUBSTRING "${line}" ${length} -1 parameters)
+                # A comment is no code: /* sizeof(T) */ after the declaration opens no parameter list
+                string(REGEX REPLACE "/[*]([^*]|[*]+[^*/])*[*]+/" "" parameters "${parameters}")
+                string(REGEX REPLACE "(/[*]|//).*$" "" parameters "${parameters}")
+                string(REGEX MATCH "[^ \t]" first "${parameters}")
+                if(first STREQUAL "")
+                    # From the line's own rest on, as a block comment opened there may close lines later. Comments are
+                    # cut with string(FIND), not matched: CMake's regular expressions recurse for each repetition of a
+                    # group, and the following text is the rest of the header.
+                    string(SUBSTRING "${line}" ${length} -1 next)
+                    string(APPEND next "\n${text}")
+                    while(TRUE)
+                        string(REGEX MATCH "[^ \t\n]" first "${next}")
+                        if(first STREQUAL "")
+                            break()
+                        endif()
+                        string(FIND "${next}" "${first}" at)
+                        string(SUBSTRING "${next}" ${at} 2 opener)
+                        if(opener STREQUAL "/*")
+                            set(closer "*/")
+                        elseif(opener STREQUAL "//")
+                            set(closer "\n")
+                        else()
+                            break()
+                        endif()
+                        math(EXPR at "${at} + 2")
+                        string(SUBSTRING "${next}" ${at} -1 next)
+                        string(FIND "${next}" "${closer}" at)
+                        if(at EQUAL -1)
+                            set(first "")
+                            break()
+                        endif()
+                        string(LENGTH "${closer}" closer_length)
+                        math(EXPR at "${at} + ${closer_length}")
+                        string(SUBSTRING "${next}" ${at} -1 next)
+                    endwhile()
+                endif()
+                set(closed "(${parameters}")
+                while(closed MATCHES "[(][^()]*[)]")
+                    string(REGEX REPLACE "[(][^()]*[)]" "${group}" closed "${closed}")
+                endwhile()
+                string(SUBSTRING "${closed}" 0 1 head)
+                string(SUBSTRING "${closed}" 1 -1 after_list)
+                string(FIND "${after_list}" "(" open_at)
+                string(FIND "${after_list}" "${group}" group_at)
+                if(first MATCHES "^[*(]$" OR NOT name MATCHES "[a-z]" OR name MATCHES "^__"
+                        OR ("${head}" STREQUAL "${group}" AND (NOT open_at EQUAL -1 OR NOT group_at EQUAL -1)))
+                    set(name "")
+                endif()
+            endif()
+            if(name STREQUAL "")
+                string(APPEND problems "\n  ${header}:${line_number}: ${line}")
+            else()
+                list(APPEND names "${name}")
+            endif()
+        endwhile()
     endforeach()
+    if(NOT problems STREQUAL "")
+        message(FATAL_ERROR "jfx_add_rust_slice: these header lines name an export macro, but are no export "
+            "declaration this build can read:${problems}\nWrite each export as one line that starts with the "
+            "macro in column 0 and holds the function's name and its \"(\": <LIB>_EXPORT <type> <name>(...); with "
+            "no \"(\" before the name's (a typedef names a function pointer type) and none after its parameter "
+            "list, and a name that has a lower-case letter and does not start with \"__\". Where a listed line names "
+            "the macro in a comment, reword the comment.")
+    endif()
     list(REMOVE_DUPLICATES names)
     list(SORT names)
     set(${out_var} "${names}" PARENT_SCOPE)
@@ -372,19 +510,38 @@ function(_jfx_rust_fail_toolchain library problem)
         "or configure with -DJFX_RUST=false to build the C implementation of ${library} instead.")
 endfunction()
 
-# The command that runs "cargo <args>" through the cargo action above, logging to logs/<log name>.log.
-# $<SEMICOLON> keeps the cargo command one argument of the returned command list.
-function(_jfx_rust_cargo_command out_var log_name)
-    set(command "${JFX_RUST_CARGO}" ${ARGN})
+# The command that runs <command> <args> through the cargo action above, logging to logs/<log name>.log.
+# $<SEMICOLON> keeps the command one argument of the returned command list.
+function(_jfx_rust_action_command out_var log_name)
+    get_property(toolchain GLOBAL PROPERTY JFX_RUST_PINNED_VERSION)
+    set(command ${ARGN})
     string(REPLACE ";" "$<SEMICOLON>" command "${command}")
     set(${out_var} "${CMAKE_COMMAND}" -DJFX_RUST_ACTION=cargo
-        "-DJFX_RUST_CARGO_TARGET_DIR=${JFX_RUST_CARGO_TARGET_DIR}"
-        "-DJFX_RUST_LOG=${JFX_RUST_BINARY_DIR}/logs/${log_name}.log"
+        "-DJFX_RUST_CARGO_TARGET_DIR=${JFX_RUST_CARGO_TARGET_DIR}" "-DJFX_RUST_TOOLCHAIN=${toolchain}"
+        "-DJFX_RUST_RUSTC=${JFX_RUST_RUSTC}" "-DJFX_RUST_LOG=${JFX_RUST_BINARY_DIR}/logs/${log_name}.log"
         "-DJFX_RUST_COMMAND=${command}" -P "${JFX_RUST_HELPER}" PARENT_SCOPE)
 endfunction()
 
-# Finds cargo and rustc, checks rustc against the pin and probes the platform libraries std needs.
-# Runs once per tree, and only for a tree with an enabled slice.
+function(_jfx_rust_cargo_command out_var log_name)
+    _jfx_rust_action_command(command "${log_name}" "${JFX_RUST_CARGO}" ${ARGN})
+    set(${out_var} ${command} PARENT_SCOPE)
+endfunction()
+
+# The arguments of every cargo call that compiles: the profiles, then split-debuginfo, which has no value that
+# every host accepts, then the target, which puts the archive in <build tree>/cargo/<host>/
+function(_jfx_rust_pins out_var)
+    get_property(host GLOBAL PROPERTY JFX_RUST_HOST)
+    if(host MATCHES "-windows-msvc$")
+        set(split packed)
+    else()
+        set(split off)
+    endif()
+    set(${out_var} --config "${JFX_RUST_CARGO_CONFIG}" --config "profile.release.split-debuginfo='${split}'"
+        --config "profile.dev.split-debuginfo='${split}'" --target ${host} PARENT_SCOPE)
+endfunction()
+
+# Finds cargo and rustc, checks rustc against the pin, reads its host target and probes the platform libraries
+# std needs. Runs once per tree, and only for a tree with an enabled slice.
 function(_jfx_rust_require_toolchain library)
     get_property(done GLOBAL PROPERTY JFX_RUST_TOOLCHAIN_FOUND)
     if(done)
@@ -414,18 +571,24 @@ function(_jfx_rust_require_toolchain library)
         _jfx_rust_fail_toolchain("${library}" "no cargo or no rustc is on PATH or in ${hint}")
     endif()
 
-    # In the repository root, so that a rustup proxy selects the toolchain of rust-toolchain.toml.
-    # A distribution's cargo ignores that file, hence the version check.
-    execute_process(COMMAND "${CMAKE_COMMAND}" -E env RUSTUP_AUTO_INSTALL=0 "${JFX_RUST_RUSTC}" --version
+    # With the pin in RUSTUP_TOOLCHAIN, as the cargo action runs, so that neither the shell's RUSTUP_TOOLCHAIN
+    # nor a rustup override replaces it. A distribution's rustc ignores both, hence the version check.
+    set(pinned_env RUSTUP_AUTO_INSTALL=0 "RUSTUP_TOOLCHAIN=${JFX_RUST_PINNED_VERSION}")
+    execute_process(COMMAND "${CMAKE_COMMAND}" -E env ${pinned_env} "${JFX_RUST_RUSTC}" -vV
         WORKING_DIRECTORY "${JFX_RUST_REPO_ROOT}"
         RESULT_VARIABLE rc OUTPUT_VARIABLE out ERROR_VARIABLE err OUTPUT_STRIP_TRAILING_WHITESPACE)
-    if(NOT rc EQUAL 0 OR NOT out MATCHES "^rustc ([0-9]+[.][0-9]+[.][0-9]+)[ -]")
-        _jfx_rust_fail_toolchain("${library}" "\"${JFX_RUST_RUSTC} --version\" failed: ${out}${err}")
+    if(NOT rc EQUAL 0 OR NOT out MATCHES "^(rustc ([0-9]+[.][0-9]+[.][0-9]+)[ -][^\r\n]*)")
+        _jfx_rust_fail_toolchain("${library}" "\"${JFX_RUST_RUSTC} -vV\" failed: ${out}${err}")
     endif()
-    if(NOT CMAKE_MATCH_1 STREQUAL JFX_RUST_PINNED_VERSION)
-        _jfx_rust_fail_toolchain("${library}" "${JFX_RUST_RUSTC} is ${out}")
+    set(version "${CMAKE_MATCH_1}")
+    if(NOT CMAKE_MATCH_2 STREQUAL JFX_RUST_PINNED_VERSION)
+        _jfx_rust_fail_toolchain("${library}" "${JFX_RUST_RUSTC} is ${version}")
     endif()
-    message(STATUS "jfx_rust: ${out} (${JFX_RUST_RUSTC}), cargo ${JFX_RUST_CARGO}")
+    if(NOT out MATCHES "\nhost: ([^\r\n]+)")
+        _jfx_rust_fail_toolchain("${library}" "\"${JFX_RUST_RUSTC} -vV\" names no host: ${out}")
+    endif()
+    set(host "${CMAKE_MATCH_1}")
+    message(STATUS "jfx_rust: ${version} (${JFX_RUST_RUSTC}), host ${host}, cargo ${JFX_RUST_CARGO}")
 
     # The platform libraries std needs, from rustc itself, for an empty staticlib
     set(probe_dir "${JFX_RUST_BINARY_DIR}/probe")
@@ -436,7 +599,7 @@ function(_jfx_rust_require_toolchain library)
     else()
         set(probe_archive "${probe_dir}/libjfx_rust_probe.a")
     endif()
-    execute_process(COMMAND "${CMAKE_COMMAND}" -E env RUSTUP_AUTO_INSTALL=0
+    execute_process(COMMAND "${CMAKE_COMMAND}" -E env ${pinned_env}
             "${JFX_RUST_RUSTC}" --crate-type staticlib --crate-name jfx_rust_probe
             --print native-static-libs -o "${probe_archive}" "${probe_dir}/empty.rs"
         WORKING_DIRECTORY "${JFX_RUST_REPO_ROOT}"
@@ -466,6 +629,8 @@ function(_jfx_rust_require_toolchain library)
     message(STATUS "jfx_rust: the Rust standard library links ${libs_text}; dropped from rustc's list: "
         "${dropped_text}")
     set_property(GLOBAL PROPERTY JFX_RUST_NATIVE_LIBS "${libs}")
+    set_property(GLOBAL PROPERTY JFX_RUST_PINNED_VERSION "${JFX_RUST_PINNED_VERSION}")
+    set_property(GLOBAL PROPERTY JFX_RUST_HOST "${host}")
     set_property(GLOBAL PROPERTY JFX_RUST_TOOLCHAIN_FOUND TRUE)
 endfunction()
 
@@ -483,8 +648,9 @@ function(_jfx_rust_crate_library crate_dir crate_name out_var)
     else()
         set(archive "lib${lib_name}.a")
     endif()
-    set(debug_archive "${JFX_RUST_CARGO_TARGET_DIR}/debug/${archive}")
-    set(release_archive "${JFX_RUST_CARGO_TARGET_DIR}/release/${archive}")
+    get_property(host GLOBAL PROPERTY JFX_RUST_HOST)
+    set(debug_archive "${JFX_RUST_CARGO_TARGET_DIR}/${host}/debug/${archive}")
+    set(release_archive "${JFX_RUST_CARGO_TARGET_DIR}/${host}/release/${archive}")
     if(JFX_RUST_MULTI_CONFIG)
         set(profile "$<IF:$<CONFIG:Debug>,dev,release>")
         set(byproducts "${debug_archive}" "${release_archive}")
@@ -500,8 +666,9 @@ function(_jfx_rust_crate_library crate_dir crate_name out_var)
     endif()
 
     # Always run: cargo decides what is out of date
+    _jfx_rust_pins(pins)
     _jfx_rust_cargo_command(cargo_build "${lib_name}-build-${profile}"
-        rustc --locked --offline -p ${crate_name} --lib --profile ${profile} --crate-type staticlib)
+        rustc --locked --offline ${pins} -p ${crate_name} --lib --profile ${profile} --crate-type staticlib)
     add_custom_target(${imported}_cargo
         COMMAND ${cargo_build}
         WORKING_DIRECTORY "${JFX_RUST_REPO_ROOT}"
@@ -636,21 +803,24 @@ ${export_count} exports of ${library} (target ${target}) */\n{\n    global:\n   
         endif()
     endforeach()
     if(NOT WIN32)
-        # std's prebuilt objects carry debug sections, and cargo's strip setting does not reach a staticlib
-        target_link_options(${target} PRIVATE "$<$<NOT:$<CONFIG:Debug>>:LINKER:--strip-debug>")
+        # std's prebuilt objects carry debug sections, and cargo's strip setting does not reach a staticlib.
+        # Release only: the other configurations are built to be debugged, std's sections included.
+        target_link_options(${target} PRIVATE "$<$<CONFIG:Release>:LINKER:--strip-debug>")
     endif()
 
     _jfx_rust_link_map(${target} map)
     if(WIN32)
         set(map_format msvc)
+        set(librarian "-DJFX_RUST_AR=${CMAKE_AR}")
     else()
         set(map_format gnu)
+        set(librarian)
     endif()
     # A generator may name the archive relative to the top of the build tree or to the target's directory
     get_target_property(target_binary_dir ${target} BINARY_DIR)
     add_custom_command(TARGET ${target} POST_BUILD
         COMMAND "${CMAKE_COMMAND}" -DJFX_RUST_ACTION=check-origin "-DJFX_RUST_MAP=${map}"
-            "-DJFX_RUST_MAP_FORMAT=${map_format}" "-DJFX_RUST_ARCHIVE=$<TARGET_FILE:${imported}>"
+            "-DJFX_RUST_MAP_FORMAT=${map_format}" "-DJFX_RUST_ARCHIVE=$<TARGET_FILE:${imported}>" ${librarian}
             "-DJFX_RUST_LINK_DIRS=${CMAKE_BINARY_DIR};${target_binary_dir}"
             "-DJFX_RUST_TARGET=${target}" "-DJFX_RUST_LOG=${JFX_RUST_BINARY_DIR}/logs/${target}-origin.log"
             "-DJFX_RUST_LIBRARY=${library}" "-DJFX_RUST_CRATE=${crate_name}"
@@ -658,7 +828,6 @@ ${export_count} exports of ${library} (target ${target}) */\n{\n    global:\n   
         COMMENT "Checking that ${library} (${target}) takes ${rust_text} from the ${crate_name} crate"
         VERBATIM)
 
-    # What the lint needs: the crate, its exports, and what its ABI check includes
     set_property(GLOBAL APPEND PROPERTY JFX_RUST_LINKED_CRATES "${crate_dir}")
     set_property(GLOBAL APPEND PROPERTY JFX_RUST_EXPORTS_${crate_name} ${SLICE_EXPORTS})
     foreach(header ${SLICE_HEADERS})
@@ -691,8 +860,9 @@ function(_jfx_rust_define_check_targets)
         list(APPEND packages -p ${crate_name})
     endforeach()
     list(JOIN packages " " packages_text)
+    _jfx_rust_pins(pins)
 
-    _jfx_rust_cargo_command(cargo_test test test --locked --offline ${packages})
+    _jfx_rust_cargo_command(cargo_test test test --locked --offline ${pins} ${packages})
     add_custom_target(jfx_rust_test
         COMMAND ${cargo_test}
         WORKING_DIRECTORY "${JFX_RUST_REPO_ROOT}"
@@ -700,7 +870,8 @@ function(_jfx_rust_define_check_targets)
         VERBATIM)
 
     _jfx_rust_cargo_command(cargo_fmt fmt fmt --check ${packages})
-    _jfx_rust_cargo_command(cargo_clippy clippy clippy --locked --offline --all-targets ${packages} -- -D warnings)
+    _jfx_rust_cargo_command(cargo_clippy clippy
+        clippy --locked --offline ${pins} --all-targets ${packages} -- -D warnings)
     add_custom_target(jfx_rust_lint_cargo
         COMMAND ${cargo_fmt}
         COMMAND ${cargo_clippy}
@@ -770,18 +941,32 @@ function(_jfx_rust_define_check_targets)
     endif()
     if(JFX_RUST_PERL)
         message(STATUS "jfx_rust: perl for the licence check: ${JFX_RUST_PERL}")
-        set(licence_check "${JFX_RUST_PERL}" "${JFX_RUST_LICENCE_SCRIPT}" --cargo "${JFX_RUST_CARGO}")
+        # The script calls a crate shipped only when its Cargo.toml lists a staticlib; --linked makes it
+        # check that each crate the slices link does
+        set(linked)
+        foreach(crate_dir ${crates})
+            get_filename_component(crate_name "${crate_dir}" NAME)
+            list(APPEND linked --linked ${crate_name})
+        endforeach()
+        # Its cargo metadata runs in the environment of every other cargo call
+        _jfx_rust_action_command(licence_check licences "${JFX_RUST_PERL}" "${JFX_RUST_LICENCE_SCRIPT}"
+            --cargo "${JFX_RUST_CARGO}" --config "${JFX_RUST_CARGO_CONFIG}" ${linked})
+        set(licence_commands
+            COMMAND "${JFX_RUST_PERL}" "${JFX_RUST_LICENCE_SCRIPT}" --self-test
+            COMMAND ${licence_check})
+        set(licence_comment "self-test of the licence check, then the licence check of the linked crates")
     else()
         set(no_perl "jfx_rust_lint: the licence check ${JFX_RUST_LICENCE_SCRIPT} needs perl, and at configure "
             "time none was ${perl_places}. ${perl_remedy} and configure again.")
         string(CONCAT no_perl ${no_perl})
-        set(licence_check "${CMAKE_COMMAND}" -DJFX_RUST_ACTION=fail
+        set(licence_commands COMMAND "${CMAKE_COMMAND}" -DJFX_RUST_ACTION=fail
             "-DJFX_RUST_MESSAGE=${no_perl}" -P "${JFX_RUST_HELPER}")
+        set(licence_comment "the licence check of the linked crates fails: configure found no perl")
     endif()
     add_custom_target(jfx_rust_lint
-        COMMAND ${licence_check}
+        ${licence_commands}
         WORKING_DIRECTORY "${JFX_RUST_REPO_ROOT}"
-        COMMENT "jfx_rust_lint: licence check of the linked crates"
+        COMMENT "jfx_rust_lint: ${licence_comment}"
         VERBATIM)
     add_dependencies(jfx_rust_lint jfx_rust_lint_cargo ${abi_checks})
 endfunction()
