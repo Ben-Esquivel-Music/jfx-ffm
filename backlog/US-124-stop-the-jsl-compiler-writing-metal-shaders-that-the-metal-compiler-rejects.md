@@ -17,8 +17,9 @@ Paths are relative to `modules/javafx.graphics`. The compiler's files are under
 
 ### What the build does with a `.metal` file
 - The `jsl-codegen` execution of `pom.xml` (`:114`, phase `compile`) runs the Decora and Prism generators with
-  `${jfx.jsl.backends}`: `-mtl -es2` on macOS (`:652`), `-mtl` there with `-DINCLUDE_ES2=false` (`:670`), `-d3d` or
-  `-d3d -es2` on Windows (`:620`, `:637`) and `-es2` elsewhere (`:48`). Only a macOS build writes `.metal` files.
+  `${jfx.jsl.backends}`: `-mtl -es2` on macOS (`:645`), `-mtl` there with `-DINCLUDE_ES2=false` (`:663`), `-d3d` or
+  `-d3d -es2` on Windows (`:613`, `:630`) and `-es2` elsewhere (`:48`). Only a macOS build writes `.metal` files.
+  (Amended 2026-11-17: these four lines are those of US-023's change, 7 lower than at `726d7f74a5`.)
 - On macOS, unless `-DskipNative=true`, the `native-mac` profile runs `cmake-configure` and `cmake-build` at
   `process-classes` (`pom.xml:801-859`). `native/mac.cmake:233-241` gives every generated `.metal` of `jsl-decora`
   and `jsl-prism` to `add_msl_shader` (`:220-231`), which compiles it with

@@ -21,7 +21,8 @@ are those of `726d7f74a5`.
   `:67-75`): `ColorAdjust`, `Brightpass`, `SepiaTone`, `PerspectiveTransform`, `DisplacementMap`, `InvertMask`, `Blend`
   (19 programs) and `PhongLighting` (3). `JSLC.compile` writes a program's HLSL, GLSL and Metal shaders first and its
   Java peer after them (`JSLC.java:209-260`). The pom's second-pass `javac` compiles the peers with the module
-  (`pom.xml:206-228`). The Prism programs and `LinearConvolve*` are compiled without `-java`.
+  (`pom.xml:199-221`; amended 2026-11-17 for US-023's change, `:206-228` at `726d7f74a5`). The Prism programs and
+  `LinearConvolve*` are compiled without `-java`.
 - The Java backend writes Java statement by statement (`JSWTreeScanner`) and inlines each call where it is used
   (`JSWCallScanner.visitCallExpr`, `JSWCallScanner.java:146-250`): a core function from the table of `JSWFuncImpls`
   (`JSWFuncImpls.java:52-133`), a user function by scanning its body again (`JSWCallScanner.java:242-245`). The code

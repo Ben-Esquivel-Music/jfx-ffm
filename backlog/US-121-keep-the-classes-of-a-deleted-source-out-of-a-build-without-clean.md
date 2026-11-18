@@ -10,7 +10,8 @@ I want the build's outputs to hold no class of the deleted source,
 so that the build compiles, tests and packages the classes the sources have, and none that only an earlier build made.
 
 ## Problem
-Paths are relative to `modules/javafx.graphics`. `pom.xml` is its pom, cited at `7a66c85e39`.
+Paths are relative to `modules/javafx.graphics`. `pom.xml` is its pom, cited with US-023's change (amended
+2026-11-17; as filed it was cited at `7a66c85e39`, where the lines cited here after `:178` are 7 higher).
 
 ### Measured
 US-021's independent review (2026-11-15; macOS 27.2.1 arm64, Maven 3.10.0, JDK 27.0.1.0.2) built a third clone at
@@ -27,13 +28,13 @@ copying 3,540 files into `target/classes`. A clean build of the tree without the
 implementation build).
 
 ### Read
-- The second-pass `javac` writes `target/mods` (`pom.xml:206-228`), and a `<copy>` puts `target/mods/javafx.graphics`
-  over `target/classes` (`:229-231`). Nothing removes a file from `target/mods`, so a class whose source is gone stays
+- The second-pass `javac` writes `target/mods` (`pom.xml:199-221`), and a `<copy>` puts `target/mods/javafx.graphics`
+  over `target/classes` (`:222-224`). Nothing removes a file from `target/mods`, so a class whose source is gone stays
   there, and the copy puts it back into `target/classes` (the review's reading).
 - The generator `javac`s write `target/jsl-compilers/decora` and `target/jsl-compilers/prism` (`:126-138`,
-  `:167-176`), `compile-shims` writes `target/shims` (`:265`), and the `testResources` (`:86-98`) copy the shim
+  `:167-176`), `compile-shims` writes `target/shims` (`:258`), and the `testResources` (`:86-98`) copy the shim
   directories into `target/test-classes`. The pom has no `<delete>` step.
-- Nothing in the `jsl-codegen` execution (`:108-234`) removes a file from `target/gensrc`: it makes directories, runs
+- Nothing in the `jsl-codegen` execution (`:108-227`) removes a file from `target/gensrc`: it makes directories, runs
   the generator `javac`s, the generators and the second pass, and copies (read, not measured).
 - Other modules' builds stage the graphics shims too: in the main checkout, built before US-021's deletion, the two
   `ZoomRadialBlur` classes are also in the `target/test-classes` of `javafx.controls` and `javafx.fxml` (the review)

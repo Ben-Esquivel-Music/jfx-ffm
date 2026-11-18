@@ -175,19 +175,15 @@
                                     <compilerarg value="--add-modules=javafx.graphics"/>
                                 </javac>
 
-                                <pathconvert property="jfx.jslc.prism.classpath">
-                                    <path>
+                                <!-- One run, not one per .jsl file as upstream: every run composes every program -->
+                                <java classname="CompileJSL" fork="true" failonerror="true"
+                                      dir="${project.basedir}">
+                                    <classpath>
                                         <path refid="maven.compile.classpath"/>
                                         <pathelement location="${project.basedir}/src/jslc/resources"/>
                                         <pathelement location="${project.build.directory}/jsl-compilers/prism"/>
                                         <pathelement location="${project.basedir}/src/main/jsl-prism"/>
-                                    </path>
-                                </pathconvert>
-                                <apply executable="${java.home}/bin/java" failonerror="true"
-                                       dir="${project.basedir}" parallel="false">
-                                    <arg value="-cp"/>
-                                    <arg value="${jfx.jslc.prism.classpath}"/>
-                                    <arg value="CompileJSL"/>
+                                    </classpath>
                                     <arg value="-i"/>
                                     <arg value="${project.basedir}/src/main/jsl-prism"/>
                                     <arg value="-o"/>
@@ -198,10 +194,7 @@
                                     <arg value="-pkg"/>
                                     <arg value="com/sun/prism"/>
                                     <arg line="${jfx.jsl.backends}"/>
-                                    <arg value="-name"/>
-                                    <srcfile/>
-                                    <fileset dir="${project.basedir}/src/main/jsl-prism" includes="**/*.jsl"/>
-                                </apply>
+                                </java>
 
                                 <!-- Second pass: compile main + generated sources as the module -->
                                 <mkdir dir="${project.build.directory}/mods"/>
