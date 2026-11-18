@@ -23,9 +23,9 @@ to line 474.
   `MaskSolid.jsl`, `MaskAlphaOne.jsl` and `PaintColor.jsl` goes into no program, and nothing parses it.
 - Their time still counts. A program's source time is the newer of its mask and paint times (`:407-408`), so a newer
   time of one of the three makes its programs out of date (US-023).
-- The pom runs the generator once for each of the 28 `.jsl` files of `src/main/jsl-prism` (`pom.xml:186-204`), and
-  the generator reads all 28. Before US-021 there were 30, and `PaintTextureYUV422.jsl` and `PaintTextureYUV444.jsl`
-  were never read; US-021 deleted them.
+- Since US-023 (amended 2026-11-17) the pom runs the generator once per build, in one JVM (`pom.xml:178-197`), and
+  the generator reads all 28 `.jsl` files of `src/main/jsl-prism`. Before US-021 there were 30, and
+  `PaintTextureYUV422.jsl` and `PaintTextureYUV444.jsl` were never read; US-021 deleted them.
 - The two omissions are in the first open-source version of the generator, `839a0d8349` (2013-02-25). `git log -S`
   on either comment finds only that commit and the 2016 directory rename `c420248b9b`.
 
@@ -105,8 +105,9 @@ These are the counts the end-to-end run of US-020 read from the code (28, 8 and 
   ```
 - One run per case is enough. The generator ignores `-name` and writes all 212 programs in every JVM (US-023): the
   one run of the unmodified inputs wrote the same 850 files, by name and md5, as the 30 JVMs of the end-to-end run.
-  With the pom's 28 JVMs (30 before US-021), the first does all the work and `failonerror` stops the `<apply>` at the
-  first JVM that exits 1 (US-023).
+  Since US-023 (amended 2026-11-17) the pom runs the generator in one JVM, as these runs do but without `-name`, and
+  `failonerror` fails the build when it exits 1; with the pom's former loop of 28 JVMs (30 before US-021), the first
+  did all the work and the `<apply>` stopped at the first JVM that exited 1.
 - Files compared by name and md5: `find . -type f | sort | xargs md5 -r` in each output directory.
 
 ### Upstream too
@@ -188,6 +189,7 @@ generator was not run.
 - US-022 (amended 2026-11-17): since US-022 the generators read their `.jsl` files with `JSLSource.file`, so an error
   names the file, its line and column and the program. An error in the three files is to be named the same way; the
   requirement and the criteria above hold with US-022's message forms.
-- US-023: with the pom's 28 JVMs (30 before US-021), the first, started with `-name …/MaskAlphaOne.jsl`, reports
-  any Prism error, whatever file holds it. Its "A source time in the future" case also rewrote the 112 files of the
-  28 `<mask>_Color` programs for `PaintColor.jsl`.
+- US-023 (amended 2026-11-17): the pom runs the generator in one JVM, without `-name`, and that JVM reports any Prism
+  error, whatever file holds it; with the former loop of 28 JVMs (30 before US-021) it was the first, started with
+  `-name …/MaskAlphaOne.jsl`. Its "A source time in the future" case also rewrote the 112 files of the 28
+  `<mask>_Color` programs for `PaintColor.jsl`.

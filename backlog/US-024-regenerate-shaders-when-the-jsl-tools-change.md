@@ -37,8 +37,12 @@ Options; the choice is part of the story. None was prototyped.
 - **(b) A stamp.** The build keeps, in `target/gensrc`, a digest of the compiler, the generators and every `.jsl`
   input, and runs the generators with `-force` when the digest differs. It also catches restored files. Cost: a digest
   of every input in every build.
-- **(c) Always `-force`.** Simplest. Every build rewrites every output, so every later step that compares times (the
-  second-pass `javac`, the native shader compiles) repeats its work. Not measured.
+- **(c) Always `-force`.** Simplest. Every build rewrites every output that `JSLC.compile` writes, so every later step
+  that compares times (the second-pass `javac`, the native shader compiles) repeats its work. Not measured. (Amended
+  2026-11-17: filed as "every output". The Prism `_Loader.java` files are not rewritten: `CompileJSL.compileShader`
+  writes a loader only when it is out of date and never reads `-force` (`src/main/jsl-prism/CompileJSL.java:420`).
+  Measured in US-023: with `-force`, the Prism step rewrote all 212 backend files of each backend and only the loaders
+  that were out of date, and the Decora step every one of its 108 files with `-d3d`.)
 - **(d) Keep it and document it:** a change to the compiler or a generator needs `clean`.
 
 ## Acceptance criteria
