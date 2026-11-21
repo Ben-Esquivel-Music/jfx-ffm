@@ -242,7 +242,10 @@ it is part of the story.
   is up to date, since `CompileJSL.compileShader` writes a loader only when it is out of date and never reads the flag,
   `CompileJSL.java:420`. In WSL, after the touch, 228 files: the 212 `.frag` files and the 16 `FillPgram_*` loaders. On
   Windows, in the next build, with `-force` passed through `-Djfx.jsl.backends` and so reaching the Decora step too,
-  320: the 212 `.hlsl` files and the 108 files of `jsl-decora`).
+  320: the 212 `.hlsl` files and the 108 files of `jsl-decora`). (Amended 2026-11-21: true of the pom and the
+  generators of this story only. Since US-024 the pom passes `-force` to both steps, the loader check at
+  `CompileJSL.java:420` reads it, and a forced run writes only the outputs whose bytes change, so after this touch no
+  file gets a new time; see [US-024](US-024-regenerate-shaders-when-the-jsl-tools-change.md#behaviour-changes).)
 - **Same failure.** With the `;` at the end of `MaskFillPgram.jsl:108` removed in a scratch copy of the tree, a clean
   build fails in `jsl-codegen` with `MaskFillPgram.jsl:109:4: in program FillPgram_Color: missing ';' at 'return'`
   after writing the same 32 files as the old pom (amended 2026-11-17: the message was `line 109:4 missing ';' at

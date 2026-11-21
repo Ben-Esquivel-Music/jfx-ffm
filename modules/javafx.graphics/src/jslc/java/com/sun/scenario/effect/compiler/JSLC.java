@@ -232,7 +232,7 @@ public class JSLC {
                 if (pinfo == null) pinfo = checkedParserInfo(jslcinfo, source);
                 HLSLBackend hlslBackend = new HLSLBackend(pinfo.parser, pinfo.visitor);
                 hlslBackend.scan(pinfo.program);
-                write(hlslBackend.getShader(), outFile);
+                writeOutput(jslcinfo, hlslBackend.getShader(), outFile);
             }
         }
 
@@ -242,7 +242,7 @@ public class JSLC {
                 if (pinfo == null) pinfo = checkedParserInfo(jslcinfo, source);
                 ES2Backend es2Backend = new ES2Backend(pinfo.parser, pinfo.visitor);
                 es2Backend.scan(pinfo.program);
-                write(es2Backend.getShader(), outFile);
+                writeOutput(jslcinfo, es2Backend.getShader(), outFile);
             }
         }
 
@@ -258,7 +258,7 @@ public class JSLC {
                 mslBackend.scan(pinfo.program);
                 String shader = mslBackend.getShader();
                 if (compileMetal) {
-                    write(shader, outFile);
+                    writeOutput(jslcinfo, shader, outFile);
                 } else {
                     // Only an output that an earlier MSLBackend wrote changes; one whose JSL names just look
                     // renamed keeps its file time.
@@ -274,7 +274,7 @@ public class JSLC {
                 if (pinfo == null) pinfo = checkedParserInfo(jslcinfo, source);
                 JSWBackend javaBackend = new JSWBackend(pinfo.parser, pinfo.visitor, pinfo.program);
                 String genCode = javaBackend.getGenCode(shaderName, peerName, genericsName, interfaceName);
-                write(genCode, outFile);
+                writeOutput(jslcinfo, genCode, outFile);
             }
         }
 
@@ -284,7 +284,7 @@ public class JSLC {
                 if (pinfo == null) pinfo = checkedParserInfo(jslcinfo, source);
                 PrismBackend prismBackend = new PrismBackend(pinfo.parser, pinfo.visitor, pinfo.program);
                 String genCode = prismBackend.getGlueCode(shaderName, peerName, genericsName, interfaceName);
-                write(genCode, outFile);
+                writeOutput(jslcinfo, genCode, outFile);
             }
         }
 
@@ -293,6 +293,20 @@ public class JSLC {
 
     public static boolean outOfDate(File outFile, long sourceTime) {
         return sourceTime >= outFile.lastModified();
+    }
+
+    /**
+     * Writes an output that the run compiled. A forced run compiles every output, so it writes only those whose bytes
+     * differ: the steps after it that compare file times then repeat their work only for an output that changed.
+     * Without force an output is compiled only when it is out of date, and it is written even with the same bytes so
+     * that its new time makes it up to date.
+     */
+    public static void writeOutput(JSLCInfo jslcinfo, String str, File outFile) throws Exception {
+        if (jslcinfo.force) {
+            writeIfChanged(str, outFile);
+        } else {
+            write(str, outFile);
+        }
     }
 
     public static void write(String str, File outFile) throws Exception {
@@ -309,13 +323,14 @@ public class JSLC {
     private static void writeIfChanged(String str, File outFile) throws Exception {
         // The charset that the FileWriter of write encodes with
         byte[] bytes = str.getBytes(Charset.defaultCharset());
-        if (!Arrays.equals(Files.readAllBytes(outFile.toPath()), bytes)) {
+        if (!outFile.isFile() || !Arrays.equals(Files.readAllBytes(outFile.toPath()), bytes)) {
             write(str, outFile);
         }
     }
 
     public static class JSLCInfo {
         public int outTypes;
+        /** A forced run compiles every output whatever the file times say, and writes only the changed ones. */
         public boolean force;
         public String outDir;
         public boolean trimToOutDir;

@@ -17,9 +17,10 @@ Paths are relative to `modules/javafx.graphics`. The compiler's files are under
 
 ### What the build does with a `.metal` file
 - The `jsl-codegen` execution of `pom.xml` (`:114`, phase `compile`) runs the Decora and Prism generators with
-  `${jfx.jsl.backends}`: `-mtl -es2` on macOS (`:645`), `-mtl` there with `-DINCLUDE_ES2=false` (`:663`), `-d3d` or
-  `-d3d -es2` on Windows (`:613`, `:630`) and `-es2` elsewhere (`:48`). Only a macOS build writes `.metal` files.
-  (Amended 2026-11-17: these four lines are those of US-023's change, 7 lower than at `726d7f74a5`.)
+  `${jfx.jsl.backends}`: `-mtl -es2` on macOS (`:649`), `-mtl` there with `-DINCLUDE_ES2=false` (`:667`), `-d3d` or
+  `-d3d -es2` on Windows (`:617`, `:634`) and `-es2` elsewhere (`:48`). Only a macOS build writes `.metal` files.
+  (Amended 2026-11-17: these four lines are those of US-023's change, 7 lower than at `726d7f74a5`. Amended
+  2026-11-21: they are now those of US-024's change, 4 higher than with US-023's.)
 - On macOS, unless `-DskipNative=true`, the `native-mac` profile runs `cmake-configure` and `cmake-build` at
   `process-classes` (`pom.xml:801-859`). `native/mac.cmake:233-241` gives every generated `.metal` of `jsl-decora`
   and `jsl-prism` to `add_msl_shader` (`:220-231`), which compiles it with
@@ -188,3 +189,9 @@ Upstream was not built or run, and JBS was not searched.
   story.
 - The driver and the inputs were not kept in the repository. The inputs above describe each case fully enough to
   rebuild it.
+- US-024 (amended 2026-11-21): another case of a `.metal` that the backend writes wrong. `MSLBackend.getVar` writes a
+  variable as `VAR_MAP.getOrDefault(v, v)` (`backend/hw/MSLBackend.java:182-184`), and `VAR_MAP` is a fixed list of
+  names (`:82-154`; lines of `38911806e8`, where the file is as with US-024's change). A parameter whose name is not in
+  it is written without the `uniforms.` prefix, which is not valid MSL: in a probe of US-024's test rework, a program
+  with `param float2 origin;` gave `in.texCoord0 - origin`. Read in the source by US-024's confirming review, seen in
+  that probe's output; not compiled with the Metal compiler.

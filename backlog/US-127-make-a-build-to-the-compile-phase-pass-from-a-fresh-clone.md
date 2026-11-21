@@ -58,7 +58,9 @@ passes from a fresh clone whose local repository holds none of this project's ar
 3. **Nothing else changes.** The module gates of US-023, `mvn -B -ntp -pl buildtools/jslc,modules/javafx.graphics -am
    clean test` on Windows (with `-Djfx.parity.require=true`) and in WSL, give per-class lists identical to
    `US-023-windows-per-class.tsv` and `US-023-wsl-per-class.tsv`, and `target/gensrc` identical by name and md5 to
-   `US-023-windows-gensrc.md5` and `US-023-wsl-gensrc.md5`. `submit.yml` is green.
+   `US-023-windows-gensrc.md5` and `US-023-wsl-gensrc.md5`. `submit.yml` is green. (Amended 2026-11-21: since US-024,
+   which adds the jslc class `ForcedRunTest`, the per-class lists are to equal the "after" columns of
+   `US-024-windows-per-class.tsv` and `US-024-wsl-per-class.tsv`; the `target/gensrc` lists are unchanged.)
 
 ## Definition of Done
 - All acceptance criteria met, logs kept, results stated here.
