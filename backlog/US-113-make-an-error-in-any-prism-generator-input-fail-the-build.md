@@ -22,10 +22,14 @@ to line 474.
   empty paint text and no `paint()` call (`:375-378`, "can omit trivial paint() call"). So the text of
   `MaskSolid.jsl`, `MaskAlphaOne.jsl` and `PaintColor.jsl` goes into no program, and nothing parses it.
 - Their time still counts. A program's source time is the newer of its mask and paint times (`:407-408`), so a newer
-  time of one of the three makes its programs out of date (US-023).
-- Since US-023 (amended 2026-11-17) the pom runs the generator once per build, in one JVM (`pom.xml:178-197`), and
-  the generator reads all 28 `.jsl` files of `src/main/jsl-prism`. Before US-021 there were 30, and
-  `PaintTextureYUV422.jsl` and `PaintTextureYUV444.jsl` were never read; US-021 deleted them.
+  time of one of the three makes its programs out of date (US-023). (Amended 2026-11-21: the time decides only in a
+  run without `-force`. Since US-024 the build passes `-force`, so it compiles every program in every build whatever
+  the times say; the text of the three files still goes into no program, so this story's subject is unchanged. Read
+  from the code, not run.)
+- Since US-023 (amended 2026-11-17) the pom runs the generator once per build, in one JVM (`pom.xml:181-201`;
+  amended 2026-11-21 for US-024's change, `:178-197` with US-023's), and the generator reads all 28 `.jsl` files of
+  `src/main/jsl-prism`. Before US-021 there were 30, and `PaintTextureYUV422.jsl` and `PaintTextureYUV444.jsl` were
+  never read; US-021 deleted them.
 - The two omissions are in the first open-source version of the generator, `839a0d8349` (2013-02-25). `git log -S`
   on either comment finds only that commit and the 2016 directory rename `c420248b9b`.
 
@@ -105,9 +109,10 @@ These are the counts the end-to-end run of US-020 read from the code (28, 8 and 
   ```
 - One run per case is enough. The generator ignores `-name` and writes all 212 programs in every JVM (US-023): the
   one run of the unmodified inputs wrote the same 850 files, by name and md5, as the 30 JVMs of the end-to-end run.
-  Since US-023 (amended 2026-11-17) the pom runs the generator in one JVM, as these runs do but without `-name`, and
-  `failonerror` fails the build when it exits 1; with the pom's former loop of 28 JVMs (30 before US-021), the first
-  did all the work and the `<apply>` stopped at the first JVM that exited 1.
+  Since US-023 (amended 2026-11-17) the pom runs the generator in one JVM, as these runs do but without `-name` and,
+  since US-024 (amended 2026-11-21), with `-force`, and `failonerror` fails the build when it exits 1; with the pom's
+  former loop of 28 JVMs (30 before US-021), the first did all the work and the `<apply>` stopped at the first JVM
+  that exited 1.
 - Files compared by name and md5: `find . -type f | sort | xargs md5 -r` in each output directory.
 
 ### Upstream too

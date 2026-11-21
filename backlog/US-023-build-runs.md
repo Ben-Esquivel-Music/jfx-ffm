@@ -168,7 +168,10 @@ per class on [Windows](US-023-windows-per-class.tsv) and in [WSL](US-023-wsl-per
     `-d3d -es2 -mtl` (212 each of `.hlsl`, `.frag` and `.metal`, no loader, no header) and 212 with `-d3d`.
   - No `-force` run rewrote an up-to-date loader. `CompileJSL.compileShader` writes the loader under
     `if (JSLC.outOfDate(outFile, sourcetime))` (`src/main/jsl-prism/CompileJSL.java:420`) and never reads
-    `jslcinfo.force`, which `JSLC.compile` checks for each backend output.
+    `jslcinfo.force`, which `JSLC.compile` checks for each backend output. (Amended 2026-11-21: that is the code of
+    this record. Since US-024 the line is `if (jslcinfo.force || JSLC.outOfDate(outFile, sourcetime))`, the pom
+    passes `-force` to both steps, and a forced run writes only the outputs whose bytes change, so the touch of
+    `MaskFillPgram.jsl` above gives no file a new time; see [US-024's record](US-024-build-runs.md).)
 
 ## Failure case
 **Through Maven, in WSL clones,** one per pom:

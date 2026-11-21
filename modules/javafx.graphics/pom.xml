@@ -158,6 +158,9 @@
                                     <arg value="${jfx.graphics.gensrc}/mtl-headers"/>
                                     <arg value="-pkg"/>
                                     <arg value="com/sun/scenario/effect"/>
+                                    <!-- Here and in the Prism run: file times miss a changed compiler or generator,
+                                         and a forced run writes only the outputs whose bytes change -->
+                                    <arg value="-force"/>
                                     <arg line="${jfx.jsl.backends}"/>
                                     <!-- placeholders: GenAllDecoraShaders.java drops the last two args and sets each shader's output types -->
                                     <arg value="-all"/>
@@ -193,6 +196,7 @@
                                     <arg value="${jfx.graphics.gensrc}/mtl-headers"/>
                                     <arg value="-pkg"/>
                                     <arg value="com/sun/prism"/>
+                                    <arg value="-force"/>
                                     <arg line="${jfx.jsl.backends}"/>
                                 </java>
 

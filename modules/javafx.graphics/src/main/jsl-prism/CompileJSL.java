@@ -417,10 +417,10 @@ public class CompileJSL {
         JSLC.ParserInfo pinfo = JSLC.compile(jslcinfo, source, sourcetime);
 
         File outFile = jslcinfo.getOutputFile("prism-ps/build/gensrc/{pkg}/shader/{name}_Loader.java");
-        if (JSLC.outOfDate(outFile, sourcetime)) {
+        if (jslcinfo.force || JSLC.outOfDate(outFile, sourcetime)) {
             if (pinfo == null) pinfo = JSLC.getParserInfo(jslcinfo, source);
             PrismLoaderBackend loaderBackend = new PrismLoaderBackend(pinfo.visitor, pinfo.program);
-            JSLC.write(loaderBackend.getGlueCode(name), outFile);
+            JSLC.writeOutput(jslcinfo, loaderBackend.getGlueCode(name), outFile);
         }
     }
 

@@ -621,7 +621,7 @@ public class MetalHeadersTest {
     }
 
     @Test
-    public void aRunWithForceWritesEveryOutputAgainThoughNothingIsOutOfDate() throws Exception {
+    public void aRunWithForceWritesNoOutputOrHeaderWhoseBytesAreUnchangedThoughEverySourceIsNewer() throws Exception {
         Path gensrc = tmp.resolve("gensrc");
         Path outDir = gensrc.resolve("jsl-decora");
         probeRun(outDir, gensrc.resolve("mtl-headers"), OUT_OF_DATE, OUT_OF_DATE);
@@ -630,16 +630,11 @@ public class MetalHeadersTest {
 
         JSLCInfo forced = newRun(outDir, gensrc.resolve("mtl-headers"), DECORA);
         forced.force = true;
-        compile(forced, "ProbeA", SAMPLING, UP_TO_DATE);
-        compile(forced, "ProbeB", UNTEXTURED, UP_TO_DATE);
+        compile(forced, "ProbeA", SAMPLING, OUT_OF_DATE);
+        compile(forced, "ProbeB", UNTEXTURED, OUT_OF_DATE);
         finish(forced);
 
-        for (String shaderName : List.of("ProbeA", "ProbeB")) {
-            for (Path output : outputsOf(outDir, shaderName)) {
-                assertNotEquals(AGED, Files.getLastModifiedTime(output), output + " was not written again");
-                assertEquals(firstRun.get(output).content(), Files.readString(output), output.toString());
-            }
-        }
+        assertUnchanged(firstRun, snapshot(tmp));
     }
 
     @Test

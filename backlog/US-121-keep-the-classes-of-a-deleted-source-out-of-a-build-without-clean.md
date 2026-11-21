@@ -10,8 +10,10 @@ I want the build's outputs to hold no class of the deleted source,
 so that the build compiles, tests and packages the classes the sources have, and none that only an earlier build made.
 
 ## Problem
-Paths are relative to `modules/javafx.graphics`. `pom.xml` is its pom, cited with US-023's change (amended
-2026-11-17; as filed it was cited at `7a66c85e39`, where the lines cited here after `:178` are 7 higher).
+Paths are relative to `modules/javafx.graphics`. `pom.xml` is its pom, cited with US-024's change (amended
+2026-11-21; with US-023's change alone, the lines cited here from `:164` to `:198` are 3 lower and those from `:200`
+on 4 lower. Amended 2026-11-17: as filed it was cited at `7a66c85e39`, where the lines that are after `:178` with
+US-023's change are 7 higher).
 
 ### Measured
 US-021's independent review (2026-11-15; macOS 27.2.1 arm64, Maven 3.10.0, JDK 27.0.1.0.2) built a third clone at
@@ -28,13 +30,13 @@ copying 3,540 files into `target/classes`. A clean build of the tree without the
 implementation build).
 
 ### Read
-- The second-pass `javac` writes `target/mods` (`pom.xml:199-221`), and a `<copy>` puts `target/mods/javafx.graphics`
-  over `target/classes` (`:222-224`). Nothing removes a file from `target/mods`, so a class whose source is gone stays
+- The second-pass `javac` writes `target/mods` (`pom.xml:203-225`), and a `<copy>` puts `target/mods/javafx.graphics`
+  over `target/classes` (`:226-228`). Nothing removes a file from `target/mods`, so a class whose source is gone stays
   there, and the copy puts it back into `target/classes` (the review's reading).
 - The generator `javac`s write `target/jsl-compilers/decora` and `target/jsl-compilers/prism` (`:126-138`,
-  `:167-176`), `compile-shims` writes `target/shims` (`:258`), and the `testResources` (`:86-98`) copy the shim
+  `:170-179`), `compile-shims` writes `target/shims` (`:262`), and the `testResources` (`:86-98`) copy the shim
   directories into `target/test-classes`. The pom has no `<delete>` step.
-- Nothing in the `jsl-codegen` execution (`:108-227`) removes a file from `target/gensrc`: it makes directories, runs
+- Nothing in the `jsl-codegen` execution (`:108-231`) removes a file from `target/gensrc`: it makes directories, runs
   the generator `javac`s, the generators and the second pass, and copies (read, not measured).
 - Other modules' builds stage the graphics shims too: in the main checkout, built before US-021's deletion, the two
   `ZoomRadialBlur` classes are also in the `target/test-classes` of `javafx.controls` and `javafx.fxml` (the review)
@@ -80,3 +82,8 @@ in the module's outputs or in the generator class directories.
 - Outside this story: the peers and shaders generated into `target/gensrc` from a deleted `.jsl` file, and the
   classes compiled from them. That case was not measured, because none of the `.jsl` files US-021 deleted generated a
   file.
+- US-024 (amended 2026-11-21): the build now forces both generators, and a forced run rewrites what the generators
+  produce and deletes nothing. So the outputs of a deleted `.jsl` file, or of a generator change that drops or renames
+  an output, still stay in `target/gensrc` until `clean`, and the second-pass `javac` still compiles them (US-024,
+  [Known limits](US-024-regenerate-shaders-when-the-jsl-tools-change.md#known-limits); read from the code by its
+  review, not measured).
