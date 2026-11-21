@@ -4,9 +4,9 @@
 `getrange`, monitor), `cache.h`, both `filecache.c` excerpts, the jfxmedia message consumers; not checked:
 `hlsprogressbuffer.c` beyond its type and factory, the property ranges; no in-repo test reaches either element;
 nothing built; 2026-10-01: the deletion of the files macOS compiles moved behind US-028 after a re-read of the
-`fxplugins` sources in all three `native/*.cmake` files) · **Epic:** Rust port of the remaining native code (goal 3) ·
-**Blocked by:** US-027, US-032 (javasource port: crate, link recipe, trace driver), US-041 (fxplugins
-map-misuse fix, finding 4); the deletion of the files macOS compiles (slice 6) also by US-028
+`fxplugins` sources in all three `native/*.cmake` files; 2026-11-21: it no longer waits for US-028) · **Epic:** Rust
+port of the remaining native code (goal 3) · **Blocked by:** US-027, US-032 (javasource port: crate, link recipe,
+trace driver), US-041 (fxplugins map-misuse fix, finding 4)
 
 ## Story
 As a JavaFX app developer streaming media over HTTP or HLS,
@@ -24,8 +24,8 @@ Paths as in the javasource port story.
 - **Owned code (R2):** OpenJFX code.
 - **Buildable and testable here (R3):**
   - It is compiled into `fxplugins` on Windows and Linux (`native/win.cmake:755-757`, `native/linux.cmake:366-368`).
-    macOS compiles both elements and the POSIX cache too (`native/mac.cmake:607-609`) and keeps the C until
-    US-028 (P2).
+    macOS compiles both elements and the POSIX cache too (`native/mac.cmake:607-609`). Their C is deleted on all
+    three platforms together (P2).
   - It is inserted when the source needs buffering (`GstPipelineFactory.cpp:281-302`).
   - No test reaches it today (`FFM-STATUS.md:264-268`), so the trace goldens are the oracle.
 - **Benefit (R4):**
@@ -71,7 +71,7 @@ Paths as in the javasource port story.
 - **Monitor thread.** It keeps its lifecycle: started on pull-mode activation, woken through the same condition,
   and joined on deactivation (`:385-403`).
 - **Cache.** It keeps its C prototypes while `progressbuffer.c` is still C.
-- **macOS.** Every option stays off on macOS until US-028, so macOS keeps compiling all of this C (P2).
+- **macOS.** Every option applies on macOS too, so the C leaves the three builds together (P2).
 
 ### Slices
 1. **Goldens from C.** Scenarios in the trace driver, upstream being the scripted javasource in
@@ -86,32 +86,32 @@ Paths as in the javasource port story.
 
    Captured at a recorded commit on Windows and WSL.
 2. **Cache in Rust.** The crate exports the `cache.h` functions per OS behind an option. With it on, `filecache.c`
-   leaves the Windows and Linux builds; macOS keeps compiling `posix/filecache.c` (`native/mac.cmake:609`). Same
-   temp-file location and delete-on-close behaviour as each C file. Gate: goldens exact.
+   leaves the three builds (on macOS `posix/filecache.c`, `native/mac.cmake:609`). Same temp-file location and
+   delete-on-close behaviour as each C file. Gate: goldens exact.
 3. **`progressbuffer` in Rust.** Gate: goldens exact, and the option off is unchanged.
 4. **`hlsprogressbuffer` in Rust.** Same gate.
-5. **Remove the C from the Windows and Linux builds.** In its own commit, once slices 2-4 are accepted on both,
-   drop both elements' `.c` files and each OS's `filecache.c` from `native/win.cmake` and `native/linux.cmake`; on
-   those two OSes the options go too. `win32/filecache.c`, which only Windows compiles, is deleted with its
-   `native/win.cmake` lines (`:756`, `:769`). The other files, `cache.h` and the full headers stay, because macOS
-   still compiles the C (`native/mac.cmake:607-609`, include directories `:613-614`).
-6. **Delete the C, after US-028.** Remove both elements' `.c` files, `posix/filecache.c`, `cache.h` and their
-   `native/mac.cmake` lines. The headers `fxplugins.c` includes shrink to the init prototypes.
+5. **Remove the C from the builds.** In its own commit, once slices 2-4 are accepted on Windows, WSL Linux and
+   macOS, drop both elements' `.c` files and each OS's `filecache.c` from `native/win.cmake`, `native/linux.cmake`
+   and `native/mac.cmake` (`:607-609`); the options go too. `win32/filecache.c`, which only Windows compiles, is
+   deleted with its `native/win.cmake` lines (`:756`, `:769`). macOS no longer waits for US-028.
+6. **Delete the C.** Remove both elements' `.c` files, `posix/filecache.c` and `cache.h`, and any CMake line left
+   that names them. The headers `fxplugins.c` includes shrink to the init prototypes.
 
 ## Acceptance criteria
-- `fxplugins` export lists as in the javasource port: Windows identical; Linux identical except for listed symbols
-  internal to C the Linux build no longer compiles; no Rust std symbol.
+- `fxplugins` export lists as in the javasource port: Windows identical; Linux and macOS identical except for listed
+  symbols internal to C their build no longer compiles; no Rust std symbol.
 - Goldens exact on Windows and WSL.
 - Module Java suite unchanged and passing.
-- After slice 5, the elements and the cache are absent from `native/win.cmake` and `native/linux.cmake`,
-  `win32/filecache.c` is deleted, and `native/mac.cmake` is unchanged. After slice 6, the slice-6 files are deleted
-  and nothing references them (`git grep`).
+- After slice 5, the elements and the cache are absent from `native/win.cmake`, `native/linux.cmake` and
+  `native/mac.cmake`, and `win32/filecache.c` is deleted. After slice 6, the slice-6 files are deleted and nothing
+  references them (`git grep`).
 - `unsafe` only in `ffi`.
 - clippy and rustfmt clean.
 
 ## Definition of Done
-PR merged after review; verified on Windows and on WSL Linux; the C removed from the Windows and Linux builds, and
-deleted from the tree by slice 6 once US-028 has landed; `backlog/README.md` updated.
+PR merged after review; verified on Windows, on WSL Linux and on macOS (arm64 on the macOS host, x86_64 in the
+`macos-15-intel` CI job); the C deleted on all three platforms once the slice is accepted on Windows, WSL Linux and
+macOS (slices 5 and 6); `backlog/README.md` updated.
 
 ## Risks
 | # | Risk | Mitigation |

@@ -677,6 +677,14 @@ add_media_library(jfxmedia
     COMPILE_OPTIONS -pipe ${JFXM_SSE2_OPTIONS}
     LINK_LIBS gstreamerLite glibLite ${JFXM_BASE_LINK_LIBS})
 
+# jfxm_abi_version comes from the jfxmedia crate (buildtools/rust/jfx_rust.cmake); with -DJFX_RUST=false
+# from ffi/jfxmedia_api.cpp. The shipped library exports the same names either way: jfxmedia_avf imports C++ ones.
+jfx_add_rust_slice(jfxmedia
+    CRATE "${CMAKE_CURRENT_SOURCE_DIR}/../src/main/native-rust/jfxmedia"
+    SLICE JFXMEDIA_ABI_VERSION
+    EXPORTS jfxm_abi_version
+    HEADERS "${JFXMEDIA_SRC}/jfxmedia_api.h")
+
 add_no_quicktime_check(jfxmedia)
 
 # ===========================================================================

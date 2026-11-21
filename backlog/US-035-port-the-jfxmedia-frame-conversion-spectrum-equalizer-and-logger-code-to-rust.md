@@ -4,8 +4,9 @@
 §0–1, the frame/spectrum/equalizer/logger sources and `native/{win,linux,mac}.cmake`; counted lines with `wc -l` and
 refcount sites with `git grep -c`; NOT checked: current gstreamer-rs/glib releases, their minimum GStreamer/GLib
 versions and dependency licences, which `gst_*`/`g_*` symbols they reference versus the ordinal-only `.def` exports,
-macOS; nothing built; 2026-10-01: the macOS deletion became slice 6, after US-028, as US-028 expects) ·
-**Epic:** Rust port of the remaining native code (goal 3) · **Blocked by:** US-027; slice 6 also by US-028
+macOS; nothing built; 2026-10-01: the macOS deletion became slice 6, after US-028, as US-028 expects; 2026-11-21:
+slice 6 no longer waits for US-028) · **Epic:** Rust port of the remaining native code (goal 3) · **Blocked by:**
+US-027
 
 ## Story
 As a platform maintainer,
@@ -68,14 +69,24 @@ RAII-managed and bounds-checked, with no Java change.
 
 ## Approach
 - One crate for all of jfxmedia (location per US-027), built as a `staticlib` into the existing
-  `jfxmedia` CMake target on Windows and Linux. A per-slice CMake option selects C++ or Rust. It defaults to C++ on
-  macOS, which keeps compiling these files (Rust on macOS is US-028).
+  `jfxmedia` CMake target on Windows, Linux and macOS. The one global `JFX_RUST` switch (default `true`) selects
+  Rust or C++ for every slice; each slice is a `SLICE` name of `jfx_add_rust_slice` in all three `native/*.cmake`.
 - Rust and the remaining C++ talk through internal `extern "C"` functions declared in a private header. These are
-  never exported: the export list is generated from `jfxmedia_api.h` alone.
+  never exported: on Windows and Linux the export list is generated from `jfxmedia_api.h` alone, and on macOS the
+  library exports no name that its C build does not.
 - Every export and every GLib/GStreamer callback entry is guarded with `catch_unwind`. Allocation keeps GLib's
   allocator wherever GStreamer frees the memory.
-- End state on Windows/Linux: the 25 exports are in Rust, and the files above are out of `win.cmake`/`linux.cmake`.
-  `mac.cmake` is unchanged until slice 6, after US-028.
+- End state: the 25 exports are in Rust, and the files above are out of `win.cmake`, `linux.cmake` and `mac.cmake`,
+  except for what the next point keeps in the macOS build.
+- On macOS, `libjfxmedia_avf.dylib` (`platform/osx/avf`, C++ and Objective-C++, which no story ports) imports 13 C++
+  names from `libjfxmedia.dylib` today; files of this story define 7 of them (`CBandsHolder::AddRef`/`ReleaseRef`,
+  `CVideoFrame::GetWidth`/`GetHeight` and three `CLogger` names). jfxmedia's own macOS sources
+  (`platform/osx/OSXPlatform.mm`, `OSXMediaPlayer.mm` and `CVVideoFrame.mm`, which no story ports either) reference
+  two classes of this story: `CLogger` (the same three names) and `CVideoFrame`, from which `CVVideoFrame` derives
+  (its constructor, destructor, `CalcSize`, `SwapPlanes`, `GetPlaneCount`, `SetPlaneCount`, `Reset` and typeinfo).
+  `CVVideoFrame.mm` also calls `ColorConvert_YCbCr422p_to_BGRA32_no_alpha`, one of the six C names that slice 2
+  provides from Rust. C++ that defines a name that `libjfxmedia_avf.dylib` imports, or that these three files
+  reference, cannot leave the macOS build while they reference it.
 
 ### Slices
 0. **Goldens and split:**
@@ -110,20 +121,29 @@ RAII-managed and bounds-checked, with no Java change.
    - `#[repr(C)]` asserts for `JfxmFrameInfo`.
    - Gate: the frame goldens, `NativeVideoBufferOwnershipTest`, `aPlaneTheFrameDoesNotHaveReadsAsAnEmptyBuffer` and
      `frameInfoFieldOffsetsMatchTheCompiledStruct`.
-6. **Delete the C/C++, after US-028.** Delete the files slices 1-5 removed from the Windows/Linux builds, and their
-   `native/mac.cmake` lines.
+6. **Delete the C/C++.** Delete the files slices 1-5 removed from the builds. A file that defines a name that
+   `libjfxmedia_avf.dylib` imports, or that jfxmedia's own macOS sources reference, stays in the tree and in
+   `native/mac.cmake` while they reference it.
 
-Slices 1-5 each remove their C/C++ from the Windows/Linux builds, in their own commit, once accepted on both. macOS
-keeps compiling it until slice 6.
+Slices 1-5 each remove their C/C++ from the three builds, in their own commit: a slice's C is deleted on all three
+platforms once the slice is accepted on Windows, WSL Linux and macOS. macOS no longer waits for US-028, but keeps the
+C++ that `libjfxmedia_avf.dylib` and jfxmedia's own macOS sources need (Approach). The change that marks a slice of
+jfxmedia `C_DELETED` must give the macOS CI export check a baseline other than the C build: that check, the step
+"Verify the exports of jfxmedia, which links Rust" of both macOS jobs of `.github/workflows/submit.yml`, builds the C
+library with `-DJFX_RUST=false` as its baseline, which `C_DELETED` makes a configure error.
 
 ## Acceptance criteria
 - The export list is identical (`dumpbin /exports jfxmedia.dll`, `nm -D --defined-only libjfxmedia.so`), and
-  `jfxm_abi_version()` = 4.
-- The 33 tests of `modules/javafx.media/src/test` are unchanged and pass on Windows and on WSL (ALSA null PCM).
+  `jfxm_abi_version()` = 4. On macOS `nm -gU libjfxmedia.dylib` is the C build's list less the names of C/C++ that
+  left the macOS build, each listed in the PR, and none of them is a name `libjfxmedia_avf.dylib` imports.
+- The 33 tests of `modules/javafx.media/src/test` are unchanged and pass on Windows, on WSL (ALSA null PCM) and on
+  macOS.
 - The conversion, spectrum, equalizer and logger goldens match exactly. The frame goldens match exactly on each
   platform they were captured on.
-- After slices 1-5, the slice files are absent from `native/win.cmake` and `native/linux.cmake`, and
-  `native/mac.cmake` is unchanged. After slice 6, the files are deleted and nothing references them (`git grep`).
+- After slices 1-5, the slice files are absent from `native/win.cmake`, `native/linux.cmake` and `native/mac.cmake`,
+  except a file that defines a name that `libjfxmedia_avf.dylib` imports, or that jfxmedia's own macOS sources
+  reference, which stays in `native/mac.cmake`. After slice 6, the files gone from all three builds are deleted and
+  nothing references them (`git grep`).
 - The staticlib references no `gst_*`/`g_*` symbol that gstreamer-lite/glib-lite do not export. `.def` changes are
   append-only.
 - `unsafe` appears only in the boundary modules, each block with a `// SAFETY:` comment. clippy and rustfmt are
@@ -131,9 +151,10 @@ keeps compiling it until slice 6.
 
 ## Definition of Done
 - The PRs are merged, one slice per PR.
-- Each slice is verified on Windows (VS2022) and on WSL Ubuntu, and its C/C++ is removed from the Windows/Linux
-  builds.
-- Slice 6 deletes the C/C++ from the tree once US-028 has landed. The Rust table in `backlog/README.md` is updated.
+- Each slice is verified on Windows (VS2022), on WSL Ubuntu and on macOS (arm64 on the macOS host, x86_64 in the
+  `macos-15-intel` CI job), and its C/C++ is removed from the three builds, apart from what the macOS build keeps
+  for `libjfxmedia_avf.dylib` and jfxmedia's own macOS sources.
+- Slice 6 deletes the C/C++ from the tree. The Rust table in `backlog/README.md` is updated.
 
 ## Risks
 | # | Risk | Mitigation |
@@ -141,6 +162,6 @@ keeps compiling it until slice 6.
 | 1 | The crates reference symbols missing from the ordinal-only `.def`s or from `libgstreamer-lite.so` | Undefined-symbol audit in slice 3; append-only `.def` entries; release LTO so that only reachable wrapper code is linked |
 | 2 | `GST_DISABLE_GST_DEBUG` (`native/linux.cmake:459`) versus gstreamer-rs logging | Log only through the jfxmedia logger, as the C does; the audit catches any `gst_debug_*` reference |
 | 3 | Conversion slower than the C | Throughput gate in slice 2; the C++ option stays selectable until it passes |
-| 4 | macOS keeps the C++ of these files, so a fix lands twice until macOS can build the crate | Goldens are platform-neutral data; one PR updates both sides and the goldens |
+| 4 | macOS keeps the C++ that defines a name that `libjfxmedia_avf.dylib` imports, or that jfxmedia's own macOS sources reference, so a fix to it lands twice while they reference it | Goldens are platform-neutral data; one PR updates both sides and the goldens |
 | 5 | H.264 on Linux decodes through avplugin, which is built only when the ffmpeg dev packages exist (`submit.yml:82`) | Capture frame goldens on Windows (mfwrapper) and on Linux where avplugin is built; record the platform per golden |
 

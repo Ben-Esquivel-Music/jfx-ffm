@@ -1,9 +1,10 @@
 # US-027 — Add a Rust toolchain to the native build and CI
 
-**Status:** 🚧 Implemented, not merged: committed as `924047c8b0` = PR #66 (open), whose CI run 43922168677 passed all
-six jobs; the fixes of its code review (2026-11-16) are uncommitted on top and passed their final gate on Windows 10 and
-WSL Ubuntu (see "Review fixes" below). Open: their commit, a green `submit.yml` run of PR #66 with them, the dumps in
-the PR, and the owner's confirmation of two accepted deviations (Windows dependents, Linux CET marking).
+**Status:** 🔶 Merged, not Done: PR #66 was merged as `f5e137e15e` (2026-11-17) with the fixes of its code review
+(2026-11-16), which passed their final gate on Windows 10 and WSL Ubuntu (see "Review fixes" below); before them,
+`924047c8b0` passed all six jobs in CI run 43922168677. Open: a green `submit.yml` run with the review fixes, recorded
+here, the dumps on PR #66, and the owner's confirmation of two accepted deviations (Windows dependents, Linux CET
+marking).
 Drafted 2026-09-30 from a read-only survey of both native CMake projects, both module poms, `sdk/pom.xml`,
 `submit.yml`, `build-webkit.yml`, `.jcheck/conf` and the seven C ABI headers · **Epic:** Rust port of the remaining
 native code (goal 3) · **Blocked by:** none · **Blocks:** every Rust port story
