@@ -52,6 +52,7 @@ import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
+import java.util.Locale;
 import java.util.concurrent.Callable;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutionException;
@@ -82,6 +83,7 @@ public final class MacFontReleaseChild {
     static final String CASCADE_LIST_INTERRUPTED = "release.cascadeListInterrupted";
     static final String CASCADE_LIST_WAIT_INTERRUPTED = "release.cascadeListWaitInterrupted";
     static final String CASCADE_LIST_WAIT_FAILS = "release.cascadeListWaitFails";
+    static final String FACE_MEMORY = "release.faceMemory";
 
     static final int HEAP_CALLS = 300;
     static final int HEAP_ROUNDS = 3;
@@ -102,6 +104,9 @@ public final class MacFontReleaseChild {
 
     /** Text 06 of the layout corpus: the System font leaves it to a Devanagari face its font file lacks. */
     private static final String DEVANAGARI = MacFontGoldens.TEXTS.get(6);
+
+    /** Invented: no face of Helvetica.ttc has this name. */
+    private static final String NO_SUCH_FACE = "US-111 No Such Face";
 
     private static final int GLYF_TAG = 0x676c7966;
     private static final int SBIX_TAG = 0x73626978;
@@ -135,6 +140,7 @@ public final class MacFontReleaseChild {
             case CASCADE_LIST_INTERRUPTED -> cascadeListInterrupted(out);
             case CASCADE_LIST_WAIT_INTERRUPTED -> cascadeListWaitInterrupted(out);
             case CASCADE_LIST_WAIT_FAILS -> cascadeListWaitFails(out);
+            case FACE_MEMORY -> faceMemory(out);
             default -> throw new IllegalArgumentException("unknown scenario " + scenario);
         }
         Files.writeString(Path.of(args[1]), FontGoldens.format(out, List.of("MacFontReleaseChild " + scenario)),
@@ -282,6 +288,29 @@ public final class MacFontReleaseChild {
         out.put(key + ".after", Long.toString(MacFontOracleShim.retainCount(ref)));
         Reference.reachabilityFence(made);
         OSShim.CFRelease(ref);
+    }
+
+    /**
+     * Whether the factory may still find a face of a name, before and after it looked the name up in a copy of
+     * Helvetica's font: under {@link #NO_SUCH_FACE}, also asked in upper case, and under "Helvetica".
+     */
+    private static void faceMemory(GoldenMap out) throws Exception {
+        long helvetica = MacFontOracleShim.createFont("Helvetica", 12);
+        out.put("missing.before", Boolean.toString(CoreTextPeerShim.mayFindFace(NO_SUCH_FACE)));
+        out.put("missing.made", fontFileMadeFor(helvetica, NO_SUCH_FACE));
+        out.put("missing.after", Boolean.toString(CoreTextPeerShim.mayFindFace(NO_SUCH_FACE)));
+        out.put("missing.otherCase",
+                Boolean.toString(CoreTextPeerShim.mayFindFace(NO_SUCH_FACE.toUpperCase(Locale.ROOT))));
+        out.put("found.made", fontFileMadeFor(helvetica, "Helvetica"));
+        out.put("found.after", Boolean.toString(CoreTextPeerShim.mayFindFace("Helvetica")));
+        MacFontOracleShim.release(helvetica);
+    }
+
+    /** Hands a copy of {@code font} to the factory under {@code name}, which takes it; null if no font file is made. */
+    private static String fontFileMadeFor(long font, String name) throws Exception {
+        long ref = OSShim.CTFontCreateCopyWithAttributes(font, 0, null, 0);
+        FontResource made = CoreTextPeerShim.createFontFile(name, ref);
+        return made == null ? null : made.getClass().getSimpleName();
     }
 
     /**
@@ -463,7 +492,8 @@ public final class MacFontReleaseChild {
     /**
      * Lays the Devanagari text out in the System font {@link #FALLBACK_LAYOUTS} times, each with a fresh run and
      * straight through the glyph layout, so that no run is reused. With {@code prism.debugfonts} the factory prints
-     * each lookup of a fallback face in its font file, and layout each fallback font it resolves.
+     * each lookup of a fallback face in its font file, and layout each fallback font it resolves; whether the child
+     * ran with it is written too, since without it there is nothing to count.
      */
     private static void fallbackFace(GoldenMap out) {
         PrismFontFactory factory = PrismFontFactory.getFontFactory();
@@ -481,6 +511,7 @@ public final class MacFontReleaseChild {
             out.put("glyphs." + i, String.join(";", codes));
         }
         out.put("layouts", Integer.toString(FALLBACK_LAYOUTS));
+        out.put("debugFonts", String.valueOf(PrismFontFactory.debugFonts));
         Reference.reachabilityFence(strike);
     }
 

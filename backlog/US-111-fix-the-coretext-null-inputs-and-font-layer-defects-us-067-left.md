@@ -1,12 +1,16 @@
 # US-111 — Fix the CoreText NULL inputs and font-layer defects US-067 left
 
-**Status:** ✅ Done (2026-11-22, uncommitted, PR pending; filed 2026-11-13 from US-067; sites 1-7 hand none of their
-listed inputs to CoreFoundation, CoreGraphics or CoreText as NULL or 0, site 8 keeps the strike reachable, site 9 has
-one owner, site 10 drains what CoreText autoreleases on any thread (deviation 7), site 11's outcomes are pinned and
+**Status:** ✅ Done (2026-11-22, PR 71, commit `40e53db102`; filed 2026-11-13 from US-067; sites 1-7 hand none of
+their listed inputs to CoreFoundation, CoreGraphics or CoreText as NULL or 0, site 8 keeps the strike reachable, site 9
+has one owner, site 10 drains what CoreText autoreleases on any thread (deviation 7), site 11's outcomes are pinned and
 site 12 looks a missing face up once per process, each pinned by a test with mutant proof on the finished tree,
-except site 5's guard and site 3's guarded name release, which rest on review; the commit, the robot and system tests
-and the comparison on the golden machine remain for the owner, see "Done" below; what the work found and did not fix
-is US-129) ·
+except site 5's guard and site 3's guarded name release, which rest on review; CI run 45022158121 failed three checks
+of `MacFontReleaseTest` on both macOS 15 runners, where the region without a pool leaves about 6 heap blocks per call
+and the fallback-face child printed no lookup of a face missing from its file, so the checks cannot show their
+defects there, and a test-only fix, uncommitted and not yet run on CI, has them skip with their figures where the
+machine cannot show the defect ("The CI fix" below); its commit and CI run, the robot and system tests and the
+comparison on the golden machine remain for the owner, see "Done" below; what the work found and did not fix is
+US-129) ·
 **Found:** 2026-11-12 and 2026-11-13, the traces and the exit-path review of US-067, on the US-067 tree
 
 ## Story
@@ -112,12 +116,14 @@ or heap-block change, as `MacFontReleaseTest` measures it.
   ✅ All nine, with the limits stated under "Done"; the flagged comparison on the golden machine remains for the owner.
 - An independent review (`ffm-reviewer`) repeated the macOS gate.
   ✅ Each slice's `ffm-reviewer` repeated it without the flag; the final criteria-and-gate review and the
-  confirmation on the final tree repeated it without and with the flag (see "Independent review").
+  confirmation on the final tree repeated it without and with the flag (see "Independent review"). The gate has not
+  been run on the tree with the CI fix.
 - Status set to ✅ Done with the date and the PR, and the row moved to the done table of `backlog/README.md`.
-  ✅ Status and row set on 2026-11-22; no PR exists yet ("PR pending").
+  ✅ Status and row set on 2026-11-22; the row gives PR 71, open on `40e53db102`, and the uncommitted CI fix.
 - Changes left in the working tree / a review branch — **no commits, merges or PRs without
   explicit approval from the repository owner.**
-  ✅ Left uncommitted in the working tree; nothing was committed, merged or pushed.
+  ✅ The owner committed the change as `40e53db102` and opened PR 71, which is not merged; the CI fix is uncommitted
+  in the working tree.
 
 ## Notes
 - Related: US-067 (it traced these sites and left them; see its "Deviations").
@@ -127,13 +133,17 @@ or heap-block change, as `MacFontReleaseTest` measures it.
 - Follow-up: US-129 (the defects and test gaps this story's work found beside its sites and did not fix; see
   "Rests on review" and "Deviations and stated properties" under "Done").
 
-## Done (2026-11-22, uncommitted)
+## Done (2026-11-22, PR 71)
 
 ### What changed
 Paths as under "Problem". 10 production files (one new, `coretext/ObjCNative.java`), 7 shims (2 new) and 8 test
 files (2 new); `git diff --stat` over the 20 tracked files: 1,623 insertions, 88 deletions, of which the 9 tracked
 production files 263 and 71. The work ran on 2026-11-21 and 2026-11-22 in four slices, A (sites 1, 2, 3, 7), B (4,
 5, 6, 11), C (8, 9, 12) and D (10), then five touch-ups and the test-only fixes of the final review.
+The owner committed it as `40e53db102` on `abe0943d31`: "the final tree" below is that commit's code (the 25 files
+of `after/final.sha256` are byte-identical to it), and "HEAD" is still `abe0943d31`. After CI run 45022158121 the
+CI fix changed 2 shims and 5 test files and added 2 test files, and no production file (against `40e53db102`,
+`git diff --stat` over the 7 tracked files: 501 insertions, 66 deletions; the new files 198 and 412 lines).
 
 **Production.**
 - **Site 1.** `MacFontFinder.getSystemFontSize` hands the UI font to a new `sizeOf`. It answers 13 for NULL, the size
@@ -196,6 +206,37 @@ production files 263 and 71. The work ran on 2026-11-21 and 2026-11-22 in four s
 - **The observer** `MacFontProbeShim`, with its own bindings and no font class: `fontCollection`,
   `setFillColorOfNoContext`, `setAllowsAntialiasingOfNoContext` and `languageCodes`.
 
+**The CI fix** (test-only, uncommitted, not yet run on CI).
+- **Three checks decide through a verdict.** The two heap checks of site 10 and the fallback-face check of site 12
+  need a machine that can show their defect. The new pure class `MacFontReleaseVerdict` decides each from the
+  child's figures and lines: `PROVED`, `REFUTED`, or `CANNOT_SHOW`, which `ParityGate` makes a skip, or a failure
+  under `-Djfx.parity.require=true`.
+  - The bound stays 10. A control above it, and for the virtual check an empty hand-off below it, are the
+    precondition under which a check decides; before, both were failures. A call at or above the bound is
+    `REFUTED`, its message starting with the old one; the call is judged against the bound alone, and the hand-off
+    is not subtracted.
+  - The fallback face: a face missing from its font file is the precondition. Other glyphs, an unresolved count other
+    than the layouts, or a second lookup is `REFUTED`. The check first asserts that the child ran with
+    `prism.debugfonts` (its new `debugFonts` key).
+  - The probes' structural checks run first, unchanged. Each check prints one line,
+    `MacFontReleaseTest.<method> <OUTCOME>: <figures>`, to the test JVM's file descriptor 2, which surefire copies to
+    the Maven console; a skip's reason reaches only the XML report, which the macOS CI jobs do not keep.
+- **36 more tests.** `MacFontReleaseVerdictTest`, new, 30 on any OS: the rules fed the recorded figures of this Mac,
+  of mutants M10a, M10b and M12a here and of both macOS 15 runners where there are any, and invented ones, labelled
+  so in the test, for the rest (the macOS 15 platform call and hand-off, which CI did not print, the edges of each
+  rule and a machine whose face is found). `MacFontReleaseTest` 1, `aFaceItsFontFileLacksIsRememberedByItsName`
+  (site 12's memory, child scenario `release.faceMemory`). `MacFontBindingStructureTest` 4 class-file checks of
+  site 10, and its site 12 check also pins the guard. `coretext.MacObjCNativeTest` 1,
+  `aPoppedPoolReleasesWhatWasAutoreleasedIntoIt`.
+- **Helpers and shims.** `FontCallOrder.assertGuards`: the first branch after a condition call is an `ifeq`, each
+  guarded call lies on its fall-through and each other named call at or after its target.
+  `assertReleasedOnEveryExit`: a release call lies between each return after a region's first call and the
+  region's last call before that return, and a handler that catches everything and covers the region's call makes
+  the release before it throws. `assertReturnsFirstCallOf`: the instruction after a call is a return.
+  `assertNeverCalls`: none of the named calls is made. `MacFontProbeShim` gains `mutableData`, `retain` and
+  `autorelease` (`CFDataCreateMutable`, `CFRetain`, `CFAutorelease`), and `CoreTextPeerShim` gains `mayFindFace`.
+  `AUTORELEASED_BLOCKS_PER_CALL` is package-private, still 10.0.
+
 ### Measured (2026-11-21 and 2026-11-22; Apple arm64, macOS 27.2.1 (26B131), JDK 27.0.1.0.2, Maven 3.10.0)
 Before: a clean tree at HEAD `abe0943d31`. After: the same commit with the final tree of this change (25 files,
 `after/final.sha256`). Commands as under "Verification"; the gate was run both without and with
@@ -235,15 +276,17 @@ Before: a clean tree at HEAD `abe0943d31`. After: the same commit with the final
     run predates it and the "after" run follows its removal.
 - **139 to 163, and 482 to 506.** `Mac*Test` also selects the 14 Glass classes of `test.com.sun.glass.ui.mac`, 343
   tests before and after; the font classes run 139 before and 163 after. Of 34 classes before and 35 after, only
-  these changed (`after/before-gate-noflag.perclass.txt`, `after/gate-noflag.perclass.txt`):
+  these changed (`after/before-gate-noflag.perclass.txt`, `after/gate-noflag.perclass.txt`). The column "CI fix" is
+  the module run with the CI fix (`final/V4.log`); the gate selects all six classes, but it was not run on the fix:
 
-  | class | before | after | the new tests |
-  | --- | --- | --- | --- |
-  | `MacFontNullInputTest` | 9 | 18 | sites 1, 2, 3, 4 (two), 5, 6, 7 and 11 |
-  | `MacFontReleaseTest` | 7 | 14 | sites 9, 12 and 10 (five) |
-  | `MacFontBindingStructureTest` | 8 | 11 | sites 4, 8 and 12 |
-  | `coretext.GlyfTableBoundsTest` | 10 | 12 | site 11 (two) |
-  | `coretext.MacObjCNativeTest` | – | 3 | site 10, the new facade |
+  | class | before | after | CI fix | the new tests |
+  | --- | --- | --- | --- | --- |
+  | `MacFontNullInputTest` | 9 | 18 | 18 | sites 1, 2, 3, 4 (two), 5, 6, 7 and 11 |
+  | `MacFontReleaseTest` | 7 | 14 | 15 | sites 9, 12 (two) and 10 (five) |
+  | `MacFontBindingStructureTest` | 8 | 11 | 15 | sites 4, 8, 12 and 10 (four) |
+  | `coretext.GlyfTableBoundsTest` | 10 | 12 | 12 | site 11 (two) |
+  | `coretext.MacObjCNativeTest` | – | 3 | 4 | site 10, the new facade and a pop |
+  | `MacFontReleaseVerdictTest` | – | – | 30 | the verdicts of sites 10 and 12, any OS |
 
 - **The module run gains the same 24 tests**, all in `javafx.graphics`, with the same skips; of its 954 classes
   before and 955 after, only these five differ (`after/before-module.perclass.txt`,
@@ -252,6 +295,14 @@ Before: a clean tree at HEAD `abe0943d31`. After: the same commit with the final
   javafx.scene.layout.Border has been mutated reflectively by class test.javafx.scene.layout.BorderTest"), so a
   per-class sum of the console comes out 18 short in both; the class's surefire XML gives 18 / 0 / 0 / 0. The warning
   is there at HEAD and outside the font layer, and no story was filed for it.
+- **With the CI fix** (`final/V4.log`, 01:10 min): `javafx.graphics` 26,756 / 0 / 0 / 858, 36 more than after,
+  with the same skips; jslc and `javafx.base` as before; no `hs_err_pid*` file and no golden change. The font tests
+  and `ParityGateTest` ran 432 / 0 / 0 / 156 (`final/V1.log`). The gate was not run, without or with the flag. A
+  rehearsal on the fix's final tree of a machine that cannot show the defects, with two temporary test edits (bound
+  1000, Latin text), printed three `CANNOT_SHOW` lines and skipped the three checks, `MacFontReleaseTest` 15 / 0 /
+  0 / 3, and with the flag failed exactly them, 15 / 3 / 0 / 0, each message starting "-Djfx.parity.require=true
+  says this machine owns the oracle of MacFontReleaseTest, and the oracle could not run" (`final/R1.log`,
+  `final/R2.log`).
 - **The gate without the flag after each step**, each exit 0 with the same 8 classes skipped: HEAD 482
   (`before-gate-noflag.log`), slice A 486 (`slice-A/gate2-noflag.log`), B 494 (`slice-B/gate-noflag.log`), C 498
   (`slice-C/gate-noflag.log`), D 504 and, after its review round, 505 (`slice-D/gate-noflag.log`,
@@ -268,8 +319,25 @@ Before: a clean tree at HEAD `abe0943d31`. After: the same commit with the final
     to 230.81 throughout, and an empty hand-off at most 0.66 in any round, so nothing is subtracted.
   - The bound is 10 blocks per call, inside the 0.57 to 114.5 that "at least twice the largest fixed figure and at
     most half the smallest control" allows. The first measured round alone reads up to 8.7 after the fix (the heap
-    settling), which the smallest-round rule absorbs. The figures come from this one machine.
+    settling), which the smallest-round rule absorbs. The bound and these figures come from this one machine.
   - Files: `slice-D/unfixed-{1,2,3}.*`, `slice-D/fixed-{1..6}.*` and `slice-D/gate-r2.*`.
+  - With the CI fix, 6 runs here (`impl/v1.log`, `impl/V4.log`, `fix/W1.log`, `fix/W3.log`, `final/V1.log`,
+    `final/V4.log`): at most 0.283 on a platform thread and 0.037 from a virtual one, controls 229.50 to 230.15, the
+    empty hand-off -0.45 to -0.26.
+- **CI run 45022158121, on `40e53db102`** (`ci/mac-aarch64.log`, `ci/mac-x64.log`): macOS 15.8.2 arm64 (`macos-15`)
+  and 15.7.9 x64 (`macos-15-intel`), Oracle JDK 27, `mvn -B -ntp -fae install -Djfx.web.skipFfmTests=false`.
+  - `javafx.graphics` 26,720 / 3 / 0 / 858 on arm64 and 26,720 / 3 / 0 / 864 on x64; `MacFontReleaseTest` 14 / 3 /
+    0 / 0 on both, and no other test failed. The modules after `javafx.graphics` did not run there. Linux x64, Linux
+    aarch64 and Windows x64 passed (`MacFontBindingStructureTest` 11 run, 1 skipped there).
+  - The region without a pool left 6.01 blocks per call on a platform thread on both (rounds 6.59; 6.01; 6.03 and
+    6.58; 6.02; 6.01) and, on a virtual thread's carrier, 6.01 on arm64 (6.50; 6.04; 6.01) and 5.99 on x64 (6.52;
+    6.04; 5.99). That is below the bound, so the heap there cannot show a missing pool: both heap checks failed at
+    their control.
+  - A virtual caller's call left 10.67 (12.71; 11.62; 10.67) and 11.26 (13.10; 12.38; 11.26), above the bound and
+    more than the region without a pool (US-129). The platform caller's call and the empty hand-off left less than
+    10 on both; their values were not printed.
+  - The fallback-face child printed no lookup that found no face in its file, so the check cannot show site 12's
+    defect there; it failed at that precondition. What it looked up and laid out was not printed.
 - **Site 6, the unified log.** On the unguarded code in a child JVM, CoreGraphics wrote one Error-level line per
   setter ("CGContextSetAllows…: invalid context 0x0", subsystem com.apple.coregraphics) and nothing on stderr;
   `CGBitmapContextCreate` of width 0 logs nothing; `log show` for the child's pid took 0.66 to 0.69 s and needed no
@@ -327,10 +395,28 @@ and 7 dies: exit 133 (SIGTRAP, no `hs_err` file) at a `CFRelease(NULL)` or the f
 
 ### Criterion 4: sites 10 and 12
 - **10, the pool.** `aCascadeListCallOnAPlatformThreadDrainsWhatItAutoreleased` and
-  `aCascadeListCallOnAVirtualThreadDrainsWhatItAutoreleased`: fewer than 10 blocks per call, see "Measured". Each
-  requires its control (the same region without a pool: the production `cascadeList`, with the codes from the
-  observer) to be above 10, the virtual one also an empty hand-off below 10, and every call to give the same list
-  (39 entries).
+  `aCascadeListCallOnAVirtualThreadDrainsWhatItAutoreleased`: fewer than 10 blocks per call, see "Measured". Every
+  call must give the same list (39 entries here).
+  - Since the CI fix each decides through `MacFontReleaseVerdict`. Its control (the same region without a pool: the
+    production `cascadeList`, with the codes from the observer) above 10, and for the virtual one an empty hand-off
+    below 10, is the precondition under which it decides.
+  - Elsewhere it is skipped with the figures, or fails under `-Djfx.parity.require=true`. On the macOS 15 runners the
+    control is about 6, so both are predicted to skip there.
+- **10, on every machine** (the CI fix; `MacFontBindingStructureTest` on any OS, `MacObjCNativeTest` on any macOS).
+  - `theCascadeListIsReadInsideAnAutoreleasePool`: in `pooledCascadeList` the push comes before the language-codes
+    copy, and `cascadeList` before the pop.
+  - `thePoolOfTheCascadeListIsPoppedOnBothExits`: a pop lies between `cascadeList` and each return after it, and a
+    handler that catches everything `cascadeList` throws pops before it throws: javac's two copies of the `finally`.
+  - `aVirtualCallerHandsTheCascadeListToAPlatformThread`: in `getCascadeList`, `isVirtual` comes before the hand-off
+    and the hand-off before `pooledCascadeList`; the first branch after `isVirtual` is an `ifeq` whose fall-through
+    holds the hand-off, and `pooledCascadeList` is at or after its target; the instruction after the hand-off is a
+    return.
+  - `theHandOffStartsAPlatformThreadAndNeverRunsTheTaskItself`: `cascadeListOnAPlatformThread` calls none of
+    `Thread.run`, `FutureTask.run`, `Runnable.run` and `pooledCascadeList`, and calls `Thread.ofPlatform` before
+    `Thread.start` and `start` before `resultOf`. The task's body, a lambda, is a method of its own, which no check
+    reads.
+  - `aPoppedPoolReleasesWhatWasAutoreleasedIntoIt`: on the test's platform thread a `CFMutableData` retained and
+    autoreleased into a pushed pool holds one more reference until the pop, and none after it.
 - **10, the wait.**
   - `anInterruptedVirtualCallerGetsTheWholeCascadeListAndKeepsItsInterrupt`: a virtual caller that interrupted
     itself gets the whole list and keeps its interrupt, end to end.
@@ -349,8 +435,17 @@ and 7 dies: exit 133 (SIGTRAP, no `hs_err` file) at a `CFRelease(NULL)` or the f
   - Before the fix: 5 lookups of `.SF Devanagari Regular` in `/System/Library/Fonts/SFIndia.ttc`; after: 1. Both
     trees give `7f;40a;f3;d5;40`, the slot-0 glyphs of golden row `lay.system.s12.t06.r00`
     (`slice-C/red-1.release.fallbackFace.err`, `slice-C/green-1.release.fallbackFace.err`).
+  - Since the CI fix it decides through `MacFontReleaseVerdict`: a face missing from its font file is the
+    precondition. Where the child prints no lookup of such a face, as on both macOS 15 runners, it is skipped with
+    what the child printed and laid out (predicted there, not yet run on CI), or fails under
+    `-Djfx.parity.require=true`.
   - `MacFontBindingStructureTest.layoutAsksForAFallbackFaceBeforeCopyingTheRunFont`: in `getFontSlot` the
-    `mayFindFace` call comes before the font copy.
+    `mayFindFace` call comes before the font copy. Since the CI fix it also pins the guard on any OS: the first
+    branch after `mayFindFace` is an `ifeq` whose fall-through holds every call of `OS.CTFontCreateCopyWithAttributes`
+    and of `addFallbackFont`.
+  - `MacFontReleaseTest.aFaceItsFontFileLacksIsRememberedByItsName` (the CI fix, any macOS): an invented name looked
+    up in a copy of Helvetica's font finds no face and is remembered after it, in either case; "Helvetica", whose
+    face is found, is not.
 
 ### Criterion 5: site 11
 - `GlyfTableBoundsTest.aBoxTooShortForFourValuesIsLeftAsItWas`: `int[1]`, `int[2]` and `int[3]` sentinels are
@@ -410,8 +505,10 @@ Classes: N = `MacFontNullInputTest`, R = `MacFontReleaseTest`, S = `MacFontBindi
 | M10d | 10 | `resultOf`: the spin on `isDone()` deleted | R | `the caller left its wait while the task still ran` |
 | X1 | 10 | `PrismFontFactory`: `ObjCNative.link()` deleted | S | `PrismFontFactory.<clinit> links libobjc after …` |
 
-M10a fails only the platform test: the virtual one passes (0.043 blocks per call), because a worker's pool is
-drained when its thread exits; that the worker pushes and pops rests on review.
+M10a fails only the platform test: the virtual one passes (0.043 blocks per call), because a worker thread's exit
+drains what the thread's own pool still holds. Since the CI fix the class file pins the push and a pop on each exit of
+`pooledCascadeList` on any OS, which M10a fails (below); that the worker's task runs `pooledCascadeList` still rests
+on review.
 
 **After the test-only fixes** (`final-fix/`). The fixes changed six test and shim files and no production file:
 the 10 production files were OK against the final pass's checksums before the rows, after each undo and at the end.
@@ -435,6 +532,59 @@ other 26 rows were not run again: the fixes changed none of the tests that fail 
 - Logs `final-fix/{M10e,M10c,M6}.log` and `.diff`; no row left an `hs_err` file. The three classes then ran 35 / 0 /
   0 / 0 on the restored tree (`final-fix/restored-green.log`).
 
+**After CI run 45022158121** (the CI fix, on its final tree; `final/`). One hand edit per row, then R, S and
+`coretext.MacObjCNativeTest` (O), 34 tests. The first eight rows had been run on the fix's earlier trees; they were
+run again here from the same diffs, byte for byte, and M10j to M10m are new. After every undo `src/main` was
+identical to `40e53db102` (`git diff --quiet`) and the nine test and shim files of the fix matched their checksums
+(`final/final.sha256`). All 12 were killed as expected, with failures only: no error, no abort, no survivor.
+
+| row | site | the only production edit | failed |
+| --- | --- | --- | --- |
+| M10a | 10 | as above | 3: R platform heap, S pool, S exits |
+| M10b | 10 | as above | 2: R virtual heap, S hand-off |
+| M10g | 10 | `ObjCNative.objc_autoreleasePoolPop` does nothing | 2: R platform heap, O pop |
+| M12a | 12 | as above | 2: R fallback face, R face memory |
+| M12f | 12 | `getFontSlot`: `mayFindFace` negated | 1: S guard; R fallback face skipped |
+| M10h | 10 | `getCascadeList`: `isVirtual` negated | 1: S hand-off |
+| M10i | 10 | `getCascadeList`: the platform branch without the pool | 2: R platform heap, S hand-off |
+| M10f | 10 | `pooledCascadeList`: the `finally` made a `catch (Throwable)` that pops | 2: R platform heap, S exits |
+| M10j | 10 | `pooledCascadeList`: as M10f, `catch`es of `RuntimeException` and `Error` | 2: R platform heap, S exits |
+| M10k | 10 | `pooledCascadeList`: no `try`; push, read, pop, return | 1: S exits |
+| M10l | 10 | `getCascadeList`: the hand-off's answer dropped, so the caller goes on | 1: S hand-off |
+| M10m | 10 | `cascadeListOnAPlatformThread`: `task.run()` for `worker.start()` | 1: S thread |
+
+- **R heap** is `REFUTED`, "a cascade list call leaves … autoreleased blocks per call": 230.38 (M10a), 230.08
+  (M10b, virtual), 229.38 (M10g), 229.52 (M10i), 230.33 (M10f) and 229.45 (M10j). **R fallback face** under M12a:
+  "… was looked up in its font file 5 times over 5 layouts, where once is enough"; **R face memory**: "a name its
+  font file has no face of is remembered ==> expected: <false> but was: <true>".
+- **S pool** (`theCascadeListIsReadInsideAnAutoreleasePool`), M10a: "… pooledCascadeList never calls …
+  objc_autoreleasePoolPush". **S exits** (`thePoolOfTheCascadeListIsPoppedOnBothExits`), M10f and M10j: "… but the
+  return at instruction 7 follows its call of … cascadeList at instruction 6 with no call of …
+  objc_autoreleasePoolPop between them"; M10a the same at instructions 5 and 4, since javac drops the emptied
+  `finally`; M10k: "… but no handler that catches everything covers its call of … cascadeList at instruction 6 and
+  calls … objc_autoreleasePoolPop before it throws; its handlers are []".
+- **S hand-off** (`aVirtualCallerHandsTheCascadeListToAPlatformThread`): "… getCascadeList no longer calls …
+  cascadeListOnAPlatformThread" (M10b) or "… pooledCascadeList" (M10i), "so this order check no longer pins
+  anything"; M10h: "… the first branch after its first call of java/lang/Thread isVirtual is ifne at instruction 12,
+  not ifeq"; M10l: "… must return what its first call of … cascadeListOnAPlatformThread answers, …; but instruction
+  15, after that call at instruction 14, is pop, not a return". **S thread**
+  (`theHandOffStartsAPlatformThreadAndNeverRunsTheTaskItself`), M10m: "… must call none of java/lang/Thread run,
+  java/util/concurrent/FutureTask run, java/lang/Runnable run, … pooledCascadeList, …; but it calls
+  java/util/concurrent/FutureTask run at instructions [16]". **S guard**
+  (`layoutAsksForAFallbackFaceBeforeCopyingTheRunFont`), M12f: the same of `mayFindFace`, "ifne at instruction 62".
+  **O pop**, M10g: "popping the pool releases the reference autoreleased into it ==> expected: <1> but was: <2>".
+- The virtual heap check passes M10a, M10g, M10f and M10j (0.053, 0.043, 0.243 and 0.037 blocks per call), because
+  a worker thread's exit drains what its pool, or the thread's own, still holds. Under M10f and M10j
+  `theCascadeListIsReadInsideAnAutoreleasePool` passes too, since a handler's pop follows the list.
+- Under M10h, M10k, M10l and M10m all 15 tests of R pass here, the interrupt and wait tests included (virtual heap
+  0.34, 0.03, 0.47 and 0.003; platform -0.003, 0.003, 0.03 and 0.003); only S sees them, on any OS. Under M12f
+  layout looks no face up, so the fallback-face check finds nothing missing and is skipped, here as on a machine
+  without a missing face (the child printed the 5 unsupported-name and 5 `slot=-1` lines and no lookup); only S
+  fails, on any OS.
+- Against the earlier trees, two outcomes differ: M10a also fails S exits, which was added after M10a was first
+  run, and S exits now names the return without a pop, where under M10f it counted the pops ("at instructions [10],
+  where it needs exactly 2 calls").
+
 ### The `MacFontBindings` pins
 None moved. `MacFontBindings.java` has no diff, and `requireSameBinding` passed in all five golden classes in every
 gate, before their machine check ("native methods left: OS 0, MacFontFinder 0, DFontDecoder 0").
@@ -451,6 +601,11 @@ What changed in `MacFontBindingStructureTest` (any OS):
   `ObjCNative`.
 - `theFontFactoryInitialiserLinksTheBindings` also requires `ObjCNative link()V` after `CTNative link()V` (X1).
 - Three new tests, on `FontCallOrder`: the order checks of sites 4 and 12 and the receiver check of site 8.
+- The CI fix: four more tests, of site 10's pool, its exits, the virtual hand-off and the hand-off's thread, and
+  the guard check in site 12's test, on `assertFirstCallBefore` and the new `assertGuards`,
+  `assertReleasedOnEveryExit`, `assertReturnsFirstCallOf` and `assertNeverCalls`. It moved no pin:
+  `MacFontBindings.java` has no diff, and `MacFontBindingsTest` and the witness of each golden class passed in its
+  module run.
 - Unchanged: the 75 functions and 11 data symbols of the three frameworks, and
   `everyFrameworkSymbolIsBoundOnceInTheFacadeItsPrefixNames` (libobjc is no framework).
 
@@ -467,14 +622,16 @@ What changed in `MacFontBindingStructureTest` (any OS):
   so the rule does not apply to it.
   - In the 25 files no line is over 120 columns except `OS.java` line 52 (154 columns, older than this story and
     untouched). No tab, CR, trailing whitespace, `var`, wildcard import or executable bit; every file ends in LF;
-    the headers of modified files end in 2026 and new files carry 2026.
+    the headers of modified files end in 2026 and new files carry 2026. The 9 test and shim files of the CI fix
+    hold the same, with no line over 120 columns.
   - The other rules rest on the reviews: the features used are final in JDK 27 (flexible constructor bodies,
     `java.lang.classfile`, `Thread.join(Duration)`); no line holds two statements (the one-line `if`s of sites 5 and
     6 match their neighbours); the new production comments are ownership javadoc and why-comments, with no story
     number.
 
 ### Rests on review
-No test covers these paths; each was checked by reading, in a slice review or a final review.
+No test covers these paths in full; each was checked by reading, in a slice review or a final review. Where the CI
+fix pins part of one, its entry says which part.
 - **Site 3.** The guarded release of the name string in `createCTFont` (R3 survives): nothing makes `toCFString`
   answer NULL. The same NULL in `fontNamed` is pinned by M3c.
 - **Site 3.** `fontNamed` returns 0 for a NULL name inside its `try`, so the descriptor array is still released. A
@@ -493,14 +650,29 @@ No test covers these paths; each was checked by reading, in a slice review or a 
   (`isSubPixelGlyph` reads a static final and a field; `OS`, the facades and `CTFontStrike` hold no `synchronized`).
   The test proves one creation, not freedom from deadlock.
 - **Site 10, the worker.**
-  - That the worker pushes and pops: a worker without a pool is hidden by the drain at thread exit (M10a).
-  - That a virtual caller never pushes inline: a change of carrier cannot be provoked on demand.
+  - That the worker's task runs `pooledCascadeList`: a worker without a pool is hidden by the drain at thread exit
+    (M10a), and no check reads the task's lambda body. Since the CI fix the class file pins the push and a pop on
+    each exit of `pooledCascadeList` (M10a, M10f, M10j, M10k), and `MacObjCNativeTest` that a pop releases what was
+    autoreleased into its pool (M10g). The exit check reads code order, not control flow, which holds for the way
+    javac 27 copies a `finally`.
+  - That the hand-off runs the task on another thread: since the CI fix the class file pins that
+    `cascadeListOnAPlatformThread` calls `Thread.ofPlatform` before `start` and `start` before `resultOf`, and none
+    of `Thread.run`, `FutureTask.run`, `Runnable.run` and `pooledCascadeList` (M10m). It pins calls and their order,
+    not data flow: a thread made some other way and started after an unrelated `ofPlatform` call, or the task run
+    inline through a call not on the list (`RunnableFuture.run`, an `Executor`), would pass (not run as mutants).
+  - That a virtual caller never pushes inline: a change of carrier cannot be provoked on demand. Since the CI fix the
+    class file pins that only the branch where `isVirtual` answers true hands off (M10h) and that it returns what
+    the hand-off answers (M10l). Nothing pins that the branch reads nothing before the hand-off: a `cascadeList` call
+    of freshly copied codes there would pass every class-file check (not run as a mutant).
+  - Only the class-file checks catch M10h, M10k, M10l and M10m: under each, all 15 tests of `MacFontReleaseTest`
+    pass on this Mac.
   - The worker's thread is named, daemon and inherits no thread locals; the pooled region takes no monitor, prints
     nothing and calls no font class but the facades. The only monitor a caller holds across the hand-off is that
     of `FallbackResource.getSlotResource`, and the worker needs no class the caller could be initialising, so there
     is no deadlock; pinning is no worse than HEAD's inline call.
-  - The language-codes copy sits inside the pool. No mutant moved it above the push; as a Copy function it probably
-    autoreleases nothing, so the heap test would likely not see it.
+  - The language-codes copy sits inside the pool. As a Copy function it probably autoreleases nothing, so the heap
+    test would likely not see it moved above the push; since the CI fix the class file pins the push before it. No
+    mutant moved it.
   - The rethrow of a worker failure, and the cast of its cause to `RuntimeException`, which relies on
     `pooledCascadeList` declaring nothing checked: nothing in the region throws on demand.
   - The start-failure fallback: an `OutOfMemoryError` from `Thread.start()` is not provoked. JDK 27's `start()` runs
@@ -602,12 +774,19 @@ In the session scratch directory, which is temporary: under
   `review-final-ownership-concurrency.json`, `review-final-tests-evidence.json` with `review-final/` and
   `final-review-tests/`; `verified-final.json`; `review-confirm/`.
 - **The design:** `design.md`, the tracer reports `trace-*.md` and the critiques `critique-*.md`.
+- **The CI fix:** under the same parent, the directory `7c84aabb-09af-4669-b4e4-19d317cb24e2/scratchpad/`, which the
+  names `ci/`, `impl/`, `fix/` and `final/` above refer to. `ci/mac-aarch64.log` and `ci/mac-x64.log` are the macOS
+  jobs of CI run 45022158121. `final/` is the fix's final tree: `V1.log`, the module run `V4.log`, the rehearsal
+  `R1.log` and `R2.log`, `final.sha256`, and the `.diff` and `.log` of each of the 12 mutants, named by its row.
+  `impl/` and `fix/` are its two earlier trees: the runs `v1.log` and `V4.log`, and `W1.log` and `W3.log`, and their
+  first mutant runs.
 
 The records of the test-only fixes, of the after-runs, of the confirmation and of this record's fact check are
 `close-fix.json`, `close-measure.json`, `close-confirm.json`, `close-docs.json`, `close-docCheck.json` and
 `close-docsFix.json`. The evidence-only `Us111CorpusDumpTest` (sha256 `fde7c5c7…`) was in the tree from before
-slice A until after the "after" dump; it is not part of the change. Two of its surefire reports remain in
-`modules/javafx.graphics/target/surefire-reports` (git-ignored; the next clean or full run removes them).
+slice A until after the "after" dump; it is not part of the change. Two of its surefire reports stayed in
+`modules/javafx.graphics/target/surefire-reports` (git-ignored) after it; since the module runs of the CI fix they
+are no longer there.
 
 ### Deviations and stated properties
 Decided by the session's manager, for the owner's attention:
@@ -620,8 +799,9 @@ Decided by the session's manager, for the owner's attention:
    though CoreText declares the parameter nullable; the C passed NULL to CoreText and then crashed at `CFRelease`.
 3. **Site 3 guards one input more than the story names:** a NULL name string from `toCFString`.
 4. **Site 4: the empty name stays on the ordinary path** (golden rows `ct.font.name.n10.*`). The classfile check
-   pins the order of the two calls, not the comparison: `>= 0` for `> 0` would pass it. Site 12's order check
-   likewise pins the order, not the condition (US-129).
+   pins the order of the two calls, not the comparison: `>= 0` for `> 0` would pass it (US-129). Site 12's check,
+   which pinned the order only, pins the condition too since the CI fix: the copy and `addFallbackFont` lie on the
+   fall-through of the `ifeq` after `mayFindFace` (M12f).
 5. **Site 5's guard has no observable on this macOS** (R5 survives); it rests on review.
 6. **Site 6 is proved through the unified log.** On an account that cannot read it the test aborts, a 9th skip in
    the gate; where CoreGraphics no longer logs the setters on NULL it waits its 30 s and aborts. It never passes
@@ -631,19 +811,27 @@ Decided by the session's manager, for the owner's attention:
    moved. A virtual caller gets one platform thread per call, and if none can be started the list is made inline
    without a pool. The wait outlasts an interrupt and an error of `get()` itself. Measured here: about 230 blocks
    per call without the pool (the story said about 232), at most 0.283 with it; the bound of 10 comes from this one
-   machine.
+   machine. On the macOS 15 runners of CI run 45022158121 the region without a pool leaves about 6, below the bound,
+   so the two heap checks cannot show the defect there. Since the CI fix they are skipped there with their figures
+   (predicted, not yet run on CI), or fail under `-Djfx.parity.require=true`.
 8. **Site 12 is keyed by name alone, as `storeInMap` is,** so a later run font with the same display name from
    another file is not looked at again. It remembers `findFontIndex`'s -1 whatever its cause, so a file that could
    not be read at the first layout is not retried in the process (US-129). `CTFactory.createFontFile` with a null
    name and no face now throws `NullPointerException` where it returned null; production cannot pass null
    (`getFontSlot` returns first), only a shim caller can.
 9. **Site 11: `OS.rect` needed no change;** its outcome is pinned by a test and by M11b.
-10. **Tests whose preconditions belong to this macOS build:** the site 12 fallback face, the heap bound and the log
-    read. On another build they fail loudly or abort; none passes wrongly (US-129).
-11. **No commit exists.** Only the repository owner commits.
+10. **Tests whose preconditions belong to the machine:** the site 12 fallback face, the heap bound and the log
+    read. On the macOS 15 runners of CI run 45022158121 the fallback-face check and both heap checks failed at their
+    preconditions, and the log read passed. Since the CI fix the fallback-face check and both heap checks are skipped
+    with their figures where the machine cannot show the defect, or fail under `-Djfx.parity.require=true`; the log
+    read aborts where the log cannot be read. None passes wrongly (US-129).
+11. **The owner committed the change** as `40e53db102` (PR 71); the CI fix is not committed. Only the repository
+    owner commits.
 
-Not run: x86_64, another macOS version, CI (`submit.yml`), Windows and Linux (the classfile checks that run on any
-OS ran only here), and any robot or `tests/system` test, which the owner runs.
+CI run 45022158121 ran `40e53db102` on macOS 15 (arm64 and x64), Linux x64 and aarch64 and Windows x64: see
+"Measured". Not run: the CI fix anywhere but this Mac, so its outcomes on the CI runners are predicted; the gate on
+the CI fix; the modules after `javafx.graphics` on macOS with this change; and any robot or `tests/system` test,
+which the owner runs.
 
 ### Acceptance criteria
 1. ✅ Sites 1-7 hand none of their listed inputs to CoreFoundation, CoreGraphics or CoreText as NULL or 0; each
@@ -653,15 +841,21 @@ OS ran only here), and any robot or `tests/system` test, which the owner runs.
    review).
 4. ✅ Site 10 leaves under 10 blocks per call where 230 were left, on platform and virtual threads (measured, bound
    from this machine; without a startable thread the call runs as before, deviation 7). Site 12 looks the missing
-   face up once in 5 layouts where it did 5 times.
+   face up once in 5 layouts where it did 5 times. On the macOS 15 runners neither can be shown (a region without a
+   pool leaves about 6 blocks per call, and the child printed no lookup of a face missing from its file): since the
+   CI fix the three checks are predicted to skip there, and the sites are pinned by the class-file checks (any OS:
+   a pop on each exit of the pool, the virtual branch returning the hand-off's answer, the hand-off starting a
+   platform thread and never running the task itself, site 12's guard) and the pop and face-memory tests (any
+   macOS); the checks the CI fix added have not run on CI yet.
 5. ✅ A short or null `bb` is left as it was, and a `CGRect` with a null half throws `NullPointerException` in
    `OS.rect` before any downcall, both pinned.
-6. ✅ 27 of 29 mutants killed on the finished tree after the touch-ups, and 3 of 3 after the test-only fixes; R3 and
-   R5 survive and are on the list under "Rests on review", with the other paths no test provokes.
+6. ✅ 27 of 29 mutants killed on the finished tree after the touch-ups, 3 of 3 after the test-only fixes and 12 of
+   12 on the CI fix's final tree; R3 and R5 survive and are on the list under "Rests on review", with the other paths
+   no test provokes.
 7. **✅ on this machine; the comparison on the golden machine remains for the owner.** No golden row changed, and
    the five corpora are identical before and on the final tree.
 8. ✅ `CFNative`, `CGNative` and `CTNative` unchanged, a fourth facade beside them (deviation 7), no pin moved.
 9. ✅ Line counts and line lengths as above (measured); the other rules rest on the reviews.
 
-**Remains for the owner:** the commit, the robot and `tests/system` runs, and the flagged comparison on the golden
-machine.
+**Remains for the owner:** the commit of the CI fix and a CI run of it, the robot and `tests/system` runs, and the
+flagged comparison on the golden machine.

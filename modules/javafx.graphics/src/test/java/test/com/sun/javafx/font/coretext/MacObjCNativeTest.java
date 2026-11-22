@@ -25,6 +25,8 @@
 
 package test.com.sun.javafx.font.coretext;
 
+import com.sun.javafx.font.MacFontOracleShim;
+import com.sun.javafx.font.MacFontProbeShim;
 import com.sun.javafx.font.coretext.ObjCNative;
 import com.sun.javafx.font.coretext.ObjCNativeShim;
 import java.lang.foreign.FunctionDescriptor;
@@ -38,10 +40,14 @@ import org.junit.jupiter.api.condition.OS;
 
 import static java.lang.foreign.ValueLayout.ADDRESS;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
-/** {@link ObjCNative} on any macOS: the two pool functions of {@code libobjc}, their descriptors, nested pools. */
+/**
+ * {@link ObjCNative} on any macOS: the two pool functions of {@code libobjc}, their descriptors, nested pools, and a
+ * pop that releases what was autoreleased into its pool, which no heap measurement needs to show.
+ */
 @EnabledOnOs(OS.MAC)
 public class MacObjCNativeTest {
 
@@ -77,6 +83,33 @@ public class MacObjCNativeTest {
             }
         } finally {
             popPushed(outer);
+        }
+    }
+
+    /**
+     * The test's own platform thread pops its pool on the spot, so the watched object's extra reference is released by
+     * the pop and not by the thread's exit, which drains a pool that is never popped.
+     */
+    @Test
+    void aPoppedPoolReleasesWhatWasAutoreleasedIntoIt() {
+        assertFalse(Thread.currentThread().isVirtual(), "the test runs on a virtual thread, which may change carriers");
+        long watched = MacFontProbeShim.mutableData();
+        try {
+            long before = MacFontOracleShim.retainCount(watched);
+            long inside;
+            MemorySegment pool = ObjCNative.objc_autoreleasePoolPush();
+            try {
+                MacFontProbeShim.retain(watched);
+                MacFontProbeShim.autorelease(watched);
+                inside = MacFontOracleShim.retainCount(watched);
+            } finally {
+                popPushed(pool);
+            }
+            long after = MacFontOracleShim.retainCount(watched);
+            assertEquals(before + 1, inside, "an autoreleased reference is held until its pool is popped");
+            assertEquals(before, after, "popping the pool releases the reference autoreleased into it");
+        } finally {
+            MacFontOracleShim.release(watched);
         }
     }
 

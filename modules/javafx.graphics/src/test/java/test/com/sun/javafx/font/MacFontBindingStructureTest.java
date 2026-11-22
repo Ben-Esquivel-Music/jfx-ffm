@@ -219,15 +219,90 @@ public class MacFontBindingStructureTest {
     }
 
     /**
-     * Layout asks the factory whether a fallback face is worth a lookup before it copies the run's font for one, so
-     * a face its font file lacks costs no copy after the first lookup. {@code MacFontReleaseTest} counts the lookups
-     * but cannot see a copy that is made and released.
+     * Layout asks the factory whether a fallback face is worth a lookup before it copies the run's font for one, and
+     * copies it and adds the copy only when the answer is yes, so a face its font file lacks costs no copy after the
+     * first lookup. {@code MacFontReleaseTest} counts the lookups but cannot see a copy that is made and released,
+     * nor tell a layout that never looks a face up from a machine where no fallback face is missing.
      */
     @Test
     void layoutAsksForAFallbackFaceBeforeCopyingTheRunFont() {
         String layout = CORETEXT + "CTGlyphLayout";
-        FontCallOrder.assertFirstCallBefore(layout, "getFontSlot", CORETEXT + "CTFactory mayFindFace",
-                                            MacFontBindings.OS + " CTFontCreateCopyWithAttributes");
+        String mayFindFace = CORETEXT + "CTFactory mayFindFace";
+        String copy = MacFontBindings.OS + " CTFontCreateCopyWithAttributes";
+        FontCallOrder.assertFirstCallBefore(layout, "getFontSlot", mayFindFace, copy);
+        FontCallOrder.assertGuards(layout, "getFontSlot", mayFindFace, List.of(copy, layout + " addFallbackFont"),
+                                   List.of(), "a face its font file lacks costs no copy of the run's font, and no"
+                                   + " lookup, after the first");
+    }
+
+    /**
+     * What CoreText autoreleases while it makes a cascade list waits for a pool, so the list is read inside one of
+     * the calling thread's. {@code MacFontReleaseTest} sees a missing pool only where the heap can show it, which the
+     * macOS 15 runners' cannot.
+     */
+    @Test
+    void theCascadeListIsReadInsideAnAutoreleasePool() {
+        String finder = MacFontBindings.MAC_FONT_FINDER;
+        FontCallOrder.assertFirstCallBefore(finder, "pooledCascadeList", OBJC + " objc_autoreleasePoolPush",
+                                            CF + " CFLocaleCopyISOLanguageCodes");
+        FontCallOrder.assertFirstCallBefore(finder, "pooledCascadeList", finder + " cascadeList",
+                                            OBJC + " objc_autoreleasePoolPop");
+    }
+
+    /**
+     * The pool is popped however the read of the list ends: before each return after the read, and in a handler that
+     * catches everything the read throws, before that handler throws, the two copies javac makes of a finally.
+     * {@code MacFontReleaseTest} sees a pool left on a return only where the heap can show it, and one left on a throw
+     * on no machine, since none of its reads throws.
+     */
+    @Test
+    void thePoolOfTheCascadeListIsPoppedOnBothExits() {
+        String finder = MacFontBindings.MAC_FONT_FINDER;
+        FontCallOrder.assertReleasedOnEveryExit(finder, "pooledCascadeList", finder + " cascadeList",
+                                                OBJC + " objc_autoreleasePoolPop",
+                                                "no pool is left pushed, whether the read returns or throws");
+    }
+
+    /**
+     * A pool must be popped on the thread that pushed it, and a virtual thread can change carriers between the
+     * downcalls, so only a virtual caller hands the list to a platform thread, and returns what the hand-off answers,
+     * and a platform caller reads it in a pool of its own. {@code MacFontReleaseTest} sees a caller of either kind that
+     * reads the list without a pool only where the heap can show it, and a negated condition on no machine, since
+     * both kinds of caller drain under it.
+     */
+    @Test
+    void aVirtualCallerHandsTheCascadeListToAPlatformThread() {
+        String finder = MacFontBindings.MAC_FONT_FINDER;
+        String isVirtual = "java/lang/Thread isVirtual";
+        String handOff = finder + " cascadeListOnAPlatformThread";
+        String pooled = finder + " pooledCascadeList";
+        FontCallOrder.assertFirstCallBefore(finder, "getCascadeList", isVirtual, handOff);
+        FontCallOrder.assertFirstCallBefore(finder, "getCascadeList", handOff, pooled);
+        FontCallOrder.assertGuards(finder, "getCascadeList", isVirtual, List.of(handOff), List.of(pooled),
+                                   "only a virtual caller hands the list to a platform thread, and a platform caller"
+                                   + " reads it in a pool of its own");
+        FontCallOrder.assertReturnsFirstCallOf(finder, "getCascadeList", handOff,
+                                               "a virtual caller pushes no pool on its own thread");
+    }
+
+    /**
+     * The hand-off reads the list on a thread of its own: it calls {@code Thread.ofPlatform} before it starts a
+     * thread, starts one before it waits for the task, and never runs the task, nor calls {@code pooledCascadeList},
+     * itself, since javac compiles the task's body, a lambda, into a method of its own. {@code MacFontReleaseTest}
+     * measures the heap, which does not show the thread a pool was pushed on.
+     */
+    @Test
+    void theHandOffStartsAPlatformThreadAndNeverRunsTheTaskItself() {
+        String finder = MacFontBindings.MAC_FONT_FINDER;
+        String handOff = "cascadeListOnAPlatformThread";
+        String start = "java/lang/Thread start";
+        List<String> runsTheTaskHere = List.of("java/lang/Thread run", "java/util/concurrent/FutureTask run",
+                                               "java/lang/Runnable run", finder + " pooledCascadeList");
+        FontCallOrder.assertNeverCalls(finder, handOff, runsTheTaskHere,
+                                       "the task pushes and pops its pool on the platform thread, not on the virtual"
+                                       + " caller");
+        FontCallOrder.assertFirstCallBefore(finder, handOff, "java/lang/Thread ofPlatform", start);
+        FontCallOrder.assertFirstCallBefore(finder, handOff, start, finder + " resultOf");
     }
 
     @Test

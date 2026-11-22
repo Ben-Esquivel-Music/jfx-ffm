@@ -25,24 +25,28 @@
 
 package test.com.sun.javafx.font;
 
+import java.io.FileDescriptor;
+import java.io.FileOutputStream;
+import java.io.PrintStream;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
-import java.util.Collections;
-import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.TestInfo;
 import org.junit.jupiter.api.Timeout;
 import org.junit.jupiter.api.condition.EnabledOnOs;
 import org.junit.jupiter.api.condition.OS;
 import test.com.sun.javafx.font.FontGoldenRuntime.ChildJvm;
+import test.com.sun.javafx.font.MacFontReleaseVerdict.HeapProbe;
+import test.com.sun.javafx.font.MacFontReleaseVerdict.Verdict;
+import test.com.sun.javafx.test.ParityGate;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -51,22 +55,34 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * those a Java exception could leave unreleased (US-067): each is now released exactly once. Each observation runs
  * in a child JVM ({@link MacFontReleaseChild}), because an over-release ends the JVM. A leak shows as a retain
  * count that rises with the calls, as in {@link MacFontStressTest}, or as a heap that grows with them.
+ * <p>
+ * Three checks need a machine that can show their defect: the two heap checks of the autorelease pool need a region
+ * without a pool that leaves more than {@link #AUTORELEASED_BLOCKS_PER_CALL} blocks per call, and the fallback-face
+ * check needs a fallback face its font file lacks. {@link MacFontReleaseVerdict} decides them, and each prints its
+ * verdict with the measured figures on one line of the test JVM's standard error. Where the machine cannot show the
+ * defect the check is skipped, or fails under {@code -Djfx.parity.require=true}; each check's comment names what
+ * still pins its code on every machine, and what that pins.
  */
 @EnabledOnOs(OS.MAC)
 public class MacFontReleaseTest {
 
     private static final String RETAIN_CALLS = Integer.toString(MacFontStressChild.RETAIN_CALLS);
 
-    /** How {@code CTFactory.createFontFile} reports, with {@code prism.debugfonts}, each lookup in a font file. */
-    private static final String FONT_FILE_LOOKUP = "createFontFile by ref name=";
-    private static final String NO_FACE = " index=-1";
-
     /**
      * Measured in the child on macOS 27.2.1, smallest of three rounds of 300 calls: without a pool a cascade list call
      * of Helvetica leaves about 230 heap blocks, with its pool 0.3 at most, on either kind of thread. The bound is
-     * more than twice the second and less than half the first.
+     * more than twice the second and less than half the first. Elsewhere the region without a pool may not reach the
+     * bound: on the macOS 15 runners of CI run 45022158121 it left about 6.0, so the heap there cannot show the
+     * defect.
      */
-    private static final double AUTORELEASED_BLOCKS_PER_CALL = 10.0;
+    static final double AUTORELEASED_BLOCKS_PER_CALL = 10.0;
+
+    /*
+     * Surefire copies what the test JVM writes to its file descriptor 2 to the Maven console, while the reason of a
+     * skip reaches only the XML report, which the macOS CI jobs do not keep.
+     */
+    private static final PrintStream FORK_STDERR =
+            new PrintStream(new FileOutputStream(FileDescriptor.err), true, StandardCharsets.UTF_8);
 
     /**
      * The name copy and the URL of every cascade entry. A URL left behind keeps about two heap blocks, so the bound
@@ -251,69 +267,92 @@ public class MacFontReleaseTest {
      * A fallback face that is not in its font file is looked up there once a process: later layouts of the same
      * text neither copy its font again nor parse its file. Its slot stays -1, so every layout gives the glyphs of the
      * first. The child runs with {@code prism.debugfonts}: the factory prints a line per lookup in a font file and
-     * layout one per fallback font it resolves. At least one face must be missing, or the path is not reached.
+     * layout one per fallback font it resolves. Where no fallback face of the text is missing from its font file, as
+     * on the macOS 15 runners of CI run 45022158121, the path is not reached: the check is skipped with what the child
+     * printed and laid out, or fails under {@code -Djfx.parity.require=true}. On every machine
+     * {@link #aFaceItsFontFileLacksIsRememberedByItsName} pins the factory's memory, and
+     * {@code MacFontBindingStructureTest.layoutAsksForAFallbackFaceBeforeCopyingTheRunFont} pins in the class file
+     * that layout copies the run's font and adds the copy only where the factory answers that it may find the face.
      */
     @Test
     @Tag("crash-prone")
     @Timeout(2 * MacFontGoldens.CHILD_TIMEOUT_SECONDS)
-    void aFallbackFaceItsFontFileLacksIsLookedUpOnce() throws Exception {
+    void aFallbackFaceItsFontFileLacksIsLookedUpOnce(TestInfo test) throws Exception {
         Map<String, String> values = MacFontGoldens.runChild(MacFontReleaseChild.class,
                 MacFontReleaseChild.FALLBACK_FACE, Map.of("prism.debugfonts", "true"));
+        assertEquals("true", values.get("debugFonts"),
+                     "the child ran without prism.debugfonts, so it printed no lookup to count");
         int layouts = Integer.parseInt(values.get("layouts"));
+        List<String> glyphs = new ArrayList<>();
+        for (int i = 0; i < layouts; i++) {
+            glyphs.add(values.get("glyphs." + i));
+        }
         Path stderr = MacFontGoldens.workDirectory().resolve(MacFontReleaseChild.FALLBACK_FACE + ".err");
         List<String> lines = new String(Files.readAllBytes(stderr), StandardCharsets.UTF_8).lines().toList();
-        List<String> lookups = new ArrayList<>();
-        for (String line : lines) {
-            if (line.startsWith(FONT_FILE_LOOKUP) && line.endsWith(NO_FACE)) {
-                lookups.add(line.substring(FONT_FILE_LOOKUP.length(), line.indexOf(" filename=")));
-            }
-        }
-        assertFalse(lookups.isEmpty(), "no fallback face of the System font's Devanagari text is missing from its"
-                + " font file, so the layouts do not reach the path; see " + stderr);
-        for (int i = 1; i < layouts; i++) {
-            assertEquals(values.get("glyphs.0"), values.get("glyphs." + i),
-                         "layout " + i + " gives other glyphs than the first");
-        }
-        for (String name : new LinkedHashSet<>(lookups)) {
-            String unresolved = "\tFallback font= " + name + " slot=-1";
-            assertEquals(layouts, lines.stream().filter(unresolved::equals).count(),
-                         "each of the " + layouts + " layouts resolves " + name + " to no slot");
-            int times = Collections.frequency(lookups, name);
-            assertEquals(1, times, name + " was looked up in its font file " + times + " times over " + layouts
-                    + " layouts, where once is enough");
-        }
+        decide(test, MacFontReleaseVerdict.lookedUpOnce(glyphs, lines));
+    }
+
+    /**
+     * The factory remembers a name whose font file has no face of it, in any case, so that layout does not look it up
+     * again; a name it found a face for is not remembered. The name is invented and the font is Helvetica's, so this
+     * needs no machine whose fallback faces are missing.
+     */
+    @Test
+    @Tag("crash-prone")
+    @Timeout(2 * MacFontGoldens.CHILD_TIMEOUT_SECONDS)
+    void aFaceItsFontFileLacksIsRememberedByItsName() throws Exception {
+        Map<String, String> values = run(MacFontReleaseChild.FACE_MEMORY);
+        assertEquals("true", values.get("missing.before"), "the invented name was remembered before any lookup");
+        assertEquals(FontGoldens.NULL, values.get("missing.made"), "no face of Helvetica has the invented name");
+        assertEquals("false", values.get("missing.after"), "a name its font file has no face of is remembered");
+        assertEquals("false", values.get("missing.otherCase"), "the name is remembered whatever its case");
+        assertEquals("CTFontFile", values.get("found.made"), "Helvetica has a face of that name");
+        assertEquals("true", values.get("found.after"), "a name a face was found for is not remembered");
     }
 
     /**
      * A cascade list call on a platform thread that has no autorelease pool drains what CoreText autoreleased
      * during the call before it returns, instead of leaving it to wait for the thread's exit. The control, the same
      * region without a pool, must leave more than {@link #AUTORELEASED_BLOCKS_PER_CALL} blocks per call, or the heap
-     * could not show the difference.
+     * cannot show the difference: the check is then skipped with the figures, or fails under
+     * {@code -Djfx.parity.require=true}. On every machine {@code MacFontBindingStructureTest} pins in the class file
+     * that {@code getCascadeList} calls {@code pooledCascadeList} outside the branch where {@code Thread.isVirtual}
+     * answers true, and that {@code pooledCascadeList} pushes its pool before it copies the language codes, and pops
+     * it before each return after it reads the list and in a handler that catches everything the read throws, javac's
+     * copies of a finally; and {@code MacObjCNativeTest.aPoppedPoolReleasesWhatWasAutoreleasedIntoIt} pins that a
+     * pop releases what was autoreleased into the pool.
      */
     @Test
     @Tag("crash-prone")
     @Timeout(2 * MacFontGoldens.CHILD_TIMEOUT_SECONDS)
-    void aCascadeListCallOnAPlatformThreadDrainsWhatItAutoreleased() throws Exception {
-        requireDrained(run(MacFontReleaseChild.CASCADE_LIST_POOL), false);
+    void aCascadeListCallOnAPlatformThreadDrainsWhatItAutoreleased(TestInfo test) throws Exception {
+        Map<String, String> values = run(MacFontReleaseChild.CASCADE_LIST_POOL);
+        requireProbes(values, false);
+        decide(test, MacFontReleaseVerdict.drainedOnAPlatformThread(HeapProbe.of(values, "subject"),
+                HeapProbe.of(values, "control"), AUTORELEASED_BLOCKS_PER_CALL));
     }
 
     /**
      * A cascade list call on a virtual thread leaves no block that CoreText autoreleased during it waiting on the
      * caller's carrier, where the same region run on the carrier without a pool leaves more than
      * {@link #AUTORELEASED_BLOCKS_PER_CALL} per call. Every call answers the platform thread's list. Starting and
-     * waiting for a thread that runs nothing must stay below the bound, so none is subtracted.
+     * waiting for a thread that runs nothing must stay below the bound, so none is subtracted. A machine where the
+     * region without a pool does not exceed the bound, or the hand-off does not stay below it, cannot show the drain:
+     * the check is skipped with the figures, or fails under {@code -Djfx.parity.require=true}. On every machine
+     * {@code MacFontBindingStructureTest} pins in the class file that {@code getCascadeList} calls
+     * {@code cascadeListOnAPlatformThread} only where {@code Thread.isVirtual} answers true, and returns what it
+     * answers, and that the hand-off calls {@code Thread.ofPlatform} before it starts a thread, starts one before it
+     * waits for the task, and never runs the task itself.
      */
     @Test
     @Tag("crash-prone")
     @Timeout(2 * MacFontGoldens.CHILD_TIMEOUT_SECONDS)
-    void aCascadeListCallOnAVirtualThreadDrainsWhatItAutoreleased() throws Exception {
+    void aCascadeListCallOnAVirtualThreadDrainsWhatItAutoreleased(TestInfo test) throws Exception {
         Map<String, String> values = run(MacFontReleaseChild.CASCADE_LIST_VIRTUAL);
         assertEquals(FontGoldens.NULL, values.get("handOff.failure"), "the hand-off probe's calls");
-        double handOff = Double.parseDouble(values.get("handOff.perCall"));
-        assertTrue(handOff < AUTORELEASED_BLOCKS_PER_CALL, "a platform thread started and waited for per call leaves "
-                + handOff + " blocks per call (rounds " + values.get("handOff.rounds") + "), so the bound "
-                + AUTORELEASED_BLOCKS_PER_CALL + " needs the hand-off subtracted");
-        requireDrained(values, true);
+        requireProbes(values, true);
+        decide(test, MacFontReleaseVerdict.drainedOnAVirtualThread(HeapProbe.of(values, "subject"),
+                HeapProbe.of(values, "control"), HeapProbe.of(values, "handOff"), AUTORELEASED_BLOCKS_PER_CALL));
     }
 
     /**
@@ -381,7 +420,8 @@ public class MacFontReleaseTest {
         assertEquals(FontGoldens.NULL, values.get("list"), "a caller whose wait failed gets no list");
     }
 
-    private static void requireDrained(Map<String, String> values, boolean virtual) {
+    /** The probes' heap figures mean something only if each ran on its kind of thread and answered the list. */
+    private static void requireProbes(Map<String, String> values, boolean virtual) {
         assertNotEquals("0", values.get("entries"), "Helvetica has no cascade list, so no call autoreleases one");
         List<String> problems = new ArrayList<>();
         for (String probe : List.of("subject", "control")) {
@@ -389,19 +429,13 @@ public class MacFontReleaseTest {
             expect(problems, values, probe + ".failure", FontGoldens.NULL, "the probe's calls");
             expect(problems, values, probe + ".sameList", "true", "every call answers the cascade list of the font");
         }
-        double control = Double.parseDouble(values.get("control.perCall"));
-        double subject = Double.parseDouble(values.get("subject.perCall"));
-        if (!(control > AUTORELEASED_BLOCKS_PER_CALL)) {
-            problems.add("the region without a pool leaves " + control + " blocks per call (rounds "
-                    + values.get("control.rounds") + "), not above " + AUTORELEASED_BLOCKS_PER_CALL
-                    + ": the heap cannot show blocks a call leaves autoreleased");
-        }
-        if (!(subject < AUTORELEASED_BLOCKS_PER_CALL)) {
-            problems.add("a cascade list call leaves " + subject + " autoreleased blocks per call (rounds "
-                    + values.get("subject.rounds") + ") waiting for its thread to exit, bound "
-                    + AUTORELEASED_BLOCKS_PER_CALL);
-        }
         assertEquals(List.of(), problems);
+    }
+
+    private static void decide(TestInfo test, Verdict verdict) {
+        FORK_STDERR.println("MacFontReleaseTest." + test.getTestMethod().orElseThrow().getName() + " "
+                + verdict.outcome() + ": " + verdict.message());
+        MacFontReleaseVerdict.require(MacFontReleaseTest.class, verdict, ParityGate.required());
     }
 
     private static void expect(List<String> problems, Map<String, String> values, String key, String expected,

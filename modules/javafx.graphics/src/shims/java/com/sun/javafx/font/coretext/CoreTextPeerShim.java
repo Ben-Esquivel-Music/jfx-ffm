@@ -93,6 +93,10 @@ public final class CoreTextPeerShim {
         return ((CTFactory) PrismFontFactory.getFontFactory()).createFontFile(name, fontRef);
     }
 
+    public static boolean mayFindFace(String name) {
+        return ((CTFactory) PrismFontFactory.getFontFactory()).mayFindFace(name);
+    }
+
     /** The CTFont a font file made from a reference owns; 0 for any other font. */
     public static long ctFontRef(FontResource resource) throws ReflectiveOperationException {
         if (!(resource instanceof CTFontFile)) {

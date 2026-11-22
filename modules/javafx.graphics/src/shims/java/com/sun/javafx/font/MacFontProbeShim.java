@@ -35,6 +35,7 @@ import static java.lang.foreign.ValueLayout.ADDRESS;
 import static java.lang.foreign.ValueLayout.JAVA_BOOLEAN;
 import static java.lang.foreign.ValueLayout.JAVA_DOUBLE;
 import static java.lang.foreign.ValueLayout.JAVA_INT;
+import static java.lang.foreign.ValueLayout.JAVA_LONG;
 
 /**
  * Test-only CoreText, CoreGraphics, libobjc and malloc probes for the macOS NULL-input and release tests, over the
@@ -55,6 +56,12 @@ public final class MacFontProbeShim {
             FunctionDescriptor.of(ADDRESS, ADDRESS, ADDRESS));
     private static final MethodHandle CF_LOCALE_COPY_ISO_LANGUAGE_CODES = MacFontOracleShim.bind(
             MacFontOracleShim.Lib.CF, "CFLocaleCopyISOLanguageCodes", FunctionDescriptor.of(ADDRESS));
+    private static final MethodHandle CF_DATA_CREATE_MUTABLE = MacFontOracleShim.bind(
+            MacFontOracleShim.Lib.CF, "CFDataCreateMutable", FunctionDescriptor.of(ADDRESS, ADDRESS, JAVA_LONG));
+    private static final MethodHandle CF_RETAIN = MacFontOracleShim.bind(
+            MacFontOracleShim.Lib.CF, "CFRetain", FunctionDescriptor.of(ADDRESS, ADDRESS));
+    private static final MethodHandle CF_AUTORELEASE = MacFontOracleShim.bind(
+            MacFontOracleShim.Lib.CF, "CFAutorelease", FunctionDescriptor.of(ADDRESS, ADDRESS));
     private static final MethodHandle CT_FONT_COLLECTION_CREATE_FROM_AVAILABLE_FONTS = MacFontOracleShim.bind(
             MacFontOracleShim.Lib.CT, "CTFontCollectionCreateFromAvailableFonts",
             FunctionDescriptor.of(ADDRESS, ADDRESS));
@@ -178,6 +185,39 @@ public final class MacFontProbeShim {
             } finally {
                 MacFontOracleShim.release(descriptors);
             }
+        } catch (Throwable t) {
+            throw MacFontOracleShim.unexpected(t);
+        }
+    }
+
+    /**
+     * {@code CFDataCreateMutable(NULL, 0)}. A fresh mutable object is never tagged, shared or immortal, so its retain
+     * count is exact.
+     */
+    public static long mutableData() {
+        try {
+            return ((MemorySegment) CF_DATA_CREATE_MUTABLE.invokeExact(MemorySegment.NULL, 0L)).address();
+        } catch (Throwable t) {
+            throw MacFontOracleShim.unexpected(t);
+        }
+    }
+
+    /** {@code CFRetain}, which answers {@code object}. */
+    public static long retain(long object) {
+        try {
+            return ((MemorySegment) CF_RETAIN.invokeExact(MemorySegment.ofAddress(object))).address();
+        } catch (Throwable t) {
+            throw MacFontOracleShim.unexpected(t);
+        }
+    }
+
+    /**
+     * {@code CFAutorelease}, which answers {@code object}: the reference is released when this thread pops the pool it
+     * went into.
+     */
+    public static long autorelease(long object) {
+        try {
+            return ((MemorySegment) CF_AUTORELEASE.invokeExact(MemorySegment.ofAddress(object))).address();
         } catch (Throwable t) {
             throw MacFontOracleShim.unexpected(t);
         }
