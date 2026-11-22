@@ -41,7 +41,10 @@ namespace WebCore {
  * slot or a 0 return - both of which land on the same null cursor as before.
  */
 Cursor::Cursor(Image* image, const IntPoint& hotspot)
-    : m_platformCursor(0)
+    : m_type(Type::Custom)
+    , m_image(image)
+    , m_hotSpot(image ? determineHotSpot(image, hotspot) : IntPoint())
+    , m_platformCursor(0)
 {
     if (!image) {
         return;
@@ -57,6 +60,7 @@ Cursor::Cursor(Image* image, const IntPoint& hotspot)
         return;
     }
 
+    // Not m_hotSpot: Java's ImageCursor clamps the page's hotspot to the image, determineHotSpot makes one outside 0,0.
     m_platformCursor = cb->cursor_get_custom_id(
         wkj_ref(*cursorImageFrame->platformImage()->getImage()),
         hotspot.x(), hotspot.y());
@@ -194,9 +198,8 @@ void Cursor::ensurePlatformCursor() const
     case PlatformCursorType::ZoomOut:
       setPlatformCursor(zoomOutCursor());
         break;
+    // A custom cursor gets its platform cursor in the constructor; if that failed, a retry fails too: show the pointer.
     case PlatformCursorType::Custom:
-      setPlatformCursor(Cursor(m_image.get(), m_hotSpot));
-        break;
     default:
       setPlatformCursor(pointerCursor());
         break;

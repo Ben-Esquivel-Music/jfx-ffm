@@ -160,9 +160,6 @@ public:
         FloatSize m_initialAdvance;
         SingleThreadWeakRef<const Font> m_font;
         std::span<const char16_t> m_characters;
-#if PLATFORM(JAVA)
-        unsigned m_stringLength;
-#endif
         unsigned m_indexBegin;
         unsigned m_indexEnd;
         unsigned m_glyphCount;
