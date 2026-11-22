@@ -35,15 +35,22 @@
 #
 # With JFX_RUST on, the crate's staticlib (cargo's default name, built by "cargo rustc --locked --offline
 # --crate-type staticlib" in the repository root with the toolchain rust-toolchain.toml pins, the profiles of
-# cargo-config.toml plus a host-dependent split-debuginfo, and --target <host>, into
-# <build tree>/cargo/<host>/<profile directory>) is linked into <target>. Only the staticlib is built there: with the
+# cargo-config.toml plus a triple-dependent split-debuginfo, and --target <triple>, into
+# <cargo directory>/<triple>/<profile directory>) is linked into <target>. <triple> is the rustc host on Windows and
+# Linux, and on macOS that of the one architecture CMake builds for. The cargo directory is <build tree>/cargo, on
+# macOS <build tree>/cargo/macos-<CMAKE_OSX_DEPLOYMENT_TARGET> if set: cargo and rustc run with that
+# MACOSX_DEPLOYMENT_TARGET, and cargo does not rebuild when it changes. Only the staticlib is built there: with the
 # rlib in the same rustc call, cargo would not apply the profile's lto. Two targets that register the same crate share
 # one cargo step and one IMPORTED library. Windows exports the Rust symbols with /EXPORT:, which also pulls them out of
 # the archive, since no C code references them. Linux pulls them in with --require-defined= and links every target that
 # has a slice, with JFX_RUST on or off, with a version script that exports exactly the headers' names, which also keeps
-# the Rust standard library's symbols local. Both linkers take a C definition left in an object file over the archive
-# member without a word, so after each link the linker map must show every EXPORTS symbol defined by the
-# crate's archive. macOS links no Rust yet (US-028).
+# the Rust standard library's symbols local. macOS pulls them in with -u, which also fails the link when nothing
+# defines them, and keeps the rest of the archive local with an -unexported_symbols_list, written from nm of the
+# archive before each link: an exported list of the headers' names would also hide the C++ names that
+# libjfxmedia_avf imports from libjfxmedia, so the C exports stay as they are, and with JFX_RUST off the link is
+# unchanged. All three linkers take a C definition left in an object file over the archive member without a word, so
+# after each link the linker map must show every EXPORTS symbol defined by the crate's archive; on macOS nm -gU of the
+# library must also list each of them and no other name that the map takes from the archive.
 #
 # The targets jfx_rust_test (cargo test) and jfx_rust_lint (cargo fmt --check, clippy -D warnings, the ABI
 # check of each library crate, then buildtools/rust/check-crate-licences.pl --self-test and the licence check
@@ -108,6 +115,46 @@ function(_jfx_rust_origin_fail text)
     message(FATAL_ERROR "${text}\nThis text is also in ${JFX_RUST_LOG}.")
 endfunction()
 
+# ld64's map and nm's output with "\", "[", "]" and ";" replaced by the control characters 5, 2, 3 and 4, so that
+# each of their lines can be a list element: a literal string of the map may hold any of them, brackets unbalanced
+function(_jfx_rust_ld64_safe text out_var)
+    string(ASCII 2 lb)
+    string(ASCII 3 rb)
+    string(ASCII 4 sc)
+    string(ASCII 5 bs)
+    string(REPLACE "\\" "${bs}" text "${text}")
+    string(REPLACE "[" "${lb}" text "${text}")
+    string(REPLACE "]" "${rb}" text "${text}")
+    string(REPLACE ";" "${sc}" text "${text}")
+    set(${out_var} "${text}" PARENT_SCOPE)
+endfunction()
+
+function(_jfx_rust_ld64_plain text out_var)
+    string(ASCII 2 lb)
+    string(ASCII 3 rb)
+    string(ASCII 4 sc)
+    string(ASCII 5 bs)
+    string(REPLACE "${lb}" "[" text "${text}")
+    string(REPLACE "${rb}" "]" text "${text}")
+    string(REPLACE "${sc}" ";" text "${text}")
+    string(REPLACE "${bs}" "\\" text "${text}")
+    set(${out_var} "${text}" PARENT_SCOPE)
+endfunction()
+
+# The names of nm -P output ("<name> <type> <value> <size>" per symbol, "<member>:" before those of each archive
+# member), in the form of _jfx_rust_ld64_safe
+function(_jfx_rust_nm_names text out_var)
+    _jfx_rust_ld64_safe("${text}" text)
+    string(REGEX MATCHALL "[^\n]+" lines "${text}")
+    set(names)
+    foreach(line IN LISTS lines)
+        if(line MATCHES "^(.*[^ ]) [A-Za-z?] [0-9A-Fa-f]+ [0-9A-Fa-f]+$")
+            list(APPEND names "${CMAKE_MATCH_1}")
+        endif()
+    endforeach()
+    set(${out_var} "${names}" PARENT_SCOPE)
+endfunction()
+
 if(CMAKE_SCRIPT_MODE_FILE)
     if(JFX_RUST_ACTION STREQUAL "fail")
         message(FATAL_ERROR "${JFX_RUST_MESSAGE}")
@@ -153,6 +200,10 @@ if(CMAKE_SCRIPT_MODE_FILE)
         set(ENV{RUSTC} "${JFX_RUST_RUSTC}")
         set(ENV{CARGO_TARGET_DIR} "${JFX_RUST_CARGO_TARGET_DIR}")
         set(ENV{CARGO_BUILD_BUILD_DIR} "${JFX_RUST_CARGO_TARGET_DIR}")
+        # Passed on macOS only: rustc reads it as clang does, and the C build's value outranks an inherited one
+        if(NOT "${JFX_RUST_DEPLOYMENT_TARGET}" STREQUAL "")
+            set(ENV{MACOSX_DEPLOYMENT_TARGET} "${JFX_RUST_DEPLOYMENT_TARGET}")
+        endif()
         get_filename_component(jfx_rust_log_dir "${JFX_RUST_LOG}" DIRECTORY)
         file(MAKE_DIRECTORY "${jfx_rust_log_dir}")
         execute_process(COMMAND ${JFX_RUST_COMMAND}
@@ -249,6 +300,266 @@ if(CMAKE_SCRIPT_MODE_FILE)
         list(LENGTH jfx_rust_emitted jfx_rust_count)
         message(STATUS "jfx_rust_lint: the ${JFX_RUST_CRATE} crate declares exactly the ${jfx_rust_count} "
             "EXPORTS symbol(s) of its slices")
+    elseif(JFX_RUST_ACTION STREQUAL "unexported-list")
+        # Every name the crate's archive defines but the EXPORTS of the target's slices, for ld64's
+        # -unexported_symbols_list, which skips a name that the link does not define. Apple's nm cannot read the LLVM
+        # bitcode that rustc embeds in some members: without --no-llvm-bc it leaves out their names and exits 1.
+        execute_process(COMMAND "${JFX_RUST_NM}" --no-llvm-bc -g -U -P "${JFX_RUST_ARCHIVE}"
+            RESULT_VARIABLE jfx_rust_rc OUTPUT_VARIABLE jfx_rust_out ERROR_VARIABLE jfx_rust_err)
+        if(NOT jfx_rust_rc EQUAL 0)
+            message(FATAL_ERROR "jfx_rust: \"${JFX_RUST_NM} --no-llvm-bc -g -U -P ${JFX_RUST_ARCHIVE}\" failed "
+                "(${jfx_rust_rc}), so the names of the ${JFX_RUST_CRATE} crate cannot be kept out of the exports of "
+                "${JFX_RUST_TARGET}:\n${jfx_rust_err}")
+        endif()
+        _jfx_rust_nm_names("${jfx_rust_out}" jfx_rust_names)
+        list(LENGTH jfx_rust_names jfx_rust_count)
+        set(jfx_rust_missing)
+        foreach(jfx_rust_sym IN LISTS JFX_RUST_EXPORTS)
+            if(NOT "_${jfx_rust_sym}" IN_LIST jfx_rust_names)
+                list(APPEND jfx_rust_missing "_${jfx_rust_sym}")
+            endif()
+            list(REMOVE_ITEM jfx_rust_names "_${jfx_rust_sym}")
+        endforeach()
+        if(jfx_rust_missing)
+            list(JOIN jfx_rust_missing ", " jfx_rust_text)
+            message(FATAL_ERROR "jfx_rust: of the ${jfx_rust_count} names that nm lists in ${JFX_RUST_ARCHIVE}, "
+                "none is ${jfx_rust_text}, an EXPORTS symbol of a slice of ${JFX_RUST_TARGET}: either the "
+                "${JFX_RUST_CRATE} crate does not define it as a #[unsafe(no_mangle)] pub extern \"C\" fn, or nm did "
+                "not read every member of the archive")
+        endif()
+        # ld64 reads *, ? and [ in a line as a pattern, and a line that starts with # as a comment
+        string(ASCII 2 jfx_rust_lb)
+        string(ASCII 3 jfx_rust_rb)
+        set(jfx_rust_patterns)
+        foreach(jfx_rust_name IN LISTS jfx_rust_names)
+            if(jfx_rust_name MATCHES "[*?${jfx_rust_lb}${jfx_rust_rb}]|^#")
+                list(APPEND jfx_rust_patterns "${jfx_rust_name}")
+            endif()
+        endforeach()
+        if(jfx_rust_patterns)
+            list(JOIN jfx_rust_patterns "\n  " jfx_rust_text)
+            _jfx_rust_ld64_plain("${jfx_rust_text}" jfx_rust_text)
+            message(FATAL_ERROR "jfx_rust: ${JFX_RUST_ARCHIVE} defines names that an -unexported_symbols_list "
+                "cannot hold, as ld64 would read them as patterns or comments:\n  ${jfx_rust_text}")
+        endif()
+        list(JOIN jfx_rust_names "\n" jfx_rust_text)
+        _jfx_rust_ld64_plain("${jfx_rust_text}" jfx_rust_text)
+        file(WRITE "${JFX_RUST_LIST}" "# Generated by jfx_rust.cmake before the link of ${JFX_RUST_TARGET}: the names "
+            "that ${JFX_RUST_ARCHIVE} defines, but the EXPORTS of the target's slices\n${jfx_rust_text}\n")
+    elseif(JFX_RUST_ACTION STREQUAL "check-origin" AND JFX_RUST_MAP_FORMAT STREQUAL "ld64")
+        # ld64's -map: under "# Object files:", lines "[<index>] <file>", an archive member written as
+        # <archive as the link command names it>(<member>); under "# Symbols:", lines
+        # "<address>\t<size>\t[<index>] <name>", the name with the Mach-O "_", and pseudo names (literal strings,
+        # FDEs, Objective-C methods) among them; with -dead_strip, then "# Dead Stripped Symbols:", which define
+        # nothing. The log is gone before anything can fail, so that the verdict of an earlier link never outlives
+        # this one.
+        get_filename_component(jfx_rust_log_dir "${JFX_RUST_LOG}" DIRECTORY)
+        file(MAKE_DIRECTORY "${jfx_rust_log_dir}")
+        file(REMOVE "${JFX_RUST_LOG}")
+        if(NOT EXISTS "${JFX_RUST_MAP}")
+            string(CONCAT jfx_rust_text "jfx_rust: no linker map ${JFX_RUST_MAP} after the link of "
+                "${JFX_RUST_TARGET}, so the origin of its Rust exports cannot be checked")
+            _jfx_rust_origin_fail("${jfx_rust_text}")
+        endif()
+        string(ASCII 2 jfx_rust_lb)
+        string(ASCII 3 jfx_rust_rb)
+        file(READ "${JFX_RUST_MAP}" jfx_rust_map_text)
+        _jfx_rust_ld64_safe("${jfx_rust_map_text}" jfx_rust_map_text)
+        string(FIND "${jfx_rust_map_text}" "\n# Object files:\n" jfx_rust_objects_at)
+        string(FIND "${jfx_rust_map_text}" "\n# Sections:\n" jfx_rust_sections_at)
+        string(FIND "${jfx_rust_map_text}" "\n# Symbols:\n" jfx_rust_symbols_at)
+        if(jfx_rust_objects_at EQUAL -1 OR jfx_rust_sections_at LESS jfx_rust_objects_at
+                OR jfx_rust_symbols_at LESS jfx_rust_sections_at)
+            string(CONCAT jfx_rust_text "jfx_rust: the linker map ${JFX_RUST_MAP} of ${JFX_RUST_TARGET} lacks "
+                "\"# Object files:\", \"# Sections:\" or \"# Symbols:\", or has them in another order")
+            _jfx_rust_origin_fail("${jfx_rust_text}")
+        endif()
+        math(EXPR jfx_rust_length "${jfx_rust_sections_at} - ${jfx_rust_objects_at}")
+        string(SUBSTRING "${jfx_rust_map_text}" ${jfx_rust_objects_at} ${jfx_rust_length} jfx_rust_objects)
+        string(SUBSTRING "${jfx_rust_map_text}" ${jfx_rust_symbols_at} -1 jfx_rust_symbols)
+        unset(jfx_rust_map_text)
+        string(FIND "${jfx_rust_symbols}" "\n# Dead Stripped Symbols:" jfx_rust_dead_at)
+        if(NOT jfx_rust_dead_at EQUAL -1)
+            string(SUBSTRING "${jfx_rust_symbols}" 0 ${jfx_rust_dead_at} jfx_rust_symbols)
+        endif()
+        string(APPEND jfx_rust_symbols "\n")
+
+        # The indexes of the archive's members, by real path: a relative one is relative to the directory the link
+        # runs in, and the build tree may be reached through a symbolic link
+        get_filename_component(jfx_rust_archive_path "${JFX_RUST_ARCHIVE}" REALPATH)
+        set(jfx_rust_members)
+        set(jfx_rust_named_last)
+        string(REGEX MATCHALL "\n${jfx_rust_lb} *[0-9]+${jfx_rust_rb} [^\n]*" jfx_rust_entries "${jfx_rust_objects}")
+        foreach(jfx_rust_entry IN LISTS jfx_rust_entries)
+            string(REGEX MATCH "[0-9]+" jfx_rust_index "${jfx_rust_entry}")
+            string(FIND "${jfx_rust_entry}" "${jfx_rust_rb} " jfx_rust_at)
+            math(EXPR jfx_rust_at "${jfx_rust_at} + 2")
+            string(SUBSTRING "${jfx_rust_entry}" ${jfx_rust_at} -1 jfx_rust_file)
+            _jfx_rust_ld64_plain("${jfx_rust_file}" jfx_rust_file)
+            set("jfx_rust_file_${jfx_rust_index}" "${jfx_rust_file}")
+            if(NOT jfx_rust_file MATCHES "^(.+)[(][^()]+[)]$")
+                continue()
+            endif()
+            set(jfx_rust_named "${CMAKE_MATCH_1}")
+            if(NOT "${jfx_rust_named}" STREQUAL "${jfx_rust_named_last}")
+                set(jfx_rust_named_last "${jfx_rust_named}")
+                set(jfx_rust_named_ours FALSE)
+                foreach(jfx_rust_dir IN LISTS JFX_RUST_LINK_DIRS)
+                    get_filename_component(jfx_rust_path "${jfx_rust_named}" REALPATH BASE_DIR "${jfx_rust_dir}")
+                    if("${jfx_rust_path}" STREQUAL "${jfx_rust_archive_path}")
+                        set(jfx_rust_named_ours TRUE)
+                    endif()
+                endforeach()
+            endif()
+            if(jfx_rust_named_ours)
+                list(APPEND jfx_rust_members ${jfx_rust_index})
+            endif()
+        endforeach()
+
+        # (a) Each EXPORTS symbol of the slice is defined by a member of the archive, and by nothing else
+        set(jfx_rust_found "")
+        set(jfx_rust_problems "")
+        set(jfx_rust_remedy FALSE)
+        foreach(jfx_rust_sym IN LISTS JFX_RUST_EXPORTS)
+            string(REGEX MATCHALL "\t${jfx_rust_lb} *[0-9]+${jfx_rust_rb} _${jfx_rust_sym}\n" jfx_rust_lines
+                "${jfx_rust_symbols}")
+            if(NOT jfx_rust_lines)
+                string(APPEND jfx_rust_problems "\n  ${jfx_rust_sym}: the linker map names no file that defines it")
+                set(jfx_rust_remedy TRUE)
+            endif()
+            foreach(jfx_rust_line IN LISTS jfx_rust_lines)
+                string(REGEX MATCH "[0-9]+" jfx_rust_index "${jfx_rust_line}")
+                set(jfx_rust_object "${jfx_rust_file_${jfx_rust_index}}")
+                if(jfx_rust_object STREQUAL "")
+                    set(jfx_rust_object "the object file [${jfx_rust_index}], which the map does not list")
+                endif()
+                if(jfx_rust_index IN_LIST jfx_rust_members)
+                    string(APPEND jfx_rust_found "jfx_rust: ${JFX_RUST_TARGET}: ${jfx_rust_sym} is defined by "
+                        "${jfx_rust_object}\n")
+                elseif(jfx_rust_object MATCHES "^(.+)[(][^()]+[)]$")
+                    string(APPEND jfx_rust_problems "\n  ${jfx_rust_sym} is defined by ${jfx_rust_object}: another "
+                        "archive defines it, not the ${JFX_RUST_CRATE} crate's archive ${JFX_RUST_ARCHIVE}")
+                else()
+                    string(APPEND jfx_rust_problems "\n  ${jfx_rust_sym} is defined by ${jfx_rust_object}, not by "
+                        "the ${JFX_RUST_CRATE} crate's archive ${JFX_RUST_ARCHIVE}")
+                    set(jfx_rust_remedy TRUE)
+                endif()
+            endforeach()
+        endforeach()
+        set(jfx_rust_failure "")
+        if(NOT jfx_rust_problems STREQUAL "")
+            string(CONCAT jfx_rust_failure "jfx_rust: ${JFX_RUST_LIBRARY} (target ${JFX_RUST_TARGET}) does not take "
+                "the Rust exports of its slice ${JFX_RUST_SLICE} from Rust:${jfx_rust_problems}\n")
+            if(jfx_rust_remedy)
+                string(APPEND jfx_rust_failure "A C definition of a slice symbol wins over the archive at link time. "
+                    "Compile the C definition out with #ifndef JFX_RUST_${JFX_RUST_SLICE}.\n")
+            endif()
+        endif()
+
+        # (b) The library exports each of them, and (c) no other name that the map takes from the archive
+        execute_process(COMMAND "${JFX_RUST_NM}" -g -U -P "${JFX_RUST_LIBRARY_FILE}"
+            RESULT_VARIABLE jfx_rust_rc OUTPUT_VARIABLE jfx_rust_out ERROR_VARIABLE jfx_rust_err)
+        if(NOT jfx_rust_rc EQUAL 0)
+            string(CONCAT jfx_rust_text "${jfx_rust_failure}jfx_rust: \"${JFX_RUST_NM} -g -U -P "
+                "${JFX_RUST_LIBRARY_FILE}\" failed (${jfx_rust_rc}), so the exports of ${JFX_RUST_TARGET} cannot be "
+                "checked:\n${jfx_rust_err}")
+            _jfx_rust_origin_fail("${jfx_rust_text}")
+        endif()
+        _jfx_rust_nm_names("${jfx_rust_out}" jfx_rust_exported)
+        list(LENGTH jfx_rust_exported jfx_rust_export_count)
+        set(jfx_rust_hidden)
+        foreach(jfx_rust_sym IN LISTS JFX_RUST_EXPORTS)
+            if(NOT "_${jfx_rust_sym}" IN_LIST jfx_rust_exported)
+                list(APPEND jfx_rust_hidden "${jfx_rust_sym}")
+            endif()
+        endforeach()
+        if(jfx_rust_hidden)
+            list(JOIN jfx_rust_hidden ", " jfx_rust_text)
+            string(APPEND jfx_rust_failure "jfx_rust: ${JFX_RUST_LIBRARY} (target ${JFX_RUST_TARGET}) does not "
+                "export ${jfx_rust_text} of its slice ${JFX_RUST_SLICE}: nm -g -U of ${JFX_RUST_LIBRARY_FILE} does "
+                "not list it. ${JFX_RUST_LIST} must not hold it, and its definition must not be hidden.\n")
+        endif()
+        set(jfx_rust_allowed)
+        foreach(jfx_rust_sym IN LISTS JFX_RUST_TARGET_EXPORTS)
+            list(APPEND jfx_rust_allowed "_${jfx_rust_sym}")
+        endforeach()
+        set(jfx_rust_taken 0)
+        if(jfx_rust_members)
+            list(JOIN jfx_rust_members "|" jfx_rust_alternatives)
+            string(REGEX MATCHALL "\t${jfx_rust_lb} *(${jfx_rust_alternatives})${jfx_rust_rb} [^\n]*" jfx_rust_lines
+                "${jfx_rust_symbols}")
+            foreach(jfx_rust_line IN LISTS jfx_rust_lines)
+                string(FIND "${jfx_rust_line}" "${jfx_rust_rb} " jfx_rust_at)
+                math(EXPR jfx_rust_at "${jfx_rust_at} + 2")
+                string(SUBSTRING "${jfx_rust_line}" ${jfx_rust_at} -1 jfx_rust_name)
+                set("jfx_rust_taken:${jfx_rust_name}" TRUE)
+            endforeach()
+            list(LENGTH jfx_rust_lines jfx_rust_taken)
+        endif()
+        set(jfx_rust_leaked)
+        foreach(jfx_rust_name IN LISTS jfx_rust_exported)
+            if(DEFINED "jfx_rust_taken:${jfx_rust_name}" AND NOT "${jfx_rust_name}" IN_LIST jfx_rust_allowed)
+                list(APPEND jfx_rust_leaked "${jfx_rust_name}")
+            endif()
+        endforeach()
+        if(jfx_rust_leaked)
+            list(LENGTH jfx_rust_leaked jfx_rust_count)
+            list(SUBLIST jfx_rust_leaked 0 20 jfx_rust_leaked)
+            list(JOIN jfx_rust_leaked "\n  " jfx_rust_text)
+            _jfx_rust_ld64_plain("${jfx_rust_text}" jfx_rust_text)
+            string(APPEND jfx_rust_failure "jfx_rust: ${JFX_RUST_LIBRARY} (target ${JFX_RUST_TARGET}) exports "
+                "${jfx_rust_count} name(s) that the linker map takes from the ${JFX_RUST_CRATE} crate's archive and "
+                "no slice of the target lists in EXPORTS (at most 20 shown):\n  ${jfx_rust_text}\nThe list "
+                "${JFX_RUST_LIST}, written before the link, must hold every name the archive defines but those "
+                "EXPORTS.\n")
+        endif()
+
+        # (d) Nothing but the archive defines a name of the list, as ld64 would hide that definition too. The map
+        # gives the descriptor of a thread-local variable that the archive defines to "linker synthesized".
+        set(jfx_rust_shadowed)
+        if(EXISTS "${JFX_RUST_LIST}")
+            file(READ "${JFX_RUST_LIST}" jfx_rust_text)
+            _jfx_rust_ld64_safe("${jfx_rust_text}" jfx_rust_text)
+            string(REGEX MATCHALL "[^\n]+" jfx_rust_lines "${jfx_rust_text}")
+            foreach(jfx_rust_name IN LISTS jfx_rust_lines)
+                set("jfx_rust_listed:${jfx_rust_name}" TRUE)
+            endforeach()
+            string(REGEX MATCHALL "\t${jfx_rust_lb} *[0-9]+${jfx_rust_rb} [^\n]*" jfx_rust_lines "${jfx_rust_symbols}")
+            foreach(jfx_rust_line IN LISTS jfx_rust_lines)
+                string(REGEX MATCH "^\t${jfx_rust_lb} *([0-9]+)${jfx_rust_rb} (.*)" jfx_rust_line "${jfx_rust_line}")
+                if(DEFINED "jfx_rust_listed:${CMAKE_MATCH_2}" AND NOT CMAKE_MATCH_1 IN_LIST jfx_rust_members
+                        AND NOT "${jfx_rust_file_${CMAKE_MATCH_1}}" STREQUAL "linker synthesized")
+                    _jfx_rust_ld64_safe("${CMAKE_MATCH_2} is defined by ${jfx_rust_file_${CMAKE_MATCH_1}}"
+                        jfx_rust_text)
+                    list(APPEND jfx_rust_shadowed "${jfx_rust_text}")
+                endif()
+            endforeach()
+        endif()
+        if(jfx_rust_shadowed)
+            list(LENGTH jfx_rust_shadowed jfx_rust_count)
+            list(SUBLIST jfx_rust_shadowed 0 20 jfx_rust_shadowed)
+            list(JOIN jfx_rust_shadowed "\n  " jfx_rust_text)
+            _jfx_rust_ld64_plain("${jfx_rust_text}" jfx_rust_text)
+            string(APPEND jfx_rust_failure "jfx_rust: ${JFX_RUST_LIBRARY} (target ${JFX_RUST_TARGET}) hides "
+                "${jfx_rust_count} definition(s) that the linker map takes from outside the ${JFX_RUST_CRATE} crate's "
+                "archive (at most 20 shown):\n  ${jfx_rust_text}\nA C symbol has the name of a symbol of the Rust "
+                "archive, and so is hidden: the list ${JFX_RUST_LIST} holds every name the archive defines. Rename "
+                "the C symbol.\n")
+        endif()
+        if(NOT jfx_rust_failure STREQUAL "")
+            string(STRIP "${jfx_rust_failure}" jfx_rust_failure)
+            _jfx_rust_origin_fail("${jfx_rust_failure}")
+        endif()
+        list(JOIN JFX_RUST_EXPORTS ", " jfx_rust_text)
+        get_filename_component(jfx_rust_file "${JFX_RUST_LIBRARY_FILE}" NAME)
+        string(APPEND jfx_rust_found "jfx_rust: ${JFX_RUST_TARGET}: ${jfx_rust_file} exports ${jfx_rust_text}, and "
+            "none of the other names on the ${jfx_rust_taken} lines of the map that the archive defines (nm -g -U "
+            "lists ${jfx_rust_export_count} names)\n")
+        _jfx_rust_lines("${jfx_rust_found}" jfx_rust_found_lines)
+        foreach(jfx_rust_line IN LISTS jfx_rust_found_lines)
+            message(STATUS "${jfx_rust_line}")
+        endforeach()
+        file(WRITE "${JFX_RUST_LOG}" "${jfx_rust_found}")
     elseif(JFX_RUST_ACTION STREQUAL "check-origin")
         # Gone before anything can fail, so that the verdict of an earlier link never outlives this one
         get_filename_component(jfx_rust_log_dir "${JFX_RUST_LOG}" DIRECTORY)
@@ -378,6 +689,10 @@ set(JFX_RUST_LICENCE_SCRIPT "${CMAKE_CURRENT_LIST_DIR}/check-crate-licences.pl")
 set(JFX_RUST_CARGO_CONFIG "${CMAKE_CURRENT_LIST_DIR}/cargo-config.toml")
 set(JFX_RUST_BINARY_DIR "${CMAKE_BINARY_DIR}/jfx-rust")
 set(JFX_RUST_CARGO_TARGET_DIR "${CMAKE_BINARY_DIR}/cargo")
+if(APPLE AND CMAKE_OSX_DEPLOYMENT_TARGET)
+    # cargo does not fingerprint MACOSX_DEPLOYMENT_TARGET, so an archive built for another value would stay
+    string(APPEND JFX_RUST_CARGO_TARGET_DIR "/macos-${CMAKE_OSX_DEPLOYMENT_TARGET}")
+endif()
 get_property(JFX_RUST_MULTI_CONFIG GLOBAL PROPERTY GENERATOR_IS_MULTI_CONFIG)
 
 function(_jfx_rust_library_name target out_var)
@@ -516,9 +831,14 @@ function(_jfx_rust_action_command out_var log_name)
     get_property(toolchain GLOBAL PROPERTY JFX_RUST_PINNED_VERSION)
     set(command ${ARGN})
     string(REPLACE ";" "$<SEMICOLON>" command "${command}")
+    set(deployment_target)
+    if(APPLE AND CMAKE_OSX_DEPLOYMENT_TARGET)
+        set(deployment_target "-DJFX_RUST_DEPLOYMENT_TARGET=${CMAKE_OSX_DEPLOYMENT_TARGET}")
+    endif()
     set(${out_var} "${CMAKE_COMMAND}" -DJFX_RUST_ACTION=cargo
         "-DJFX_RUST_CARGO_TARGET_DIR=${JFX_RUST_CARGO_TARGET_DIR}" "-DJFX_RUST_TOOLCHAIN=${toolchain}"
-        "-DJFX_RUST_RUSTC=${JFX_RUST_RUSTC}" "-DJFX_RUST_LOG=${JFX_RUST_BINARY_DIR}/logs/${log_name}.log"
+        "-DJFX_RUST_RUSTC=${JFX_RUST_RUSTC}" ${deployment_target}
+        "-DJFX_RUST_LOG=${JFX_RUST_BINARY_DIR}/logs/${log_name}.log"
         "-DJFX_RUST_COMMAND=${command}" -P "${JFX_RUST_HELPER}" PARENT_SCOPE)
 endfunction()
 
@@ -528,24 +848,51 @@ function(_jfx_rust_cargo_command out_var log_name)
 endfunction()
 
 # The arguments of every cargo call that compiles: the profiles, then split-debuginfo, which has no value that
-# every host accepts, then the target, which puts the archive in <build tree>/cargo/<host>/
+# every target accepts, then the target, which puts the archive in <cargo directory>/<triple>/
 function(_jfx_rust_pins out_var)
-    get_property(host GLOBAL PROPERTY JFX_RUST_HOST)
-    if(host MATCHES "-windows-msvc$")
+    get_property(triple GLOBAL PROPERTY JFX_RUST_TARGET_TRIPLE)
+    if(triple MATCHES "-windows-msvc$")
         set(split packed)
     else()
         set(split off)
     endif()
     set(${out_var} --config "${JFX_RUST_CARGO_CONFIG}" --config "profile.release.split-debuginfo='${split}'"
-        --config "profile.dev.split-debuginfo='${split}'" --target ${host} PARENT_SCOPE)
+        --config "profile.dev.split-debuginfo='${split}'" --target ${triple} PARENT_SCOPE)
 endfunction()
 
-# Finds cargo and rustc, checks rustc against the pin, reads its host target and probes the platform libraries
-# std needs. Runs once per tree, and only for a tree with an enabled slice.
+# macOS: the triple of the one architecture the tree builds for, which may differ from rustc's host (an arm64 Mac
+# builds x86_64 with CMAKE_OSX_ARCHITECTURES=x86_64)
+function(_jfx_rust_darwin_triple library out_var)
+    if(CMAKE_OSX_ARCHITECTURES)
+        set(archs ${CMAKE_OSX_ARCHITECTURES})
+        set(source CMAKE_OSX_ARCHITECTURES)
+    else()
+        set(archs ${CMAKE_SYSTEM_PROCESSOR})
+        set(source CMAKE_SYSTEM_PROCESSOR)
+    endif()
+    if(archs STREQUAL "arm64")
+        set(triple aarch64-apple-darwin)
+    elseif(archs STREQUAL "x86_64")
+        set(triple x86_64-apple-darwin)
+    else()
+        list(JOIN archs ", " archs_text)
+        message(FATAL_ERROR "${library}: its Rust slices are built for one macOS architecture, arm64 or x86_64, and "
+            "this tree builds for ${archs_text} (${source}). Configure with -DCMAKE_OSX_ARCHITECTURES=arm64 or "
+            "-DCMAKE_OSX_ARCHITECTURES=x86_64, or with -DJFX_RUST=false to build the C implementation of ${library} "
+            "instead.")
+    endif()
+    set(${out_var} ${triple} PARENT_SCOPE)
+endfunction()
+
+# Finds cargo and rustc, checks rustc against the pin, reads its host target, chooses the target triple and probes the
+# platform libraries std needs. Runs once per tree, and only for a tree with an enabled slice.
 function(_jfx_rust_require_toolchain library)
     get_property(done GLOBAL PROPERTY JFX_RUST_TOOLCHAIN_FOUND)
     if(done)
         return()
+    endif()
+    if(APPLE)
+        _jfx_rust_darwin_triple("${library}" darwin_triple)
     endif()
 
     set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${JFX_RUST_REPO_ROOT}/rust-toolchain.toml")
@@ -574,6 +921,10 @@ function(_jfx_rust_require_toolchain library)
     # With the pin in RUSTUP_TOOLCHAIN, as the cargo action runs, so that neither the shell's RUSTUP_TOOLCHAIN
     # nor a rustup override replaces it. A distribution's rustc ignores both, hence the version check.
     set(pinned_env RUSTUP_AUTO_INSTALL=0 "RUSTUP_TOOLCHAIN=${JFX_RUST_PINNED_VERSION}")
+    if(APPLE AND CMAKE_OSX_DEPLOYMENT_TARGET)
+        # The value the cargo action sets
+        list(APPEND pinned_env "MACOSX_DEPLOYMENT_TARGET=${CMAKE_OSX_DEPLOYMENT_TARGET}")
+    endif()
     execute_process(COMMAND "${CMAKE_COMMAND}" -E env ${pinned_env} "${JFX_RUST_RUSTC}" -vV
         WORKING_DIRECTORY "${JFX_RUST_REPO_ROOT}"
         RESULT_VARIABLE rc OUTPUT_VARIABLE out ERROR_VARIABLE err OUTPUT_STRIP_TRAILING_WHITESPACE)
@@ -590,6 +941,29 @@ function(_jfx_rust_require_toolchain library)
     set(host "${CMAKE_MATCH_1}")
     message(STATUS "jfx_rust: ${version} (${JFX_RUST_RUSTC}), host ${host}, cargo ${JFX_RUST_CARGO}")
 
+    set(triple "${host}")
+    set(probe_target)
+    if(APPLE)
+        set(triple "${darwin_triple}")
+        set(probe_target --target ${triple})
+        execute_process(COMMAND "${CMAKE_COMMAND}" -E env ${pinned_env} "${JFX_RUST_RUSTC}" --print target-libdir
+                --target ${triple}
+            WORKING_DIRECTORY "${JFX_RUST_REPO_ROOT}"
+            RESULT_VARIABLE rc OUTPUT_VARIABLE libdir ERROR_VARIABLE err OUTPUT_STRIP_TRAILING_WHITESPACE)
+        set(std_rlibs)
+        if(rc EQUAL 0 AND NOT libdir STREQUAL "")
+            file(GLOB std_rlibs "${libdir}/libstd-*.rlib")
+        endif()
+        if(NOT std_rlibs)
+            string(CONCAT problem "it has no standard library for ${triple} (rustc --print target-libdir --target "
+                "${triple}: ${libdir}${err}), one of the targets that rust-toolchain.toml lists for "
+                "\"rustup toolchain install\"")
+            _jfx_rust_fail_toolchain("${library}" "${problem}")
+        endif()
+        message(STATUS "jfx_rust: target ${triple}, MACOSX_DEPLOYMENT_TARGET \"${CMAKE_OSX_DEPLOYMENT_TARGET}\", "
+            "cargo directory ${JFX_RUST_CARGO_TARGET_DIR}")
+    endif()
+
     # The platform libraries std needs, from rustc itself, for an empty staticlib
     set(probe_dir "${JFX_RUST_BINARY_DIR}/probe")
     file(MAKE_DIRECTORY "${probe_dir}")
@@ -600,7 +974,7 @@ function(_jfx_rust_require_toolchain library)
         set(probe_archive "${probe_dir}/libjfx_rust_probe.a")
     endif()
     execute_process(COMMAND "${CMAKE_COMMAND}" -E env ${pinned_env}
-            "${JFX_RUST_RUSTC}" --crate-type staticlib --crate-name jfx_rust_probe
+            "${JFX_RUST_RUSTC}" --crate-type staticlib --crate-name jfx_rust_probe ${probe_target}
             --print native-static-libs -o "${probe_archive}" "${probe_dir}/empty.rs"
         WORKING_DIRECTORY "${JFX_RUST_REPO_ROOT}"
         RESULT_VARIABLE rc OUTPUT_VARIABLE out ERROR_VARIABLE err)
@@ -608,7 +982,19 @@ function(_jfx_rust_require_toolchain library)
         message(FATAL_ERROR "jfx_rust: rustc --print native-static-libs failed:\n${out}${err}")
     endif()
     string(STRIP "${CMAKE_MATCH_1}" printed)
-    string(REPLACE " " ";" printed "${printed}")
+    if(APPLE)
+        # -framework <Name> is one link item, as in the LINK_LIBS of mac.cmake
+        string(REGEX MATCHALL "-framework +[^ ]+|[^ ]+" printed "${printed}")
+        foreach(lib ${printed})
+            if(NOT lib MATCHES "^(-l[^ ]+|-framework +[^ -][^ ]*)$")
+                message(FATAL_ERROR "jfx_rust: rustc --print native-static-libs lists \"${lib}\" for the Rust standard "
+                    "library, a link item that jfx_rust.cmake does not know: on macOS it knows -l<name> and "
+                    "-framework <Name> only")
+            endif()
+        endforeach()
+    else()
+        string(REPLACE " " ";" printed "${printed}")
+    endif()
     set(libs)
     set(dropped)
     foreach(lib ${printed})
@@ -617,7 +1003,11 @@ function(_jfx_rust_require_toolchain library)
             # archive's objects carry no /DEFAULTLIB directive, so with this entry gone a Debug (/MDd) link
             # names no msvcrt.lib and gets no LNK4098, and needs no /NODEFAULTLIB.
             list(APPEND dropped "${lib}")
-        elseif(NOT WIN32 AND lib STREQUAL "-lgcc_s")
+        elseif(APPLE AND lib MATCHES "^-l(System|c|m)$")
+            # libc and libm are libSystem, which clang links anyway: passed again, -lSystem draws ld's "ignoring
+            # duplicate libraries" and moves libSystem before libc++ in the load commands
+            list(APPEND dropped "${lib}")
+        elseif(NOT WIN32 AND NOT APPLE AND lib STREQUAL "-lgcc_s")
             # -static-libgcc of the C link supplies the unwinder
             list(APPEND dropped "${lib}")
         else()
@@ -626,11 +1016,15 @@ function(_jfx_rust_require_toolchain library)
     endforeach()
     list(JOIN libs " " libs_text)
     list(JOIN dropped " " dropped_text)
+    if(APPLE AND libs_text STREQUAL "")
+        set(libs_text "nothing that clang does not link")
+    endif()
     message(STATUS "jfx_rust: the Rust standard library links ${libs_text}; dropped from rustc's list: "
         "${dropped_text}")
     set_property(GLOBAL PROPERTY JFX_RUST_NATIVE_LIBS "${libs}")
     set_property(GLOBAL PROPERTY JFX_RUST_PINNED_VERSION "${JFX_RUST_PINNED_VERSION}")
-    set_property(GLOBAL PROPERTY JFX_RUST_HOST "${host}")
+    # What --target, the archive directory and split-debuginfo follow
+    set_property(GLOBAL PROPERTY JFX_RUST_TARGET_TRIPLE "${triple}")
     set_property(GLOBAL PROPERTY JFX_RUST_TOOLCHAIN_FOUND TRUE)
 endfunction()
 
@@ -648,9 +1042,9 @@ function(_jfx_rust_crate_library crate_dir crate_name out_var)
     else()
         set(archive "lib${lib_name}.a")
     endif()
-    get_property(host GLOBAL PROPERTY JFX_RUST_HOST)
-    set(debug_archive "${JFX_RUST_CARGO_TARGET_DIR}/${host}/debug/${archive}")
-    set(release_archive "${JFX_RUST_CARGO_TARGET_DIR}/${host}/release/${archive}")
+    get_property(triple GLOBAL PROPERTY JFX_RUST_TARGET_TRIPLE)
+    set(debug_archive "${JFX_RUST_CARGO_TARGET_DIR}/${triple}/debug/${archive}")
+    set(release_archive "${JFX_RUST_CARGO_TARGET_DIR}/${triple}/release/${archive}")
     if(JFX_RUST_MULTI_CONFIG)
         set(profile "$<IF:$<CONFIG:Debug>,dev,release>")
         set(byproducts "${debug_archive}" "${release_archive}")
@@ -692,7 +1086,8 @@ function(_jfx_rust_crate_library crate_dir crate_name out_var)
 endfunction()
 
 # The linker map the origin check reads: on Windows the /map: the target already writes, else one in the
-# build tree; on Linux a map with the cross reference table, in the build tree
+# build tree; on macOS ld64's -map, in the build tree, one per configuration in a multi-config tree; on Linux a map
+# with the cross reference table, in the build tree
 function(_jfx_rust_link_map target out_var)
     get_target_property(map ${target} JFX_RUST_LINK_MAP)
     if(map)
@@ -711,12 +1106,56 @@ function(_jfx_rust_link_map target out_var)
             set(map "${JFX_RUST_BINARY_DIR}/${target}-$<CONFIG>.map")
             target_link_options(${target} PRIVATE "/MAP:${map}")
         endif()
+    elseif(APPLE)
+        if(JFX_RUST_MULTI_CONFIG)
+            set(map "${JFX_RUST_BINARY_DIR}/${target}-$<CONFIG>.map")
+        else()
+            set(map "${JFX_RUST_BINARY_DIR}/${target}.map")
+        endif()
+        target_link_options(${target} PRIVATE "LINKER:-map,${map}")
     else()
         set(map "${JFX_RUST_BINARY_DIR}/${target}.map")
         target_link_options(${target} PRIVATE "LINKER:-Map=${map}" "LINKER:--cref")
     endif()
     set_target_properties(${target} PROPERTIES JFX_RUST_LINK_MAP "${map}")
     set(${out_var} "${map}" PARENT_SCOPE)
+endfunction()
+
+# macOS, once per target: the -unexported_symbols_list, which a pre-link step writes from nm of the archive that this
+# very link uses, so that no archive rebuild, configuration or JFX_RUST toggle leaves it stale. It holds the names of
+# one archive, and leaves out the EXPORTS of all slices of the target, which the step reads when it runs.
+function(_jfx_rust_darwin_link target crate_dir crate_name imported)
+    set_property(TARGET ${target} APPEND PROPERTY JFX_RUST_DARWIN_EXPORTS ${ARGN})
+    get_target_property(linked ${target} JFX_RUST_DARWIN_CRATE)
+    if(linked)
+        if(NOT linked STREQUAL crate_dir)
+            message(FATAL_ERROR "jfx_add_rust_slice(${target}): its slices come from ${linked}, and on macOS the "
+                "names it keeps local are those of one crate's archive; register no slice of ${crate_dir} for it")
+        endif()
+        return()
+    endif()
+    if(NOT CMAKE_NM)
+        message(FATAL_ERROR "jfx_add_rust_slice(${target}): CMake found no nm (CMAKE_NM), which lists the names of "
+            "the ${crate_name} crate's archive that ${target} keeps local. Configure with -DCMAKE_NM=<nm>, or with "
+            "-DJFX_RUST=false to build the C implementation of ${target} instead.")
+    endif()
+    set(config)
+    if(JFX_RUST_MULTI_CONFIG)
+        set(config "-$<CONFIG>")
+    endif()
+    set(list "${JFX_RUST_BINARY_DIR}/${target}${config}.unexported")
+    add_custom_command(TARGET ${target} PRE_LINK
+        COMMAND "${CMAKE_COMMAND}" -DJFX_RUST_ACTION=unexported-list "-DJFX_RUST_NM=${CMAKE_NM}"
+            "-DJFX_RUST_ARCHIVE=$<TARGET_FILE:${imported}>"
+            "-DJFX_RUST_EXPORTS=$<TARGET_PROPERTY:${target},JFX_RUST_DARWIN_EXPORTS>" "-DJFX_RUST_LIST=${list}"
+            "-DJFX_RUST_TARGET=${target}" "-DJFX_RUST_CRATE=${crate_name}" -P "${JFX_RUST_HELPER}"
+        COMMENT "Listing the names of the ${crate_name} crate's archive that ${target} keeps local"
+        VERBATIM)
+    target_link_options(${target} PRIVATE "LINKER:-unexported_symbols_list,${list}")
+    # std's objects carry DWARF even in release, so the link would add a debug map, whose N_OSO names the archive
+    # member by its build-tree path. -S drops the whole debug map, the C code's too, hence Release only.
+    target_link_options(${target} PRIVATE "$<$<CONFIG:Release>:LINKER:-S>")
+    set_target_properties(${target} PROPERTIES JFX_RUST_DARWIN_CRATE "${crate_dir}" JFX_RUST_DARWIN_LIST "${list}")
 endfunction()
 
 function(jfx_add_rust_slice target)
@@ -737,19 +1176,6 @@ function(jfx_add_rust_slice target)
     list(JOIN SLICE_HEADERS ", " header_text)
     list(JOIN SLICE_EXPORTS ", " rust_text)
 
-    if(APPLE)
-        if(JFX_RUST)
-            message(FATAL_ERROR "jfx_add_rust_slice(${target}): ${library} cannot link Rust on macOS yet "
-                "(US-028: -exported_symbols_list and -u); register no slice in mac.cmake, or configure "
-                "with -DJFX_RUST=false")
-        endif()
-        if(SLICE_C_DELETED)
-            message(FATAL_ERROR "${library}: the C implementation of its slice ${SLICE_SLICE} is deleted, "
-                "so it cannot be built with -DJFX_RUST=false")
-        endif()
-        return()
-    endif()
-
     get_filename_component(crate_dir "${SLICE_CRATE}" ABSOLUTE)
     if(NOT EXISTS "${crate_dir}/Cargo.toml")
         message(FATAL_ERROR "jfx_add_rust_slice(${target}): no Cargo.toml in ${crate_dir}")
@@ -768,7 +1194,7 @@ function(jfx_add_rust_slice target)
     endforeach()
 
     # The same export list with Rust on and off. Anonymous version node: no symbol version is attached.
-    if(NOT WIN32)
+    if(NOT WIN32 AND NOT APPLE)
         set(script "${JFX_RUST_BINARY_DIR}/${target}.version")
         string(REPLACE ";" ";\n        " globals "${exports}")
         # file(GENERATE) rewrites the script only when its text changes, so a configure run relinks nothing
@@ -784,6 +1210,16 @@ ${export_count} exports of ${library} (target ${target}) */\n{\n    global:\n   
             message(FATAL_ERROR "${library}: the C implementation of its slice ${SLICE_SLICE} is deleted, "
                 "so it cannot be built with -DJFX_RUST=false")
         endif()
+        # Left by an earlier link with Rust, they would say that the library links the crate
+        set(stale "${JFX_RUST_BINARY_DIR}/logs/${target}-origin.log")
+        if(APPLE)
+            foreach(config IN ITEMS "" ${CMAKE_CONFIGURATION_TYPES})
+                string(REGEX REPLACE "^(.)" "-\\1" config "${config}")
+                list(APPEND stale "${JFX_RUST_BINARY_DIR}/${target}${config}.map"
+                    "${JFX_RUST_BINARY_DIR}/${target}${config}.unexported")
+            endforeach()
+        endif()
+        file(REMOVE ${stale})
         message(STATUS "${library} (${target}): slice ${SLICE_SLICE} built from C (JFX_RUST=OFF), "
             "${export_count} exports")
         return()
@@ -797,21 +1233,33 @@ ${export_count} exports of ${library} (target ${target}) */\n{\n    global:\n   
     foreach(sym ${SLICE_EXPORTS})
         if(WIN32)
             target_link_options(${target} PRIVATE "/EXPORT:${sym}")
+        elseif(APPLE)
+            # Pulls the member out of the archive, and fails the link when nothing defines it
+            target_link_options(${target} PRIVATE "LINKER:-u,_${sym}")
         else()
             # Pulls the member out of the archive like --undefined=, and fails the link when nothing defines it
             target_link_options(${target} PRIVATE "LINKER:--require-defined=${sym}")
         endif()
     endforeach()
-    if(NOT WIN32)
+    if(APPLE)
+        _jfx_rust_darwin_link(${target} "${crate_dir}" "${crate_name}" ${imported} ${SLICE_EXPORTS})
+    elseif(NOT WIN32)
         # std's prebuilt objects carry debug sections, and cargo's strip setting does not reach a staticlib.
         # Release only: the other configurations are built to be debugged, std's sections included.
         target_link_options(${target} PRIVATE "$<$<CONFIG:Release>:LINKER:--strip-debug>")
     endif()
 
     _jfx_rust_link_map(${target} map)
+    set(ld64_args)
     if(WIN32)
         set(map_format msvc)
         set(librarian "-DJFX_RUST_AR=${CMAKE_AR}")
+    elseif(APPLE)
+        set(map_format ld64)
+        set(librarian)
+        get_target_property(list ${target} JFX_RUST_DARWIN_LIST)
+        set(ld64_args "-DJFX_RUST_NM=${CMAKE_NM}" "-DJFX_RUST_LIBRARY_FILE=$<TARGET_FILE:${target}>"
+            "-DJFX_RUST_TARGET_EXPORTS=$<TARGET_PROPERTY:${target},JFX_RUST_DARWIN_EXPORTS>" "-DJFX_RUST_LIST=${list}")
     else()
         set(map_format gnu)
         set(librarian)
@@ -821,7 +1269,7 @@ ${export_count} exports of ${library} (target ${target}) */\n{\n    global:\n   
     add_custom_command(TARGET ${target} POST_BUILD
         COMMAND "${CMAKE_COMMAND}" -DJFX_RUST_ACTION=check-origin "-DJFX_RUST_MAP=${map}"
             "-DJFX_RUST_MAP_FORMAT=${map_format}" "-DJFX_RUST_ARCHIVE=$<TARGET_FILE:${imported}>" ${librarian}
-            "-DJFX_RUST_LINK_DIRS=${CMAKE_BINARY_DIR};${target_binary_dir}"
+            ${ld64_args} "-DJFX_RUST_LINK_DIRS=${CMAKE_BINARY_DIR};${target_binary_dir}"
             "-DJFX_RUST_TARGET=${target}" "-DJFX_RUST_LOG=${JFX_RUST_BINARY_DIR}/logs/${target}-origin.log"
             "-DJFX_RUST_LIBRARY=${library}" "-DJFX_RUST_CRATE=${crate_name}"
             "-DJFX_RUST_SLICE=${SLICE_SLICE}" "-DJFX_RUST_EXPORTS=${SLICE_EXPORTS}" -P "${JFX_RUST_HELPER}"

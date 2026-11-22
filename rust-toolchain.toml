@@ -25,4 +25,6 @@
 [toolchain]
 channel = "1.100.0"
 components = ["clippy", "rustfmt"]
+# The std of both macOS architectures: a Mac builds Rust for the one CMake builds, which need not be rustc's host
+targets = ["aarch64-apple-darwin", "x86_64-apple-darwin"]
 profile = "minimal"

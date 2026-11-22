@@ -83,10 +83,13 @@ javafx.media native libraries, and the legal notices under `legal/`.
 
 Parts of the native libraries are written in Rust and linked into the same
 library as its C/C++ code; today that is `jfxm_abi_version` of `jfxmedia` on
-Windows and Linux (crate `modules/javafx.media/src/main/native-rust/jfxmedia`).
+Windows, Linux and macOS (crate
+`modules/javafx.media/src/main/native-rust/jfxmedia`).
 The toolchain is pinned in [rust-toolchain.toml](rust-toolchain.toml) (Rust
-1.100.0, with clippy and rustfmt), and the lint step also needs cbindgen
-0.29.4 and perl (Git for Windows ships one). Set them up once: install rustup
+1.100.0, with clippy and rustfmt, and the standard library of the two macOS
+targets `aarch64-apple-darwin` and `x86_64-apple-darwin`), and the lint step
+also needs cbindgen 0.29.4 and perl (Git for Windows ships one). Set them up
+once: install rustup
 from <https://rustup.rs>, then run
 `rustup toolchain install` and `cargo install --locked cbindgen@0.29.4` in the
 repository root. The native build runs cargo with `--locked --offline`, the
@@ -94,8 +97,7 @@ repository root. The native build runs cargo with `--locked --offline`, the
 with `-D warnings`, an ABI check of each crate against its C header and
 `buildtools/rust/check-crate-licences.pl`. `-DJFX_RUST=false` builds the C
 implementation of every Rust part instead and needs no Rust toolchain;
-`-DskipNative=true` skips Rust along with the rest of the native build. macOS
-builds no Rust yet.
+`-DskipNative=true` skips Rust along with the rest of the native build.
 
 Every module jar carries the files of its module's `src/main/legal/` under
 `META-INF/legal/`. The SDK carries the repository's `LICENSE`,

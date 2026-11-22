@@ -4,8 +4,8 @@
 ```
 
 The Rust standard library of the Rust toolchain 1.100.0 is statically linked
-into the jfxmedia library on Windows and Linux. Except as otherwise noted
-below, it is licensed under the Apache License, Version 2.0 or the MIT
+into the jfxmedia library on Windows, Linux and macOS. Except as otherwise
+noted below, it is licensed under the Apache License, Version 2.0 or the MIT
 license, at your option, and is used here under the MIT license. The notices
 below are those of the toolchain's own files
 (share/doc/rust/COPYRIGHT-library.html, COPYRIGHT.html and licenses/) for the
@@ -29,7 +29,7 @@ Copyright: 1991-2024 Unicode, Inc
 The following component carries its own license expression, as
 share/doc/rust/COPYRIGHT-library.html of the toolchain gives it:
 
-compiler-builtins, Linux
+compiler-builtins, Linux and macOS
 License: Apache-2.0 WITH LLVM-exception AND (Apache-2.0 OR MIT)
 Copyright: 2003-2019 University of Illinois at Urbana-Champaign
 Copyright: The Rust Project Developers (see https://thanks.rust-lang.org)
@@ -94,7 +94,7 @@ dealings in these Data Files or Software without prior written
 authorization of the copyright holder.
 ```
 
-### rustc-demangle 0.1.28 (MIT/Apache-2.0, used under MIT; Windows and Linux)
+### rustc-demangle 0.1.28 (MIT/Apache-2.0, used under MIT; Windows, Linux and macOS)
 ```
 
 Copyright (c) 2014 Alex Crichton
@@ -124,7 +124,7 @@ IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 DEALINGS IN THE SOFTWARE.
 ```
 
-### addr2line 0.27.1 (Apache-2.0 OR MIT, used under MIT; Linux)
+### addr2line 0.27.1 (Apache-2.0 OR MIT, used under MIT; Linux and macOS)
 ```
 
 Copyright (c) 2016-2018 The gimli Developers
@@ -184,7 +184,7 @@ IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 DEALINGS IN THE SOFTWARE.
 ```
 
-### gimli 0.34.0 (MIT OR Apache-2.0, used under MIT; Linux)
+### gimli 0.34.0 (MIT OR Apache-2.0, used under MIT; Linux and macOS)
 ```
 
 Copyright (c) 2015 The Rust Project Developers
@@ -214,7 +214,7 @@ IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 DEALINGS IN THE SOFTWARE.
 ```
 
-### memchr 2.8.3 (Unlicense OR MIT, used under MIT; Linux)
+### memchr 2.8.3 (Unlicense OR MIT, used under MIT; Linux and macOS)
 ```
 
 The MIT License (MIT)
@@ -269,7 +269,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 ```
 
-### object 0.39.1 (Apache-2.0 OR MIT, used under MIT; Linux)
+### object 0.39.1 (Apache-2.0 OR MIT, used under MIT; Linux and macOS)
 ```
 
 Copyright (c) 2015 The Gimli Developers

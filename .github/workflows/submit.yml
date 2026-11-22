@@ -39,11 +39,15 @@
 # ffmpeg development packages) and jfxmedia_avf on macOS (the AVFoundation
 # backend).
 #
-# The Linux and Windows jobs also set up the Rust toolchain that
+# The Linux, macOS and Windows jobs also set up the Rust toolchain that
 # rust-toolchain.toml pins, plus cbindgen for the build's lint, because
-# jfxmedia links a Rust staticlib there (macOS builds no Rust yet); a step after
-# the build checks that jfxmedia exports exactly the JFXM_EXPORT names of
-# jfxmedia_api.h. An actions/cache entry holds the pinned toolchain and the
+# jfxmedia links a Rust staticlib. A step after the build checks its exports.
+# On Linux and Windows jfxmedia must export exactly the JFXM_EXPORT names of
+# jfxmedia_api.h. On macOS it must export each of those names and otherwise
+# exactly the names of its C build (jfxmedia_avf imports C++ ones), which the
+# step builds once more with -DJFX_RUST=false, and load the same libraries in
+# the same order; built for Release, it must have no debug map either. An
+# actions/cache entry holds the pinned toolchain and the
 # cbindgen binary. It is saved per branch, right after the toolchain setup, so
 # a job that fails later still saves it; a run restores the entry of its own
 # branch or of the default branch, which has one only after a manual run of
@@ -662,6 +666,8 @@ jobs:
       BOOT_JDK_VERSION: "27"
       BOOT_JDK_FILENAME: "jdk-27_macos-x64_bin.tar.gz"
       BOOT_JDK_URL: "https://download.oracle.com/java/27/archive/jdk-27_macos-x64_bin.tar.gz"
+      # Must equal JFX_CBINDGEN_VERSION of buildtools/rust/jfx_rust.cmake: its lint fails on any other version.
+      CBINDGEN_VERSION: "0.29.4"
 
     steps:
       - name: Checkout the source
@@ -686,6 +692,94 @@ jobs:
           which java
           java -version
           mvn -version
+
+      - name: Locate the pinned Rust toolchain and the cargo and rustup homes
+        id: rust
+        # Feeds only the cache steps and the setup step's removal of what a restore left, which all do nothing
+        # when this step fails: the job goes on without a cache.
+        continue-on-error: true
+        working-directory: jfx
+        run: |
+          set -x
+          # macOS grep has no -P, so the value is cut out of the line by parameter expansion
+          line=$(grep -m 1 -E '^[[:space:]]*channel[[:space:]]*=[[:space:]]*"[^"]' rust-toolchain.toml)
+          channel=${line#*\"}
+          channel=${channel%%\"*}
+          echo "channel=${channel}" >> "${GITHUB_OUTPUT}"
+          echo "cargo_home=${CARGO_HOME:-${HOME}/.cargo}" >> "${GITHUB_OUTPUT}"
+          echo "rustup_home=${RUSTUP_HOME:-${HOME}/.rustup}" >> "${GITHUB_OUTPUT}"
+
+      - name: Restore the pinned Rust toolchain and cbindgen from the cache
+        id: rust_cache
+        if: ${{ steps.rust.outcome == 'success' }}
+        continue-on-error: true
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          # Nothing else of the two homes: the image's own rustup and toolchains live there too.
+          path: |
+            ${{ steps.rust.outputs.rustup_home }}/toolchains/${{ steps.rust.outputs.channel }}-*
+            ${{ steps.rust.outputs.rustup_home }}/update-hashes/${{ steps.rust.outputs.channel }}-*
+            ${{ steps.rust.outputs.cargo_home }}/bin/cbindgen
+          key: >-
+            ${{ format('rust-{0}-{1}-{2}-cbindgen-{3}', runner.os, runner.arch,
+            hashFiles('jfx/rust-toolchain.toml'), env.CBINDGEN_VERSION) }}
+
+      - name: Set up the Rust toolchain
+        working-directory: jfx
+        env:
+          CACHE_HIT: ${{ steps.rust_cache.outputs.cache-hit }}
+          CACHE_CHANNEL: ${{ steps.rust.outputs.channel }}
+          CACHE_RUSTUP_HOME: ${{ steps.rust.outputs.rustup_home }}
+          CACHE_CARGO_HOME: ${{ steps.rust.outputs.cargo_home }}
+        run: |
+          set -x
+          # jfxmedia links a Rust staticlib (buildtools/rust/jfx_rust.cmake). In the repository root,
+          # rustup installs the toolchain that rust-toolchain.toml pins, and the lint of the build
+          # (jfx_rust_lint) needs the pinned cbindgen. An image without rustup gets rustup-init the
+          # way the boot JDK is fetched. A restore that was not a hit can still have written part of
+          # the toolchain (a failed extraction keeps its files and sets no cache-hit), which rustup
+          # may take for an installed toolchain or fail on, so whatever the restore step's three
+          # paths match is removed first. The cache thus saves only time: rustup toolchain install
+          # runs either way, and cargo builds cbindgen unless the one on PATH is the pinned version.
+          if [ -n "${CACHE_CHANNEL}" ] && [ -n "${CACHE_RUSTUP_HOME}" ] && [ -n "${CACHE_CARGO_HOME}" ] \
+            && [ "${CACHE_HIT}" != "true" ]; then
+            for cached in "${CACHE_RUSTUP_HOME}/toolchains/${CACHE_CHANNEL}"-* \
+              "${CACHE_RUSTUP_HOME}/update-hashes/${CACHE_CHANNEL}"-* "${CACHE_CARGO_HOME}/bin/cbindgen"; do
+              if [ -e "${cached}" ] || [ -L "${cached}" ]; then
+                rm -rf -- "${cached}"
+              fi
+            done
+          fi
+          cargo_bin="${CARGO_HOME:-${HOME}/.cargo}/bin"
+          if ! command -v rustup > /dev/null; then
+            # -f: unlike wget, curl would otherwise save an HTTP error page as rustup-init
+            curl -fL -o "${HOME}/rustup-init" \
+              "https://static.rust-lang.org/rustup/dist/x86_64-apple-darwin/rustup-init"
+            chmod +x "${HOME}/rustup-init"
+            "${HOME}/rustup-init" -y --no-modify-path --profile minimal --default-toolchain none
+          fi
+          export PATH="${cargo_bin}:${PATH}"
+          echo "${cargo_bin}" >> "${GITHUB_PATH}"
+          rustup toolchain install
+          if [ "$(cbindgen --version 2> /dev/null)" != "cbindgen ${CBINDGEN_VERSION}" ]; then
+            # A restored binary is not in cargo's install records, and cargo overwrites such a file
+            # only with --force.
+            cargo install --locked --force "cbindgen@${CBINDGEN_VERSION}"
+          fi
+          rustup show active-toolchain
+
+      - name: Save the pinned Rust toolchain and cbindgen to the cache
+        # Right after the setup, so that a job that fails later still saves it. The paths must be the
+        # restore step's, character for character: the version of a cache entry is a hash of them.
+        if: ${{ steps.rust_cache.outputs.cache-hit != 'true' && steps.rust_cache.outputs.cache-primary-key != '' }}
+        continue-on-error: true
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ${{ steps.rust.outputs.rustup_home }}/toolchains/${{ steps.rust.outputs.channel }}-*
+            ${{ steps.rust.outputs.rustup_home }}/update-hashes/${{ steps.rust.outputs.channel }}-*
+            ${{ steps.rust.outputs.cargo_home }}/bin/cbindgen
+          key: ${{ steps.rust_cache.outputs.cache-primary-key }}
 
       - name: Build JavaFX artifacts and run headless tests
         working-directory: jfx
@@ -718,6 +812,87 @@ jobs:
           file "${dylib}"
           otool -L "${dylib}"
           nm -gU "${dylib}" | head -40
+
+      - name: Verify the exports of jfxmedia, which links Rust
+        if: ${{ !cancelled() }}
+        working-directory: jfx
+        run: |
+          set -x
+          # jfxm_abi_version comes from a Rust staticlib (buildtools/rust/jfx_rust.cmake). The other names of the
+          # archive stay local through an -unexported_symbols_list, not through an export list of the header's
+          # names, as libjfxmedia_avf imports C++ names from jfxmedia. So the library must export every JFXM_EXPORT
+          # name of jfxmedia_api.h and otherwise exactly what its C build exports, and load the same libraries in
+          # the same order: any other name (the Rust standard library's) or library means the list no longer
+          # applies. The C build is made once more for this, outside the Maven tree. A Release build must also
+          # have no debug map: std's objects bring one, whose N_OSO stab names the archive member by its path in
+          # the build tree. A name the header declares twice (in two #if branches) counts once.
+          lib=modules/javafx.media/target/native/bin/libjfxmedia.dylib
+          header=modules/javafx.media/src/main/native/jfxmedia/jfxmedia_api.h
+          tree=modules/javafx.media/target/native/cmake
+          origin="${tree}/jfx-rust/logs/jfxmedia-origin.log"
+          work="${RUNNER_TEMP}/jfxmedia-exports"
+          if [ ! -f "${lib}" ]; then
+            echo "::error::${lib} was not built"
+            exit 1
+          fi
+          otool -L "${lib}"
+          if [ ! -f "${origin}" ]; then
+            echo "::error::no ${origin}: the link of ${lib} did not check the origin of its Rust exports"
+            exit 1
+          fi
+          cat "${origin}"
+          mkdir -p "${work}"
+          # Mach-O names carry a leading _
+          perl -nle 'print "_$&" if /^JFXM_EXPORT\b[^(]*?\K\w+(?=\s*\()/' "${header}" | LC_ALL=C sort -u \
+            > "${work}/header.txt"
+          nm -gUj "${lib}" | LC_ALL=C sort > "${work}/rust.txt"
+          header_count=$(awk 'END { print NR }' "${work}/header.txt")
+          export_count=$(awk 'END { print NR }' "${work}/rust.txt")
+          echo "${header_count} names in the header, ${export_count} exported"
+          if [ ! -s "${work}/header.txt" ]; then
+            echo "::error::no JFXM_EXPORT line found in ${header}"
+            exit 1
+          fi
+          missing=$(LC_ALL=C comm -23 "${work}/header.txt" "${work}/rust.txt")
+          if [ -n "${missing}" ]; then
+            echo "${missing}"
+            echo "::error::${lib} does not export the JFXM_EXPORT names of ${header} listed above"
+            exit 1
+          fi
+          # The C build: the arguments mirror the cmake-configure execution of the native-mac profile of
+          # modules/javafx.media/pom.xml, with the values Maven passed (read from its CMakeCache.txt), but with a
+          # build tree and a BIN_DIR of its own and with -DJFX_RUST=false. A slice of jfxmedia marked C_DELETED
+          # fails this configure, so the change that marks one must give this check another baseline.
+          maven_value() {
+            sed -n "s/^$1:[A-Z]*=//p" "${tree}/CMakeCache.txt"
+          }
+          build_type=$(maven_value CMAKE_BUILD_TYPE)
+          c_tree="${RUNNER_TEMP}/jfxmedia-c"
+          cmake -S modules/javafx.media/native -B "${c_tree}/cmake" "-DCMAKE_BUILD_TYPE=${build_type}" \
+            "-DGENSRC_DIR=$(maven_value GENSRC_DIR)" "-DHEADERS_DIR=$(maven_value HEADERS_DIR)" \
+            "-DBIN_DIR=${c_tree}/bin" "-DJFX_VER=$(maven_value JFX_VER)" "-DJFX_FVER=$(maven_value JFX_FVER)" \
+            "-DJFX_BUILD_ID=$(maven_value JFX_BUILD_ID)" -DJFX_RUST=false
+          cmake --build "${c_tree}/cmake" --parallel --target jfxmedia
+          c_lib="${c_tree}/bin/libjfxmedia.dylib"
+          nm -gUj "${c_lib}" | LC_ALL=C sort > "${work}/c.txt"
+          if ! diff "${work}/c.txt" "${work}/rust.txt"; then
+            echo "::error::${lib} must export exactly the names of the C build ${c_lib} (<: C, >: Rust)"
+            exit 1
+          fi
+          otool -L "${c_lib}" | tail -n +2 > "${work}/c-dependencies.txt"
+          otool -L "${lib}" | tail -n +2 > "${work}/rust-dependencies.txt"
+          if ! diff "${work}/c-dependencies.txt" "${work}/rust-dependencies.txt"; then
+            echo "::error::${lib} must load the libraries of the C build ${c_lib} in the same order (<: C, >: Rust)"
+            exit 1
+          fi
+          if [ "${build_type}" = Release ]; then
+            stabs=$(nm -a "${lib}" | awk '$2 == "-" && $5 == "OSO"')
+            if [ -n "${stabs}" ]; then
+              echo "${stabs}"
+              echo "::error::${lib} is a Release build with a debug map (the N_OSO stabs above): link it with -S"
+              exit 1
+            fi
+          fi
 
   macos_aarch64_build:
     name: macOS aarch64
@@ -727,6 +902,8 @@ jobs:
       BOOT_JDK_VERSION: "27"
       BOOT_JDK_FILENAME: "jdk-27_macos-aarch64_bin.tar.gz"
       BOOT_JDK_URL: "https://download.oracle.com/java/27/archive/jdk-27_macos-aarch64_bin.tar.gz"
+      # Must equal JFX_CBINDGEN_VERSION of buildtools/rust/jfx_rust.cmake: its lint fails on any other version.
+      CBINDGEN_VERSION: "0.29.4"
 
     steps:
       - name: Checkout the source
@@ -751,6 +928,94 @@ jobs:
           which java
           java -version
           mvn -version
+
+      - name: Locate the pinned Rust toolchain and the cargo and rustup homes
+        id: rust
+        # Feeds only the cache steps and the setup step's removal of what a restore left, which all do nothing
+        # when this step fails: the job goes on without a cache.
+        continue-on-error: true
+        working-directory: jfx
+        run: |
+          set -x
+          # macOS grep has no -P, so the value is cut out of the line by parameter expansion
+          line=$(grep -m 1 -E '^[[:space:]]*channel[[:space:]]*=[[:space:]]*"[^"]' rust-toolchain.toml)
+          channel=${line#*\"}
+          channel=${channel%%\"*}
+          echo "channel=${channel}" >> "${GITHUB_OUTPUT}"
+          echo "cargo_home=${CARGO_HOME:-${HOME}/.cargo}" >> "${GITHUB_OUTPUT}"
+          echo "rustup_home=${RUSTUP_HOME:-${HOME}/.rustup}" >> "${GITHUB_OUTPUT}"
+
+      - name: Restore the pinned Rust toolchain and cbindgen from the cache
+        id: rust_cache
+        if: ${{ steps.rust.outcome == 'success' }}
+        continue-on-error: true
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          # Nothing else of the two homes: the image's own rustup and toolchains live there too.
+          path: |
+            ${{ steps.rust.outputs.rustup_home }}/toolchains/${{ steps.rust.outputs.channel }}-*
+            ${{ steps.rust.outputs.rustup_home }}/update-hashes/${{ steps.rust.outputs.channel }}-*
+            ${{ steps.rust.outputs.cargo_home }}/bin/cbindgen
+          key: >-
+            ${{ format('rust-{0}-{1}-{2}-cbindgen-{3}', runner.os, runner.arch,
+            hashFiles('jfx/rust-toolchain.toml'), env.CBINDGEN_VERSION) }}
+
+      - name: Set up the Rust toolchain
+        working-directory: jfx
+        env:
+          CACHE_HIT: ${{ steps.rust_cache.outputs.cache-hit }}
+          CACHE_CHANNEL: ${{ steps.rust.outputs.channel }}
+          CACHE_RUSTUP_HOME: ${{ steps.rust.outputs.rustup_home }}
+          CACHE_CARGO_HOME: ${{ steps.rust.outputs.cargo_home }}
+        run: |
+          set -x
+          # jfxmedia links a Rust staticlib (buildtools/rust/jfx_rust.cmake). In the repository root,
+          # rustup installs the toolchain that rust-toolchain.toml pins, and the lint of the build
+          # (jfx_rust_lint) needs the pinned cbindgen. An image without rustup gets rustup-init the
+          # way the boot JDK is fetched. A restore that was not a hit can still have written part of
+          # the toolchain (a failed extraction keeps its files and sets no cache-hit), which rustup
+          # may take for an installed toolchain or fail on, so whatever the restore step's three
+          # paths match is removed first. The cache thus saves only time: rustup toolchain install
+          # runs either way, and cargo builds cbindgen unless the one on PATH is the pinned version.
+          if [ -n "${CACHE_CHANNEL}" ] && [ -n "${CACHE_RUSTUP_HOME}" ] && [ -n "${CACHE_CARGO_HOME}" ] \
+            && [ "${CACHE_HIT}" != "true" ]; then
+            for cached in "${CACHE_RUSTUP_HOME}/toolchains/${CACHE_CHANNEL}"-* \
+              "${CACHE_RUSTUP_HOME}/update-hashes/${CACHE_CHANNEL}"-* "${CACHE_CARGO_HOME}/bin/cbindgen"; do
+              if [ -e "${cached}" ] || [ -L "${cached}" ]; then
+                rm -rf -- "${cached}"
+              fi
+            done
+          fi
+          cargo_bin="${CARGO_HOME:-${HOME}/.cargo}/bin"
+          if ! command -v rustup > /dev/null; then
+            # -f: unlike wget, curl would otherwise save an HTTP error page as rustup-init
+            curl -fL -o "${HOME}/rustup-init" \
+              "https://static.rust-lang.org/rustup/dist/aarch64-apple-darwin/rustup-init"
+            chmod +x "${HOME}/rustup-init"
+            "${HOME}/rustup-init" -y --no-modify-path --profile minimal --default-toolchain none
+          fi
+          export PATH="${cargo_bin}:${PATH}"
+          echo "${cargo_bin}" >> "${GITHUB_PATH}"
+          rustup toolchain install
+          if [ "$(cbindgen --version 2> /dev/null)" != "cbindgen ${CBINDGEN_VERSION}" ]; then
+            # A restored binary is not in cargo's install records, and cargo overwrites such a file
+            # only with --force.
+            cargo install --locked --force "cbindgen@${CBINDGEN_VERSION}"
+          fi
+          rustup show active-toolchain
+
+      - name: Save the pinned Rust toolchain and cbindgen to the cache
+        # Right after the setup, so that a job that fails later still saves it. The paths must be the
+        # restore step's, character for character: the version of a cache entry is a hash of them.
+        if: ${{ steps.rust_cache.outputs.cache-hit != 'true' && steps.rust_cache.outputs.cache-primary-key != '' }}
+        continue-on-error: true
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ${{ steps.rust.outputs.rustup_home }}/toolchains/${{ steps.rust.outputs.channel }}-*
+            ${{ steps.rust.outputs.rustup_home }}/update-hashes/${{ steps.rust.outputs.channel }}-*
+            ${{ steps.rust.outputs.cargo_home }}/bin/cbindgen
+          key: ${{ steps.rust_cache.outputs.cache-primary-key }}
 
       - name: Build JavaFX artifacts and run headless tests
         working-directory: jfx
@@ -783,6 +1048,87 @@ jobs:
           file "${dylib}"
           otool -L "${dylib}"
           nm -gU "${dylib}" | head -40
+
+      - name: Verify the exports of jfxmedia, which links Rust
+        if: ${{ !cancelled() }}
+        working-directory: jfx
+        run: |
+          set -x
+          # jfxm_abi_version comes from a Rust staticlib (buildtools/rust/jfx_rust.cmake). The other names of the
+          # archive stay local through an -unexported_symbols_list, not through an export list of the header's
+          # names, as libjfxmedia_avf imports C++ names from jfxmedia. So the library must export every JFXM_EXPORT
+          # name of jfxmedia_api.h and otherwise exactly what its C build exports, and load the same libraries in
+          # the same order: any other name (the Rust standard library's) or library means the list no longer
+          # applies. The C build is made once more for this, outside the Maven tree. A Release build must also
+          # have no debug map: std's objects bring one, whose N_OSO stab names the archive member by its path in
+          # the build tree. A name the header declares twice (in two #if branches) counts once.
+          lib=modules/javafx.media/target/native/bin/libjfxmedia.dylib
+          header=modules/javafx.media/src/main/native/jfxmedia/jfxmedia_api.h
+          tree=modules/javafx.media/target/native/cmake
+          origin="${tree}/jfx-rust/logs/jfxmedia-origin.log"
+          work="${RUNNER_TEMP}/jfxmedia-exports"
+          if [ ! -f "${lib}" ]; then
+            echo "::error::${lib} was not built"
+            exit 1
+          fi
+          otool -L "${lib}"
+          if [ ! -f "${origin}" ]; then
+            echo "::error::no ${origin}: the link of ${lib} did not check the origin of its Rust exports"
+            exit 1
+          fi
+          cat "${origin}"
+          mkdir -p "${work}"
+          # Mach-O names carry a leading _
+          perl -nle 'print "_$&" if /^JFXM_EXPORT\b[^(]*?\K\w+(?=\s*\()/' "${header}" | LC_ALL=C sort -u \
+            > "${work}/header.txt"
+          nm -gUj "${lib}" | LC_ALL=C sort > "${work}/rust.txt"
+          header_count=$(awk 'END { print NR }' "${work}/header.txt")
+          export_count=$(awk 'END { print NR }' "${work}/rust.txt")
+          echo "${header_count} names in the header, ${export_count} exported"
+          if [ ! -s "${work}/header.txt" ]; then
+            echo "::error::no JFXM_EXPORT line found in ${header}"
+            exit 1
+          fi
+          missing=$(LC_ALL=C comm -23 "${work}/header.txt" "${work}/rust.txt")
+          if [ -n "${missing}" ]; then
+            echo "${missing}"
+            echo "::error::${lib} does not export the JFXM_EXPORT names of ${header} listed above"
+            exit 1
+          fi
+          # The C build: the arguments mirror the cmake-configure execution of the native-mac profile of
+          # modules/javafx.media/pom.xml, with the values Maven passed (read from its CMakeCache.txt), but with a
+          # build tree and a BIN_DIR of its own and with -DJFX_RUST=false. A slice of jfxmedia marked C_DELETED
+          # fails this configure, so the change that marks one must give this check another baseline.
+          maven_value() {
+            sed -n "s/^$1:[A-Z]*=//p" "${tree}/CMakeCache.txt"
+          }
+          build_type=$(maven_value CMAKE_BUILD_TYPE)
+          c_tree="${RUNNER_TEMP}/jfxmedia-c"
+          cmake -S modules/javafx.media/native -B "${c_tree}/cmake" "-DCMAKE_BUILD_TYPE=${build_type}" \
+            "-DGENSRC_DIR=$(maven_value GENSRC_DIR)" "-DHEADERS_DIR=$(maven_value HEADERS_DIR)" \
+            "-DBIN_DIR=${c_tree}/bin" "-DJFX_VER=$(maven_value JFX_VER)" "-DJFX_FVER=$(maven_value JFX_FVER)" \
+            "-DJFX_BUILD_ID=$(maven_value JFX_BUILD_ID)" -DJFX_RUST=false
+          cmake --build "${c_tree}/cmake" --parallel --target jfxmedia
+          c_lib="${c_tree}/bin/libjfxmedia.dylib"
+          nm -gUj "${c_lib}" | LC_ALL=C sort > "${work}/c.txt"
+          if ! diff "${work}/c.txt" "${work}/rust.txt"; then
+            echo "::error::${lib} must export exactly the names of the C build ${c_lib} (<: C, >: Rust)"
+            exit 1
+          fi
+          otool -L "${c_lib}" | tail -n +2 > "${work}/c-dependencies.txt"
+          otool -L "${lib}" | tail -n +2 > "${work}/rust-dependencies.txt"
+          if ! diff "${work}/c-dependencies.txt" "${work}/rust-dependencies.txt"; then
+            echo "::error::${lib} must load the libraries of the C build ${c_lib} in the same order (<: C, >: Rust)"
+            exit 1
+          fi
+          if [ "${build_type}" = Release ]; then
+            stabs=$(nm -a "${lib}" | awk '$2 == "-" && $5 == "OSO"')
+            if [ -n "${stabs}" ]; then
+              echo "${stabs}"
+              echo "::error::${lib} is a Release build with a debug map (the N_OSO stabs above): link it with -S"
+              exit 1
+            fi
+          fi
 
   windows_x64_build:
     name: Windows x64

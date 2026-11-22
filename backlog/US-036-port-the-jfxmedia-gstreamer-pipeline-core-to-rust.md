@@ -4,9 +4,9 @@
 javasource-wiring and dispatcher code and `jfxmedia_api.h`; counted lines and refcount/lock sites with `wc -l`/
 `git grep -c`; NOT checked: which threads call `UpdatePlayerState`, the lock state of every cross-thread field,
 current gstreamer-rs/glib APIs and the licences of their dependency trees, macOS; nothing built; 2026-10-01: the
-macOS deletion became slice 7, after US-028, as US-028 expects) · **Epic:** Rust port of the remaining native code
-(goal 3) · **Blocked by:** US-027, US-035 (jfxmedia video-frame, colour-conversion, spectrum, equalizer and logger
-port); slice 7 also by US-028
+macOS deletion became slice 7, after US-028, as US-028 expects; 2026-11-21: slice 7 no longer waits for US-028) ·
+**Epic:** Rust port of the remaining native code (goal 3) · **Blocked by:** US-027, US-035 (jfxmedia video-frame,
+colour-conversion, spectrum, equalizer and logger port)
 
 ## Story
 As a JavaFX app developer,
@@ -123,28 +123,44 @@ events, error codes and threads as today.
    - Every racy field is listed in the PR with its accesses.
    - Gate: all traces, `MediaPlaybackTest` and both dispose-leak tests.
 6. **Exports and leftovers** (`ffi/jfxmedia_api.cpp`, `JfxmMediaHandle.h`, the 33 exports). The guards return the
-   C's error codes. Then `Utils/` locks, `Singleton.h` and `Common/` leave the Windows/Linux builds.
-7. **Delete the C++, after US-028.** Delete the files slices 1-6 removed from the Windows/Linux builds, and their
-   `native/mac.cmake` lines.
+   C's error codes. Then `Utils/` locks, `Singleton.h` and `Common/` leave the three builds.
+7. **Delete the C++.** Delete the files slices 1-6 removed from the builds. A file that defines a name that
+   `libjfxmedia_avf.dylib` imports, or that jfxmedia's own macOS sources reference, stays in the tree and in
+   `native/mac.cmake` while they reference it.
 
-Slices 1-6 each remove their C++ from the Windows/Linux builds, in their own commit, once accepted on both. macOS
-keeps compiling it until slice 7.
+Slices 1-6 each remove their C++ from the three builds, in their own commit: a slice's C is deleted on all three
+platforms once the slice is accepted on Windows, WSL Linux and macOS. macOS no longer waits for US-028. The change
+that marks a slice of jfxmedia `C_DELETED` must give the macOS CI export check a baseline other than the C build:
+that check, the step "Verify the exports of jfxmedia, which links Rust" of both macOS jobs of
+`.github/workflows/submit.yml`, builds the C library with `-DJFX_RUST=false` as its baseline, which `C_DELETED` makes
+a configure error.
+
+On macOS, `libjfxmedia_avf.dylib` (`platform/osx/avf`, C++ and Objective-C++, which no story ports) imports 13 C++
+names from `libjfxmedia.dylib` today; files of this story define 4 of them (the `CAudioTrack`, `CVideoTrack` and
+`CSubtitleTrack` constructors and `CLocator::GetSizeHint`). jfxmedia's own macOS sources (`platform/osx/OSXPlatform.mm`,
+`OSXMediaPlayer.mm` and `CVVideoFrame.mm`, which no story ports either) reference three classes of this story, all
+from `OSXMediaPlayer.mm`: the constructors of `CLocatorStream` and `CFfiStreamCallbacks` (slice 1) and of
+`CFfiPlayerEventDispatcher` (slice 2). C++ that defines a name that `libjfxmedia_avf.dylib` imports, or that these
+three files reference, cannot leave the macOS build while they reference it.
 
 ## Acceptance criteria
 - The export list is identical and `jfxm_abi_version()` = 4. The `jfxm_sizeof_*`/`jfxm_offsetof_*` values are
-  unchanged.
-- The 33 module tests are unchanged and pass on Windows and on WSL (ALSA null PCM).
+  unchanged. On macOS `nm -gU libjfxmedia.dylib` is the C build's list less the names of C++ that left the macOS
+  build, each listed in the PR, and none of them is a name `libjfxmedia_avf.dylib` imports.
+- The 33 module tests are unchanged and pass on Windows, on WSL (ALSA null PCM) and on macOS.
 - The event traces match, under the comparison rule of slice 0, for every scenario on both platforms.
 - The fxplugins signal names and C signatures are unchanged, and no plugin file is edited.
 - No new thread, lock or `GMainContext`: one `MainLoop` thread per process.
-- After slice 7, the slice files are deleted and nothing references them (`git grep`).
+- After slice 7, the slice files gone from all three builds are deleted and nothing references them (`git grep`).
 - The Windows/Linux builds compile no jfxmedia C/C++. `unsafe` appears only in the boundary modules. clippy and
   rustfmt are clean.
 
 ## Definition of Done
 - The PRs are merged.
-- The port is verified on Windows (VS2022) and on WSL Ubuntu, and the C++ is gone from the Windows/Linux builds.
-- Slice 7 deletes the C++ from the tree once US-028 has landed. `backlog/README.md` is updated.
+- The port is verified on Windows (VS2022), on WSL Ubuntu and on macOS (arm64 on the macOS host, x86_64 in the
+  `macos-15-intel` CI job), and its C++ is gone from the three builds, apart from what the macOS build keeps for
+  `libjfxmedia_avf.dylib` and jfxmedia's own macOS sources.
+- Slice 7 deletes the C++ from the tree. `backlog/README.md` is updated.
 
 ## Risks
 | # | Risk | Mitigation |
@@ -153,6 +169,6 @@ keeps compiling it until slice 7.
 | 2 | A racy field mapped to a relaxed atomic hides an ordering dependency | Each field listed with its accesses and the C's lock set; the reviewer checks the ordering |
 | 3 | glib-rs marshalling differs from C trampolines for the fxplugins signals | Raw `g_signal_connect_data` with `extern "C"` trampolines in the boundary module |
 | 4 | Under OOM, Rust aborts where the C++ returned `ERROR_MEMORY_ALLOCATION` from `new (nothrow)` | Keep `g_try_malloc` where the C used it; record the remaining difference (the throwing-`new` paths already terminate) |
-| 5 | macOS keeps the C++ backend (`native/mac.cmake` compiles `platform/gstreamer`) | As in the story this one depends on: the C++ stays in the macOS build until US-028, which needs no macOS host because CI builds and tests macOS; slice 7 then deletes it |
+| 5 | macOS keeps the C++ that defines a name that `libjfxmedia_avf.dylib` imports, or that jfxmedia's own macOS sources reference (Slices), so a fix to it lands twice while they reference it | As in the story this one depends on: one PR updates both sides and the traces |
 | 6 | Slice 5 is large | Three commits with the traces run per commit; slices 1–4 shrink its seam first |
 
