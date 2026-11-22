@@ -40,6 +40,7 @@ import java.util.Locale;
 import com.sun.glass.ui.Screen;
 import com.sun.javafx.PlatformUtil;
 import com.sun.javafx.font.coretext.CTNative;
+import com.sun.javafx.font.coretext.ObjCNative;
 import com.sun.javafx.text.GlyphLayout;
 
 public abstract class PrismFontFactory implements FontFactory {
@@ -87,6 +88,7 @@ public abstract class PrismFontFactory implements FontFactory {
          * with a bare InternalError, losing the framework or symbol a link failure names. */
         if (isMacOSX) {
             CTNative.link();
+            ObjCNative.link();
         }
         String dbg = System.getProperty("prism.debugfonts", "");
         debugFonts = "true".equals(dbg);

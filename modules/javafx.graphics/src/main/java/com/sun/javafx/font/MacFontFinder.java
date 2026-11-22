@@ -29,9 +29,12 @@ import java.lang.foreign.MemorySegment;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.Locale;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.FutureTask;
 
 import com.sun.javafx.font.coretext.CFNative;
 import com.sun.javafx.font.coretext.CTNative;
+import com.sun.javafx.font.coretext.ObjCNative;
 
 /**
  * The macOS system fonts, font files and cascade lists, from CoreText; once JNI natives in {@code MacFontFinder.c}.
@@ -42,6 +45,9 @@ public class MacFontFinder {
 
     private static final int SystemFontType = 2; /*kCTFontSystemFontType*/
     private static final int MonospacedFontType = 1; /*kCTFontUserFixedPitchFontType*/
+    // PrismFontFactory's size on the other desktops: its -1 means "not asked yet" and 0 would be cached as the size.
+    private static final float SIZE_WITHOUT_A_UI_FONT = 13f;
+
     private static String getFont(int type) {
         MemorySegment font = CTNative.CTFontCreateUIFontForLanguage(type, 0, MemorySegment.NULL);
         if (font.address() == 0) {
@@ -75,11 +81,19 @@ public class MacFontFinder {
     }
 
     static float getSystemFontSize() {
-        MemorySegment font = CTNative.CTFontCreateUIFontForLanguage(CTNative.kCTFontUIFontSystem, 0.0,
-                                                                    MemorySegment.NULL);
-        float size = (float) CTNative.CTFontGetSize(font);
-        CFNative.CFRelease(font);
-        return size;
+        return sizeOf(CTNative.CTFontCreateUIFontForLanguage(CTNative.kCTFontUIFontSystem, 0.0, MemorySegment.NULL));
+    }
+
+    /** The size of the +1 UI font, which this releases; {@link #SIZE_WITHOUT_A_UI_FONT} when there is none. */
+    private static float sizeOf(MemorySegment font) {
+        if (font.address() == 0) {
+            return SIZE_WITHOUT_A_UI_FONT;
+        }
+        try {
+            return (float) CTNative.CTFontGetSize(font);
+        } finally {
+            CFNative.CFRelease(font);
+        }
     }
 
     public static boolean populateFontFileNameMap(
@@ -134,37 +148,65 @@ public class MacFontFinder {
      */
     private static String[] getFontData() {
         MemorySegment collection = CTNative.CTFontCollectionCreateFromAvailableFonts(MemorySegment.NULL);
-        MemorySegment fonts;
+        return fontData(matchingDescriptors(collection));
+    }
+
+    /** The +1 descriptors of the +1 collection, which this releases; NULL for a NULL collection. */
+    private static MemorySegment matchingDescriptors(MemorySegment collection) {
+        if (collection.address() == 0) {
+            return MemorySegment.NULL;
+        }
         try {
-            fonts = CTNative.CTFontCollectionCreateMatchingFontDescriptors(collection);
+            return CTNative.CTFontCollectionCreateMatchingFontDescriptors(collection);
         } finally {
             CFNative.CFRelease(collection);
         }
+    }
+
+    /**
+     * Name, family and file per font of the +1 descriptor array, which this releases, then of the two UI fonts,
+     * which the collection does not list; a NULL array lists the UI fonts alone.
+     */
+    private static String[] fontData(MemorySegment fonts) {
         String[] result;
         int index = 0;
         try {
-            long count = CFNative.CFArrayGetCount(fonts);
+            long count = fonts.address() == 0 ? 0 : CFNative.CFArrayGetCount(fonts);
             result = new String[(int) ((count + 2) * 3)];
             for (long i = 0; i < count; i++) {
                 index = addDescriptor(CFNative.CFArrayGetValueAtIndex(fonts, i), result, index);
             }
         } finally {
-            CFNative.CFRelease(fonts);
+            release(fonts);
         }
         for (int type : new int[] {CTNative.kCTFontUIFontSystem, CTNative.kCTFontUIFontEmphasizedSystem}) {
-            MemorySegment font = CTNative.CTFontCreateUIFontForLanguage(type, 0, MemorySegment.NULL);
-            try {
-                MemorySegment descriptor = CTNative.CTFontCopyFontDescriptor(font);
-                try {
-                    index = addDescriptor(descriptor, result, index);
-                } finally {
-                    CFNative.CFRelease(descriptor);
-                }
-            } finally {
-                CFNative.CFRelease(font);
-            }
+            index = addUiFont(CTNative.CTFontCreateUIFontForLanguage(type, 0, MemorySegment.NULL), result, index);
         }
         return result;
+    }
+
+    /** {@link #addDescriptor} for the descriptor of the +1 UI font, which this releases; NULL adds nothing. */
+    private static int addUiFont(MemorySegment font, String[] result, int index) {
+        if (font.address() == 0) {
+            return index;
+        }
+        try {
+            return addOwnedDescriptor(CTNative.CTFontCopyFontDescriptor(font), result, index);
+        } finally {
+            CFNative.CFRelease(font);
+        }
+    }
+
+    /** {@link #addDescriptor} for a +1 descriptor, which this releases; NULL adds nothing. */
+    private static int addOwnedDescriptor(MemorySegment descriptor, String[] result, int index) {
+        if (descriptor.address() == 0) {
+            return index;
+        }
+        try {
+            return addDescriptor(descriptor, result, index);
+        } finally {
+            CFNative.CFRelease(descriptor);
+        }
     }
 
     private static int addDescriptor(MemorySegment descriptor, String[] result, int index) {
@@ -197,15 +239,99 @@ public class MacFontFinder {
         }
     }
 
-    /** Display name and file per cascade entry; none for a zero font or when CoreText gives no list. */
+    /**
+     * Display name and file per cascade entry; none for a zero font or when CoreText gives no list. What CoreText
+     * autoreleases during the call is drained before it returns, on any thread, unless a virtual caller cannot start a
+     * platform thread.
+     */
     public static String[] getCascadeList(long fontRef) {
         if (fontRef == 0) {
             return new String[0];
         }
-        MemorySegment codes = CFNative.CFLocaleCopyISOLanguageCodes();
+        MemorySegment font = ptr(fontRef);
+        if (Thread.currentThread().isVirtual()) {
+            return cascadeListOnAPlatformThread(font);
+        }
+        return pooledCascadeList(font);
+    }
+
+    /**
+     * {@link #cascadeList} of the borrowed font, with every downcall and release inside an autorelease pool of this
+     * thread; only Java strings leave the pool.
+     */
+    private static String[] pooledCascadeList(MemorySegment font) {
+        MemorySegment pool = ObjCNative.objc_autoreleasePoolPush();
+        try {
+            MemorySegment codes = CFNative.CFLocaleCopyISOLanguageCodes();
+            return cascadeList(font, codes);
+        } finally {
+            ObjCNative.objc_autoreleasePoolPop(pool);
+        }
+    }
+
+    /**
+     * {@link #pooledCascadeList} on a new platform thread, waited for to the end. A pool must be popped on the thread
+     * that pushed it, and a virtual thread can move to another carrier between the downcalls. A thread per call is
+     * enough: the list is kept per composite font, so the call is rare.
+     */
+    private static String[] cascadeListOnAPlatformThread(MemorySegment font) {
+        FutureTask<String[]> task = new FutureTask<>(() -> pooledCascadeList(font));
+        Thread worker = Thread.ofPlatform().name("JavaFX font cascade list").daemon()
+                              .inheritInheritableThreadLocals(false).unstarted(task);
+        try {
+            worker.start();
+        } catch (OutOfMemoryError e) {
+            // Without a thread the list is made here as it was before, with no pool: a virtual thread may not push.
+            return cascadeList(font, CFNative.CFLocaleCopyISOLanguageCodes());
+        }
+        return resultOf(task);
+    }
+
+    /**
+     * What the task answered, or what it threw, thrown here. Nothing ends the wait before the task is done, because
+     * the caller releases the font as soon as this returns: the interrupt status is set again before it does, and
+     * what {@code get()} itself throws, such as an {@code OutOfMemoryError} of its own allocation, is thrown once the
+     * task is done.
+     */
+    private static String[] resultOf(FutureTask<String[]> task) {
+        boolean interrupted = false;
+        try {
+            while (true) {
+                try {
+                    return task.get();
+                } catch (InterruptedException e) {
+                    interrupted = true;
+                } catch (RuntimeException | Error e) {
+                    // get() allocates and parks, which is what failed; spinning does neither.
+                    while (!task.isDone()) {
+                        Thread.onSpinWait();
+                    }
+                    throw e;
+                }
+            }
+        } catch (ExecutionException e) {
+            if (e.getCause() instanceof Error error) {
+                throw error;
+            }
+            throw (RuntimeException) e.getCause();
+        } finally {
+            if (interrupted) {
+                Thread.currentThread().interrupt();
+            }
+        }
+    }
+
+    /**
+     * Display name and file per cascade entry of the borrowed font for the +1 language codes, which this releases;
+     * none for NULL codes, without asking CoreText.
+     */
+    private static String[] cascadeList(MemorySegment font, MemorySegment codes) {
+        if (codes.address() == 0) {
+            return new String[0];
+        }
         MemorySegment descriptors;
         try {
-            descriptors = CTNative.CTFontCopyDefaultCascadeListForLanguages(ptr(fontRef), codes);
+            descriptors = CTNative.CTFontCopyDefaultCascadeListForLanguages(font, codes);
         } finally {
             CFNative.CFRelease(codes);
         }

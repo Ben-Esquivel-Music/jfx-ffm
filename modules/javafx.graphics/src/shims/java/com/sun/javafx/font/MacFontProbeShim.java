@@ -32,12 +32,13 @@ import java.lang.foreign.SymbolLookup;
 import java.lang.invoke.MethodHandle;
 
 import static java.lang.foreign.ValueLayout.ADDRESS;
+import static java.lang.foreign.ValueLayout.JAVA_BOOLEAN;
 import static java.lang.foreign.ValueLayout.JAVA_DOUBLE;
 import static java.lang.foreign.ValueLayout.JAVA_INT;
 
 /**
- * Test-only CoreText, libobjc and malloc probes for the macOS NULL-input and release tests, over the bindings and
- * toolkit of {@link MacFontOracleShim}. An observer like it: it uses no font class of the product
+ * Test-only CoreText, CoreGraphics, libobjc and malloc probes for the macOS NULL-input and release tests, over the
+ * bindings and toolkit of {@link MacFontOracleShim}. An observer like it: it uses no font class of the product
  * ({@code MacFontBindings.requireSameBinding} checks). Every object it hands out is at +1, for the caller to release
  * with {@link MacFontOracleShim#release(long)}.
  */
@@ -54,6 +55,15 @@ public final class MacFontProbeShim {
             FunctionDescriptor.of(ADDRESS, ADDRESS, ADDRESS));
     private static final MethodHandle CF_LOCALE_COPY_ISO_LANGUAGE_CODES = MacFontOracleShim.bind(
             MacFontOracleShim.Lib.CF, "CFLocaleCopyISOLanguageCodes", FunctionDescriptor.of(ADDRESS));
+    private static final MethodHandle CT_FONT_COLLECTION_CREATE_FROM_AVAILABLE_FONTS = MacFontOracleShim.bind(
+            MacFontOracleShim.Lib.CT, "CTFontCollectionCreateFromAvailableFonts",
+            FunctionDescriptor.of(ADDRESS, ADDRESS));
+    private static final MethodHandle CG_CONTEXT_SET_RGB_FILL_COLOR = MacFontOracleShim.bind(
+            MacFontOracleShim.Lib.CG, "CGContextSetRGBFillColor",
+            FunctionDescriptor.ofVoid(ADDRESS, JAVA_DOUBLE, JAVA_DOUBLE, JAVA_DOUBLE, JAVA_DOUBLE));
+    private static final MethodHandle CG_CONTEXT_SET_ALLOWS_ANTIALIASING = MacFontOracleShim.bind(
+            MacFontOracleShim.Lib.CG, "CGContextSetAllowsAntialiasing",
+            FunctionDescriptor.ofVoid(ADDRESS, JAVA_BOOLEAN));
 
     private static final SymbolLookup OBJC = MacFontOracleShim.load("/usr/lib/libobjc.A.dylib");
     private static final MethodHandle OBJC_AUTORELEASE_POOL_PUSH = MacFontOracleShim.bind(
@@ -79,6 +89,41 @@ public final class MacFontProbeShim {
         }
     }
 
+    /** {@code CTFontCollectionCreateFromAvailableFonts(NULL)}. */
+    public static long fontCollection() {
+        try {
+            return ((MemorySegment) CT_FONT_COLLECTION_CREATE_FROM_AVAILABLE_FONTS.invokeExact(MemorySegment.NULL))
+                    .address();
+        } catch (Throwable t) {
+            throw MacFontOracleShim.unexpected(t);
+        }
+    }
+
+    /**
+     * {@code CGContextSetRGBFillColor(NULL, 0, 0, 0, 1)}. CoreGraphics refuses it with one "invalid context" line in
+     * the unified log and nothing else, which makes it the control of a test that reads that log.
+     */
+    public static void setFillColorOfNoContext() {
+        try {
+            CG_CONTEXT_SET_RGB_FILL_COLOR.invokeExact(MemorySegment.NULL, 0.0, 0.0, 0.0, 1.0);
+        } catch (Throwable t) {
+            throw MacFontOracleShim.unexpected(t);
+        }
+    }
+
+    /**
+     * {@code CGContextSetAllowsAntialiasing(NULL, true)}, one of the setters a glyph's bitmap context gets.
+     * CoreGraphics refuses it as it refuses the fill colour, which makes it the control that shows those setters
+     * still log a call on NULL.
+     */
+    public static void setAllowsAntialiasingOfNoContext() {
+        try {
+            CG_CONTEXT_SET_ALLOWS_ANTIALIASING.invokeExact(MemorySegment.NULL, true);
+        } catch (Throwable t) {
+            throw MacFontOracleShim.unexpected(t);
+        }
+    }
+
     /** {@code CTFontDescriptorCreateWithNameAndSize}. */
     public static long createFontDescriptor(String name, double size) {
         MemorySegment nameRef = MacFontOracleShim.createString(name);
@@ -98,6 +143,15 @@ public final class MacFontProbeShim {
                     MemorySegment.ofAddress(descriptor), MacFontOracleShim.Lib.K_CT_FONT_DISPLAY_NAME_ATTRIBUTE);
             MacFontOracleShim.release(displayName);
             return displayName.address() != 0;
+        } catch (Throwable t) {
+            throw MacFontOracleShim.unexpected(t);
+        }
+    }
+
+    /** {@code CFLocaleCopyISOLanguageCodes()}. */
+    public static long languageCodes() {
+        try {
+            return ((MemorySegment) CF_LOCALE_COPY_ISO_LANGUAGE_CODES.invokeExact()).address();
         } catch (Throwable t) {
             throw MacFontOracleShim.unexpected(t);
         }

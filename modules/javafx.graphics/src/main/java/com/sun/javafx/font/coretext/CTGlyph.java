@@ -44,6 +44,7 @@ class CTGlyph implements Glyph {
     private static boolean CACHE_CONTEXT = true;
 
     private static long cachedContextRef;
+    private static final Object CONTEXT_LOCK = new Object();
     private static final int BITMAP_WIDTH = 256;
     private static final int BITMAP_HEIGHT = 256;
     private static final int MAX_SIZE = 320;
@@ -135,6 +136,7 @@ class CTGlyph implements Glyph {
             flags = OS.kCGImageAlphaNone;
         }
         long context =  OS.CGBitmapContextCreate(0, width, height, bpc, bpr, space, flags);
+        if (context == 0) return 0;
         try {
             boolean subPixel = strike.isSubPixelGlyph();
             OS.CGContextSetAllowsFontSmoothing(context, lcd);
@@ -152,10 +154,12 @@ class CTGlyph implements Glyph {
     }
 
     private long getCachedContext(boolean lcd) {
-        if (cachedContextRef == 0) {
-            cachedContextRef = createContext(lcd, BITMAP_WIDTH, BITMAP_HEIGHT);
+        synchronized (CONTEXT_LOCK) {
+            if (cachedContextRef == 0) {
+                cachedContextRef = createContext(lcd, BITMAP_WIDTH, BITMAP_HEIGHT);
+            }
+            return cachedContextRef;
         }
-        return cachedContextRef;
     }
 
     private synchronized byte[] getColorImage(double x, double y, int w, int h) {

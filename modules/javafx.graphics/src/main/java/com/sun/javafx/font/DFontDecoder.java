@@ -48,42 +48,66 @@ class DFontDecoder extends FontFileWriter {
         }
         MemorySegment nameRef = CFNative.toCFString(fontName);
         try {
-            MemorySegment descriptor = MemorySegment.NULL;
             MemorySegment collection = CTNative.CTFontCollectionCreateFromAvailableFonts(MemorySegment.NULL);
-            MemorySegment fonts;
-            try {
-                fonts = CTNative.CTFontCollectionCreateMatchingFontDescriptors(collection);
-            } finally {
-                CFNative.CFRelease(collection);
+            return fontNamed(matchingDescriptors(collection), nameRef);
+        } finally {
+            if (nameRef.address() != 0) {
+                CFNative.CFRelease(nameRef);
             }
-            try {
-                long count = CFNative.CFArrayGetCount(fonts);
-                for (long i = 0; i < count && descriptor.address() == 0; i++) {
-                    MemorySegment candidate = CFNative.CFArrayGetValueAtIndex(fonts, i);
-                    if (candidate.address() != 0) {
-                        MemorySegment name = CTNative.CTFontDescriptorCopyAttribute(candidate,
-                                CTNative.kCTFontDisplayNameAttribute);
-                        if (name.address() != 0) {
-                            if (CFNative.CFStringCompare(name, nameRef, 0) == CFNative.kCFCompareEqualTo) {
-                                descriptor = candidate;
-                            }
-                            CFNative.CFRelease(name);
+        }
+    }
+
+    /** The +1 descriptors of the +1 collection, which this releases; NULL for a NULL collection. */
+    private static MemorySegment matchingDescriptors(MemorySegment collection) {
+        if (collection.address() == 0) {
+            return MemorySegment.NULL;
+        }
+        try {
+            return CTNative.CTFontCollectionCreateMatchingFontDescriptors(collection);
+        } finally {
+            CFNative.CFRelease(collection);
+        }
+    }
+
+    /**
+     * The +1 font of the first descriptor in the +1 array, which this releases, whose display name compares equal
+     * with the borrowed {@code nameRef}; 0 for a NULL array or name.
+     */
+    private static long fontNamed(MemorySegment fonts, MemorySegment nameRef) {
+        if (fonts.address() == 0) {
+            return 0;
+        }
+        try {
+            if (nameRef.address() == 0) {
+                return 0;
+            }
+            MemorySegment descriptor = MemorySegment.NULL;
+            long count = CFNative.CFArrayGetCount(fonts);
+            for (long i = 0; i < count && descriptor.address() == 0; i++) {
+                MemorySegment candidate = CFNative.CFArrayGetValueAtIndex(fonts, i);
+                if (candidate.address() != 0) {
+                    MemorySegment name = CTNative.CTFontDescriptorCopyAttribute(candidate,
+                            CTNative.kCTFontDisplayNameAttribute);
+                    if (name.address() != 0) {
+                        if (CFNative.CFStringCompare(name, nameRef, 0) == CFNative.kCFCompareEqualTo) {
+                            descriptor = candidate;
                         }
+                        CFNative.CFRelease(name);
                     }
                 }
-                MemorySegment font = descriptor.address() == 0 ? MemorySegment.NULL
-                        : CTNative.CTFontCreateWithFontDescriptor(descriptor, 0, MemorySegment.NULL);
-                return font.address();
-            } finally {
-                CFNative.CFRelease(fonts);
             }
+            MemorySegment font = descriptor.address() == 0 ? MemorySegment.NULL
+                    : CTNative.CTFontCreateWithFontDescriptor(descriptor, 0, MemorySegment.NULL);
+            return font.address();
         } finally {
-            CFNative.CFRelease(nameRef);
+            CFNative.CFRelease(fonts);
         }
     }
 
     private static void releaseCTFont(long font) {
-        CFNative.CFRelease(ptr(font));
+        if (font != 0) {
+            CFNative.CFRelease(ptr(font));
+        }
     }
 
     private static int getCTFontFormat(long font) {

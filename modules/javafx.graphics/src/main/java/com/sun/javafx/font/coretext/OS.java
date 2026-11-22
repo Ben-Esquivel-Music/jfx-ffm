@@ -405,36 +405,43 @@ class OS {
 
     static final long CTFontCreateUIFontForLanguage(double size, CGAffineTransform matrix, boolean bold) {
         int type = bold ? CTNative.kCTFontUIFontEmphasizedSystem : CTNative.kCTFontUIFontSystem;
-        MemorySegment font = CTNative.CTFontCreateUIFontForLanguage(type, size, MemorySegment.NULL);
         if (matrix == null) {
-            return font.address();
+            return CTNative.CTFontCreateUIFontForLanguage(type, size, MemorySegment.NULL).address();
         }
         try (Arena arena = Arena.ofConfined()) {
-            MemorySegment copy = CTNative.CTFontCreateCopyWithAttributes(font, size, transform(arena, matrix),
-                                                                         MemorySegment.NULL);
-            return copy.address();
-        } finally {
-            CFNative.CFRelease(font);
+            MemorySegment m = transform(arena, matrix);
+            return copyOfUIFont(CTNative.CTFontCreateUIFontForLanguage(type, size, MemorySegment.NULL), size, m);
         }
     }
 
     static final long CTFontCreateWithName(long name, double size, CGAffineTransform matrix) {
+        if (name == 0) {
+            return 0;
+        }
         MemorySegment fontName = ptr(name);
         try (Arena arena = Arena.ofConfined()) {
             MemorySegment m = matrix == null ? MemorySegment.NULL : transform(arena, matrix);
-            if (CFNative.CFStringGetCharacterAtIndex(fontName, 0) == '.') {
+            if (CFNative.CFStringGetLength(fontName) > 0
+                    && CFNative.CFStringGetCharacterAtIndex(fontName, 0) == '.') {
                 MemorySegment found = CFNative.CFStringFind(arena, fontName, CFNative.boldCFString(),
                                                             CFNative.kCFCompareCaseInsensitive);
                 boolean bold = found.get(JAVA_LONG, 0) != CFNative.kCFNotFound;
                 int type = bold ? CTNative.kCTFontUIFontEmphasizedSystem : CTNative.kCTFontUIFontSystem;
-                MemorySegment font = CTNative.CTFontCreateUIFontForLanguage(type, 0.0, MemorySegment.NULL);
-                try {
-                    return CTNative.CTFontCreateCopyWithAttributes(font, size, m, MemorySegment.NULL).address();
-                } finally {
-                    CFNative.CFRelease(font);
-                }
+                return copyOfUIFont(CTNative.CTFontCreateUIFontForLanguage(type, 0.0, MemorySegment.NULL), size, m);
             }
             return CTNative.CTFontCreateWithName(fontName, size, m).address();
+        }
+    }
+
+    /** Copies the UI font, which it takes at +1 and releases, with {@code matrix}; 0 for a NULL font. */
+    static long copyOfUIFont(MemorySegment font, double size, MemorySegment matrix) {
+        if (font.address() == 0) {
+            return 0;
+        }
+        try {
+            return CTNative.CTFontCreateCopyWithAttributes(font, size, matrix, MemorySegment.NULL).address();
+        } finally {
+            CFNative.CFRelease(font);
         }
     }
 

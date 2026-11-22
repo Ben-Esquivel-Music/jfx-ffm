@@ -25,9 +25,15 @@
 
 package test.com.sun.javafx.font;
 
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.ArrayList;
+import java.util.Collections;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.Timeout;
@@ -36,6 +42,7 @@ import org.junit.jupiter.api.condition.OS;
 import test.com.sun.javafx.font.FontGoldenRuntime.ChildJvm;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -49,6 +56,17 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 public class MacFontReleaseTest {
 
     private static final String RETAIN_CALLS = Integer.toString(MacFontStressChild.RETAIN_CALLS);
+
+    /** How {@code CTFactory.createFontFile} reports, with {@code prism.debugfonts}, each lookup in a font file. */
+    private static final String FONT_FILE_LOOKUP = "createFontFile by ref name=";
+    private static final String NO_FACE = " index=-1";
+
+    /**
+     * Measured in the child on macOS 27.2.1, smallest of three rounds of 300 calls: without a pool a cascade list call
+     * of Helvetica leaves about 230 heap blocks, with its pool 0.3 at most, on either kind of thread. The bound is
+     * more than twice the second and less than half the first.
+     */
+    private static final double AUTORELEASED_BLOCKS_PER_CALL = 10.0;
 
     /**
      * The name copy and the URL of every cascade entry. A URL left behind keeps about two heap blocks, so the bound
@@ -197,6 +215,193 @@ public class MacFontReleaseTest {
         assertEquals("0", values.get("retain.delta.layout"), "a layout releases its line");
         assertEquals("0", values.get("retain.delta.shapeThrows"),
                      "a layout whose run throws leaves no line behind");
+    }
+
+    /**
+     * The bitmap context the glyph cache keeps has one owner: two threads that find the cache empty create one
+     * context between them, and both get the one the cache holds. The first thread is held inside the creation until
+     * the second has reached the cache, inside a creation of its own or blocked at the cache; a hold that times out
+     * fails. The threads call the cache directly and draw nothing: two threads drawing into the one bitmap is
+     * another defect.
+     */
+    @Test
+    @Tag("crash-prone")
+    @Timeout(2 * MacFontGoldens.CHILD_TIMEOUT_SECONDS)
+    void twoThreadsThatFindTheContextCacheEmptyCreateOneContext() throws Exception {
+        Map<String, String> values = run(MacFontReleaseChild.CACHED_CONTEXT);
+        assertEquals("0", values.get("cached.before"),
+                     "a context was cached before the two threads asked for one, so the race proves nothing");
+        assertEquals("true", values.get("strike.hasFont"), "the strike has no CTFont, so it makes no context");
+        assertEquals("true", values.get("firstInside"), "the first thread never created a context");
+        assertTrue(Set.of(MacFontReleaseChild.SECOND_CREATING, MacFontReleaseChild.SECOND_BLOCKED)
+                      .contains(values.get("hold")),
+                   "the first thread stopped waiting for the second to reach the cache: " + values.get("hold"));
+        assertEquals("true", values.get("finished"), "a thread did not return from the context cache");
+        assertEquals(FontGoldens.NULL, values.get("first.failure"), "the first thread's call of the cache");
+        assertEquals(FontGoldens.NULL, values.get("second.failure"), "the second thread's call of the cache");
+        assertEquals("1", values.get("creations"), "two threads that find the cache empty create one context"
+                + " between them, not one each, which leaves all but the cached one without an owner (hold: "
+                + values.get("hold") + ")");
+        assertEquals("true", values.get("context.made"), "the cache answers a context");
+        assertEquals("true", values.get("context.shared"), "both threads get the same context");
+        assertEquals("true", values.get("context.cached"), "the context both threads get is the cached one");
+    }
+
+    /**
+     * A fallback face that is not in its font file is looked up there once a process: later layouts of the same
+     * text neither copy its font again nor parse its file. Its slot stays -1, so every layout gives the glyphs of the
+     * first. The child runs with {@code prism.debugfonts}: the factory prints a line per lookup in a font file and
+     * layout one per fallback font it resolves. At least one face must be missing, or the path is not reached.
+     */
+    @Test
+    @Tag("crash-prone")
+    @Timeout(2 * MacFontGoldens.CHILD_TIMEOUT_SECONDS)
+    void aFallbackFaceItsFontFileLacksIsLookedUpOnce() throws Exception {
+        Map<String, String> values = MacFontGoldens.runChild(MacFontReleaseChild.class,
+                MacFontReleaseChild.FALLBACK_FACE, Map.of("prism.debugfonts", "true"));
+        int layouts = Integer.parseInt(values.get("layouts"));
+        Path stderr = MacFontGoldens.workDirectory().resolve(MacFontReleaseChild.FALLBACK_FACE + ".err");
+        List<String> lines = new String(Files.readAllBytes(stderr), StandardCharsets.UTF_8).lines().toList();
+        List<String> lookups = new ArrayList<>();
+        for (String line : lines) {
+            if (line.startsWith(FONT_FILE_LOOKUP) && line.endsWith(NO_FACE)) {
+                lookups.add(line.substring(FONT_FILE_LOOKUP.length(), line.indexOf(" filename=")));
+            }
+        }
+        assertFalse(lookups.isEmpty(), "no fallback face of the System font's Devanagari text is missing from its"
+                + " font file, so the layouts do not reach the path; see " + stderr);
+        for (int i = 1; i < layouts; i++) {
+            assertEquals(values.get("glyphs.0"), values.get("glyphs." + i),
+                         "layout " + i + " gives other glyphs than the first");
+        }
+        for (String name : new LinkedHashSet<>(lookups)) {
+            String unresolved = "\tFallback font= " + name + " slot=-1";
+            assertEquals(layouts, lines.stream().filter(unresolved::equals).count(),
+                         "each of the " + layouts + " layouts resolves " + name + " to no slot");
+            int times = Collections.frequency(lookups, name);
+            assertEquals(1, times, name + " was looked up in its font file " + times + " times over " + layouts
+                    + " layouts, where once is enough");
+        }
+    }
+
+    /**
+     * A cascade list call on a platform thread that has no autorelease pool drains what CoreText autoreleased
+     * during the call before it returns, instead of leaving it to wait for the thread's exit. The control, the same
+     * region without a pool, must leave more than {@link #AUTORELEASED_BLOCKS_PER_CALL} blocks per call, or the heap
+     * could not show the difference.
+     */
+    @Test
+    @Tag("crash-prone")
+    @Timeout(2 * MacFontGoldens.CHILD_TIMEOUT_SECONDS)
+    void aCascadeListCallOnAPlatformThreadDrainsWhatItAutoreleased() throws Exception {
+        requireDrained(run(MacFontReleaseChild.CASCADE_LIST_POOL), false);
+    }
+
+    /**
+     * A cascade list call on a virtual thread leaves no block that CoreText autoreleased during it waiting on the
+     * caller's carrier, where the same region run on the carrier without a pool leaves more than
+     * {@link #AUTORELEASED_BLOCKS_PER_CALL} per call. Every call answers the platform thread's list. Starting and
+     * waiting for a thread that runs nothing must stay below the bound, so none is subtracted.
+     */
+    @Test
+    @Tag("crash-prone")
+    @Timeout(2 * MacFontGoldens.CHILD_TIMEOUT_SECONDS)
+    void aCascadeListCallOnAVirtualThreadDrainsWhatItAutoreleased() throws Exception {
+        Map<String, String> values = run(MacFontReleaseChild.CASCADE_LIST_VIRTUAL);
+        assertEquals(FontGoldens.NULL, values.get("handOff.failure"), "the hand-off probe's calls");
+        double handOff = Double.parseDouble(values.get("handOff.perCall"));
+        assertTrue(handOff < AUTORELEASED_BLOCKS_PER_CALL, "a platform thread started and waited for per call leaves "
+                + handOff + " blocks per call (rounds " + values.get("handOff.rounds") + "), so the bound "
+                + AUTORELEASED_BLOCKS_PER_CALL + " needs the hand-off subtracted");
+        requireDrained(values, true);
+    }
+
+    /**
+     * An interrupt does not end a virtual caller's wait for its cascade list, since the caller releases the font as
+     * soon as the call returns: an interrupted caller gets the whole list, and its interrupt status is still set.
+     */
+    @Test
+    @Tag("crash-prone")
+    @Timeout(2 * MacFontGoldens.CHILD_TIMEOUT_SECONDS)
+    void anInterruptedVirtualCallerGetsTheWholeCascadeListAndKeepsItsInterrupt() throws Exception {
+        Map<String, String> values = run(MacFontReleaseChild.CASCADE_LIST_INTERRUPTED);
+        assertNotEquals("0", values.get("entries"), "Helvetica has no cascade list, so no call can be cut short");
+        assertEquals("true", values.get("virtual"), "the caller is not a virtual thread");
+        assertEquals("true", values.get("interruptedBefore"), "the caller did not interrupt itself");
+        assertEquals(FontGoldens.NULL, values.get("failure"), "the interrupted caller's call of the cascade list");
+        assertEquals("true", values.get("sameList"), "the interrupted caller gets the whole cascade list");
+        assertEquals("true", values.get("interruptedAfter"), "the caller's interrupt status is still set");
+    }
+
+    /**
+     * The same at the wait, without depending on how fast the task is: a virtual caller that interrupted itself
+     * waits for a task that answers only once the caller is seen parked in that wait. It parks only once its
+     * interrupt status is clear, which the wait's first {@code get()} does by throwing, so the wait has seen the
+     * interrupt, goes on, and sets it again once the task answers. In the call above, a task that is done before
+     * the first {@code get()} is never asked about the interrupt.
+     */
+    @Test
+    @Tag("crash-prone")
+    @Timeout(2 * MacFontGoldens.CHILD_TIMEOUT_SECONDS)
+    void anInterruptTheWaitClearsDoesNotEndItAndIsSetAgainOnceTheTaskAnswers() throws Exception {
+        Map<String, String> values = run(MacFontReleaseChild.CASCADE_LIST_WAIT_INTERRUPTED);
+        assertEquals("true", values.get("virtual"), "the caller is not a virtual thread");
+        assertEquals("true", values.get("interruptedBefore"), "the caller did not interrupt itself");
+        assertEquals("true", values.get("parkedInTheWait"), "the caller was not seen parked in its wait for the"
+                + " running task (state " + values.get("callerState") + ", failure " + values.get("failure")
+                + "), so the interrupt ended the wait or the wait never saw it");
+        assertEquals("false", values.get("doneWhenParked"),
+                     "the task was done when the caller parked, so the wait had nothing left to outlast");
+        assertEquals(FontGoldens.NULL, values.get("failure"), "the interrupted caller's wait for the task");
+        assertEquals("true", values.get("theTasksArray"),
+                     "the interrupted caller gets the task's array, not " + values.get("list"));
+        assertEquals("true", values.get("interruptedAfter"), "the interrupt the wait cleared is set again");
+    }
+
+    /**
+     * Nor does an error of the wait itself, such as an {@code OutOfMemoryError} of its own allocation: the caller
+     * leaves only once the platform thread's task is done, and then throws that error. The child hands the wait a task
+     * whose first {@code get()} throws while the task runs, and lets the task finish only after the caller has had a
+     * second to leave.
+     */
+    @Test
+    @Tag("crash-prone")
+    @Timeout(2 * MacFontGoldens.CHILD_TIMEOUT_SECONDS)
+    void anErrorOfTheWaitItselfIsThrownOnlyOnceTheTaskIsDone() throws Exception {
+        Map<String, String> values = run(MacFontReleaseChild.CASCADE_LIST_WAIT_FAILS);
+        assertEquals("true", values.get("virtual"), "the caller is not a virtual thread");
+        assertEquals("true", values.get("waitFailed"), "the caller's wait never called get()");
+        assertEquals("false", values.get("doneWhenTheWaitFailed"),
+                     "the task was done when get() threw, so the wait had nothing left to outlast");
+        assertEquals("true", values.get("doneWhenTheCallerLeft"), "the caller left its wait while the task still ran"
+                + " (left within the hold: " + values.get("leftWhileTheTaskRan") + "), where a real task still reads"
+                + " the font the caller releases next");
+        assertEquals("true", values.get("thrownIsTheWaitsError"),
+                     "the caller throws the error of its wait, not " + values.get("thrown"));
+        assertEquals(FontGoldens.NULL, values.get("list"), "a caller whose wait failed gets no list");
+    }
+
+    private static void requireDrained(Map<String, String> values, boolean virtual) {
+        assertNotEquals("0", values.get("entries"), "Helvetica has no cascade list, so no call autoreleases one");
+        List<String> problems = new ArrayList<>();
+        for (String probe : List.of("subject", "control")) {
+            expect(problems, values, probe + ".virtual", Boolean.toString(virtual), "the thread the probe ran on");
+            expect(problems, values, probe + ".failure", FontGoldens.NULL, "the probe's calls");
+            expect(problems, values, probe + ".sameList", "true", "every call answers the cascade list of the font");
+        }
+        double control = Double.parseDouble(values.get("control.perCall"));
+        double subject = Double.parseDouble(values.get("subject.perCall"));
+        if (!(control > AUTORELEASED_BLOCKS_PER_CALL)) {
+            problems.add("the region without a pool leaves " + control + " blocks per call (rounds "
+                    + values.get("control.rounds") + "), not above " + AUTORELEASED_BLOCKS_PER_CALL
+                    + ": the heap cannot show blocks a call leaves autoreleased");
+        }
+        if (!(subject < AUTORELEASED_BLOCKS_PER_CALL)) {
+            problems.add("a cascade list call leaves " + subject + " autoreleased blocks per call (rounds "
+                    + values.get("subject.rounds") + ") waiting for its thread to exit, bound "
+                    + AUTORELEASED_BLOCKS_PER_CALL);
+        }
+        assertEquals(List.of(), problems);
     }
 
     private static void expect(List<String> problems, Map<String, String> values, String key, String expected,

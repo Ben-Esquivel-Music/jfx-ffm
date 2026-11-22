@@ -31,11 +31,12 @@ import java.lang.reflect.Method;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.Locale;
+import java.util.concurrent.FutureTask;
 
 /**
- * Delegate onto the {@code MacFontFinder} entry points production calls. The four {@code private} methods are named as
+ * Delegate onto the {@code MacFontFinder} entry points production calls. The {@code private} methods are named as
  * strings and invoked by reflection, so that {@code MacFontBindings.requireSameBinding} can prove they are the
- * methods {@code MacFontFinder} itself calls.
+ * methods {@code MacFontFinder} itself calls. Each helper that takes a CF object at +1 releases it.
  */
 public final class MacFontFinderShim {
 
@@ -54,8 +55,32 @@ public final class MacFontFinderShim {
         return invokeStatic("getFontData", new Class<?>[0]);
     }
 
+    public static long matchingDescriptors(long collection) {
+        MemorySegment descriptors = invokeStatic("matchingDescriptors", new Class<?>[] {MemorySegment.class},
+                                                 MemorySegment.ofAddress(collection));
+        return descriptors.address();
+    }
+
+    public static String[] fontData(long fonts) {
+        return invokeStatic("fontData", new Class<?>[] {MemorySegment.class}, MemorySegment.ofAddress(fonts));
+    }
+
+    public static int addUiFont(long font, String[] result, int index) {
+        return invokeStatic("addUiFont", new Class<?>[] {MemorySegment.class, String[].class, int.class},
+                            MemorySegment.ofAddress(font), result, index);
+    }
+
+    public static int addOwnedDescriptor(long descriptor, String[] result, int index) {
+        return invokeStatic("addOwnedDescriptor", new Class<?>[] {MemorySegment.class, String[].class, int.class},
+                            MemorySegment.ofAddress(descriptor), result, index);
+    }
+
     public static float getSystemFontSize() {
         return MacFontFinder.getSystemFontSize();
+    }
+
+    public static float sizeOf(long font) {
+        return invokeStatic("sizeOf", new Class<?>[] {MemorySegment.class}, MemorySegment.ofAddress(font));
     }
 
     public static String getSystemFont() {
@@ -77,6 +102,17 @@ public final class MacFontFinderShim {
 
     public static String[] getCascadeList(long fontRef) {
         return MacFontFinder.getCascadeList(fontRef);
+    }
+
+    /** {@code font} is borrowed. */
+    public static String[] cascadeList(long font, long codes) {
+        return invokeStatic("cascadeList", new Class<?>[] {MemorySegment.class, MemorySegment.class},
+                            MemorySegment.ofAddress(font), MemorySegment.ofAddress(codes));
+    }
+
+    /** What a virtual caller of {@code getCascadeList} gets from its wait for the platform thread's task. */
+    public static String[] resultOf(FutureTask<String[]> task) {
+        return invokeStatic("resultOf", new Class<?>[] {FutureTask.class}, task);
     }
 
     /** The display name and file {@code getCascadeList} records for one descriptor. */

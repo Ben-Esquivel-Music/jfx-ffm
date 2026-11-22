@@ -209,6 +209,7 @@ class CTFontFile extends PrismFontFile {
           (CTFontStrike)getStrike(ptSize, BaseTransform.IDENTITY_TRANSFORM);
       try {
           long fontRef = strike.getFontRef();
+          if (fontRef == 0) return 0;
           int orientation = OS.kCTFontOrientationDefault;
           CGSize size = new CGSize();
           return (float)OS.CTFontGetAdvancesForGlyphs(fontRef, orientation, (short)glyphCode, size);

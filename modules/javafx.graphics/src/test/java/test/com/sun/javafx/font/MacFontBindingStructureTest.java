@@ -67,9 +67,10 @@ public class MacFontBindingStructureTest {
     private static final String CF = CORETEXT + "CFNative";
     private static final String CG = CORETEXT + "CGNative";
     private static final String CT = CORETEXT + "CTNative";
+    private static final String OBJC = CORETEXT + "ObjCNative";
 
     /** In dependency order: each may reference only those before it. */
-    static final List<String> FACADES = List.of(CF, CG, CT);
+    static final List<String> FACADES = List.of(CF, CG, CT, OBJC);
 
     static final Set<String> RESTRICTED = Set.of(
             "java/lang/foreign/SymbolLookup libraryLookup", "java/lang/foreign/Linker downcallHandle",
@@ -88,6 +89,8 @@ public class MacFontBindingStructureTest {
             "com/sun/javafx/font/DFontDecoder", "com/sun/javafx/font/PrismFontFactory");
 
     static final String PRISM_FONT_FACTORY = "com/sun/javafx/font/PrismFontFactory";
+
+    static final String REACHABILITY_FENCE = "java/lang/ref/Reference reachabilityFence";
 
     /**
      * The binding names of the goldens' witness, by owner. Only these are entry points: the owners' private helpers
@@ -188,6 +191,43 @@ public class MacFontBindingStructureTest {
     void theFontFactoryInitialiserLinksTheBindings() {
         List<String> references = initialiserReferences(PRISM_FONT_FACTORY);
         assertTrue(references.contains(CT + " link()V"), "PrismFontFactory.<clinit> references " + references);
+        assertTrue(references.indexOf(OBJC + " link()V") > references.indexOf(CT + " link()V"),
+                   "PrismFontFactory.<clinit> links libobjc after the frameworks: " + references);
+    }
+
+    /**
+     * An empty font name has no first character, so its length is read before that character is. No run-time test
+     * can tell: {@code CFStringGetCharacterAtIndex} of the empty string at index 0 answers 0 on macOS 27.2.1.
+     */
+    @Test
+    void aFontNameIsMeasuredBeforeItsFirstCharacterIsRead() {
+        FontCallOrder.assertFirstCallBefore(MacFontBindings.OS, "CTFontCreateWithName", CF + " CFStringGetLength",
+                                            CF + " CFStringGetCharacterAtIndex");
+    }
+
+    /**
+     * The strike's disposer releases the CTFont that layout hands to CoreText, so layout fences the strike it read
+     * the font from until the line, which retains the font, is made. That the fence is enough at run time rests on
+     * review: losing the strike inside layout needs a compiled frame and a Disposer race, which no test provokes.
+     */
+    @Test
+    void layoutKeepsTheStrikeReachableUntilItsLineHoldsTheFont() {
+        String layout = CORETEXT + "CTGlyphLayout";
+        FontCallOrder.assertArgumentIsReceiverOf(layout, "layout", REACHABILITY_FENCE,
+                                                 CORETEXT + "CTFontStrike getFontRef");
+        FontCallOrder.assertFirstCallBefore(layout, "layout", layout + " createCTLine", REACHABILITY_FENCE);
+    }
+
+    /**
+     * Layout asks the factory whether a fallback face is worth a lookup before it copies the run's font for one, so
+     * a face its font file lacks costs no copy after the first lookup. {@code MacFontReleaseTest} counts the lookups
+     * but cannot see a copy that is made and released.
+     */
+    @Test
+    void layoutAsksForAFallbackFaceBeforeCopyingTheRunFont() {
+        String layout = CORETEXT + "CTGlyphLayout";
+        FontCallOrder.assertFirstCallBefore(layout, "getFontSlot", CORETEXT + "CTFactory mayFindFace",
+                                            MacFontBindings.OS + " CTFontCreateCopyWithAttributes");
     }
 
     @Test

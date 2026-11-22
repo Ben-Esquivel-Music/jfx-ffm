@@ -26,6 +26,9 @@
 package com.sun.javafx.font.coretext;
 
 import java.util.ArrayList;
+import java.util.Locale;
+import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
 import com.sun.javafx.font.FontFallbackInfo;
 import com.sun.javafx.font.FontResource;
 import com.sun.javafx.font.PrismFontFactory;
@@ -38,7 +41,14 @@ public class CTFactory extends PrismFontFactory {
         return new CTFactory();
     }
 
+    /* Keyed by name alone, as storeInMap keys the faces that were found. */
+    private final Set<String> namesWithoutAFace = ConcurrentHashMap.newKeySet();
+
     private CTFactory() {
+    }
+
+    boolean mayFindFace(String name) {
+        return !namesWithoutAFace.contains(name.toLowerCase(Locale.ROOT));
     }
 
     /*
@@ -61,6 +71,8 @@ public class CTFactory extends PrismFontFactory {
             }
             if (fIndex != -1) {
                 font = new CTFontFile(name, filename, fIndex, fontRef);
+            } else {
+                namesWithoutAFace.add(name.toLowerCase(Locale.ROOT));
             }
         } finally {
             if (font == null && fontRef != 0) {

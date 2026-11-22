@@ -29,12 +29,54 @@ import com.sun.javafx.font.CompositeFontResource;
 import com.sun.javafx.font.FontResource;
 import com.sun.javafx.font.FontStrike;
 import com.sun.javafx.font.PrismFontFactory;
+import java.lang.foreign.MemorySegment;
 import java.lang.reflect.Field;
 
 /** Package-private access to the macOS font peers for the font tests. No native call of its own. */
 public final class CoreTextPeerShim {
 
+    /** The half of a {@code CGRect} mirror a test leaves null. */
+    public enum NullHalf {
+        ORIGIN, SIZE
+    }
+
     private CoreTextPeerShim() {
+    }
+
+    /** {@code OS.copyOfUIFont} with no matrix, so the font's own is kept; it takes {@code font} at +1. */
+    public static long copyOfUIFont(long font, double size) {
+        return OS.copyOfUIFont(MemorySegment.ofAddress(font), size, MemorySegment.NULL);
+    }
+
+    /** The advance CoreText gives the glyph in the font file's strike at {@code size}. */
+    public static float advanceFromPlatform(FontResource resource, int glyphCode, float size) {
+        return ((CTFontFile) resource).getAdvanceFromPlatform(glyphCode, size);
+    }
+
+    /** {@code OS.CGRectApplyAffineTransform} of the identity on {@code rect}, {x, y, w, h}, with {@code half} null. */
+    public static void transformRectWithNull(NullHalf half, double[] rect) {
+        CGAffineTransform identity = new CGAffineTransform();
+        identity.a = 1;
+        identity.d = 1;
+        OS.CGRectApplyAffineTransform(rectWithNull(half, rect), identity);
+    }
+
+    /** {@code OS.CGContextFillRect} of {@code rect}, {x, y, w, h}, with {@code half} null. */
+    public static void fillRectWithNull(long context, NullHalf half, double[] rect) {
+        OS.CGContextFillRect(context, rectWithNull(half, rect));
+    }
+
+    private static CGRect rectWithNull(NullHalf half, double[] rect) {
+        CGRect mirror = new CGRect();
+        mirror.origin.x = rect[0];
+        mirror.origin.y = rect[1];
+        mirror.size.width = rect[2];
+        mirror.size.height = rect[3];
+        switch (half) {
+            case ORIGIN -> mirror.origin = null;
+            case SIZE -> mirror.size = null;
+        }
+        return mirror;
     }
 
     public static int addFallbackFont(CompositeFontResource fr, String fontName, long newRef) throws Exception {

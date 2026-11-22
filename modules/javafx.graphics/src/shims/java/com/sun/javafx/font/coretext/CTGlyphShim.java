@@ -25,9 +25,12 @@
 
 package com.sun.javafx.font.coretext;
 
+import com.sun.javafx.font.Glyph;
 import java.lang.reflect.Field;
+import java.lang.reflect.InvocationTargetException;
+import java.lang.reflect.Method;
 
-/** Reads {@link CTGlyph}'s process-wide state. No native call of its own. */
+/** Reads {@link CTGlyph}'s process-wide state and calls its private methods. No native call of its own. */
 public final class CTGlyphShim {
 
     private CTGlyphShim() {
@@ -38,5 +41,36 @@ public final class CTGlyphShim {
         Field field = CTGlyph.class.getDeclaredField("cachedContextRef");
         field.setAccessible(true);
         return field.getLong(null);
+    }
+
+    /** The glyph's private {@code createContext}; a context it answers is the caller's to release. */
+    public static long createContext(Glyph glyph, boolean lcd, int width, int height)
+            throws ReflectiveOperationException {
+        return invoke(glyph, "createContext", new Class<?>[] {boolean.class, int.class, int.class},
+                      lcd, width, height);
+    }
+
+    /** The glyph's private {@code getCachedContext}; the context it answers belongs to the cache. */
+    public static long getCachedContext(Glyph glyph, boolean lcd) throws ReflectiveOperationException {
+        return invoke(glyph, "getCachedContext", new Class<?>[] {boolean.class}, lcd);
+    }
+
+    @SuppressWarnings("unchecked")
+    private static <T> T invoke(Glyph glyph, String name, Class<?>[] parameterTypes, Object... arguments)
+            throws ReflectiveOperationException {
+        Method method = CTGlyph.class.getDeclaredMethod(name, parameterTypes);
+        method.setAccessible(true);
+        try {
+            return (T) method.invoke(glyph, arguments);
+        } catch (InvocationTargetException e) {
+            Throwable cause = e.getCause();
+            if (cause instanceof RuntimeException runtime) {
+                throw runtime;
+            }
+            if (cause instanceof Error error) {
+                throw error;
+            }
+            throw e;
+        }
     }
 }

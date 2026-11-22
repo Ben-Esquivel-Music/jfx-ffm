@@ -25,6 +25,8 @@
 
 package com.sun.javafx.font.coretext;
 
+import java.lang.ref.Reference;
+
 import com.sun.javafx.font.CompositeFontResource;
 import com.sun.javafx.font.CompositeStrike;
 import com.sun.javafx.font.FontStrike;
@@ -106,8 +108,10 @@ class CTGlyphLayout extends GlyphLayout {
             if (slot == -1) {
                 try {
                     CTFactory factory = (CTFactory)PrismFontFactory.getFontFactory();
-                    long newRef = OS.CTFontCreateCopyWithAttributes(actualFont, 0, null, 0);
-                    slot = addFallbackFont(factory, fr, fontName, newRef);
+                    if (factory.mayFindFace(fontName)) {
+                        long newRef = OS.CTFontCreateCopyWithAttributes(actualFont, 0, null, 0);
+                        slot = addFallbackFont(factory, fr, fontName, newRef);
+                    }
                 } catch (Exception e) {
                     if (PrismFontFactory.debugFonts) {
                         e.printStackTrace();
@@ -149,7 +153,13 @@ class CTGlyphLayout extends GlyphLayout {
         long fontRef = ((CTFontStrike)strike).getFontRef();
         if (fontRef == 0) return;
         boolean rtl = (run.getLevel() & 1) != 0;
-        long lineRef = createCTLine(fontRef, text, rtl, run.getStart(), run.getLength());
+        long lineRef;
+        try {
+            lineRef = createCTLine(fontRef, text, rtl, run.getStart(), run.getLength());
+        } finally {
+            // The strike's disposer releases fontRef; from here on the line retains the font itself.
+            Reference.reachabilityFence(strike);
+        }
         if (lineRef == 0) return;
         try {
             long runs = OS.CTLineGetGlyphRuns(lineRef);

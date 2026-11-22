@@ -1,0 +1,96 @@
+/*
+ * Copyright (c) 2026, Oracle and/or its affiliates. All rights reserved.
+ * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
+ *
+ * This code is free software; you can redistribute it and/or modify it
+ * under the terms of the GNU General Public License version 2 only, as
+ * published by the Free Software Foundation.  Oracle designates this
+ * particular file as subject to the "Classpath" exception as provided
+ * by Oracle in the LICENSE file that accompanied this code.
+ *
+ * This code is distributed in the hope that it will be useful, but WITHOUT
+ * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
+ * FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License
+ * version 2 for more details (a copy is included in the LICENSE file that
+ * accompanied this code).
+ *
+ * You should have received a copy of the GNU General Public License version
+ * 2 along with this work; if not, write to the Free Software Foundation,
+ * Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301 USA.
+ *
+ * Please contact Oracle, 500 Oracle Parkway, Redwood Shores, CA 94065 USA
+ * or visit www.oracle.com if you need additional information or have any
+ * questions.
+ */
+
+package test.com.sun.javafx.font.coretext;
+
+import com.sun.javafx.font.coretext.ObjCNative;
+import com.sun.javafx.font.coretext.ObjCNativeShim;
+import java.lang.foreign.FunctionDescriptor;
+import java.lang.foreign.MemorySegment;
+import java.util.ArrayList;
+import java.util.LinkedHashMap;
+import java.util.Map;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.condition.EnabledOnOs;
+import org.junit.jupiter.api.condition.OS;
+
+import static java.lang.foreign.ValueLayout.ADDRESS;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
+import static org.junit.jupiter.api.Assertions.assertThrows;
+
+/** {@link ObjCNative} on any macOS: the two pool functions of {@code libobjc}, their descriptors, nested pools. */
+@EnabledOnOs(OS.MAC)
+public class MacObjCNativeTest {
+
+    /** From the runtime's prototypes: {@code void *objc_autoreleasePoolPush(void)}, {@code void ...Pop(void *)}. */
+    static final Map<String, FunctionDescriptor> SIGNATURES = signatures();
+
+    private static Map<String, FunctionDescriptor> signatures() {
+        Map<String, FunctionDescriptor> signatures = new LinkedHashMap<>();
+        signatures.put("objc_autoreleasePoolPush", FunctionDescriptor.of(ADDRESS));
+        signatures.put("objc_autoreleasePoolPop", FunctionDescriptor.ofVoid(ADDRESS));
+        return signatures;
+    }
+
+    @Test
+    void bothPoolFunctionsAreBoundFromLibobjcWithTheirDescriptors() {
+        ObjCNative.link();
+        assertEquals("/usr/lib/libobjc.A.dylib", ObjCNativeShim.libobjc());
+        assertEquals(new ArrayList<>(SIGNATURES.entrySet()),
+                     new ArrayList<>(ObjCNativeShim.boundFunctions().entrySet()));
+    }
+
+    @Test
+    void nestedPoolsPopInLastInFirstOutOrder() {
+        MemorySegment outer = ObjCNative.objc_autoreleasePoolPush();
+        try {
+            MemorySegment inner = ObjCNative.objc_autoreleasePoolPush();
+            try {
+                assertNotEquals(0, outer.address(), "the outer pool's token");
+                assertNotEquals(0, inner.address(), "the inner pool's token");
+                assertNotEquals(outer.address(), inner.address(), "each pool has its own token");
+            } finally {
+                popPushed(inner);
+            }
+        } finally {
+            popPushed(outer);
+        }
+    }
+
+    /** A token of 0 stands for no pool, and libobjc would read through it on a pop. */
+    private static void popPushed(MemorySegment pool) {
+        if (pool.address() != 0) {
+            ObjCNative.objc_autoreleasePoolPop(pool);
+        }
+    }
+
+    @Test
+    void aMissingSymbolIsNamed() {
+        UnsatisfiedLinkError error = assertThrows(UnsatisfiedLinkError.class,
+                () -> ObjCNativeShim.find("objc_noSuchFunction"));
+        assertEquals("/usr/lib/libobjc.A.dylib does not export objc_noSuchFunction", error.getMessage());
+    }
+}
