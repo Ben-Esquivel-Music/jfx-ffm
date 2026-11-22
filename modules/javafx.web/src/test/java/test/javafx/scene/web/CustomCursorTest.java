@@ -37,6 +37,7 @@ import java.io.IOException;
 import java.time.Duration;
 import java.util.Arrays;
 import java.util.Base64;
+import java.util.Locale;
 import javafx.scene.Cursor;
 import javafx.scene.ImageCursor;
 import javafx.scene.image.Image;
@@ -132,7 +133,7 @@ public class CustomCursorTest extends TestBase {
             // cursor that does not fit inside the visible content.
             WebEngineShim.getPage(getEngine()).setBounds(0, 0, VIEW_SIZE, VIEW_SIZE);
         });
-        loadContent(PAGE.formatted(cursorUrl, INSIDE_HOTSPOT_X, INSIDE_HOTSPOT_Y, OUTSIDE_HOTSPOT));
+        loadContent(String.format(Locale.ROOT, PAGE, cursorUrl, INSIDE_HOTSPOT_X, INSIDE_HOTSPOT_Y, OUTSIDE_HOTSPOT));
         String probeSize = "(img => img.naturalWidth + 'x' + img.naturalHeight)(document.getElementById('probe'))";
         assertEquals(CURSOR_SIZE + "x" + CURSOR_SIZE, executeScript(probeSize),
                 "natural size of an <img> with the cursor image after the page has loaded");

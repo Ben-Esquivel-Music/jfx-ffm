@@ -167,7 +167,7 @@ WebKit build in that tree.
       // A custom cursor gets its platform cursor in the constructor; if that failed, a retry fails too: show the pointer.
   ```
 - `modules/javafx.web/src/test/java/test/javafx/scene/web/CustomCursorTest.java`: new, 180 lines
-  ([The test](#the-test)).
+  ([The test](#the-test)); 181 since the [PR #72 review](#pr-72-review-2026-11-22).
 
 The five native files are LF only, with no tab and no trailing blank, before and after; no added line is over 120
 columns (the two comments are 120). The Oracle headers of `CursorJava.cpp` and `ComplexTextControllerJava.cpp` already
@@ -454,3 +454,76 @@ build, so `Cursor::type()`'s `ASSERT` was not exercised; a native `ComplexTextRu
 header change alters it; parity for Java-built runs rests on reading and on checks derived from the baseline code);
 any probe or class run against the final library other than the final gate; the Maven version of the runs; the exit
 code of the final `CheckNoJni` run.
+
+## PR #72 review (2026-11-22)
+
+Uncommitted, on top of `f5c28c079d`. Copilot (review 6013848137 of `f5c28c079d`, its one comment 4659479291 on
+`CustomCursorTest.java:135`, the `loadContent` line): `String.formatted` formats `%d` with the default format locale, so
+under a locale whose digits are not ASCII, such as `ar-EG`, the page's `cursor: url(...) X Y` gets digits that CSS does
+not parse, WebCore drops both custom-cursor declarations and the two image-cursor tests time out; it asks to format the
+page with `Locale.ROOT`. The finding is real: in jshell on Temurin 27+35, `"%d %d %d".formatted(3, 5, 20)` gives the
+code points 1635 32 1637 32 1634 1632 under `ar_EG` and 1779 32 1781 32 1778 1776 under `fa_IR`, ASCII digits under
+`en_US` and `hi_IN`; `String.format(Locale.ROOT, "%d %d %d", 3, 5, 20)` gives `3 5 20` under all four.
+
+### What changed
+- **Test** (`CustomCursorTest.java`, +2 / -1): `import java.util.Locale;` at `:40`, between `java.util.Base64` and
+  `javafx.scene.Cursor`, and the committed `:135` is now `:136`:
+  ```diff
+  -loadContent(PAGE.formatted(cursorUrl, INSIDE_HOTSPOT_X, INSIDE_HOTSPOT_Y, OUTSIDE_HOTSPOT));
+  +loadContent(String.format(Locale.ROOT, PAGE, cursorUrl, INSIDE_HOTSPOT_X, INSIDE_HOTSPOT_Y, OUTSIDE_HOTSPOT));
+  ```
+  It was the file's only format call; the other text that reaches WebCore, JavaScript or an assertion does not depend on
+  the locale (string concatenation, record and `Duration` `toString`, Base64). No comment was added: `Locale.ROOT` on a
+  format call says why by itself. Nothing else changed: no native file, no pom, no other test, no production Java.
+- The test file has 181 lines (180 at `f5c28c079d`), LF only, with no tab, no trailing blank and no non-ASCII character;
+  its longest line still has 118 columns (`:177`, and now `:136` too). Under `en_US` the page text is identical before
+  and after, 1050 characters with sha256 `571f09b591f3575fdb410aa64397ddbb9482dff15efa0e7cb99a29f74650f10f`; under
+  `ar_EG` and `fa_IR` the fixed page has that hash and the committed page does not.
+
+### Measured (2026-11-22, Windows x64, Temurin 27+35)
+Every run used the final library `build/jfxwebkit-windows-release/bin/jfxwebkit.dll`, sha256
+`d55e45271ef80eb81aab81875bb877740616246f82dfb8b1f17269d2389f7647` before and after ([Libraries](#libraries)). A class
+run is the command of [Gates](#gates) with `-Dtest=test/javafx/scene/web/CustomCursorTest`. Times are America/New_York.
+
+| Run | Test file | Locale of the test JVM | Time | Maven | Tests / failures / errors / skipped | Failure |
+| --- | --- | --- | --- | --- | --- | --- |
+| R1 (author) | committed (`f5c28c079d`) | `ar-EG` | 15:21:43 to 15:27:35 | exit 1, BUILD FAILURE, 05:49 min | 3 / 2 / 0 / 0 | tests 1 and 2: `WebView cursor DEFAULT after moving the mouse to Point[x=150, y=150] for PT5S ==> Unexpected type, expected: <javafx.scene.ImageCursor> but was: <javafx.scene.Cursor.StandardCursor>` (test 2 the same at `Point[x=300, y=150]`) |
+| R2 (author) | fixed | `ar-EG` | 15:28:40 to 15:32:38 | exit 0, BUILD SUCCESS, 03:56 min | 3 / 0 / 0 / 0 | – |
+| R3 (author) | fixed | `en-US`, the machine's default, nothing set | 15:33:08 to 15:37:05 | exit 0, BUILD SUCCESS, 03:53 min | 3 / 0 / 0 / 0 | – |
+| V1 (review) | fixed | `fa-IR` | 15:42:14 to 15:46:11 | exit 0, BUILD SUCCESS, 03:54 min | 3 / 0 / 0 / 0 | – |
+| Gate (review) | fixed | the default, `en-US` | 15:46:50 to 15:52:07 | exit 0, BUILD SUCCESS, 05:14 min | `javafx-web` `default-test` 492 / 0 / 0 / 113 in 51 classes | – |
+
+- In R1, test 3 passed, and so did `loadPage`'s probe assertion: the image loaded, only the cursor rules were dropped,
+  the symptom of `dll-mut-noupcall` in run (c) of [The test](#the-test).
+- The gate ran after the last code change (the test file's mtime is 15:28:12; of the tracked files only this one is
+  newer), and a process check just before it started found no `java`, `ninja`, `cl`, `link` or `cmake` process.
+  Per class it equals the after column of [per class](US-025-windows-per-class.tsv): 0 differences, none
+  missing, none extra; `CustomCursorTest` 3 / 0 / 0 / 0. Its `Loaded` line names the build-tree library, `caches` is on
+  `java.library.path` in none of the 51 `TEST-*.xml`, and there is no `hs_err_pid*` under `modules/javafx.web`.
+
+The locale was given to the test JVM only, not through `JDK_JAVA_OPTIONS`, which would also reach the Maven JVM and the
+generators of the `-am` modules. The default surefire `argLine` of `modules/javafx.web/pom.xml` (`:330-338`) has
+`"-Djava.library.path=${jfx.native.librarypath}"` in double quotes (`:336`); the runs closed that quote inside the
+property value. The last argument of the command, for `ar-EG`:
+```bash
+'-Djfx.native.librarypath=C:/SourceCode/jfx-ffm/modules/javafx.media/target/native/bin;C:/SourceCode/jfx-ffm/modules/javafx.graphics/target/native/bin;C:/SourceCode/jfx-ffm/build/jfxwebkit-windows-release/bin" -Duser.language=ar -Duser.country=EG "-Dpr72.fork.locale=ar-EG'
+```
+V1 used `fa` and `IR`, R3 the plain value. The control, in each run's `TEST-test.javafx.scene.web.CustomCursorTest.xml`:
+`user.language` and `user.country` as set, the marker `pr72.fork.locale` (R1, R2, V1), `java.library.path` exactly the
+three directories; in each `-output.txt` the `Loaded` line names the build-tree library.
+
+### Review
+Independent review: pass, no must-fix. The fix is sane, the smallest correct one: JDK 27 has no `String.formatted`
+overload with a `Locale`, and `Locale.ROOT` also overrides `user.language.format` and `-u-nu-` extensions. It traced the
+cause in this repository's WebCore: `css/parser/CSSTokenizer.cpp:839-844` starts a number only on an ASCII digit;
+`css/parser/CSSParserIdioms.h:52-55` treats a non-ASCII code point as a name-start code point, so U+0663 starts an ident
+token; `consumeCursor` (`css/parser/CSSPropertyParserConsumer+UI.cpp:52-62`) finds no number after the `url(...)`, then
+requires a comma, the ident fails that, and the whole declaration is dropped, so the element keeps `cursor: auto` and
+the view reports `DEFAULT`. Its optional finding, taken: [Change](#change) said only "new, 180 lines".
+
+Not run or not verified: anything on Linux or macOS; any locale through Maven but `ar-EG`, `fa-IR` and `en-US` (`hi_IN`
+only in jshell); WebCore dropping the declaration, which was traced in the source and inferred from R1 against R2, not
+observed; R1 by the review, which checked R1's files; a CI run: `submit.yml` still does not run the test.
+
+This round leaves the owner the commit of `modules/javafx.web/src/test/java/test/javafx/scene/web/CustomCursorTest.java`
+and of this file, and the push. No reply was posted on the PR thread.
