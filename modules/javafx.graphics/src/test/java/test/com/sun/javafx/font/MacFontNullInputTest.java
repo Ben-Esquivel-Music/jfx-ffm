@@ -33,14 +33,16 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.TestInfo;
 import org.junit.jupiter.api.Timeout;
 import org.junit.jupiter.api.condition.EnabledOnOs;
 import org.junit.jupiter.api.condition.OS;
+import test.com.sun.javafx.font.MacFontReleaseVerdict.Outcome;
+import test.com.sun.javafx.font.MacFontReleaseVerdict.Verdict;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
-import static org.junit.jupiter.api.Assumptions.assumeTrue;
 
 /**
  * The inputs that handed NULL or a NULL half to CoreFoundation, CoreGraphics or CoreText in the C of commit
@@ -52,10 +54,10 @@ import static org.junit.jupiter.api.Assumptions.assumeTrue;
 public class MacFontNullInputTest {
 
     /** The control of the unified-log reading: a fill colour set on NULL through the observer's own binding. */
-    private static final String CONTROL_CALL = "CGContextSetRGBFillColor";
+    static final String CONTROL_CALL = "CGContextSetRGBFillColor";
 
     /** The control of the setters: one of them called on NULL through the observer's own binding. */
-    private static final String CONTROL_SETTER = "CGContextSetAllowsAntialiasing";
+    static final String CONTROL_SETTER = "CGContextSetAllowsAntialiasing";
 
     private static final String SETTER_PREFIX = "CGContextSetAllows";
 
@@ -143,6 +145,26 @@ public class MacFontNullInputTest {
         assertEquals("0", values.get("format"), "a font without a format attribute has format 0");
     }
 
+    /**
+     * Outcome: format 0, no tags and no table for font 0, which only a shim can pass, as for a font CoreText gives
+     * none of them for, so {@code decode} would refuse it; Helvetica shows that these are not what a font answers.
+     */
+    @Test
+    @Tag("crash-prone")
+    @Timeout(2 * MacFontGoldens.CHILD_TIMEOUT_SECONDS)
+    void aZeroDfontFontHasNoFormatTagsOrTable() throws Exception {
+        Map<String, String> values = run(MacFontNullInputChild.DFONT_FONT_ZERO);
+        assertEquals("true", values.get("helvetica"), "the decoder found no Helvetica");
+        assertNotEquals("0", values.get("format.helvetica"),
+                        "Helvetica has format 0, so format 0 does not tell font 0 from a font");
+        assertNotEquals(FontGoldens.NULL, values.get("tags.helvetica"), "Helvetica has no tags");
+        assertNotEquals("0", values.get("tags.helvetica"), "Helvetica lists no tables");
+        assertEquals("bytes", values.get("table.helvetica"), "Helvetica has no head table");
+        assertEquals("0", values.get("format.zero"), "font 0 has format 0");
+        assertEquals(FontGoldens.NULL, values.get("tags.zero"), "font 0 has no tags");
+        assertEquals(FontGoldens.NULL, values.get("table.zero"), "font 0 has no table");
+    }
+
     /** Outcome: no table; the decoder then refuses the font as it does when CoreText lists no tables. */
     @Test
     @Tag("crash-prone")
@@ -213,8 +235,8 @@ public class MacFontNullInputTest {
 
     /**
      * Outcome: font 0 for a NULL collection, descriptor array or name string, so {@code decode} throws its
-     * {@code IOException("Failure creating CTFont")}, as it does for a name no font has; releasing font 0 does
-     * nothing.
+     * {@code IOException("Failure creating CTFont")}, as it does for a name no font has, and the descriptor array of a
+     * NULL name string is released as any other; releasing font 0 does nothing.
      */
     @Test
     @Tag("crash-prone")
@@ -227,6 +249,8 @@ public class MacFontNullInputTest {
         assertEquals("0", values.get("matchingDescriptors.null"), "a NULL collection has no descriptors");
         assertEquals("0", values.get("fontNamed.nullArray"), "a NULL descriptor array has no font");
         assertEquals("0", values.get("fontNamed.nullName"), "a NULL name string has no font");
+        assertEquals("1", values.get("fontNamed.nullName.released"),
+                     "the descriptor array is released once for a NULL name string");
         assertEquals("returned", values.get("releaseCTFont.zero"), "releasing font 0 does nothing");
     }
 
@@ -245,6 +269,40 @@ public class MacFontNullInputTest {
     }
 
     /**
+     * Outcome: an empty list for a NULL font, as for NULL codes and as when CoreText gives no list, and the codes are
+     * released, without asking CoreText. Only a shim passes a NULL font: {@code getCascadeList} refuses font 0 first.
+     */
+    @Test
+    @Tag("crash-prone")
+    @Timeout(2 * MacFontGoldens.CHILD_TIMEOUT_SECONDS)
+    void aNullFontHasAnEmptyCascadeListAndItsCodesAreReleased() throws Exception {
+        Map<String, String> values = run(MacFontNullInputChild.CASCADE_LIST_FONT);
+        assertEquals("0", values.get("cascadeList.nullFont"), "a NULL font has an empty cascade list");
+        assertEquals("1", values.get("codes.released"), "the codes are released once for a NULL font");
+    }
+
+    /**
+     * Outcome: 0, no string, for a count the characters do not hold: beyond the array, negative, or above 0 without
+     * an array. The C passed each on: NULL with a length ends the JVM, and a count beyond the array reads past the
+     * copy. A count the array holds, and no array with count 0, make what the C made (golden rows {@code ct.str.*}).
+     */
+    @Test
+    @Tag("crash-prone")
+    @Timeout(2 * MacFontGoldens.CHILD_TIMEOUT_SECONDS)
+    void aCountTheCharactersDoNotHoldMakesNoString() throws Exception {
+        Map<String, String> values = run(MacFontNullInputChild.CHARACTERS);
+        assertEquals("string:abc", values.get("whole"), "the three characters make their string");
+        assertEquals("string:ab", values.get("prefix"), "the first two characters make their string");
+        assertEquals("string:", values.get("nullEmpty"), "no characters with count 0 make the empty string");
+        assertEquals("0", values.get("beyond"), "a count beyond the characters makes no string");
+        assertEquals("0", values.get("wrapped"),
+                     "a negative count whose bytes wrap to the characters' makes no string");
+        assertEquals("0", values.get("negative"), "a negative count makes no string");
+        assertEquals("0", values.get("nullNegative"), "a negative count without characters makes no string");
+        assertEquals("0", values.get("nullCount"), "a count above 0 without characters makes no string");
+    }
+
+    /**
      * Outcome: no copy, font 0, for a UI font CoreText did not make, which every caller of {@code getFontRef} takes
      * as no font. That a UI font which is copied is released, {@code MacFontStressTest} measures.
      */
@@ -260,7 +318,9 @@ public class MacFontNullInputTest {
 
     /**
      * Outcome: font 0 for name 0. The empty name has no first character, so it takes the path of any other name and
-     * gets Helvetica, as the golden rows {@code ct.font.name.n10.*} recorded from the C.
+     * gets Helvetica, as the golden rows {@code ct.font.name.n10.*} recorded from the C. An empty name whose buffer
+     * starts with '.', which a read past its length would take for its first character, takes that path too, so it
+     * gets the font CoreText itself makes of that name.
      */
     @Test
     @Tag("crash-prone")
@@ -270,6 +330,10 @@ public class MacFontNullInputTest {
         assertEquals("true", values.get("coreText.emptyName"), "CoreFoundation made no empty string");
         assertEquals("0", values.get("name.zero"), "font name 0 has no font");
         assertEquals("Helvetica", values.get("name.empty"), "the empty font name is Helvetica");
+        assertEquals("", values.get("coreFoundation.emptyOverADot"),
+                     "CoreFoundation made no empty string over a buffer that starts with '.'");
+        assertEquals(values.get("coreText.emptyOverADot"), values.get("name.emptyOverADot"),
+                     "an empty font name over a '.' takes the path of any other name");
     }
 
     /**
@@ -294,30 +358,55 @@ public class MacFontNullInputTest {
      * survives a call on a NULL context and reports it only in the unified log, one line per call, so the child's
      * lines are read there. After the subject the child makes two control calls on NULL: one setter, so the only
      * setter line may be that control's, and last the fill colour, which shows that its lines can be read.
+     * {@link #contextVerdict} decides, and the check prints its verdict with the lines on one line of the test JVM's
+     * standard error. Where the account cannot read the log, or the setters no longer log a call on NULL, it is
+     * skipped, or fails under {@code -Djfx.parity.require=true}; on every machine
+     * {@code MacFontBindingStructureTest.aContextCoreGraphicsDidNotMakeIsNotConfigured} pins in the class file that
+     * the options are set only on a context there is.
      */
     @Test
     @Tag("crash-prone")
     @Timeout(2 * MacFontGoldens.CHILD_TIMEOUT_SECONDS)
-    void aContextCoreGraphicsDidNotMakeIsZeroAndNothingIsSetOnIt() throws Exception {
+    void aContextCoreGraphicsDidNotMakeIsZeroAndNothingIsSetOnIt(TestInfo test) throws Exception {
         Map<String, String> values = run(MacFontNullInputChild.CONTEXT);
         assertEquals("0", values.get("coreGraphics.context"), "CoreGraphics now makes a bitmap context of width 0,"
                 + " so this input no longer reaches a NULL context and the test needs another width");
         assertEquals("true", values.get("createContext.made"), "createContext made no 3 x 3 context");
         assertEquals("0", values.get("createContext"), "a context CoreGraphics did not make is 0");
         String pid = values.get("pid");
-        Map<String, Integer> calls = invalidContextCalls(pid);
+        Verdict verdict = contextVerdict(pid, invalidContextCalls(pid));
+        String method = test.getTestMethod().orElseThrow().getName();
+        MacFontReleaseVerdict.decide(MacFontNullInputTest.class, method, verdict);
+    }
+
+    /**
+     * Whether the "invalid context" lines of process {@code pid}, counted by function, show nothing set on the
+     * context CoreGraphics did not make: a setter line beyond the control's refutes it; without the fill-colour
+     * control's line the account cannot read the log, and without the setter control's line the setters no longer
+     * log a call on NULL, so neither can show it.
+     */
+    static Verdict contextVerdict(String pid, Map<String, Integer> calls) {
         Map<String, Integer> setters = new TreeMap<>(calls);
         setters.keySet().removeIf(function -> !function.startsWith(SETTER_PREFIX));
         Map<String, Integer> beyondTheControl = new TreeMap<>(setters);
         beyondTheControl.computeIfPresent(CONTROL_SETTER, (function, count) -> count == 1 ? null : count - 1);
-        assertEquals(Map.of(), beyondTheControl, "nothing is set on a context CoreGraphics did not make; the setter"
-                + " lines are " + setters + ", one " + CONTROL_SETTER + " line of them the control's");
-        assumeTrue(calls.containsKey(CONTROL_CALL), "the unified log shows no '" + CONTROL_CALL + ": invalid context'"
-                + " line of process " + pid + " within " + LOG_WAIT_SECONDS + " s, so this account cannot read it"
-                + " and no call on a NULL context can be seen; lines found: " + calls);
-        assumeTrue(setters.containsKey(CONTROL_SETTER), "the unified log shows the '" + CONTROL_CALL + "' line of"
-                + " process " + pid + " but no '" + CONTROL_SETTER + ": invalid context' line, so the setters no"
-                + " longer log a call on NULL and none made on that context can be seen; lines found: " + calls);
+        if (!beyondTheControl.isEmpty()) {
+            return new Verdict(Outcome.REFUTED, "nothing is set on a context CoreGraphics did not make; the setter"
+                    + " lines of process " + pid + " are " + setters + ", one " + CONTROL_SETTER + " line of them the"
+                    + " control's");
+        }
+        if (!calls.containsKey(CONTROL_CALL)) {
+            return new Verdict(Outcome.CANNOT_SHOW, "the unified log shows no '" + CONTROL_CALL + ": invalid context'"
+                    + " line of process " + pid + " within " + LOG_WAIT_SECONDS + " s, so this account cannot read it"
+                    + " and no call on a NULL context can be seen; lines found: " + calls);
+        }
+        if (!setters.containsKey(CONTROL_SETTER)) {
+            return new Verdict(Outcome.CANNOT_SHOW, "the unified log shows the '" + CONTROL_CALL + "' line of process "
+                    + pid + " but no '" + CONTROL_SETTER + ": invalid context' line, so the setters no longer log a"
+                    + " call on NULL and none made on that context can be seen; lines found: " + calls);
+        }
+        return new Verdict(Outcome.PROVED, "the unified log of process " + pid + " shows both controls' lines and no"
+                + " setter line beyond the control's: " + calls);
     }
 
     /**

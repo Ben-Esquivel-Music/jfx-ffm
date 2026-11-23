@@ -31,28 +31,91 @@ import com.sun.javafx.font.FontStrikeDesc;
 import com.sun.javafx.geom.transform.BaseTransform;
 
 /**
- * A grey-scale strike without a transform whose sub-pixel query runs a hook first. {@link CTGlyph} makes that query
- * only while it creates a bitmap context, between the create and the return, so the hook runs inside every creation.
- * No factory registers the strike, so nothing releases its CTFont before the JVM exits. No native call of its own.
+ * A grey-scale strike without a transform whose queries run hooks first. {@link CTGlyph} asks it:
+ * <ul>
+ * <li>whether its glyphs take sub-pixel positions, wherever it sets a context's options: while it creates a bitmap
+ * context, between the create and the return, and before every draw into its cached context;</li>
+ * <li>for a draw's sub-pixel position, before the draw;</li>
+ * <li>for its anti-aliasing mode before a draw, at the read of the image and in {@code getWidth}; the sub-pixel
+ * position asks for it as well, during the draw, for an index other than 0 at 12 pt and above;</li>
+ * <li>for its font file while it measures a glyph, after the advances; wherever it asks whether a glyph is a colour
+ * glyph, before a draw and in {@code getWidth}; and, through the strike, for a glyph's outline and its box.</li>
+ * </ul>
+ * The strike's quantized position asks for the anti-aliasing mode too. No factory registers the strike, so nothing
+ * releases its CTFont before the JVM exits. No native call of its own.
  */
 public final class CTFontStrikeShim extends CTFontStrike {
 
-    private final Runnable onSubPixelQuery;
+    /** The hooks, each run before its query answers; what a hook throws, its query throws. */
+    public interface Calls {
 
-    private CTFontStrikeShim(CTFontFile fontResource, float size, Runnable onSubPixelQuery) {
-        this.onSubPixelQuery = onSubPixelQuery;
+        default void subPixelQuery() {
+        }
+
+        default void subPixelPosition() {
+        }
+
+        default void aaModeQuery() {
+        }
+
+        default void fontResourceQuery() {
+        }
+    }
+
+    private final Calls calls;
+    private final boolean subPixelPositions;
+
+    private CTFontStrikeShim(CTFontFile fontResource, float size, Calls calls, boolean subPixelPositions) {
+        this.calls = calls;
+        this.subPixelPositions = subPixelPositions;
         super(fontResource, size, BaseTransform.IDENTITY_TRANSFORM, FontResource.AA_GREYSCALE,
               new FontStrikeDesc(size, BaseTransform.IDENTITY_TRANSFORM, FontResource.AA_GREYSCALE));
     }
 
     /** A strike of {@code resource}, a macOS font file, at {@code size}; {@code onSubPixelQuery} must not throw. */
     public static FontStrike create(FontResource resource, float size, Runnable onSubPixelQuery) {
-        return new CTFontStrikeShim((CTFontFile) resource, size, onSubPixelQuery);
+        return create(resource, size, new Calls() {
+            @Override
+            public void subPixelQuery() {
+                onSubPixelQuery.run();
+            }
+        });
+    }
+
+    /** A strike of {@code resource}, a macOS font file, at {@code size}, whose queries run {@code calls}. */
+    public static FontStrike create(FontResource resource, float size, Calls calls) {
+        return new CTFontStrikeShim((CTFontFile) resource, size, calls, true);
+    }
+
+    /**
+     * A strike whose glyphs take no sub-pixel positions, as those of a scaled or rotated strike take none, but
+     * without a transform.
+     */
+    public static FontStrike withoutSubPixelPositions(FontResource resource, float size) {
+        return new CTFontStrikeShim((CTFontFile) resource, size, new Calls() { }, false);
     }
 
     @Override
     boolean isSubPixelGlyph() {
-        onSubPixelQuery.run();
-        return super.isSubPixelGlyph();
+        calls.subPixelQuery();
+        return subPixelPositions && super.isSubPixelGlyph();
+    }
+
+    @Override
+    float getSubPixelPosition(int index) {
+        calls.subPixelPosition();
+        return super.getSubPixelPosition(index);
+    }
+
+    @Override
+    public int getAAMode() {
+        calls.aaModeQuery();
+        return super.getAAMode();
+    }
+
+    @Override
+    public CTFontFile getFontResource() {
+        calls.fontResourceQuery();
+        return super.getFontResource();
     }
 }

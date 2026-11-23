@@ -59,12 +59,14 @@ public class CTFactory extends PrismFontFactory {
      * fontRef is a +1 reference that this consumes: the font file's disposer owns it
      * once the constructor returns, and on every other exit it is released here.
      * A zero reference is not released.
+     * A file that cannot be read throws, and its name is not remembered, so a later layout looks the face up again.
      */
     CTFontFile createFontFile(String name, long fontRef) throws Exception {
         CTFontFile font = null;
         try {
             String filename = OS.CTFontCopyURLAttribute(fontRef);
-            int fIndex = findFontIndex(name, filename);
+            // A font that reports no file never will: it is remembered as a file without the face is.
+            int fIndex = filename == null ? -1 : findFontIndex(name, filename);
 
             if (debugFonts) {
                 System.err.println("createFontFile by ref name="+name + " filename="+filename+" index="+fIndex);

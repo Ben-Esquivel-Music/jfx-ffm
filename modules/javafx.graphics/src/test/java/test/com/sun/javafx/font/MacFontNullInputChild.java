@@ -73,6 +73,9 @@ public final class MacFontNullInputChild {
     static final String ADVANCE = "null.advance";
     static final String CONTEXT = "null.context";
     static final String RECT_HALF = "null.rectHalf";
+    static final String DFONT_FONT_ZERO = "null.dfontFontZero";
+    static final String CHARACTERS = "null.characters";
+    static final String CASCADE_LIST_FONT = "null.cascadeListFont";
 
     static final int INDEX_BEFORE = 3;
     static final List<String> SLOTS_BEFORE = List.of("slot0", "slot1", "slot2", "slot3", "slot4", "slot5");
@@ -82,6 +85,9 @@ public final class MacFontNullInputChild {
 
     /** {@code 'zzzz'}, a table no font has. */
     private static final int TABLE_TAG_NO_FONT_HAS = 0x7a7a7a7a;
+
+    /** {@code 'head'}, a table every sfnt font has. */
+    private static final int HEAD_TABLE = 0x68656164;
 
     /** A glyph of Ahem whose {@code hmtx} advance is not 0. */
     private static final int AHEM_GLYPH = 4;
@@ -118,6 +124,9 @@ public final class MacFontNullInputChild {
             case ADVANCE -> advance(out);
             case CONTEXT -> context(out);
             case RECT_HALF -> rectHalf(out);
+            case DFONT_FONT_ZERO -> dfontFontZero(out);
+            case CHARACTERS -> characters(out);
+            case CASCADE_LIST_FONT -> cascadeListFont(out);
             default -> throw new IllegalArgumentException("unknown scenario " + scenario);
         }
         Files.writeString(Path.of(args[1]), FontGoldens.format(out, List.of("MacFontNullInputChild " + scenario)),
@@ -269,6 +278,12 @@ public final class MacFontNullInputChild {
         long fonts = DFontDecoderShim.matchingDescriptors(collection);
         out.put("coreText.descriptors", Boolean.toString(fonts != 0));
         out.put("fontNamed.nullName", Long.toString(DFontDecoderShim.fontNamed(fonts, 0)));
+        // With no name nothing reads the array, so a fresh object stands in for it: its retain count is exact.
+        long standIn = MacFontProbeShim.retain(MacFontProbeShim.mutableData());
+        long before = MacFontOracleShim.retainCount(standIn);
+        DFontDecoderShim.fontNamed(standIn, 0);
+        out.put("fontNamed.nullName.released", Long.toString(before - MacFontOracleShim.retainCount(standIn)));
+        MacFontOracleShim.release(standIn);
         DFontDecoderShim.releaseCTFont(0);
         out.put("releaseCTFont.zero", "returned");
         long helvetica = DFontDecoderShim.createCTFont("Helvetica");
@@ -283,6 +298,67 @@ public final class MacFontNullInputChild {
         out.put("cascadeList.nullCodes", Integer.toString(MacFontFinderShim.cascadeList(font, 0).length));
         out.put("getCascadeList", Integer.toString(MacFontFinderShim.getCascadeList(font).length));
         MacFontOracleShim.release(font);
+    }
+
+    /**
+     * With no font nothing reads the codes, so a fresh object stands in for them: its retain count is exact, as
+     * {@code MacObjCNativeTest} relies on.
+     */
+    private static void cascadeListFont(GoldenMap out) {
+        long codes = MacFontProbeShim.retain(MacFontProbeShim.mutableData());
+        long before = MacFontOracleShim.retainCount(codes);
+        out.put("cascadeList.nullFont", Integer.toString(MacFontFinderShim.cascadeList(0, codes).length));
+        out.put("codes.released", Long.toString(before - MacFontOracleShim.retainCount(codes)));
+        MacFontOracleShim.release(codes);
+    }
+
+    /** Font 0 goes in where only a shim can pass it; Helvetica shows what a font answers. */
+    private static void dfontFontZero(GoldenMap out) {
+        long helvetica = DFontDecoderShim.createCTFont("Helvetica");
+        out.put("helvetica", Boolean.toString(helvetica != 0));
+        if (helvetica != 0) {
+            out.put("format.helvetica", Integer.toHexString(DFontDecoderShim.getCTFontFormat(helvetica)));
+            out.put("tags.helvetica", tagCount(DFontDecoderShim.getCTFontTags(helvetica)));
+            out.put("table.helvetica", DFontDecoderShim.getCTFontTable(helvetica, HEAD_TABLE) == null ? null : "bytes");
+            DFontDecoderShim.releaseCTFont(helvetica);
+        }
+        out.put("format.zero", Integer.toHexString(DFontDecoderShim.getCTFontFormat(0)));
+        out.put("tags.zero", tagCount(DFontDecoderShim.getCTFontTags(0)));
+        out.put("table.zero", DFontDecoderShim.getCTFontTable(0, HEAD_TABLE) == null ? null : "bytes");
+    }
+
+    private static String tagCount(int[] tags) {
+        return tags == null ? null : Integer.toString(tags.length);
+    }
+
+    /**
+     * The three-argument {@code CFStringCreateWithCharacters} of {@code OS} with counts the characters hold, as
+     * production passes them, and with counts they do not hold.
+     */
+    private static void characters(GoldenMap out) {
+        long alloc = OSShim.kCFAllocatorDefault();
+        char[] abc = "abc".toCharArray();
+        out.put("whole", madeString(OSShim.CFStringCreateWithCharacters(alloc, abc, 3)));
+        out.put("prefix", madeString(OSShim.CFStringCreateWithCharacters(alloc, abc, 2)));
+        out.put("nullEmpty", madeString(OSShim.CFStringCreateWithCharacters(alloc, null, 0)));
+        out.put("beyond", madeString(OSShim.CFStringCreateWithCharacters(alloc, abc, 4)));
+        // The open CoreFoundation source doubles the count into bytes unchecked, so this one would wrap to 6 bytes.
+        out.put("wrapped", madeString(OSShim.CFStringCreateWithCharacters(alloc, abc, Long.MIN_VALUE + 3)));
+        out.put("negative", madeString(OSShim.CFStringCreateWithCharacters(alloc, abc, -1)));
+        out.put("nullNegative", madeString(OSShim.CFStringCreateWithCharacters(alloc, null, -1)));
+        out.put("nullCount", madeString(OSShim.CFStringCreateWithCharacters(alloc, null, 3)));
+    }
+
+    /** "0" for no string; otherwise its text, after which it is released. */
+    private static String madeString(long string) {
+        if (string == 0) {
+            return "0";
+        }
+        try {
+            return "string:" + MacGoldenFormat.text(MacFontOracleShim.cfString(string));
+        } finally {
+            MacFontOracleShim.release(string);
+        }
     }
 
     /** CoreText makes a UI font of both types the peers ask for, so the NULL goes in where the font is copied. */
@@ -305,6 +381,15 @@ public final class MacFontNullInputChild {
         out.put("name.empty", MacFontOracleShim.fontPostScriptName(font));
         MacFontOracleShim.release(font);
         MacFontOracleShim.release(empty);
+        long emptyOverADot = MacFontProbeShim.emptyStringOver('.');
+        out.put("coreFoundation.emptyOverADot", MacFontOracleShim.cfString(emptyOverADot));
+        long coreTextFont = MacFontProbeShim.fontWithName(emptyOverADot, SIZE);
+        out.put("coreText.emptyOverADot", MacFontOracleShim.fontPostScriptName(coreTextFont));
+        MacFontOracleShim.release(coreTextFont);
+        long dotFont = OSShim.CTFontCreateWithName(emptyOverADot, SIZE, null);
+        out.put("name.emptyOverADot", MacFontOracleShim.fontPostScriptName(dotFont));
+        MacFontOracleShim.release(dotFont);
+        MacFontOracleShim.release(emptyOverADot);
     }
 
     /** CoreGraphics makes no font of Ahem without {@code glyf}, so each strike of it has no CTFont. */

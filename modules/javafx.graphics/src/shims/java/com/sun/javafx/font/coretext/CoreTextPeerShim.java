@@ -97,6 +97,20 @@ public final class CoreTextPeerShim {
         return ((CTFactory) PrismFontFactory.getFontFactory()).mayFindFace(name);
     }
 
+    /** A CTLine of {@code text} in {@code fontRef}, left to right, made by layout's own code, at +1 for the caller. */
+    public static long line(long fontRef, String text) {
+        char[] chars = text.toCharArray();
+        return new CTGlyphLayout().createCTLine(fontRef, chars, false, 0, chars.length);
+    }
+
+    /**
+     * Layout's slot for {@code run}, a run of a line made in {@code lineFont}, laid out with slot {@code slot} of
+     * {@code fr} (null for a plain strike), whose font is named {@code name}.
+     */
+    public static int getFontSlot(long run, long lineFont, CompositeFontResource fr, String name, int slot) {
+        return new CTGlyphLayout().getFontSlot(run, lineFont, fr, name, slot);
+    }
+
     /** The CTFont a font file made from a reference owns; 0 for any other font. */
     public static long ctFontRef(FontResource resource) throws ReflectiveOperationException {
         if (!(resource instanceof CTFontFile)) {

@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2011, 2023, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2011, 2026, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -66,7 +66,17 @@ class PrismCompositeFontResource implements CompositeFontResource {
         if (primaryResource.getFullName().equalsIgnoreCase(fontName)) {
             return 0;
         }
-        return fallbackResource.getSlotForFont(fontName) + 1;
+        return slotAfterThePrimary(fallbackResource.getSlotForFont(fontName));
+    }
+
+    @Override
+    public int addSlotFont(FontResource font) {
+        return slotAfterThePrimary(fallbackResource.addSlotFont(font));
+    }
+
+    /* The fallback resource's slots follow the primary's; its -1 for a font it holds no slot for stays -1. */
+    private static int slotAfterThePrimary(int fallbackSlot) {
+        return fallbackSlot < 0 ? -1 : fallbackSlot + 1;
     }
 
     @Override
@@ -153,13 +163,15 @@ class PrismCompositeFontResource implements CompositeFontResource {
         return primaryResource.isItalic();
     }
 
-    CompositeGlyphMapper mapper;
+    volatile CompositeGlyphMapper mapper;
     @Override
     public CharToGlyphMapper getGlyphMapper() {
-        if (mapper == null) {
-            mapper = new CompositeGlyphMapper(this);
+        CompositeGlyphMapper glyphMapper = mapper;
+        if (glyphMapper == null) {
+            glyphMapper = new CompositeGlyphMapper(this);
+            mapper = glyphMapper;
         }
-        return mapper;
+        return glyphMapper;
     }
 
     @Override

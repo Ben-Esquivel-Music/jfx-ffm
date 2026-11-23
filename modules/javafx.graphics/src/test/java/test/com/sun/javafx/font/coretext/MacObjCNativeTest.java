@@ -30,7 +30,6 @@ import com.sun.javafx.font.MacFontProbeShim;
 import com.sun.javafx.font.coretext.ObjCNative;
 import com.sun.javafx.font.coretext.ObjCNativeShim;
 import java.lang.foreign.FunctionDescriptor;
-import java.lang.foreign.MemorySegment;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.Map;
@@ -38,7 +37,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.condition.EnabledOnOs;
 import org.junit.jupiter.api.condition.OS;
 
-import static java.lang.foreign.ValueLayout.ADDRESS;
+import static java.lang.foreign.ValueLayout.JAVA_LONG;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
@@ -51,13 +50,16 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 @EnabledOnOs(OS.MAC)
 public class MacObjCNativeTest {
 
-    /** From the runtime's prototypes: {@code void *objc_autoreleasePoolPush(void)}, {@code void ...Pop(void *)}. */
+    /**
+     * From the runtime's prototypes, {@code void *objc_autoreleasePoolPush(void)} and
+     * {@code void objc_autoreleasePoolPop(void *)}, the pointer bound as a long.
+     */
     static final Map<String, FunctionDescriptor> SIGNATURES = signatures();
 
     private static Map<String, FunctionDescriptor> signatures() {
         Map<String, FunctionDescriptor> signatures = new LinkedHashMap<>();
-        signatures.put("objc_autoreleasePoolPush", FunctionDescriptor.of(ADDRESS));
-        signatures.put("objc_autoreleasePoolPop", FunctionDescriptor.ofVoid(ADDRESS));
+        signatures.put("objc_autoreleasePoolPush", FunctionDescriptor.of(JAVA_LONG));
+        signatures.put("objc_autoreleasePoolPop", FunctionDescriptor.ofVoid(JAVA_LONG));
         return signatures;
     }
 
@@ -71,13 +73,13 @@ public class MacObjCNativeTest {
 
     @Test
     void nestedPoolsPopInLastInFirstOutOrder() {
-        MemorySegment outer = ObjCNative.objc_autoreleasePoolPush();
+        long outer = ObjCNative.objc_autoreleasePoolPush();
         try {
-            MemorySegment inner = ObjCNative.objc_autoreleasePoolPush();
+            long inner = ObjCNative.objc_autoreleasePoolPush();
             try {
-                assertNotEquals(0, outer.address(), "the outer pool's token");
-                assertNotEquals(0, inner.address(), "the inner pool's token");
-                assertNotEquals(outer.address(), inner.address(), "each pool has its own token");
+                assertNotEquals(0L, outer, "the outer pool's token");
+                assertNotEquals(0L, inner, "the inner pool's token");
+                assertNotEquals(outer, inner, "each pool has its own token");
             } finally {
                 popPushed(inner);
             }
@@ -97,7 +99,7 @@ public class MacObjCNativeTest {
         try {
             long before = MacFontOracleShim.retainCount(watched);
             long inside;
-            MemorySegment pool = ObjCNative.objc_autoreleasePoolPush();
+            long pool = ObjCNative.objc_autoreleasePoolPush();
             try {
                 MacFontProbeShim.retain(watched);
                 MacFontProbeShim.autorelease(watched);
@@ -114,8 +116,8 @@ public class MacObjCNativeTest {
     }
 
     /** A token of 0 stands for no pool, and libobjc would read through it on a pop. */
-    private static void popPushed(MemorySegment pool) {
-        if (pool.address() != 0) {
+    private static void popPushed(long pool) {
+        if (pool != 0) {
             ObjCNative.objc_autoreleasePoolPop(pool);
         }
     }

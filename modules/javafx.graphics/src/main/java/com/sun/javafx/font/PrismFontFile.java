@@ -340,7 +340,7 @@ public abstract class PrismFontFile implements FontResource, FontConstants {
         return strike;
     }
 
-    HashMap<Integer, int[]> bbCache = null;
+    final Map<Integer, int[]> bbCache = new ConcurrentHashMap<>();
     static final int[] EMPTY_BOUNDS = new int[4];
 
     protected abstract int[] createGlyphBoundingBox(int gc);
@@ -354,14 +354,15 @@ public abstract class PrismFontFile implements FontResource, FontConstants {
             retArr[0] = retArr[1] = retArr[2] = retArr[3] = 0;
             return retArr;
         }
-        if (bbCache == null) {
-            bbCache = new HashMap<>();
-        }
         int[] bb = bbCache.get(gc);
         if (bb == null) {
             bb = createGlyphBoundingBox(gc);
             if (bb == null) bb = EMPTY_BOUNDS;
-            bbCache.put(gc, bb);
+            // Measured outside the map's lock: measuring may take the font file's monitor. The box stored first wins.
+            int[] stored = bbCache.putIfAbsent(gc, bb);
+            if (stored != null) {
+                bb = stored;
+            }
         }
         float scale = size / getUnitsPerEm();
         retArr[0] = bb[0] * scale;
@@ -1153,14 +1154,16 @@ public abstract class PrismFontFile implements FontResource, FontConstants {
         }
     }
 
-    private OpenTypeGlyphMapper mapper = null;
+    private volatile OpenTypeGlyphMapper mapper = null;
 
     @Override
     public CharToGlyphMapper getGlyphMapper() {
-        if (mapper == null) {
-            mapper = new OpenTypeGlyphMapper(this);
+        OpenTypeGlyphMapper glyphMapper = mapper;
+        if (glyphMapper == null) {
+            glyphMapper = new OpenTypeGlyphMapper(this);
+            mapper = glyphMapper;
         }
-        return mapper;
+        return glyphMapper;
     }
 
     @Override
@@ -1264,9 +1267,10 @@ public abstract class PrismFontFile implements FontResource, FontConstants {
                               this, ptSize);
     }
 
-    private float[] styleMetrics;
+    private volatile float[] styleMetrics;
     float[] getStyleMetrics(float ptSize) {
-        if (styleMetrics == null) {
+        float[] style = styleMetrics;
+        if (style == null) {
             float [] smetrics = new float[METRICS_TOTAL];
 
             Buffer os_2 = readTable(os_2Tag);
@@ -1352,11 +1356,12 @@ public abstract class PrismFontFile implements FontResource, FontConstants {
                 }
             }
             styleMetrics = smetrics;
+            style = smetrics;
         }
 
         float[] metrics = new float[METRICS_TOTAL];
         for (int i = 0; i < METRICS_TOTAL; i++) {
-            metrics[i] = styleMetrics[i] * ptSize;
+            metrics[i] = style[i] * ptSize;
         }
 
         return metrics;

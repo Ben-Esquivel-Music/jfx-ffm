@@ -267,30 +267,24 @@ public abstract class PrismFontFactory implements FontFactory {
     }
 
    /*
-    * Whether a ttf or ttc this will find the index of the named font.
+    * The index of the named face in a ttf or ttc (0 for a file of one face), or -1 if none of its faces has the name.
+    * Throws what reading the file throws, so that a file that could not be read is told from one without the face.
     */
-   public int findFontIndex(String targetName, String filename) {
+   public int findFontIndex(String targetName, String filename) throws Exception {
+         PrismFontFile fr = createFontFile(null, filename, 0, false, false, false);
 
-         try {
-             PrismFontFile fr = createFontFile(null, filename, 0, false, false, false);
-
-             int cnt = fr.getFontCount();
-             if (cnt == 1 || fr.getFullName().equalsIgnoreCase(targetName)) {
-                 return 0;
-             }
-             int index = 1;
-             do {
-                 fr = createFontFile(null, filename, index, false, false, false);
-                 String name = fr.getFullName();
-                 if (name.equalsIgnoreCase(targetName)) {
-                     return index;
-                 }
-             } while (++index < cnt);
-         } catch (Exception e) {
-             if (PrismFontFactory.debugFonts) {
-                 e.printStackTrace();
-             }
+         int cnt = fr.getFontCount();
+         if (cnt == 1 || fr.getFullName().equalsIgnoreCase(targetName)) {
+             return 0;
          }
+         int index = 1;
+         do {
+             fr = createFontFile(null, filename, index, false, false, false);
+             String name = fr.getFullName();
+             if (name.equalsIgnoreCase(targetName)) {
+                 return index;
+             }
+         } while (++index < cnt);
          return -1;
    }
 
@@ -396,7 +390,7 @@ public abstract class PrismFontFactory implements FontFactory {
         }
     }
 
-    protected void storeInMap(String name, FontResource resource) {
+    protected synchronized void storeInMap(String name, FontResource resource) {
         if (name == null || resource == null) {
             return;
         }
@@ -859,7 +853,7 @@ public abstract class PrismFontFactory implements FontFactory {
         return fontResource;
     }
 
-    FontResource getDefaultFontResource(boolean wantComp) {
+    synchronized FontResource getDefaultFontResource(boolean wantComp) {
         FontResource fontResource = lookupResource(jreDefaultFontLC, wantComp);
         if (fontResource == null) {
             fontResource = createFontResource(jreDefaultFont,
@@ -1183,9 +1177,10 @@ public abstract class PrismFontFactory implements FontFactory {
         return false;
     }
 
+    // Static, as allFontNames is, but both are built and read under the monitor of the factory getFontFactory makes.
     private static ArrayList<String> allFamilyNames;
     @Override
-    public String[] getFontFamilyNames() {
+    public synchronized String[] getFontFamilyNames() {
         if (allFamilyNames == null) {
             /* Create an array list and add the families for :
              * - logical fonts
@@ -1221,7 +1216,7 @@ public abstract class PrismFontFactory implements FontFactory {
 
     private static ArrayList<String> allFontNames;
     @Override
-    public String[] getFontFullNames() {
+    public synchronized String[] getFontFullNames() {
         if (allFontNames == null) {
             /* Create an array list and add
              * - logical fonts
@@ -1252,7 +1247,7 @@ public abstract class PrismFontFactory implements FontFactory {
     }
 
     @Override
-    public String[] getFontFullNames(String family) {
+    public synchronized String[] getFontFullNames(String family) {
 
         if (isExcluded(family)) {
             return STR_ARRAY;
@@ -1337,21 +1332,7 @@ public abstract class PrismFontFactory implements FontFactory {
 
     private synchronized void addFileCloserHook() {
         if (fileCloser == null) {
-            final Runnable fileCloserRunnable = () -> {
-                if (embeddedFonts != null) {
-                    for (PrismFontFile font : embeddedFonts.values()) {
-                        font.disposeOnShutdown();
-                    }
-                }
-                if (tmpFonts != null) {
-                    for (WeakReference<PrismFontFile> ref : tmpFonts) {
-                        PrismFontFile font = ref.get();
-                        if (font != null) {
-                            font.disposeOnShutdown();
-                        }
-                    }
-                }
-            };
+            final Runnable fileCloserRunnable = this::disposeFontsOnShutdown;
 
             /* The thread must be a member of a thread group
              * which will not get GCed before VM exit.
@@ -1363,6 +1344,23 @@ public abstract class PrismFontFactory implements FontFactory {
             fileCloser = new Thread(tg, fileCloserRunnable);
             fileCloser.setContextClassLoader(null);
             Runtime.getRuntime().addShutdownHook(fileCloser);
+        }
+    }
+
+    // Under the monitor every writer of these lists holds, so a font loaded during shutdown cannot break the walk.
+    private synchronized void disposeFontsOnShutdown() {
+        if (embeddedFonts != null) {
+            for (PrismFontFile font : embeddedFonts.values()) {
+                font.disposeOnShutdown();
+            }
+        }
+        if (tmpFonts != null) {
+            for (WeakReference<PrismFontFile> ref : tmpFonts) {
+                PrismFontFile font = ref.get();
+                if (font != null) {
+                    font.disposeOnShutdown();
+                }
+            }
         }
     }
 
@@ -1763,7 +1761,7 @@ public abstract class PrismFontFactory implements FontFactory {
         familyList.add(fullName);
     }
 
-    void populateFontFileNameMapGeneric(String fontDir) {
+    synchronized void populateFontFileNameMapGeneric(String fontDir) {
         final File dir = new File(fontDir);
         String[] files = null;
         try {

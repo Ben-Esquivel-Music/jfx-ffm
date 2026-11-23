@@ -29,8 +29,8 @@ import java.lang.foreign.MemorySegment;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.Locale;
-import java.util.concurrent.ExecutionException;
-import java.util.concurrent.FutureTask;
+import java.util.concurrent.ConcurrentLinkedQueue;
+import java.util.concurrent.locks.LockSupport;
 
 import com.sun.javafx.font.coretext.CFNative;
 import com.sun.javafx.font.coretext.CTNative;
@@ -47,6 +47,11 @@ public class MacFontFinder {
     private static final int MonospacedFontType = 1; /*kCTFontUserFixedPitchFontType*/
     // PrismFontFactory's size on the other desktops: its -1 means "not asked yet" and 0 would be cached as the size.
     private static final float SIZE_WITHOUT_A_UI_FONT = 13f;
+
+    /** The tasks of the one platform thread that makes the cascade lists of virtual callers, run in their order. */
+    private static final ConcurrentLinkedQueue<Runnable> CASCADE_LIST_TASKS = new ConcurrentLinkedQueue<>();
+    private static final Object CASCADE_LIST_WORKER_LOCK = new Object();
+    private static volatile Thread cascadeListWorker;
 
     private static String getFont(int type) {
         MemorySegment font = CTNative.CTFontCreateUIFontForLanguage(type, 0, MemorySegment.NULL);
@@ -260,7 +265,7 @@ public class MacFontFinder {
      * thread; only Java strings leave the pool.
      */
     private static String[] pooledCascadeList(MemorySegment font) {
-        MemorySegment pool = ObjCNative.objc_autoreleasePoolPush();
+        long pool = ObjCNative.objc_autoreleasePoolPush();
         try {
             MemorySegment codes = CFNative.CFLocaleCopyISOLanguageCodes();
             return cascadeList(font, codes);
@@ -270,68 +275,73 @@ public class MacFontFinder {
     }
 
     /**
-     * {@link #pooledCascadeList} on a new platform thread, waited for to the end. A pool must be popped on the thread
-     * that pushed it, and a virtual thread can move to another carrier between the downcalls. A thread per call is
-     * enough: the list is kept per composite font, so the call is rare.
+     * {@link #pooledCascadeList} on the one platform thread that makes the lists of virtual callers, waited for. A
+     * pool must be popped on the thread that pushed it, and a virtual thread can move to another carrier between the
+     * downcalls. The task holds a reference of its own to the font, so the caller may release the font it lent
+     * however its wait ends.
      */
     private static String[] cascadeListOnAPlatformThread(MemorySegment font) {
-        FutureTask<String[]> task = new FutureTask<>(() -> pooledCascadeList(font));
-        Thread worker = Thread.ofPlatform().name("JavaFX font cascade list").daemon()
-                              .inheritInheritableThreadLocals(false).unstarted(task);
+        Thread worker;
         try {
-            worker.start();
+            worker = startCascadeListWorker();
         } catch (OutOfMemoryError e) {
             // Without a thread the list is made here as it was before, with no pool: a virtual thread may not push.
             return cascadeList(font, CFNative.CFLocaleCopyISOLanguageCodes());
         }
-        return resultOf(task);
+        CascadeListTask task = new CascadeListTask(font);
+        queueCascadeListTask(worker, task);
+        return task.awaitList();
     }
 
-    /**
-     * What the task answered, or what it threw, thrown here. Nothing ends the wait before the task is done, because
-     * the caller releases the font as soon as this returns: the interrupt status is set again before it does, and
-     * what {@code get()} itself throws, such as an {@code OutOfMemoryError} of its own allocation, is thrown once the
-     * task is done.
-     */
-    private static String[] resultOf(FutureTask<String[]> task) {
-        boolean interrupted = false;
-        try {
-            while (true) {
-                try {
-                    return task.get();
-                } catch (InterruptedException e) {
-                    interrupted = true;
-                } catch (RuntimeException | Error e) {
-                    // get() allocates and parks, which is what failed; spinning does neither.
-                    while (!task.isDone()) {
-                        Thread.onSpinWait();
-                    }
-                    throw e;
-                }
+    /** The thread of {@link #runCascadeListTasks}, started unless it runs; an {@code OutOfMemoryError} if it cannot. */
+    private static Thread startCascadeListWorker() {
+        Thread worker = cascadeListWorker;
+        if (worker != null) {
+            return worker;
+        }
+        synchronized (CASCADE_LIST_WORKER_LOCK) {
+            if (cascadeListWorker == null) {
+                Thread started = Thread.ofPlatform().name("JavaFX font cascade list").daemon()
+                        .inheritInheritableThreadLocals(false).unstarted(MacFontFinder::runCascadeListTasks);
+                started.start();
+                cascadeListWorker = started;
             }
-        } catch (ExecutionException e) {
-            if (e.getCause() instanceof Error error) {
-                throw error;
-            }
-            throw (RuntimeException) e.getCause();
-        } finally {
-            if (interrupted) {
-                Thread.currentThread().interrupt();
+            return cascadeListWorker;
+        }
+    }
+
+    private static void queueCascadeListTask(Thread worker, Runnable task) {
+        CASCADE_LIST_TASKS.add(task);
+        LockSupport.unpark(worker);
+    }
+
+    /** The loop of the cascade-list thread, for the life of the process; no task throws. */
+    private static void runCascadeListTasks() {
+        while (true) {
+            Runnable task = CASCADE_LIST_TASKS.poll();
+            if (task == null) {
+                LockSupport.park();
+                // Virtual callers wait on this thread: an interrupt may neither end the loop nor keep it from parking.
+                Thread.interrupted();
+            } else {
+                task.run();
             }
         }
     }
 
     /**
      * Display name and file per cascade entry of the borrowed font for the +1 language codes, which this releases;
-     * none for NULL codes, without asking CoreText.
+     * none for NULL codes or a NULL font, without asking CoreText.
      */
     private static String[] cascadeList(MemorySegment font, MemorySegment codes) {
         if (codes.address() == 0) {
             return new String[0];
         }
-        MemorySegment descriptors;
+        MemorySegment descriptors = MemorySegment.NULL;
         try {
-            descriptors = CTNative.CTFontCopyDefaultCascadeListForLanguages(font, codes);
+            if (font.address() != 0) {
+                descriptors = CTNative.CTFontCopyDefaultCascadeListForLanguages(font, codes);
+            }
         } finally {
             CFNative.CFRelease(codes);
         }
@@ -380,6 +390,67 @@ public class MacFontFinder {
 
     private static MemorySegment ptr(long address) {
         return MemorySegment.ofAddress(address);
+    }
+
+    /** A virtual caller's cascade list, made on the cascade-list thread from a reference of its own to the font. */
+    private static final class CascadeListTask implements Runnable {
+
+        private final Thread caller = Thread.currentThread();
+        private final MemorySegment font;
+        private String[] list;
+        private Throwable failure;
+        private volatile boolean done;
+
+        CascadeListTask(MemorySegment font) {
+            this.font = font;
+            CFNative.CFRetain(font);
+        }
+
+        @Override
+        public void run() {
+            try {
+                list = pooledCascadeList(font);
+            } catch (Throwable t) {
+                failure = t;
+            }
+            // A caller whose wait failed may have released the font already; what freeing it here autoreleases
+            // would otherwise stay on this thread for the life of the process.
+            long pool = ObjCNative.objc_autoreleasePoolPush();
+            try {
+                CFNative.CFRelease(font);
+            } finally {
+                ObjCNative.objc_autoreleasePoolPop(pool);
+            }
+            // After the release, so that a caller that still waits holds the font when this reference goes.
+            done = true;
+            LockSupport.unpark(caller);
+        }
+
+        /** The list, or what making it threw; an interrupt does not end the wait, and is set again after it. */
+        String[] awaitList() {
+            boolean interrupted = false;
+            try {
+                while (!done) {
+                    LockSupport.park(this);
+                    // Recorded before it is cleared, so that no error inside the clearing can lose it.
+                    if (Thread.currentThread().isInterrupted()) {
+                        interrupted = true;
+                        Thread.interrupted();
+                    }
+                }
+            } finally {
+                if (interrupted) {
+                    Thread.currentThread().interrupt();
+                }
+            }
+            if (failure instanceof Error error) {
+                throw error;
+            }
+            if (failure != null) {
+                throw (RuntimeException) failure;
+            }
+            return list;
+        }
     }
 }
 

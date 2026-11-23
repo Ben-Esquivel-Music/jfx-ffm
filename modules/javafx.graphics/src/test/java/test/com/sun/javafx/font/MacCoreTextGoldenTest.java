@@ -63,13 +63,15 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * Left out on purpose, because the C has no defined result there:
  * <ul>
  * <li>{@code CGBitmapContextGetData(ctx, w, h, 24)} and {@code CGImageContextGetData(ctx, w, h, 32)} on an 8-bit grey
- * context read up to 3 bytes past the bitmap. Production never pairs them. For the same reason no
- * AA_LCD strike is requested here: with {@code prism.lcdtext} off, {@code CTGlyph} would draw it into its cached grey
- * context. LCD masks come from the child JVM run with {@code -Dprism.lcdtext=true};</li>
+ * context read up to 3 bytes past the bitmap. Production never pairs them. No AA_LCD strike is requested here:
+ * with {@code prism.lcdtext} off, a strike asked for as AA_LCD is made grey, so it would only repeat the grey masks.
+ * LCD masks come from the child JVM run with {@code -Dprism.lcdtext=true};</li>
  * <li>{@code CFRetain(0)}, {@code CFRelease(0)} and any other NULL handed to a one-to-one entry point still crash
  * the JVM, as in the C. A null {@code CGRect} or {@code CGAffineTransform} mirror crashed the C; the Java throws
  * {@code NullPointerException}, which {@link MacFontNullInputTest} pins (US-067);</li>
- * <li>{@code CFStringCreateWithCharacters(alloc, null, n)} with n &gt; 0 passes NULL with a length.</li>
+ * <li>{@code CFStringCreateWithCharacters(alloc, chars, n)} with a count {@code chars} does not hold: the C passed
+ * NULL with a length for no {@code chars} and n &gt; 0, and read past them for n beyond them. The Java makes no
+ * string there, which {@link MacFontNullInputTest} pins.</li>
  * </ul>
  */
 @EnabledOnOs(OS.MAC)
@@ -314,7 +316,7 @@ public class MacCoreTextGoldenTest {
         }
     }
 
-    /** In place, as {@code CTGlyph.checkBounds} calls it with a strike matrix. */
+    /** In place, as {@code CTGlyph.measuredBox} calls it with a strike matrix. */
     private static void putRects(GoldenMap out) {
         double[][][] cases = {
             {{1, 2, 3, 4}, {2, 0.5, -0.25, 3, 10, 20}},
@@ -672,7 +674,7 @@ public class MacCoreTextGoldenTest {
 
     private static void putJavaPath(GoldenMap out) throws Exception {
         assertEquals(0L, CTGlyphShim.cachedContext(), "a glyph was drawn in this JVM before the corpus: CTGlyph's"
-                + " cached context keeps the subpixel and LCD settings of the first strike that drew");
+                + " cached context keeps the colour space of the call that made it, and a shim may ask for the other");
         for (MacFontCorpus.Face face : MacFontCorpus.FACES) {
             FontResource resource = MacFontCorpus.open(face);
             String prefix = "ct.java." + face.key();

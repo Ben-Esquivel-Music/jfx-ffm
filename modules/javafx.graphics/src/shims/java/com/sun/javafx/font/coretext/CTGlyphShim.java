@@ -55,6 +55,29 @@ public final class CTGlyphShim {
         return invoke(glyph, "getCachedContext", new Class<?>[] {boolean.class}, lcd);
     }
 
+    /**
+     * The glyph measured, then drawn by its private {@code drawImage} into {@code context} with the options the context
+     * already has, at sub-pixel position {@code subPixel}; answers the image. Never hand it the cached context, which
+     * only a draw under the cache's lock may use.
+     */
+    public static byte[] drawInto(Glyph glyph, long context, int subPixel) throws ReflectiveOperationException {
+        glyph.getWidth();
+        Field field = CTGlyph.class.getDeclaredField("bounds");
+        field.setAccessible(true);
+        CGRect box = (CGRect) field.get(glyph);
+        return invoke(glyph, "drawImage",
+                      new Class<?>[] {long.class, double.class, double.class, int.class, int.class, int.class},
+                      context, box.origin.x, box.origin.y, (int) box.size.width, (int) box.size.height, subPixel);
+    }
+
+    /** {@code CTGlyph}'s private {@code bitmapContext}; a context it answers is the caller's to release. */
+    public static long bitmapContext(long space, int width, int height, int bytesPerRow, int flags)
+            throws ReflectiveOperationException {
+        return invoke(null, "bitmapContext",
+                      new Class<?>[] {long.class, int.class, int.class, int.class, int.class},
+                      space, width, height, bytesPerRow, flags);
+    }
+
     @SuppressWarnings("unchecked")
     private static <T> T invoke(Glyph glyph, String name, Class<?>[] parameterTypes, Object... arguments)
             throws ReflectiveOperationException {

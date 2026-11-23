@@ -307,6 +307,10 @@ class OS {
     }
 
     static final long CFStringCreateWithCharacters(long alloc, char[] chars, long numChars) {
+        int length = chars == null ? 0 : chars.length;
+        if (numChars < 0 || numChars > length) {
+            return 0;
+        }
         try (Arena arena = Arena.ofConfined()) {
             MemorySegment units = chars == null ? MemorySegment.NULL : arena.allocateFrom(JAVA_CHAR, chars);
             return CFNative.CFStringCreateWithCharacters(ptr(alloc), units, numChars).address();
@@ -423,9 +427,13 @@ class OS {
             MemorySegment m = matrix == null ? MemorySegment.NULL : transform(arena, matrix);
             if (CFNative.CFStringGetLength(fontName) > 0
                     && CFNative.CFStringGetCharacterAtIndex(fontName, 0) == '.') {
-                MemorySegment found = CFNative.CFStringFind(arena, fontName, CFNative.boldCFString(),
-                                                            CFNative.kCFCompareCaseInsensitive);
-                boolean bold = found.get(JAVA_LONG, 0) != CFNative.kCFNotFound;
+                boolean bold = false;
+                MemorySegment boldString = CFNative.boldCFString();
+                if (boldString.address() != 0) {
+                    MemorySegment found = CFNative.CFStringFind(arena, fontName, boldString,
+                                                                CFNative.kCFCompareCaseInsensitive);
+                    bold = found.get(JAVA_LONG, 0) != CFNative.kCFNotFound;
+                }
                 int type = bold ? CTNative.kCTFontUIFontEmphasizedSystem : CTNative.kCTFontUIFontSystem;
                 return copyOfUIFont(CTNative.CTFontCreateUIFontForLanguage(type, 0.0, MemorySegment.NULL), size, m);
             }

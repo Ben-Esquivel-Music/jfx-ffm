@@ -34,7 +34,7 @@ import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.Map;
 
-import static java.lang.foreign.ValueLayout.ADDRESS;
+import static java.lang.foreign.ValueLayout.JAVA_LONG;
 
 /**
  * The autorelease pools of the Objective-C runtime. CoreText autoreleases objects into the calling thread's pool, and
@@ -49,10 +49,12 @@ public final class ObjCNative {
 
     private static final SymbolLookup OBJC = library();
 
+    // The token is a long, not an ADDRESS: a returned address is boxed into a segment after libobjc has pushed the
+    // pool, and an OutOfMemoryError there would leave the pool pushed. Both pass alike on arm64 and x86_64.
     private static final MethodHandle OBJC_AUTORELEASE_POOL_PUSH = bind("objc_autoreleasePoolPush",
-            FunctionDescriptor.of(ADDRESS));
+            FunctionDescriptor.of(JAVA_LONG));
     private static final MethodHandle OBJC_AUTORELEASE_POOL_POP = bind("objc_autoreleasePoolPop",
-            FunctionDescriptor.ofVoid(ADDRESS));
+            FunctionDescriptor.ofVoid(JAVA_LONG));
 
     private ObjCNative() {
     }
@@ -90,16 +92,16 @@ public final class ObjCNative {
     }
 
     /** Pushes a pool on this thread; the token answered may be popped only on this thread. */
-    public static MemorySegment objc_autoreleasePoolPush() {
+    public static long objc_autoreleasePoolPush() {
         try {
-            return (MemorySegment) OBJC_AUTORELEASE_POOL_PUSH.invokeExact();
+            return (long) OBJC_AUTORELEASE_POOL_PUSH.invokeExact();
         } catch (Throwable t) {
             throw CFNative.unexpected(t);
         }
     }
 
     /** Pops the pool of {@code pool} and every pool this thread pushed after it, releasing what they hold. */
-    public static void objc_autoreleasePoolPop(MemorySegment pool) {
+    public static void objc_autoreleasePoolPop(long pool) {
         try {
             OBJC_AUTORELEASE_POOL_POP.invokeExact(pool);
         } catch (Throwable t) {

@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2013, 2022, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2013, 2026, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -25,8 +25,8 @@
 
 package com.sun.javafx.font;
 
-import java.util.HashMap;
 import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
 
 import com.sun.javafx.geom.Path2D;
 import com.sun.javafx.geom.Point2D;
@@ -38,8 +38,8 @@ import com.sun.javafx.scene.text.GlyphList;
 public abstract class PrismFontStrike<T extends PrismFontFile> implements FontStrike {
     private DisposerRecord disposer;
     private T fontResource;
-    private Map<Integer,Glyph> glyphMap = new HashMap<>();
-    private PrismMetrics metrics;
+    private final Map<Integer,Glyph> glyphMap = new ConcurrentHashMap<>();
+    private volatile PrismMetrics metrics;
     protected boolean drawShapes = false;
     private float size;
     private BaseTransform transform;
@@ -113,10 +113,12 @@ public abstract class PrismFontStrike<T extends PrismFontFile> implements FontSt
         // to be a wash if the usWin ascent and descent match, and in any
         // case, clearly the hhea values are part of the calculation for
         // leading.
-        if (metrics == null) {
-            metrics = fontResource.getFontMetrics(size);
+        PrismMetrics strikeMetrics = metrics;
+        if (strikeMetrics == null) {
+            strikeMetrics = fontResource.getFontMetrics(size);
+            metrics = strikeMetrics;
         }
-        return metrics;
+        return strikeMetrics;
     }
 
     @Override
@@ -176,10 +178,15 @@ public abstract class PrismFontStrike<T extends PrismFontFile> implements FontSt
 
     @Override
     public Glyph getGlyph(int glyphCode) {
+        // Not computeIfAbsent, which can lock a bin even on a hit, and this runs for every glyph drawn;
+        // the glyph stored first is the one every caller gets.
         Glyph glyph = glyphMap.get(glyphCode);
         if (glyph == null) {
             glyph = createGlyph(glyphCode);
-            glyphMap.put(glyphCode, glyph);
+            Glyph stored = glyphMap.putIfAbsent(glyphCode, glyph);
+            if (stored != null) {
+                glyph = stored;
+            }
         }
         return glyph;
     }

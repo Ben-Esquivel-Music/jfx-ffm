@@ -31,7 +31,7 @@ import java.lang.reflect.Method;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.Locale;
-import java.util.concurrent.FutureTask;
+import java.util.function.Consumer;
 
 /**
  * Delegate onto the {@code MacFontFinder} entry points production calls. The {@code private} methods are named as
@@ -104,15 +104,30 @@ public final class MacFontFinderShim {
         return MacFontFinder.getCascadeList(fontRef);
     }
 
+    /** The pooled region a platform caller runs and the cascade-list thread runs for a virtual caller. */
+    public static String[] pooledCascadeList(long font) {
+        return invokeStatic("pooledCascadeList", new Class<?>[] {MemorySegment.class}, MemorySegment.ofAddress(font));
+    }
+
     /** {@code font} is borrowed. */
     public static String[] cascadeList(long font, long codes) {
         return invokeStatic("cascadeList", new Class<?>[] {MemorySegment.class, MemorySegment.class},
                             MemorySegment.ofAddress(font), MemorySegment.ofAddress(codes));
     }
 
-    /** What a virtual caller of {@code getCascadeList} gets from its wait for the platform thread's task. */
-    public static String[] resultOf(FutureTask<String[]> task) {
-        return invokeStatic("resultOf", new Class<?>[] {FutureTask.class}, task);
+    /** The platform thread that makes the cascade lists of virtual callers, started if it does not run yet. */
+    public static Thread cascadeListWorker() {
+        return invokeStatic("startCascadeListWorker", new Class<?>[0]);
+    }
+
+    /**
+     * Production's hand-off of a task to {@link #cascadeListWorker}, which runs the tasks in their order. It is looked
+     * up once here, so that no reflective lookup runs in the calls it makes.
+     */
+    public static Consumer<Runnable> cascadeListHandOff() {
+        Thread worker = cascadeListWorker();
+        Method handOff = declaredMethod("queueCascadeListTask", Thread.class, Runnable.class);
+        return task -> invoke(handOff, worker, task);
     }
 
     /** The display name and file {@code getCascadeList} records for one descriptor. */
@@ -123,15 +138,25 @@ public final class MacFontFinderShim {
         return names;
     }
 
-    @SuppressWarnings("unchecked")
     private static <T> T invokeStatic(String name, Class<?>[] parameterTypes, Object... arguments) {
+        return invoke(declaredMethod(name, parameterTypes), arguments);
+    }
+
+    private static Method declaredMethod(String name, Class<?>... parameterTypes) {
         try {
             Method method = MacFontFinder.class.getDeclaredMethod(name, parameterTypes);
             method.setAccessible(true);
-            return (T) method.invoke(null, arguments);
+            return method;
         } catch (NoSuchMethodException e) {
             throw new IllegalStateException("MacFontFinder." + name + " no longer exists; re-point"
                     + " MacFontFinderShim at its replacement", e);
+        }
+    }
+
+    @SuppressWarnings("unchecked")
+    private static <T> T invoke(Method method, Object... arguments) {
+        try {
+            return (T) method.invoke(null, arguments);
         } catch (IllegalAccessException e) {
             throw new IllegalStateException(e);
         } catch (InvocationTargetException e) {

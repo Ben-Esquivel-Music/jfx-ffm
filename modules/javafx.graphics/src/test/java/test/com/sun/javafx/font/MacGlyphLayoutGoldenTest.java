@@ -42,8 +42,10 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 /**
  * Parity oracle for {@code CTGlyphLayout} through {@code PrismTextLayout}, against {@value #GOLDEN}, captured from
  * the JNI build of commit {@value MacFontGoldens#CAPTURE_COMMIT}. It runs in a child JVM because composite fallback
- * adds slots to the factory's fonts in the order a process first needs them. Wrong glyphs (PingFang SC, System
- * Devanagari, uncombined emoji sequences) are recorded as they are: this story fixes none of them.
+ * adds slots to the factory's fonts in the order a process first needs them. Ten rows were edited by hand for
+ * US-111's fixes, as the golden's header says: a run whose font takes no slot, as System Devanagari and System Bold
+ * Thai there, has the missing glyph, and the first fallback fonts PingFang SC adds take their own slots. Other wrong
+ * glyphs are recorded as they are: PingFang SC's own, drawn with the system UI font, and uncombined emoji sequences.
  */
 @EnabledOnOs(OS.MAC)
 public class MacGlyphLayoutGoldenTest {

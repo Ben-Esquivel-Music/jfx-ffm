@@ -111,6 +111,9 @@ class DFontDecoder extends FontFileWriter {
     }
 
     private static int getCTFontFormat(long font) {
+        if (font == 0) {
+            return 0;
+        }
         return formatOf(CTNative.CTFontCopyAttribute(ptr(font), CTNative.kCTFontFormatAttribute));
     }
 
@@ -137,6 +140,9 @@ class DFontDecoder extends FontFileWriter {
 
     /** The array holds tags as pointer values, not CF objects, so they are read and never released. */
     private static int[] getCTFontTags(long font) {
+        if (font == 0) {
+            return null;
+        }
         MemorySegment tags = CTNative.CTFontCopyAvailableTables(ptr(font), CTNative.kCTFontTableOptionNoOptions);
         if (tags.address() == 0) {
             return null;
@@ -153,6 +159,9 @@ class DFontDecoder extends FontFileWriter {
     }
 
     private static byte[] getCTFontTable(long font, int tag) {
+        if (font == 0) {
+            return null;
+        }
         MemorySegment table = CTNative.CTFontCopyTable(ptr(font), tag, CTNative.kCTFontTableOptionNoOptions);
         if (table.address() == 0) {
             return null;

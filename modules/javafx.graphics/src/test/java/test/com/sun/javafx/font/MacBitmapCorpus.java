@@ -60,7 +60,7 @@ final class MacBitmapCorpus {
         return context;
     }
 
-    /** As {@code CTGlyph.getImage} draws. */
+    /** As {@code CTGlyph.drawImage} draws. */
     static void drawGray(long context, long font, int glyph, double x, double y, int w, int h, double subPixel,
                          boolean matrix) {
         OSShim.CGContextSetRGBFillColor(context, 1, 1, 1, 1);

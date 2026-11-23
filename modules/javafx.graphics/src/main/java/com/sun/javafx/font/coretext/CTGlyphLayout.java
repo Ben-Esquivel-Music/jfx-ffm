@@ -27,6 +27,7 @@ package com.sun.javafx.font.coretext;
 
 import java.lang.ref.Reference;
 
+import com.sun.javafx.font.CharToGlyphMapper;
 import com.sun.javafx.font.CompositeFontResource;
 import com.sun.javafx.font.CompositeStrike;
 import com.sun.javafx.font.FontStrike;
@@ -38,8 +39,8 @@ import com.sun.javafx.text.TextRun;
 
 class CTGlyphLayout extends GlyphLayout {
 
-    private long createCTLine(long fontRef, char[] chars, boolean rtl,
-                              int start, int length) {
+    long createCTLine(long fontRef, char[] chars, boolean rtl,
+                      int start, int length) {
         /* Use CoreText to analize the run */
         long alloc = OS.kCFAllocatorDefault();
         long textRef = OS.CFStringCreateWithCharacters(alloc, chars, start, length);
@@ -83,18 +84,20 @@ class CTGlyphLayout extends GlyphLayout {
         return lineRef;
     }
 
-    private int getFontSlot(long runRef, CompositeFontResource fr, String name, int slot) {
+    int getFontSlot(long runRef, long lineFont, CompositeFontResource fr, String name, int slot) {
         long runAttrs = OS.CTRunGetAttributes(runRef);
         if (runAttrs == 0) return -1;
         long actualFont = OS.CFDictionaryGetValue(runAttrs, OS.kCTFontAttributeName());
         if (actualFont == 0) return -1;
+        // The line retains the strike's font, so a run in the font at that address is the strike's, whatever its name.
+        int ownSlot = actualFont == lineFont ? slot : -1;
 
         /* Use the display name from the kCTFontDisplayNameAttribute attribute
          * instead of CTFontCopyDisplayName() to avoid localized names*/
         String fontName = OS.CTFontCopyAttributeDisplayName(actualFont);
-        if (fontName == null) return -1;
+        if (fontName == null) return ownSlot;
         if (!fontName.equalsIgnoreCase(name)) {
-            if (fr == null) return -1;
+            if (fr == null) return ownSlot;
             // macOS 13 Ventura reports ".ThonburiUI Regular Regular" as the name
             // of font used for Thai. Per inspection of the font this is incorrect.
             // Need to do fix up here.
@@ -105,6 +108,9 @@ class CTGlyphLayout extends GlyphLayout {
                 fontName = fontName.replaceFirst(" Regular Regular", " Regular");
             }
             slot = fr.getSlotForFont(fontName);
+            if (slot == -1) {
+                slot = ownSlot;
+            }
             if (slot == -1) {
                 try {
                     CTFactory factory = (CTFactory)PrismFontFactory.getFontFactory();
@@ -173,11 +179,18 @@ class CTGlyphLayout extends GlyphLayout {
                 for (int i = 0; i < runCount; i++) {
                     long runRef = OS.CFArrayGetValueAtIndex(runs, i);
                     if (runRef == 0) continue;
-                    int slot = getFontSlot(runRef, composite, fontName, baseSlot);
+                    int slot = getFontSlot(runRef, fontRef, composite, fontName, baseSlot);
                     if (slot != -1) {
                         glyphStart += OS.CTRunGetGlyphs(runRef, slot << 24, glyphStart, glyphs);
                     } else {
+                        int runStart = glyphStart;
                         glyphStart += OS.CTRunGetGlyphs(runRef, 0, glyphStart, glyphs);
+                        // No slot holds the run's font, so its glyph IDs would draw other glyphs of the slot 0 font.
+                        for (int g = runStart; g < glyphStart; g++) {
+                            if (glyphs[g] != CharToGlyphMapper.INVISIBLE_GLYPH_ID) {
+                                glyphs[g] = CharToGlyphMapper.MISSING_GLYPH;
+                            }
+                        }
                     }
                     if (size > 0) {
                         posStart += OS.CTRunGetPositions(runRef, posStart, positions);
