@@ -499,7 +499,7 @@ unsigned ComplexTextController::ComplexTextRun::indexAt(unsigned i) const
  #if PLATFORM(JAVA)
      // Prevent out-of-bounds access
      if (i >= m_glyphCount) {
-         return m_stringLength ? m_stringLength - 1 : 0; // clamp safely
+         return stringLength() ? stringLength() - 1 : 0; // clamp safely
      }
  #endif
     ASSERT(i < m_glyphCount);
@@ -523,8 +523,8 @@ void ComplexTextController::ComplexTextRun::setIsNonMonotonic()
             continue;
         // Handle out of bound case
         unsigned charIndex = indexAt(i);
-        if (charIndex >= m_stringLength)
-            charIndex = m_stringLength - 1; // clamp
+        if (charIndex >= stringLength())
+            charIndex = stringLength() - 1; // clamp
         mappedIndices[charIndex] = true;
     }
 #endif
