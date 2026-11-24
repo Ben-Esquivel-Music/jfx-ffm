@@ -1,17 +1,21 @@
 # US-111 — Fix the CoreText NULL inputs and font-layer defects US-067 left
 
-**Status:** ✅ Done (2026-11-22, PR 71, commit `40e53db102` and its CI fix `f352c6008c`; the further fixes are
-uncommitted on 2026-11-23; filed 2026-11-13 from US-067; sites 1-7 hand none of their listed inputs to CoreFoundation,
-CoreGraphics or CoreText as NULL or 0, site 8 keeps the strike reachable, site 9 has one owner, site 10 drains what
-CoreText autoreleases on any thread (deviation 7), site 11's outcomes are pinned and site 12 looks a missing face up
-once per process, each pinned by a test with mutant proof; CI run 45022158121 failed three checks of
+**Status:** ✅ Done (2026-11-22, PR 71, commit `40e53db102` and its CI fix `f352c6008c`; the further fixes committed as
+`e1de3dd32a`, and the fixes of the Copilot review on it and of its review uncommitted on 2026-11-24; filed 2026-11-13
+from US-067; sites 1-7 hand none of their listed inputs to CoreFoundation, CoreGraphics or CoreText as NULL or 0, site 8
+keeps the strike reachable, site 9 has one owner, site 10 drains what CoreText autoreleases on any thread (deviation 7),
+site 11's outcomes are pinned and site 12 looks a missing face up once per file while that file is unchanged, by one
+caller per name and file at a time, each pinned by a test with mutant proof; CI run 45022158121 failed three checks of
 `MacFontReleaseTest` on both macOS 15 runners, where the region without a pool leaves about 6 heap blocks per call and
 the fallback-face child printed no lookup of a face missing from its file, and the test-only CI fix has them decide
 through a verdict ("The CI fix" below): on CI run 45041254324, green on all six jobs, they answer CANNOT_SHOW there and
 skip with their figures; the fourteen defects and test gaps found beside the twelve sites while PR 71 was reviewed are
-fixed in this PR ("The further fixes" below), and as of 2026-11-23 the further fixes have run only on the owner's Mac;
-their commit and CI run, the re-capture of the DirectWrite golden, the robot and system tests and the comparison on
-the golden machine remain for the owner, see "Done" below) ·
+fixed in this PR ("The further fixes" below), as are five findings of the Copilot review of PR 71 on them ("The Copilot
+review" below), whose sixth, the DirectWrite rows of 8c, cannot be edited by hand, and four findings of an independent
+review of those fixes, R1 to R4, with five items of a review that confirmed them; the further fixes passed CI run
+45278364431 but for its Linux x64 job, which compiled nothing, and the review's fixes have run only on the owner's Mac;
+the commit of the review's fixes, a CI run, the re-capture of the DirectWrite golden, the robot and system tests and the
+comparison on the golden machine remain for the owner, see "Done" below) ·
 **Found:** 2026-11-12 and 2026-11-13, the traces and the exit-path review of US-067, on the US-067 tree
 
 ## Story
@@ -108,7 +112,8 @@ or heap-block change, as `MacFontReleaseTest` measures it.
 
 The third `T` line is the further fixes': `CompositeFontLocksTest`, `CompositeSlotRaceTest` and
 `FontSharedStateRulesTest` are new and `Mac*Test` does not select them; `Mac*Test` already selects the other new
-classes, `MacFontNullInputVerdictTest`, `MacFontSharedStateTest`, `MacGlyphImageTest` and `MacGlyphImageRulesTest`.
+classes, `MacFontNullInputVerdictTest`, `MacFontSharedStateTest`, `MacGlyphImageTest` and `MacGlyphImageRulesTest`,
+and the Copilot review's `MacFontFaceLookupTest`.
 The font package run of "Measured" is
 `-Dtest='test/com/sun/javafx/font/**/*Test,**/ParityGateTest'`, which holds every font class of the gate.
 
@@ -118,13 +123,15 @@ It is evidence only, not part of the change and not in the tree: its copy is kep
 `fde7c5c7…`), and it was placed in the tree only for the dumps.
 
 On a CI run, each verdict-based check prints one line, `<class>.<method> <PROVED|REFUTED|CANNOT_SHOW>: <figures>`, in
-the macOS jobs' console, ten in all: the cascade-list drain checks on a platform and on a virtual thread, the three
+the macOS jobs' console, twelve in all: the cascade-list drain checks on a platform and on a virtual thread, the three
 fallback-face checks, the two slot checks and the lent-font check of `MacFontReleaseTest`, the log check of
-`MacFontNullInputTest` and the sub-pixel check of `MacGlyphImageTest`. On a healthy tree each is `PROVED`, or
+`MacFontNullInputTest`, the sub-pixel check of `MacGlyphImageTest`, and the two checks of `MacFontFaceLookupTest`
+that lay a face out again once its file or its path changed. On a healthy tree each is `PROVED`, or
 `CANNOT_SHOW` with the precondition the host does not meet. `REFUTED` on a healthy tree needs one of three host
 behaviours that no host has shown (see "Rests on review"):
 - the worker's call leaving 10 or more blocks per call, which the virtual drain check refutes on every host: on macOS
-  15 a pooled platform call left about 4, but the worker's call has not been measured there (item 14);
+  15 a pooled platform call left about 4, and on CI run 45278364431 the worker's call left 4.02 (arm64) and 4.05 (x64)
+  (item 14);
 - a lent font's retain count that moves again over the task's list after two baselines in a row agreed;
 - CoreGraphics keeping state, beyond the four options set before a draw, from the options a context was made with or
   first drawn under.
@@ -157,14 +164,15 @@ under `-Djfx.parity.require=true`). On a CI run, read those two classes' skip co
   ✅ Each slice's `ffm-reviewer` repeated it without the flag; the final criteria-and-gate review and the
   confirmation on the final tree repeated it without and with the flag (see "Independent review"). The gate as such
   has not been run on the CI fix or on the further fixes; on the further fixes the font package, which holds every
-  font class of the gate, ran without and with the flag (see "Measured").
+  font class of the gate, ran without and with the flag (see "Measured"). On the fixes of the Copilot review the gate
+  and the font package ran without and with the flag, and the module run once (see "The Copilot review").
 - Status set to ✅ Done with the date and the PR, and the row moved to the done table of `backlog/README.md`.
-  ✅ Status and row set on 2026-11-22 and updated on 2026-11-23; the row gives PR 71, open on `f352c6008c`, and the
-  uncommitted further fixes.
+  ✅ Status and row set on 2026-11-22 and updated on 2026-11-23; the row gives PR 71, open, with the further fixes
+  committed as `e1de3dd32a` and the fixes of its Copilot review uncommitted.
 - Changes left in the working tree / a review branch — **no commits, merges or PRs without
   explicit approval from the repository owner.**
-  ✅ The owner committed the change as `40e53db102` and the CI fix as `f352c6008c` on PR 71, which is not merged;
-  the further fixes are uncommitted in the working tree.
+  ✅ The owner committed the change as `40e53db102`, the CI fix as `f352c6008c` and the further fixes as
+  `e1de3dd32a` on PR 71, which is not merged; the fixes of the Copilot review are uncommitted in the working tree.
 
 ## Notes
 - Related: US-067 (it traced these sites and left them; see its "Deviations").
@@ -185,8 +193,9 @@ The owner committed it as `40e53db102` on `abe0943d31`: "the final tree" below i
 of `after/final.sha256` are byte-identical to it), and in the sections written for it "HEAD" is `abe0943d31`. After
 CI run 45022158121 the CI fix changed 2 shims and 5 test files and added 2 test files, and no production file
 (against `40e53db102`, `git diff --stat` over the 7 tracked files: 501 insertions, 66 deletions; the new files 198 and
-412 lines); the owner committed it as `f352c6008c`. The further fixes, uncommitted on `f352c6008c`, are under "The
-further fixes" below; where they change what this section or the criteria sections say, those say so.
+412 lines); the owner committed it as `f352c6008c`. The further fixes, made on `f352c6008c` and committed as
+`e1de3dd32a`, are under "The further fixes" below; where they change what this section or the criteria sections say,
+those say so.
 
 **Production.**
 - **Site 1.** `MacFontFinder.getSystemFontSize` hands the UI font to a new `sizeOf`. It answers 13 for NULL, the size
@@ -228,7 +237,8 @@ further fixes" below; where they change what this section or the criteria sectio
   - If no thread can be started, the caller makes the list inline without a pool, as before this story.
   - Since the further fixes (items 4, 5 and 14) a virtual caller hands its call to one long-lived platform thread
     and parks until its task is done; `resultOf`, the `FutureTask` and the spin are gone, and the pool token is a
-    `long`.
+    `long`. Since the Copilot review (F3) a virtual caller that cannot start that thread gets the error, and no
+    virtual caller makes a list itself.
 - **Site 11.** `GlyfTableBounds.boundingBox` reads the four values into locals and stores index 3 first, with a
   one-line why-comment. `OS.rect` is unchanged.
 - **Site 12.** `CTFactory` keeps a `ConcurrentHashMap.newKeySet()` of the names, lower-cased with `Locale.ROOT`, whose
@@ -236,7 +246,9 @@ further fixes" below; where they change what this section or the criteria sectio
   `if (fIndex != -1)`, with no new `return` in its `try`. `CTGlyphLayout.getFontSlot` asks `mayFindFace` after the
   " Regular Regular" fix-up and after `getSlotForFont` answered -1, and makes no copy when the answer is no. The slot
   stays -1. Since the further fixes (item 10) a file that cannot be read is not remembered: `findFontIndex` throws
-  what reading it throws, and the next layout looks again.
+  what reading it throws, and the next layout looks again. Since the Copilot review (F5, F6) the set is a map of each
+  name to the file the lookup read and that file's version, which holds only while a run font of the name reports that
+  file in that version, and one caller at a time looks a name up, the others sharing its outcome.
 
 **Tests and shims.**
 - **24 new tests.** `MacFontNullInputTest` gains 9 (sites 1-7 and 11, each in a child JVM of
@@ -297,7 +309,8 @@ L6) with one fix round of its own, and a closing round of the tests (rulings K0 
 one agent, its design checked by an independent reviewer and ruled on by the session's manager, and its
 implementation reviewed until accepted (see "Independent review").
 
-All of it is uncommitted on `f352c6008c` on 2026-11-23. `git diff HEAD --stat` over the 37 tracked files: 5,092
+All of it was made on `f352c6008c` on 2026-11-23 and committed as `e1de3dd32a`. `git diff --stat` over the 37 tracked
+files, against `f352c6008c`: 5,092
 insertions, 932 deletions (17 production files 518 and 323, 6 shims 300 and 16, 13 test files 4,256 and 583,
 `mac-layout-golden.txt` 18 and 10); 11 files are new, 1 shim and 10 test files (`impl2/CLOSE/docs/r0/diffstat.txt`).
 Mutant names are those of the cluster records; where clusters reuse a name, the cluster is named (cluster A's M1a is
@@ -365,12 +378,15 @@ and touches no native, and so is enabled on the Linux and Windows CI hosts too (
     daemon platform thread, "JavaFX font cascade list", started by the first virtual caller and found through a
     volatile fast path, makes the lists of all virtual callers: `queueCascadeListTask` adds the task to a
     `ConcurrentLinkedQueue` and unparks the thread after every add, and the thread polls and runs, or parks and
-    clears its interrupt. `MacFontReleaseTest` (macOS): `virtualCallersAtOnceShareOnePlatformThread`,
+    clears its interrupt. Since the Copilot review the thread outlives anything a task throws (F2), and a caller
+    that cannot start it gets the error (F3). `MacFontReleaseTest` (macOS):
+    `virtualCallersAtOnceShareOnePlatformThread`,
     `aVirtualCallerWaitsForThePlatformThreadToMakeItsList`, `theCascadeListThreadIsAPlatformThreadThatInheritsNothing`
     and `anInterruptOfTheCascadeListThreadNeitherEndsItNorKeepsItFromParking`. `MacFontBindingStructureTest` (any OS):
     S4, `theHandOffQueuesATaskForThePlatformThreadAndNeverRunsItItself` (the hand-off and its queue helper never run
     a task, a task enters the queue only by `add` in `queueCascadeListTask`, and each add is followed by the unpark
-    with nothing between them that branches, switches, returns, throws or begins a handler), and
+    with nothing between them that branches, switches, returns, throws or begins a handler; since the Copilot review
+    on the path the add's return takes, F4), and
     `theCascadeListThreadTakesNoFontLayerMonitor`. Mutants C-M1, C-M2a, C-M2b, C-M12 to C-M14, C-M16 to C-M19, C-M21,
     C-M32 to C-M34 and C-M37 to C-M40, and US-111's M10b, M10h and M10l.
 - **5. The error edges of the cascade-list call** (C). The caller released the font it lent as soon as
@@ -381,6 +397,9 @@ and touches no native, and so is enabled on the Linux and Windows CI hosts too (
   - Now `CascadeListTask` retains the lent font on the caller before the task is queued; on the worker it keeps what
     the read throws for the caller, then releases its reference inside a pool of its own, sets `done` and unparks the
     caller. The caller's release is then safe at any time, and `resultOf`, the `FutureTask` and the spin are gone.
+    Since the Copilot review the hand-off takes that reference for the task right before the add and releases it
+    again if the task does not enter the queue (F4), and a failure of the release is kept for the caller too, who is
+    woken either way (F2).
   - `CascadeListTask.awaitList` parks until `done`, records an interrupt before it clears it, and sets it again in a
     `finally` before it returns the list or rethrows the task's failure.
   - `ObjCNative` binds the pool token as `JAVA_LONG` (deviation 12).
@@ -391,7 +410,8 @@ and touches no native, and so is enabled on the Linux and Windows CI hosts too (
     tokens and descriptors); `MacFontBindingStructureTest` (any OS): S7,
     `theWaitRecordsAnInterruptBeforeClearingItAndSetsItAgainOnEveryExit`, S8,
     `aTaskReleasesItsOwnReferenceToTheFontOnEveryPathBeforeItWakesTheCaller`, and
-    `aTaskKeepsWhatItsReadThrowsForItsCallerAndNeverThrowsIt`. US-111's
+    `aTaskKeepsWhatItsReadThrowsForItsCallerAndNeverThrowsIt` (since the Copilot review
+    `aTaskKeepsWhatItsReadAndItsReleaseThrowAndNeverThrowsIt`). US-111's
     `anErrorOfTheWaitItselfIsThrownOnlyOnceTheTaskIsDone` and its mutant M10d are retired (deviation 13). Mutants
     C-M5 to C-M11, C-M20, C-M22 to C-M26 and C-M28 to C-M30.
 
@@ -462,7 +482,8 @@ and touches no native, and so is enabled on the Linux and Windows CI hosts too (
   - Now `findFontIndex` throws what reading the file throws (`throws Exception`, no catch-all), and `createFontFile`
     remembers a name only for a readable file without the face or a font that reports no file. A read failure reaches
     `getFontSlot`, whose catch gives slot -1, and the next layout looks again. A face a readable file lacks is still
-    looked up once per process. Nothing is read from disk under the factory monitor, as before.
+    looked up once per process (since the Copilot review, once while its file is unchanged, F5). Nothing is read from
+    disk under the factory monitor, as before.
   - `PrismFontFactoryTest.findFontIndexThrowsWhatMakingTheFontFileThrows` (any OS),
     `findFontIndexThrowsWhatReadingTheFileThrows` and `findFontIndexAnswersForAReadableFile` (macOS);
     `MacFontReleaseTest.aFaceLookupThatCannotReadItsFileIsMadeAgainAtTheNextLayout` and
@@ -488,8 +509,10 @@ and touches no native, and so is enabled on the Linux and Windows CI hosts too (
   - Site 12: `layoutAsksForAFallbackFaceBeforeCopyingTheRunFont` (any OS) kills a body that asks `mayFindFace`, copies
     the run's font anyway and uses the answer only for `addFallbackFont`; the weakened guards it lets pass fail at run
     time. A run-time check of the copy was withdrawn (deviation 20). Mutants M12g, M12h and M12i (E), US-111's M12b
-    and M12f, and Ga (D).
-  - Site 10: S5, `onlyThePooledRegionAndTheThreadlessFallbackReadTheCascadeList` (any OS), allows
+    and M12f, and Ga (D). Since the Copilot review the copy is made in `lookUpFallbackFont`, and
+    `layoutCopiesTheRunFontOnlyWhereTheFactoryMayFindItsFace` replaces this check (F5).
+  - Site 10: S5, `onlyThePooledRegionAndTheThreadlessFallbackReadTheCascadeList` (any OS; since the Copilot review
+    `onlyThePooledRegionReadsTheCascadeList`, the fallback being gone, F3), allows
     `CTFontCopyDefaultCascadeListForLanguages` only in `MacFontFinder.cascadeList`, over every class file of the font
     package; S4, S7, S8 and the keep check above read what US-111's checks read only by call order. The worker no
     longer exits, so its thread's exit no longer drains a task that pushes no pool: the virtual drain check now fails
@@ -550,7 +573,8 @@ and touches no native, and so is enabled on the Linux and Windows CI hosts too (
   thread per process the per-thread cost is paid once (item 4). `virtualCallersAtOnceShareOnePlatformThread` (macOS)
   pins the cause; the virtual drain check refutes a call that leaves 10 or more on every host, and
   `MacFontReleaseVerdictTest.aVirtualCallOfMacOs15ThatStartsAThreadPerCallIsTheDefect` refutes CI's 10.73 and 10.94.
-  What the worker leaves on macOS 15 has not been measured.
+  On CI run 45278364431 (`e1de3dd32a`) the worker's call left 4.02 (arm64) and 4.05 (x64) blocks per call on macOS 15,
+  and the virtual drain check was `PROVED` there by the pool tokens.
 
 **Beside items 1 to 4: the font layer's other shared state** (F). Cluster F's design found more state that layout and
 rendering threads share without a lock or a safe publication. Now:
@@ -617,6 +641,582 @@ and 35 on macOS only. The column `f352c6008c` is CI run 45041254324's macOS arm6
   `MacFontProbeShim` gains `emptyStringOver`, `fontWithName`, `fontOfFile` and `fontOfData`; `CTFontStrikeShim` hooks
   every call the two-thread tests hold at; `CTGlyphShim` gains `drawInto` and `bitmapContext`; `CoreTextPeerShim`
   gains `line` and `getFontSlot`; the new `FontSharedStateShim` has `newCompositeStrike` and `loadEmbeddedFont`.
+
+### The Copilot review
+Copilot's review of PR 71 on the further fixes (`e1de3dd32a`) found three defects in `MacFontFinder`'s cascade-list
+call, named F2 to F4 as the review numbers them, and two in site 12's face lookup, F5 and F6; all five are accepted,
+with the decisions below, and fixed on 2026-11-23, uncommitted on `e1de3dd32a`, in two rounds: F2 to F4 first, then F5
+and F6. After the first round, `git diff --stat` over the 6 tracked files of code: 579 insertions, 100
+deletions (`MacFontFinder` 76 changed lines, `MacFontFinderShim` 54, `FontCallOrder` 196, `MacFontBindingStructureTest`
+141, `MacFontReleaseChild` 145, `MacFontReleaseTest` 67); no file is new. After the second, over the 10 tracked files of
+code, both rounds together: 821 insertions, 158 deletions, adding `CTFactory` 109 changed lines, `CTGlyphLayout` 59,
+`CoreTextPeerShim` 23 and `MacFontBindings` 10, with `MacFontBindingStructureTest` 201, `MacFontReleaseChild` 182 and
+`MacFontReleaseTest` 69 in all and `FontCallOrder` unchanged by the second round; new are `CTFactoryShim`,
+`MacFontFaceLookupChild` and `MacFontFaceLookupTest`. After the fourth round (R1 to R4), over the same 10 files: 888
+insertions, 158 deletions, with `CTFactory` 136 changed lines, `CTGlyphLayout` 60, `FontCallOrder` 226 and
+`MacFontBindingStructureTest` 210; the new files are `CTFactoryShim` 143 lines, `MacFontFaceLookupChild` 632 and
+`MacFontFaceLookupTest` 382. Classes as under "Criterion 6"; "S4" and "S8" as there.
+Its first comment, F1, asks for the rows of `directwrite-metrics-golden.txt` that 8c moves; it is accepted, and a third
+round found that those rows cannot be edited by hand, so the golden stays as captured and the owner re-captures it
+(below). That round changed no file of code or test.
+
+- **F1. The DirectWrite golden still has the slots of `ns + 1`** (high). Accepted: on its capture machine the
+  comparison of `DirectWriteMetricsGoldenTest` fails until the 609 rows of deviation 16 move. The rule for an edit by
+  hand, as for the ten rows of `mac-layout-golden.txt`, is that every new value is the old one with only the slot byte
+  of a glyph code, a key or a code list changed, read from the same font by the same capture code. That holds for the
+  9 layout rows and not for the 300 glyph rows that come in place of the 300 that go, so the file is not edited.
+  - The capture, `captureFont` (`DirectWriteMetricsGoldenTest.java:201-243`), records `map.*`, then lays the text out
+    (`captureLayout`, `:227`), then records `slots.*` (`:229-237`), and only then every glyph code of the map and the
+    runs through `captureGlyph` (`:240-242`), which draws each with the font of its slot byte:
+    `CompositeStrike.getGlyph` (`CompositeStrike.java:176-179`) asks `getStrikeSlot(code >>> 24)` for the strike and
+    hands it the code without the slot. The code a run gets is `slot << 24` with the glyph ID DirectWrite drew
+    (`DWGlyphLayout.java:390-392`), and the slot is `composite.getSlotForFont` (`:321`). At the capture commit
+    `26ce75d02f` that was `fallbackResource.getSlotForFont(name) + 1` (`PrismCompositeFontResource.java:65-70` there),
+    where a font the fallback resource did not hold yet was added at index `ns` and answered as `ns + 1`
+    (`FallbackResource.java:270` there), so the first lookup of each added font gave the composite slot after the
+    font's own; later lookups find it by name and answer its own (`getSlotForFontNoCreate`). The 24 pt capture of
+    each font reuses the 12 pt composite (`PrismFontFactory.createFont`, `getFontResource` through `compResourceMap`,
+    `:615-625` and `:700-702`), whose added fonts it finds by name, so its codes carry each font's own slot and,
+    glyph ID for glyph ID, name the font of each 12 pt glyph.
+  - The 9 layout rows (`layout.run.5.glyphs` and `run.6.glyphs` of arial, segoeui and timesnewroman at 12 pt, `run.4`
+    to `run.6` of consolas) are re-keys: their glyph IDs equal the 24 pt rows', each code that differs is one slot
+    higher, and every other `layout.*` row comes from DirectWrite's advances and offsets, not from the slot (the CJK
+    run's positions advance 12.0 per glyph, Yu Gothic UI's full width, under the old slots too).
+  - The 300 `glyph.<code>.*` rows that go hold data of another font than the one their new code names. In arial,
+    segoeui and timesnewroman the old slot 13 was Nirmala UI once the run after the CJK run had added it (`slots.13`),
+    so the rows of Yu Gothic UI's CJK glyphs 3286, 3724 and 1954 were drawn in Nirmala UI (for 3286 advance 15.550781
+    and 134 outline segments of one sha256 in all four fonts, consolas' old slot 14 included, where Yu Gothic UI's
+    glyph advances 24.0 at 24 pt, with 31 segments); the old slot 14 was past `slots.count` = 14, where
+    `FallbackResource.getSlotResource` answers null (`FallbackResource.java:333-337`) and
+    `PrismCompositeFontResource.getSlotResource` the primary (`PrismCompositeFontResource.java:83-93`), so Nirmala
+    UI's glyph 407 was drawn in the primary (advances 6.673828, 7.201172 and 5.326172, one per font; Nirmala UI's 407
+    advances 17.214844 at 24 pt). In consolas the old slots 13, 14 and 15 drew Segoe UI's Arabic glyphs in Yu Gothic
+    UI (advance 12.0 each), Yu Gothic UI's in Nirmala UI and Nirmala UI's 407 in Consolas.
+  - Of the 300 rows that come, those of 16 glyphs, 240 rows, are nowhere in the file: Yu Gothic UI's 3286, 3724 and
+    1954 and Nirmala UI's 407 at 12 pt, in each of the four fonts. Their advance, bounding box, texture, mask and
+    outline need DirectWrite to draw them at 12 pt; the 24 pt rows do not scale to them (a hinted mask and its sha256
+    do not). Only consolas' four Segoe UI glyphs, 60 rows, have a 12 pt row of the same font, file and glyph ID, in
+    segoeui's own capture.
+  - So the golden is not edited, and the comment stays with the owner's re-capture on its Windows 10 19045 machine
+    (deviation 16). A script that reads the golden and asserts each of these facts, `round3/scripts/dw_derive.py`,
+    found exactly the 609 rows of deviation 16: 9 layout rows, 300 glyph rows out and 300 in, no new key already in
+    the file, every new slot byte below `slots.count` (see "Logs").
+  - The comment also asks for validation on Windows and Linux. CI run 45278364431 (`.github/workflows/submit.yml`,
+    the push of `e1de3dd32a`, which holds fix 8c) passed its Windows x64, Linux aarch64, macOS aarch64, macOS x64 and
+    No JNI jobs. Its Linux x64 job failed before it compiled anything: Maven Central answered HTTP 429 for
+    `org.apache.maven.plugins:maven-enforcer-plugin:pom:3.5.0`, so the root project `openjfx` failed at its plugin
+    resolution and every module was skipped. That job says nothing of the code, and needs a run again (read with
+    `gh pr checks 71` and `gh run view 45278364431 --job 138055973171 --log-failed`, `round5/`). Windows x64 runs
+    `DirectWriteMetricsGoldenTest`'s capture but skips its comparison at the machine gate, so it shows that 8c lays
+    the fonts out without failing, not that the golden's rows match.
+  - No other golden of `src/test/resources/test/com/sun/javafx/font/` depends on `ns + 1`. In `linux-pango-golden.txt`
+    a font added at layout is appended after the fallback list, and the glyphs of its first lookup carry a slot byte
+    past its own, at the list's end. The composite cases use slot bytes 0, 1 and 5 only. `dvs.comp.size0`, a fresh
+    composite whose layouts use slot 0 only and so added nothing, holds the same ten slots as `dvs.comp`; `lato.comp`
+    holds those nine fallbacks after Lato and never uses a byte past 5; the other cases use slot 0 only. So no case
+    added a font and `addNativeFallback` never ran. `sys.logical` is a `LogicalFont`, whose `addNativeFallback` has
+    answered `ns` since before `26ce75d02f`. `mac-layout-golden.txt` had the only other rows, the four of 8c among its
+    ten (deviation 16); no slot byte of its runs reaches its font's slot count now, where `lay.pingfangsc` reached 33
+    of 33 before US-111. The layout rows of `linux-font-process-golden.txt` (7) and `mac-coretext-golden.txt` (19)
+    carry no slot byte, and the other goldens lay nothing out through a composite. The five macOS corpora were compared
+    before and after on this Mac (criterion 7).
+
+- **F2. A release that threw ended the cascade-list thread** (high). `CascadeListTask.run` released its reference
+  inside a pool of its own with nothing around it, so a push, `CFRelease` or pop that threw (a `StackOverflowError`,
+  an `OutOfMemoryError`, or a linkage error where `ObjCNative` or `CFNative` failed to bind) left `run` before
+  `done = true` and the unpark. The caller parked for ever, the exception ended the one worker, and every later
+  virtual caller queued onto the dead thread, which `cascadeListWorker` still named, and parked for ever too.
+  - Now the release is a private `releaseFont`, called in a `try` whose catch keeps what it caught: as the task's
+    failure where the read answered; where the read threw, the read's failure stays and the release's is attached to
+    it as suppressed, unless they are one object, inside a catch of its own, so an attach that fails changes nothing
+    (and one the JVM disabled on a preallocated error is a no-op). `done` and the unpark follow on every path, after
+    the release attempt. `runCascadeListTasks` runs each task in a `try` that catches everything, so no task ends the
+    thread. The interrupt handling of the wait and of the loop is unchanged.
+  - `MacFontReleaseTest.aTaskWhoseReleaseThrowsStillWakesItsCallerWithTheFailure` (macOS, child JVM, scenario
+    `release.cascadeListReleaseFails`): a heap segment, which no downcall takes (`IllegalArgumentException: Heap
+    segment not allowed`, before any native call), is the font of a task made through
+    `MacFontFinderShim.cascadeListTask` and queued through production's hand-off with no reference taken, each waited
+    for by a virtual caller of its own. At address 0 the read asks CoreText nothing and answers the empty list, so
+    only the release throws, and the caller is woken with the release's failure; at address 8 the read throws too, in
+    `CTFontCopyDefaultCascadeListForLanguages`, and the caller gets the read's failure with the release's suppressed.
+    Then the same live thread makes a virtual caller's list of Helvetica.
+    `aTaskThatThrowsDoesNotEndTheCascadeListThread` (macOS, child JVM, `release.cascadeListTaskThrows`): after a task
+    that throws an `AssertionError` and one that throws an `IllegalStateException`, the same thread answers the next
+    caller.
+  - `MacFontBindingStructureTest` (any OS): S8 reads the release in `releaseFont` (the push before `CFRelease`, a pop
+    on both exits) and requires the unpark on every exit of `run` after `releaseFont`, through a handler that catches
+    everything; the keep check, renamed `aTaskKeepsWhatItsReadAndItsReleaseThrowAndNeverThrowsIt`, requires of the
+    handlers over `releaseFont` what it requires of those over the read, and that nothing `addSuppressed` throws
+    leaves `run`; the new `theCascadeListThreadOutlivesWhatATaskThrows`, that the loop catches everything
+    `Runnable.run` throws, throws none of it and has no return. `theCascadeListThreadTakesNoFontLayerMonitor` reads
+    `releaseFont` too.
+  - No run-time test makes the push or the pop throw (the heap segment fails `CFRelease` alone), nor
+    `addSuppressed`; the class file pins both handlers.
+- **F3. A virtual caller that could not start the thread made its list without a pool** (medium). When
+  `startCascadeListWorker` threw an `OutOfMemoryError`, `cascadeListOnAPlatformThread` made the list on the virtual
+  caller, unpooled, leaving the about 230 autoreleased blocks per call that criterion 4 forbids.
+  - Now that fallback is deleted and the error reaches the caller. An empty list in its place would be worse:
+    `CTFontFile.getCascadingInfo` feeds `CTFactory.getFallbacks`, and `FallbackResource.getLinkedFonts` (and
+    `LogicalFont`'s) stores `fallbacks` only after `getFallbacks` returns (`FallbackResource.java:287-299`), so an
+    `Error` leaves it null and the next layout asks again, where an empty list would stay the composite's fallbacks
+    for its life after a passing failure to start a thread. `startCascadeListWorker` stores `cascadeListWorker` only
+    after `start` returns, so a start that throws leaves it null and the next virtual caller tries again; that was so
+    before, and is now pinned. No virtual thread calls CoreText for the cascade list outside the worker, and
+    `getCascadeList`'s javadoc says that a virtual caller that cannot start the thread gets the error.
+  - `MacFontBindingStructureTest` (any OS): S5, renamed `onlyThePooledRegionReadsTheCascadeList`, allows
+    `cascadeList` and the copy of the language codes only in `pooledCascadeList`; the new
+    `aVirtualCallerGetsWhatStartingTheThreadThrowsAndTheNextOneTriesAgain` requires that no handler of the hand-off
+    covers its call of `startCascadeListWorker`, and that `cascadeListWorker` is stored only where `Thread.start` has
+    returned and no handler around it reaches.
+  - No test can make the start fail: a platform thread fails to start only where the process can make no more
+    threads, which would stop the test JVM's carrier threads too.
+- **F4. A reference taken for a task that never reached the queue leaked** (medium). `CascadeListTask`'s constructor
+  retained the font on the caller, and nothing released that reference when the task did not enter the queue: an
+  `OutOfMemoryError` while the add allocated its node, or a `StackOverflowError` at the call of
+  `queueCascadeListTask` or of the add.
+  - Now `queueCascadeListTask(worker, task, font)` takes the reference for the task itself, right before the add, so
+    only the add lies between the retain and the queue, and a handler that catches everything the add throws
+    releases it once and rethrows. The caller still holds the font it lent, so that release is never the last and
+    needs no pool (the method's one why-comment). Once the add has returned, the reference is the task's: the helper
+    releases it nowhere else, and no handler covers the unpark, so a failed unpark releases nothing. `font` is NULL
+    for the tests' own tasks, which hold none; production's is never 0. The task's constructor only stores the font.
+  - S4's rule is corrected, not weakened. The add now ends a `try`, so javac puts a `goto` over the handler, and the
+    handler, between the add and the unpark in code order (the add at instruction 10, the `goto` at 12, the handler
+    at 13 to 17 and the unpark at 19), which the code-order rule of `FontCallOrder.assertCallFollowsUnconditionally`
+    fails. The helper now follows the path the add's return takes, through fall-through and unconditional gotos, and
+    fails at a conditional branch, switch, return, throw or handler start on it, so whatever can lose the wake-up still
+    fails it: C-M33, C-M34 and C-M37, run again on the new shape, are killed by S4.
+  - `MacFontReleaseTest.aTaskTheQueueRefusesGetsNoReferenceToTheFont` (macOS, child JVM, `release.cascadeListRefused`):
+    a null task, which `ConcurrentLinkedQueue.add` refuses with a `NullPointerException`, stands in for an add that
+    cannot allocate its node; the hand-off with Helvetica leaves the font's retain count where it was and rethrows the
+    queue's exception. The child holds a second reference of its own, so a release too many shows as -1 and frees
+    nothing. `MacFontBindingStructureTest.aTaskOwnsItsReferenceToTheFontOnlyOnceItIsQueued` (any OS): `CFRetain`
+    before the add and nowhere else in the nest; a handler that catches everything the add throws releases with no
+    condition before the release and then throws, never returning; the helper's only release is in that handler; and
+    no handler covers the unpark.
+  - No run-time test makes the add run out of memory or the unpark throw.
+- **F5. A face its file lacked was never looked up again** (medium). US-111's `CTFactory` kept a set of the
+  lower-cased names whose lookup found no face, for the life of the process, and `mayFindFace` said no for such a name
+  for good, so a font file installed, updated or replaced so that it now holds the face was never read for it again. The
+  regression was US-111's own.
+  - Now `CTFactory` maps each lower-cased name and the path the run font reports (none where it reports no file) to the
+    version of the file the lookup read, the `fileKey()`, `lastModifiedTime()` and `size()` of `Files.readAttributes`,
+    since a rename over the file can keep its time and size. One record per name and path, which a new version of that
+    file replaces, so the map grows with the pairs, never with their versions; the second round kept one record per
+    name, which R2 replaced. `mayFindFace(name, file)` says no only while a stat of that file gives the version the miss
+    was read in; another path, no path where one was read, another version, or a stat that fails (the file gone or
+    unreadable) is looked up again. A font that reports no file is remembered with no path and no version for the life
+    of the process, as before, with its comment. A file whose read throws is not remembered, as since item 10.
+    `createFontFile` takes the version before `findFontIndex` reads the file, and remembers the miss only where a stat
+    after the read gives the same version.
+  - `CTGlyphLayout.getFontSlot` copies the URL of the run's own font, `OS.CTFontCopyURLAttribute(actualFont)`, and
+    hands it and that borrowed font to `addFallbackFont(factory, fr, fontName, file, runFont)`, which asks `mayFindFace`
+    before anything else; the run's font is copied only inside the lookup (F6). A remembered miss costs one URL copy and
+    one stat per layout of its run, and no copy of the font; neither creates or parses a face. `CTFontCopyURLAttribute`
+    leaves the font's ownership as it was: it calls `CTFontCopyAttribute` and `CFURLCopyFileSystemPath`, both under the
+    Copy rule, and releases each answer in a `finally` (`OS.java:127-146`). `createFontFile(name, filename, fontRef)`
+    takes the file from its caller and still consumes its +1 reference on every path. The handling of a 0 copy moved
+    with the copy into `fontFileOfCopy`, which answers null for 0 before it reaches the factory;
+    `CoreTextPeerShim.addFallbackFont` builds the old hand-over on it, so `MacFontNullInputChild` and the seam scenario
+    of `MacFontReleaseChild` are unchanged. `CTFactory`'s constructor is package-private, so that a shim can subclass
+    it.
+  - `MacFontFaceLookupTest.aMissHoldsOnlyWhileTheRunFontReportsTheSameFileInTheSameVersion` (macOS, child JVM, scenario
+    `lookup.missVersion`, plain assertions): a factory of the child's own (`CTFactoryShim.newFactory`) remembers a miss
+    of an invented name in a copy of Helvetica.ttc. The same path unchanged, in any case, is not looked up again; a hard
+    link to the same file (another path, the same version), no path, a new time, a new size, a new file key (a copy
+    renamed over the file with its time set back) and the file gone and back are. Each change is first checked to
+    change only what it is meant to, and after each a new lookup is remembered again. A lookup during whose read the
+    factory's read hook sets the file's time is not remembered (`CTFactoryShim.remembersAMiss`), nor a file of 64 zero
+    bytes, whose read throws; a font that reports no file is remembered, reads no file, and another font of that name
+    that reports one is looked up.
+  - `aFaceItsFileLackedIsFoundOnceTheFileHoldsIt` (macOS, verdict, `lookup.changedFile`): Ahem, made from a file of the
+    child's own that then holds Helvetica.ttc, laid out twice in a System font (one lookup, no face), then Ahem copied
+    back over the file, a new version: the next layout looks it up, finds it and adds it, one lookup of each printed.
+    `aFaceItsFileLackedIsLookedUpInAnotherFileOfItsName` (macOS, verdict, `lookup.movedFile`): the same two layouts,
+    then a second Ahem made from a copy in another directory, which the same System font looks up and adds. Both are
+    `PROVED` here; their preconditions are those of the swapped face of `MacFontReleaseTest`, and the files CoreText
+    reports for the copied-back and the second font.
+  - `MacFontBindingStructureTest.layoutCopiesTheRunFontOnlyWhereTheFactoryMayFindItsFace` (any OS) replaces
+    `layoutAsksForAFallbackFaceBeforeCopyingTheRunFont`, whose copy moved out of `getFontSlot`: `getFontSlot` copies the
+    URL of the font `CFDictionaryGetValue` answered, hands that URL and that font to `addFallbackFont`, and copies no
+    font; `mayFindFace` guards `lookUpFallbackFont` in `addFallbackFont`, and the copy and `fontFileOfCopy` in
+    `lookUpFallbackFont`; and of `CTGlyphLayout` and `CTFactory` only `lookUpFallbackFont` copies a font.
+  - Changed for the new signature, no assertion weakened: `MacFontReleaseChild.faceMemory` asks `mayFindFace` with the
+    file CoreText reports for Helvetica, which the copy it looked up in reports too, and `unreadableFaceFile` with the
+    child's file; `CoreTextPeerShim.mayFindFace(name, file)`, and its `createFontFile(name, ref)` hands the factory the
+    file the reference reports.
+- **F6. Lookups of one missing face at once each copied and parsed** (medium). Two threads laying out text that needs
+  the same uncached fallback face could both pass `mayFindFace`, both copy the run's font and both parse its file,
+  against criterion 4.
+  - Now at most one lookup per lower-cased name and reported path is in flight (per name until R2).
+    `CTGlyphLayout.lookUpFallbackFont` registers a `CTFactory.FaceLookup`, which makes its key when it is made, with
+    `beginLookup` (`ConcurrentHashMap.putIfAbsent`, covered since R1); a caller that finds one in flight returns what
+    its `await` answers, and creates and parses nothing. The caller whose lookup it is asks again, now that no other
+    lookup of the name in that file can run, whether one that ended after its own checks left the face in the factory's
+    map (`getFontResource(name, null, false)`, the question `getSlotForFont` asks) or a miss of that file in that
+    version (`mayFindFace`), and only then copies the run's font and calls `createFontFile`. Its `finally` calls
+    `endLookup`, which removes the entry and then, in a `finally` of its own, hands the outcome to the waiters: the
+    entry goes on every way out, an `Error` included, before any waiter wakes, so a caller that comes afterwards begins
+    a lookup of its own.
+  - Found: each caller adds the one font file to its own composite with `addSlotFont`; later callers find it through
+    `getSlotForFont`, since `createFontFile` stored it. Missing: the miss is remembered before the entry goes, so later
+    callers do not look while the file is unchanged. Failed (the read throws, or any exception or error): nothing is
+    remembered, the waiters get no slot for this layout, and the next layout looks again; the leader's exception reaches
+    `getFontSlot`'s catch and its debug output as before.
+  - `FaceLookup.await` loops over `CountDownLatch.await`: it holds no monitor, so a virtual caller unmounts, and an
+    interrupt does not end the wait and is set again after it, as in `CascadeListTask.awaitList`. The outcome is written
+    before the count-down, which publishes it. No thread and no pool is added. No caller waits for its own lookup:
+    nothing the lookup runs lays text out. The lock trace is under "Rests on review".
+  - `MacFontFaceLookupTest` (macOS, child JVM `MacFontFaceLookupChild`, plain assertions; the child's factory reads
+    font files through a hook that counts the reads and holds the first, and counts the copies handed to
+    `createFontFile`). `callersThatNeedAFaceAtOnceShareOneLookupAndItsFontFile` (`lookup.sharedFound`): with the first
+    read held, a platform and a virtual caller are seen WAITING in `CTFactory$FaceLookup.await`; the platform one is
+    interrupted and seen waiting again with its interrupt clear; once released, the three calls read the file once and
+    copy the font once, each caller's own System font holds the leader's very font file, the platform caller's interrupt
+    is set again, and no lookup is left in flight. `callersThatNeedAFaceItsFileLacksAtOnceShareOneLookupAndItsMiss`
+    (`lookup.sharedMissing`): the same over Helvetica.ttc, every slot -1, the miss remembered, and a fourth caller reads
+    and copies nothing. `aLookupThatFailsLeavesNothingBehindAndTheNextCallerLooksAgain` (`lookup.sharedFailed`): the
+    held read fails, once through the file deleted under it (`FileNotFoundException`) and once through an
+    `OutOfMemoryError` the hook throws; the waiters get -1 and no failure, nothing is remembered, no lookup is left in
+    flight, and a fourth caller on a thread of its own ends, reads the file again and adds the face.
+    `aCallerThatTakesUpALookupOnceAnotherHasEndedUsesWhatItLeft` (`lookup.lateLeader`): a caller held, through a
+    `mayFindFace` hook, right after the factory first said yes, until a second caller's whole call has run, takes up a
+    lookup that reads nothing: it adds the second caller's font file, or, where the file lacks the face, finds the miss.
+  - `MacFontBindingStructureTest.aLookupOfAFallbackFaceIsEndedOnEveryWayOutAndSharedByTheCallersThatWait` (any OS):
+    `beginLookup` before `await`, whose answer `lookUpFallbackFont` returns at once; `endLookup` before each return or
+    throw after the lookup's first call and in a handler over it that catches everything; in `endLookup` the removal
+    before `finish`, and `finish` on every way out of the removal; `await` calls no `Object.wait`; and `layout`,
+    `getFontSlot`, `addFallbackFont`, `lookUpFallbackFont`, `mayFindFace`, `beginLookup`, `endLookup`, `await` and
+    `finish` take no monitor.
+  - No run-time test makes the removal throw or fails the entry of `endLookup`; the class file pins the first.
+
+An independent review of the whole uncommitted diff then found four more, fixed in a fourth round, R1 to R4 (the third
+round, F1, changed no code).
+- **R1. A registration that threw could leave a name in flight for good.** `beginLookup` ran before the `try` whose
+  `finally` ends the lookup, and `ConcurrentHashMap.putVal` links the node before it counts it, which can allocate
+  (`addCount`, `fullAddCount`, `transfer`), so an `OutOfMemoryError` or `StackOverflowError` after the insert left a
+  `FaceLookup` in the map that nothing would finish: every later caller of the name would park in `await` for good,
+  the FX and render threads included. And `endLookup` made the key inside its `try` (`toLowerCase` allocates), so an
+  `OutOfMemoryError` there woke the waiters but left the finished entry, whose outcome every later caller then got.
+  - Now a `FaceLookup` makes its key when it is made, before it is registered, and `endLookup` reads it and makes
+    nothing. `beginLookup` covers `putIfAbsent` with a handler that catches everything, ends its own lookup (the
+    value-conditional removal, safe whether the insert happened or not, and `finish(null)`) and rethrows.
+  - `aLookupOfAFallbackFaceIsEndedOnEveryWayOutAndSharedByTheCallersThatWait` (any OS) also requires the handler over
+    `putIfAbsent` to call `endLookup` with no condition before it throws, never returning
+    (`assertHandlerReleasesUnconditionally`), and `endLookup` to call no `faceKey`, no `FaceKey` and no `String`
+    method (`assertNeverCalls`). No run-time test makes `putIfAbsent` or the removal throw.
+- **R2. Lookups and misses were keyed by name alone.** Two installed fonts can report one display name from files A
+  and B. A caller whose run reports B, which holds the face, waited for a lookup in A, which lacks it, got null and drew
+  the missing glyph; and runs that alternated between A and B replaced the one record of the name each time and parsed
+  each file again.
+  - Now both maps are keyed by the lower-cased name and the path the run font reports, null where it reports none
+    (`CTFactory.FaceKey`). Callers with one key share one lookup; a caller of another file runs its own. A new version
+    of a file replaces that file's miss, so the miss map grows with the pairs, never with versions. The re-check of the
+    factory's map stays by name: a face of that name found in any file is that face.
+  - `MacFontFaceLookupTest.facesOfOneNameInTwoFilesAreLookedUpAndRememberedApart` (macOS, child JVM,
+    `lookup.twoFiles`, plain assertions): with a lookup of Ahem in a copy of Helvetica.ttc held in its read, a caller
+    whose file is a copy of Ahem ends while it is held, having read its own file (2 reads) and added the face; released,
+    the first has no slot, and only its file's miss is remembered. Then a factory of its own lays a System font out in
+    3 rounds over 2 files, two copies of Helvetica.ttc, 6 layouts in all: 2 reads, every slot -1.
+    `CTFactoryShim.remembersAMiss` takes the file.
+- **R3. The order that publishes a lookup's outcome was not pinned.** A waiter reads `FaceLookup.font` only because
+  `finish` stores it before `done.countDown()`; swapped, the race window is too small for a run-time test.
+  - `FontCallOrder.assertWrittenBefore`, new: every store of a field comes before a method's first call of a call.
+    The check above requires it of `finish`, `FaceLookup.font` and `CountDownLatch.countDown`.
+  - The confirming review of the fourth round found the pin weaker than its claim: it read code order alone, so a
+    store that a backward branch carried past the call passed, and nothing kept the field from being stored elsewhere.
+    Since the fifth round `assertWrittenBefore` also requires the method to be straight-line code, with no branch,
+    switch or exception handler at all, so that code order is the order of execution; and a new helper,
+    `assertFieldStoredOnlyIn`, requires that `FaceLookup.font` is stored in `finish` and nowhere else in
+    `CTFactory$FaceLookup`, constructor included: no initialiser or constructor stores it today.
+- **R4. Statements of the story and the README row that the code no longer bore out**: criterion 4's summary still
+  described the thread-less fallback F3 deleted; "Remains for the owner" still named the commit of the further fixes;
+  "The `MacFontBindings` pins" opened "None moved"; the README row kept every pin unchanged. Corrected, with the other
+  statements the four rounds made untrue (commit state, the gate's runs, deviation 8, 30 and the site 12 entries of
+  "Rests on review").
+
+**Tests, helpers and shims.** F2 to F4: 6 more tests in `javafx.graphics`: `MacFontBindingStructureTest` 27 to 30 (any
+OS; 3 new, and S4, S5, S8 and the keep check changed, two of them renamed) and `MacFontReleaseTest` 23 to 26 (3 new,
+macOS, child JVMs). `MacFontReleaseChild` has the three scenarios and a `TaskCall`. `FontCallOrder` (1,782 to 1,914
+lines) has four new helpers, `assertNoHandlerCovers`, `assertNeverThrowsFrom`, `assertNeverReturns` and
+`assertStoredOnlyOnceCallReturns`; `assertCallFollowsUnconditionally` reads the path (F4), and
+`assertHandlerReleasesUnconditionally` also requires the handler to throw and never return, which its other user, the
+check of `CTGlyph.createContext`, still passes. `MacFontFinderShim` hands production's `queueCascadeListTask` a NULL
+font in `cascadeListHandOff`, and gains `queueCascadeListTask(task, font)`, `cascadeListTask` and `awaitList`.
+
+F5 and F6: 8 more tests: `MacFontBindingStructureTest` 30 to 31 (any OS; one new, and the site 12 check replaced) and
+the new `MacFontFaceLookupTest` 7 (macOS, child JVMs of the new `MacFontFaceLookupChild`, 6 scenarios). The new shim
+`CTFactoryShim` makes a factory of a test's own, a subclass of `CTFactory`, whose `findFontIndex` and `mayFindFace`
+go through a test's hooks (`FaceRead`, `FaceQuery`) and which counts the copies handed to `createFontFile`; it reaches
+`addFallbackFont`, `createFontFile` and `mayFindFace` with that factory, and reads by reflection whether a miss is
+remembered and how many lookups are in flight. `MacFontReleaseChild` lends the new child its swapped-face helpers,
+now package-private, and `MacFontReleaseTest` its `swappedFacePreconditions`. `FontCallOrder` is unchanged.
+`MacFontBindings` moves one pin (see "The `MacFontBindings` pins").
+
+R1 to R4: 1 more test, `MacFontFaceLookupTest` 7 to 8 (R2, scenario `lookup.twoFiles`), and three more requirements in
+`aLookupOfAFallbackFaceIsEndedOnEveryWayOutAndSharedByTheCallersThatWait` (R1, R3). `FontCallOrder` has one new
+helper, `assertWrittenBefore`; `CTFactoryShim.remembersAMiss` takes the file and reads the key record's components by
+reflection. The fifth round added no test: `assertWrittenBefore` reads straight-line code only, and a new helper,
+`assertFieldStoredOnlyIn`, is one more requirement of the same check (R3).
+
+**Measured** on this Mac (macOS 27.2.1 arm64, JDK 27.0.1.0.2, Maven 3.10.0), on the final tree of each round:
+
+| run | the further fixes | the Copilot review, F2 to F4 | F2 to F6 | R1 to R4 |
+| --- | --- | --- | --- | --- |
+| font package, no flag (exit 0) | 548 / 0 / 0 / 156 | 554 / 0 / 0 / 156 | 562 / 0 / 0 / 156 | 563 / 0 / 0 / 156 |
+| font package, `-Djfx.parity.require=true` (exit 1) | 548 / 5 / 0 / 151 | 554 / 5 / 0 / 151 | 562 / 5 / 0 / 151 | 563 / 5 / 0 / 151 |
+| the gate of "Verification", no flag (exit 0) | not run | 664 / 0 / 0 / 8 | 672 / 0 / 0 / 8 | 673 / 0 / 0 / 8 |
+| the gate, `-Djfx.parity.require=true` (exit 1) | not run | 664 / 8 / 0 / 0 | 672 / 8 / 0 / 0 | 673 / 8 / 0 / 0 |
+| module, `javafx.graphics` (exit 0) | 26,872 / 0 / 0 / 858 | not run | 26,886 / 0 / 0 / 858 | 26,887 / 0 / 0 / 858 |
+
+- R1 to R4: one more test in each run, the new one, `facesOfOneNameInTwoFilesAreLookedUpAndRememberedApart`, which
+  the font package, the gate (`Mac*Test`) and the module all select; the same 5 and 8 classes fail with the flag, at
+  their machine gates, and the twelve verdict lines are `PROVED` in both font-package runs. The module run took 01:15
+  min, `javafx-graphics` 53.6 s of it. Its console lists 639 test classes, 606 top-level and 33 `@Nested`, whose
+  times add up to 34.8 s and whose tests to 26,887; the 606 `TEST-*.xml` reports, one per top-level class, add up to
+  26,138 tests and 34.4 s, because surefire 3.5.4 writes no report of its own for a `@Nested` class and the 749 tests
+  of the 33 are on the console only. Of the 537 test sources that declare a test, the 4 with no console line are the
+  abstract bases of `test.com.sun.javafx.test` (`CssMethodsTestBase`, `ObjectMethodsTestBase`,
+  `OnInvalidateMethodsTestBase`, `PropertiesTestBase`), whose tests their subclasses run, so every test class ran
+  (`round4/surefire-check.txt`).
+- The fifth round changed no production file and added no test: the font package ran 563 / 0 / 0 / 156 and the gate
+  673 / 0 / 0 / 8 and, with the flag, 673 / 8 / 0 / 0, the same 8 classes, as in the R1 to R4 column; twelve verdict
+  lines `PROVED`.
+- The third round (F1) ran on the same code as F2 to F6, unchanged: the module run of "Verification" with no
+  filter, `mvn -pl modules/javafx.graphics -am test` (01:16 min; `javafx-jslc` 437 / 0 / 0 / 0 and `javafx-base`
+  5,510 / 0 / 0 / 22 besides), 14 more tests than with the further fixes, the 14 new ones, and its twelve verdict lines
+  `PROVED`; then the gate with the flag, 672 / 8 / 0 / 0, the same 8 classes, each at its machine gate.
+- With the flag the font package fails exactly the five `Mac*GoldenTest` comparisons at their machine gate, and the
+  gate those five and `MacAccessibleNativeTest`, `MacClipboardNativeTest` and `MacPixelsNativeTest`, the same 8
+  classes as before; without it they skip. The ten verdict lines are `PROVED` in both font-package runs of F2 to F4,
+  and the twelve of F2 to F6 and of R1 to R4 in both of theirs.
+- F2 to F6: the 8 more tests are the new ones. The first font-package run, before `MacFontBindings` moved its pin,
+  failed the five golden classes at their binding witness without the flag (562 / 5 / 0 / 151, "a call site moved to
+  another binding"); the runs of the table are after the move. No golden file changed (criterion 7); the corpora were
+  not dumped again: F5 and F6 change which caller looks a face up and whether a miss holds once its file changes, and
+  no dump changes a file during a run. R1 and R3 change nothing a single-threaded run sees; R2 looks a face up again
+  for each further file that run fonts of its name report, which can move a row only where one fallback name comes
+  from two files and the first lacks the face. That no corpus row does is not checked: the corpora were not dumped
+  again, and the goldens are no oracle on this Mac.
+- No `hs_err_pid*` file; `git diff --check` clean. CI was not run on any round, nor the module run on the first.
+
+**Mutants.** One hand edit of `MacFontFinder` per row, the classes S and R run (S alone where the row says S only),
+the edit undone by hand and the file checked against the round's checksum after each undo; all 25 killed, with
+failures only, no error. Cluster C's C-M7, C-M20, C-M33, C-M34 and C-M37 are its rows made on the new shape.
+
+| row | fix | the only edit | killed by |
+| --- | --- | --- | --- |
+| F2-M1 | F2 | the `try` and catch around `releaseFont()` deleted | S8, S keep; R release |
+| F2-M2 | F2 | the release's failure stored even where the read failed | R release |
+| F2-M3 | F2 | `addSuppressed` replaced by another call | S keep; R release |
+| F2-M4 | F2 | the catch around `addSuppressed` deleted | S keep only |
+| F2-M5 | F2 | the release's catch rethrows what it kept | S8, S keep; R release |
+| F2-M6 | F2 | `done = true`, the unpark and a return moved into the `try` | S8; R release |
+| F2-W1 | F2 | the loop runs `task.run()` bare | S outlives; R throws |
+| F2-W2 | F2 | the loop catches `RuntimeException` only | S outlives; R throws |
+| F2-W3 | F2 | the loop's catch returns | S outlives; R throws |
+| C-M20 | F2 | `releaseFont` without its pool | S8 (S only) |
+| C-M7 | F2 | `done = true` before the release | S8 (S only) |
+| F3-M1 | F3 | the unpooled fallback restored | S5, S start |
+| F3-M2 | F3 | the fallback answers the empty list | S start |
+| F3-M3 | F3 | `cascadeListWorker` stored before `start` | S start |
+| F3-M4 | F3 | `cascadeListWorker` stored in a `finally` around `start` | S start |
+| F3-M5 | F3 | an `OutOfMemoryError` of `start` caught, then the store | S start (S only) |
+| F4-M1 | F4 | the handler around the add deleted | S owner; R refused |
+| F4-M2 | F4 | the handler rethrows without releasing | S owner; R refused |
+| F4-M3 | F4 | the handler releases twice | R refused only |
+| F4-M4 | F4 | the handler releases and does not rethrow | S owner; R refused |
+| F4-M5 | F4 | the unpark moved into the `try` | S owner only |
+| F4-M6 | F4 | the retain moved back into the task's constructor | S owner; R refused, R release |
+| C-M33 | F4 | the unpark only `if (size() == 1)` | S4 (S only) |
+| C-M34 | F4 | the unpark in a `switch` | S4 (S only) |
+| C-M37 | F4 | a return before the unpark for a `CascadeListTask` | S4 (S only) |
+
+- **S keep**, `aTaskKeepsWhatItsReadAndItsReleaseThrowAndNeverThrowsIt`: F2-M1 "no handler that catches everything
+  covers its call of … releaseFont at instruction 11"; F2-M3 "it never calls java/lang/Throwable addSuppressed";
+  F2-M4 "no handler that catches everything covers its call at instruction 28"; F2-M5 "the handler of
+  java/lang/Throwable from instruction 10 to 12, handled at 13, … never returns and throws at instruction 32".
+- **S8**: F2-M1 the same of the unpark; F2-M5 and F2-M6 "the handler … reaches the throw at instruction 32" or "the
+  return at instruction 37 with no call of … unpark"; C-M20 "releaseFont never calls … objc_autoreleasePoolPush";
+  C-M7 "stores it at instruction 12, before that call at instruction 14".
+- **R release**, `aTaskWhoseReleaseThrowsStillWakesItsCallerWithTheFailure`: F2-M1, F2-M5 and F2-M6 "a caller whose
+  task's release threw was not woken ==> expected: <true> but was: <false>"; F2-M2 "where the read threw, the caller
+  gets the read's failure, not the release's ==> expected: <read> but was: <release>"; F2-M3 "the release's failure
+  is attached to the read's ==> expected: <release> but was: <>"; F4-M6 "what the caller of a task whose release
+  threw gets ==> expected: <java.lang.IllegalArgumentException> but was: <java.lang.IllegalStateException>", the
+  constructor's retain of the heap segment throwing first.
+- **S outlives**, `theCascadeListThreadOutlivesWhatATaskThrows`: F2-W1 and F2-W2 "no handler that catches everything
+  covers its call at instruction 11"; F2-W3 "must never return … it returns at instruction 14". **R throws**,
+  `aTaskThatThrowsDoesNotEndTheCascadeListThread`: "the cascade-list thread did not run the two throwing tasks",
+  since the first task's throw ended it.
+- **S5**, `onlyThePooledRegionReadsTheCascadeList`: F3-M1 "… cascadeListOnAPlatformThread calls it at instructions
+  [6]". **S start**, `aVirtualCallerGetsWhatStartingTheThreadThrowsAndTheNextOneTriesAgain`: F3-M1 and F3-M2 "the
+  handler of java/lang/OutOfMemoryError from instruction 0 to 2, handled at 3, covers its call at instruction 0";
+  F3-M3 and F3-M4 "stores it at instruction 22" (28) ", which no return of that call reaches"; F3-M5 "instruction 29,
+  which a handler around that call reaches".
+- **S owner**, `aTaskOwnsItsReferenceToTheFontOnlyOnceItIsQueued`: F4-M1, F4-M2 and F4-M4 "no handler that catches
+  everything covers its call of … add at instruction 10 and calls … release unconditionally before it throws,
+  reaching no return"; F4-M5 "the handler of java/lang/Throwable from instruction 8 to 14, handled at 15, covers its
+  call at instruction 13"; F4-M6 "never calls … CFRetain, which must come before its call of … add". **R refused**,
+  `aTaskTheQueueRefusesGetsNoReferenceToTheFont`: F4-M1 and F4-M2 "a refused task's reference to the font is released
+  once ==> expected: <0> but was: <1>"; F4-M3 and F4-M6 the same with -1; F4-M4 "what the queue threw ==> expected:
+  <java.lang.NullPointerException> but was: <#null>".
+- **S4**: C-M33 "if_icmpne at instruction 21 comes on the way from its call of … add at instruction 10 to a call of
+  … unpark"; C-M34 "lookupswitch at instruction 20 …"; C-M37 "ifeq at instruction 20 …".
+
+F4-M3's first run ended the child with exit 134 in the
+scenario's own last release, which then freed the font a second time; the scenario now keeps one reference to the
+end, and the row was run again. After the last row S and R ran 30 / 0 / 0 / 0 and 26 / 0 / 0 / 0 on the restored
+tree. The round has had no independent review yet.
+
+**Mutants of F5 and F6.** One hand edit of `CTFactory` or `CTGlyphLayout` per row, with the Edit tool, the classes S, L
+(`MacFontFaceLookupTest`) and R run (S and L alone where the row says so), the edit undone by hand and both files
+checked against the round's checksums after each undo; all 27 killed, with failures only, no error. M5-11a's undo was
+checked together with M5-11b's, whose edit touched other lines and was made before the check; M5-6 to M5-8 each
+replaced the same line in turn and were undone once, then checked. S is the two new checks: "S copy" is
+`layoutCopiesTheRunFontOnlyWhereTheFactoryMayFindItsFace`, "S lookup"
+`aLookupOfAFallbackFaceIsEndedOnEveryWayOutAndSharedByTheCallersThatWait`.
+
+| row | fix | the only edit | killed by |
+| --- | --- | --- | --- |
+| M5-1 | F5 | the version check deleted: `mayFindFace` says no for the same path | L miss; L changed |
+| M5-2 | F5 | the path ignored: no comparison of the remembered file | L miss (the child's own `NullPointerException`) |
+| M5-2b | F5 | the path compared only for null: keyed by name and version (S, L only) | L miss |
+| M5-3 | F5 | the version taken after the read | L miss |
+| M5-4 | F5 | the comparison after the read deleted (S, L only) | L miss only |
+| M5-5 | F5 | a read that throws taken as no face, and remembered | L miss, L failed; R unreadable |
+| M5-6 | F5 | the file key left out of the version (S, L only) | L miss |
+| M5-7 | F5 | the time left out of the version (S, L only) | L miss |
+| M5-8 | F5 | the size left out of the version (S, L only) | L miss |
+| M5-9 | F5 | a font that reports no file not remembered | L miss; R no file |
+| M5-10 | F5 | a file whose stat fails taken as unchanged | L miss |
+| M5-11a | F5 | the run's font copied, and released, in `getFontSlot` before the miss check | S copy only |
+| M5-11b | F5 | the copy in `lookUpFallbackFont` made before the re-check, released where unused | S copy only |
+| M5-12 | F5 | `getFontSlot` hands the lookup no file | S copy; L changed, L moved; R face, R unreadable |
+| M5-13 | F5 | the miss check of `addFallbackFont` deleted | S copy (L late, through its hook) |
+| M6-1 | F6 | no lookup registered: each caller runs its own (S, L only) | S lookup; L found, L missing, L failed |
+| M6-2 | F6 | the entry ended only on an `Exception`, not on an `Error` (S, L only) | S lookup; L failed |
+| M6-3 | F6 | a waiter waits, then runs a lookup of its own (S, L only) | S lookup; L failed |
+| M6-3b | F6 | a waiter waits, then copies and parses (S, L only) | S lookup, S copy; L found, missing, failed |
+| M6-4 | F6 | the interrupt cleared, not set again, after the wait (S, L only) | L found, L missing, L failed |
+| M6-5 | F6 | an interrupt ends the wait with no font (S, L only) | L found, L missing, L failed |
+| M6-6 | F6 | the waiters woken before the entry is removed (S, L only) | S lookup only |
+| M6-7 | F6 | the removal and the wake-up in a row, no `finally` (S, L only) | S lookup only |
+| M6-8a | F6 | the re-check of the factory's map dropped (S, L only) | L late |
+| M6-8b | F6 | the re-check of the remembered miss dropped (S, L only) | S copy; L late |
+| M6-9 | F6 | `await` `synchronized` (S, L only) | S lookup; L found, L missing, L failed |
+| M6-10 | F6 | the waiters handed no font (S, L only) | L found only |
+
+- **L miss**, `aMissHoldsOnlyWhileTheRunFontReportsTheSameFileInTheSameVersion`: M5-1 "the file is looked up again once
+  its time changed ==> expected: <true> but was: <false>", M5-6 the same of its key, M5-7 of its time, M5-8 of its size;
+  M5-2 "child JVM 'lookup.missVersion' exited with 1", a `NullPointerException` in `mayFindFace` when a no-file miss is
+  asked with a file; M5-2b "a run font that reports another file is looked up ==> expected: <true> but was: <false>",
+  the hard link; M5-3 and M5-4 "a file that changed while it was read ==> expected: <false> but was: <true>"; M5-5 "a
+  file whose read threw is not remembered ==> expected: <false> but was: <true>"; M5-9 "a font that reports no file is
+  remembered by its name ==> expected: <false> but was: <true>"; M5-10 "a file that is gone is looked up again ==>
+  expected: <true> but was: <false>". M5-4 is the one row whose answers `mayFindFace` gives alike: a miss stored with
+  the version before the read no longer holds once the file changed; the record itself, read through the shim, kills it.
+- **L changed**, `aFaceItsFileLackedIsFoundOnceTheFileHoldsIt`, and **L moved**,
+  `aFaceItsFileLackedIsLookedUpInAnotherFileOfItsName`: `REFUTED`, "found = -1, expected a slot of 1 or more: the face
+  is looked up again and added; … the child printed 0 lookups of Ahem in …/face.ttf that found it" (M5-1, M5-12).
+- **L found**, `callersThatNeedAFaceAtOnceShareOneLookupAndItsFontFile`, **L missing**,
+  `callersThatNeedAFaceItsFileLacksAtOnceShareOneLookupAndItsMiss`, and **L failed**,
+  `aLookupThatFailsLeavesNothingBehindAndTheNextCallerLooksAgain`: M6-1 and M6-9 "a caller that came meanwhile waits
+  for it ==> expected: <true> but was: <false>" (under M6-1 the found case read 2 times and the missing one 3; under
+  M6-9 the second waiter is BLOCKED on the monitor, and the failed child ran past its 60 s); M6-2 "error.every caller's
+  call ended ==> expected: <true> but was: <false>", with one lookup left in flight and the next caller never ending;
+  M6-3 "unreadable.the callers read the file once ==> expected: <1> but was: <3>" (found and missing pass: the waiter's
+  own lookup finds what the first left, through the re-check), M6-3b the same in all three; M6-4 "the interrupt is set
+  again ==> expected: <true> but was: <false>"; M6-5 "an interrupt does not end the wait ==> expected: <true> but was:
+  <false>"; M6-10 "platform has the face as a slot: -1"; M5-5 "unreadable. what the lookup threw ==> expected:
+  <java.io.FileNotFoundException> but was: <#null>".
+- **L late**, `aCallerThatTakesUpALookupOnceAnotherHasEndedUsesWhatItLeft`: M6-8a "found. the file is read once ==>
+  expected: <1> but was: <2>", M6-8b "missing. the file is read once ==> expected: <1> but was: <2>"; under M5-13 the
+  late caller's hook comes to sit inside the lookup it runs, so the leader waits for it: "found. the leader's call ended
+  ==> expected: <true> but was: <false>", which is the hook's shape, not a pin of M5-13.
+- **S copy**: M5-11a "getFontSlot must call none of … OS CTFontCreateCopyWithAttributes … but it calls … at
+  instructions [76]"; M5-11b, M6-3b and M6-8b "lookUpFallbackFont must call … CTFontCreateCopyWithAttributes and …
+  fontFileOfCopy only where … mayFindFace answers true"; M5-12 "getFontSlot must hand each of its calls of …
+  addFallbackFont, as argument 3, what its first call of … CTFontCopyURLAttribute answers"; M5-13 "addFallbackFont must
+  call … lookUpFallbackFont only where … mayFindFace answers true … but it never calls … mayFindFace".
+- **S lookup**: M6-1 "lookUpFallbackFont never calls … beginLookup, which must come before its call of …
+  FaceLookup await"; M6-2 "lookUpFallbackFont must call … endLookup before each return or throw after its first call of
+  … getFontResource, and in each handler that covers that call, one of which catches everything"; M6-3 and M6-3b "must
+  return what its first call of … FaceLookup await answers … but instruction 13 … is pop, not a return"; M6-6
+  "endLookup calls … FaceLookup finish before java/util/concurrent/ConcurrentHashMap remove"; M6-7 "endLookup must call
+  … finish before each return or throw after its first call of … ConcurrentHashMap remove, and in each handler that
+  covers that call, one of which catches everything"; M6-9 "FaceLookup.await may take no monitor … but it is
+  synchronized".
+- **R**: M5-5 `aFaceLookupThatCannotReadItsFileIsMadeAgainAtTheNextLayout` `REFUTED`, "the child printed 1 lookups of
+  Ahem that found no face, where the file either could not be read or had it"; M5-9
+  `aFallbackFontThatReportsNoFileIsLookedUpOnce` `REFUTED`, "Ahem was looked up with filename=null 5 times over 5
+  layouts"; M5-12 ("R face") `aFallbackFaceItsFontFileLacksIsLookedUpOnce` `REFUTED`, "Ahem was looked up with
+  filename=…/face.ttf 0 times over 5 layouts", and the unreadable check `REFUTED`, "answer.readable = -1".
+
+Structure only, where no run-time test sees the change: M5-11a and M5-11b (a copy made and released moves no retain
+count, deviation 20), M5-13 (the lookup's own re-check answers the same), M6-6 (a caller that comes between the wake-up
+and the removal joins an ended lookup and gets its outcome at once) and M6-7 (the removal does not throw). After the
+last row S, L and R ran 31 / 0 / 0 / 0, 7 / 0 / 0 / 0 and 26 / 0 / 0 / 0 in the font-package runs on the restored tree.
+The second round has had no independent review yet.
+
+**Mutants of R1 to R3.** Made, undone and checked as above, against the fourth round's checksums; the classes S and L
+run (R too where the row says so). All 13 killed. The first six rows are new; the other seven are rows of F5 and F6 run
+again on the code R1 and R2 reshaped (`mayFindFace`, the no-file miss, `beginLookup`, `endLookup`). M6-1-r4's undo was
+checked together with M6-2-r4's, made before the check on other lines of the same method, and R4-1 and R4-2, M6-6-r4
+and M6-7-r4, M5-1-r4 and M5-10-r4 each edited one region in turn and were undone once, then checked.
+
+| row | fix | the only edit | killed by |
+| --- | --- | --- | --- |
+| R4-1 | R1 | no handler around `putIfAbsent` in `beginLookup` | S lookup only |
+| R4-2 | R1 | the handler rethrows without ending the lookup | S lookup only |
+| R4-3 | R1 | `endLookup` makes the key again (`faceKey`) | S lookup only |
+| R4-4 | R2 | the lookup's key made without the file | L two |
+| R4-5 | R2 | the miss read and stored under the name alone (`""` for any file) | L two, L miss, L missing |
+| R4-6 | R3 | `finish` counts down before it stores the outcome | S lookup only |
+| M5-1-r4 | F5 | the version check deleted | L miss; L changed |
+| M5-9-r4 | F5 | a font that reports no file not remembered (S, L, R) | L miss; R no file |
+| M5-10-r4 | F5 | a failed stat taken as unchanged | L miss |
+| M6-1-r4 | F6 | no lookup registered | S lookup; L found, L missing, L failed |
+| M6-2-r4 | F6 | the lookup ended only on an `Exception` | S lookup; L failed |
+| M6-6-r4 | F6 | the waiters woken before the removal | S lookup only |
+| M6-7-r4 | F6 | the removal and the wake-up in a row, no `finally` | S lookup only |
+
+- **S lookup**: R4-1 and R4-2 "CTFactory.beginLookup must call … CTFactory endLookup, with no condition before it, in a
+  handler that catches everything its first call of java/util/concurrent/ConcurrentHashMap putIfAbsent throws, before
+  the handler throws, never returning"; R4-3 "CTFactory.endLookup must call none of … CTFactory faceKey, … FaceKey,
+  java/lang/String … but it calls … CTFactory faceKey at instructions [8]"; R4-6 "CTFactory$FaceLookup.finish may
+  store … font only before its first call of java/util/concurrent/CountDownLatch countDown … but it stores it at
+  instruction 5, after that call at instruction 2"; the reruns the messages of their rows above.
+- **L two**, `facesOfOneNameInTwoFilesAreLookedUpAndRememberedApart`: R4-4 "a caller of another file waits for nothing
+  ==> expected: <true> but was: <false>"; R4-5 "the file that lacks the face is remembered ==> expected: <true> but
+  was: <false>", with `alternating.reads` 6 where 2 is right, the alternation the review described. R4-5 also fails
+  "a run font that reports another file is looked up" (L miss) and "the miss is remembered" (L missing).
+- The reruns gave the messages of their rows above: M5-1-r4 "…once its time changed", M5-9-r4 "filename=null 5
+  times" and "remembered by its name", M5-10-r4 "a file that is gone is looked up again", M6-1-r4 "a caller that came
+  meanwhile waits for it", M6-2-r4 "error.every caller's call ended".
+
+Structure only: R4-1 to R4-3 (no test makes `putIfAbsent` or the removal throw) and R4-6 (the race window). A
+confirming review passed the fourth round's code and left the five items of the fifth round.
+
+**Mutants of the fifth round.** Made, undone and checked as above, against the fifth round's checksums (the same
+production files as the fourth round's final ones); the class S run. All 4 killed, all structure only: no run-time test
+sees the order in which one thread stores and counts down.
+
+| row | fix | the only edit | killed by |
+| --- | --- | --- | --- |
+| R5-1 | R3 | `finish` loops twice, storing only on the second pass, after the first pass's count-down | S lookup only |
+| R5-2 | R3 | `await` stores `font` (to itself) after the wait | S lookup only |
+| R5-3 | R3 | the constructor stores `font` (null) | S lookup only |
+| R4-6-r5 | R3 | R4-6 again: `finish` counts down before it stores | S lookup only |
+
+- R5-1: "CTFactory$FaceLookup.finish may store … font only before its first call of … countDown, in straight-line code,
+  so that a waiter the latch lets through reads the outcome; but if_icmpge at instruction 4 can carry a store past the
+  call". Its `javap` (`round5/mutants/R5-1.javap.txt`) has the store at instruction 14 before the count-down at 21 in
+  code order, with `goto 2` carrying the second pass's store past the first count-down, so the code-order rule of the
+  fourth round alone passed it.
+- R5-2 and R5-3: "CTFactory$FaceLookup.font may only be stored in finish, so that a waiter the latch lets through
+  reads the outcome; but await stores it at instruction 8" and "… but <init> stores it at instruction 15".
+- R4-6-r5: "… but it stores it at instruction 5, after that call at instruction 2".
 
 ### Measured (2026-11-21 to 2026-11-23; Apple arm64, macOS 27.2.1 (26B131), JDK 27.0.1.0.2, Maven 3.10.0; and CI)
 Before: a clean tree at HEAD `abe0943d31`. After: the same commit with the final tree of this change (25 files,
@@ -789,9 +1389,11 @@ Before: a clean tree at HEAD `abe0943d31`. After: the same commit with the final
     0 / 0 / 0 without and with `-Djfx.parity.require=true` (`impl2/LAST/fix-r1/touched-fix-r1-last.log`,
     `touched-require-fix-r1-last.log`), and the closing round ran `MacFontReleaseVerdictTest` and `MacFontReleaseTest`
     82 / 0 / 0 / 0 both ways (`impl2/CLOSE/k3/touched-k3.log`, `touched-require-k3.log`).
-  - As of 2026-11-23 the further fixes have run only on this Mac (macOS 27.2.1 arm64). Their macOS tests have never
-    run on macOS 15, their any-OS tests have never run on Linux or Windows, and the macOS 15 verdict lines of the new
-    checks are unknown until the next CI run.
+  - The fixes of the Copilot review were measured after these, on the same Mac: see "The Copilot review".
+  - Until CI run 45278364431, the push of `e1de3dd32a`, the further fixes had run only on this Mac (macOS 27.2.1 arm64).
+    That run passed them on macOS 15 (arm64 and x64; `javafx-graphics` 26,872 tests on each), Linux aarch64 and
+    Windows x64, with all ten verdict lines `PROVED` on both macOS 15 runners; its Linux x64 job stopped at an HTTP 429
+    of Maven Central before it compiled anything (F1 under "The Copilot review").
 
 ### Criterion 1: sites 1 to 7
 `MacFontNullInputTest`, one test per row, each in a child JVM, so a crash fails the test instead of ending the
@@ -905,6 +1507,9 @@ and 7 dies: exit 133 (SIGTRAP, no `hs_err` file) at a `CFRelease(NULL)` or the f
   - `MacFontReleaseTest.aFaceItsFontFileLacksIsRememberedByItsName` (the CI fix, any macOS): an invented name looked
     up in a copy of Helvetica's font finds no face and is remembered after it, in either case; "Helvetica", whose
     face is found, is not.
+  - Since the Copilot review (F5, F6) `MacFontFaceLookupTest` pins that the miss holds only for the same file in the
+    same version, that callers of one name and file at once share one lookup, found, missing or failed, and since R2
+    that two files of a name are looked up and remembered apart; see "The Copilot review".
 
 ### Criterion 5: site 11
 - `GlyfTableBoundsTest.aBoxTooShortForFourValuesIsLeftAsItWas`: `int[1]`, `int[2]` and `int[3]` sentinels are
@@ -1437,14 +2042,16 @@ its cluster or, for a row run again, of the later step that ran it (named under 
 killed on the final tree rests on the argument under "What ran where". L2 does not compile, C-M14 is equivalent, and
 M8g7 survives, unpinnable (deviation 20). The hardening round ran 11 of the rows again, each killed as before: C-M1,
 C-M2a, C-M2b, C-M5, C-M6, C-M11, C-M21, C-M23, M1a, M1b and M9a; the closing round ran C-M32 again, killed as before.
-Besides them, 14 of US-111's rows were run again in the clusters, on this Mac, and were killed, R3 and R5 for the
+The Copilot review's 25 rows are under "The Copilot review"; all were killed. Besides them, 14 of US-111's rows
+were run again in the clusters, on this Mac, and were killed, R3 and R5 for the
 first time: M9, R3, R5, M4c, M6, M10a, M10b, M10g, M10h, M10k, M10l, M12a, M12b and M12f; the closing round ran M10b
 and M10h again, killed as before. M10d is retired with the test it proved; M10c, M10e and M10m edit code that cluster
 C replaced, where C-M10, C-M9 and C-M2a make the same edits. US-111's other rows were not run again. Xh-ctl-t,
 Xs-ctl-t and T-sanity are controls that survive by design.
 
 ### The `MacFontBindings` pins
-None moved. `MacFontBindings.java` has no diff, and `requireSameBinding` passed in all five golden classes in every
+The original change moved none (the Copilot review's F5 moved one, at the end of this section). `MacFontBindings.java`
+had no diff, and `requireSameBinding` passed in all five golden classes in every
 gate, before their machine check ("native methods left: OS 0, MacFontFinder 0, DFontDecoder 0").
 - The `OS` call sites of the peers are those of HEAD in `javap -c -p`: `CTFactory` `OS.CFRelease*2` and
   `OS.CTFontCopyURLAttribute`, `CTGlyphLayout` `OS.CFRelease*10` and one `OS.CTFontCreateCopyWithAttributes`,
@@ -1474,6 +2081,14 @@ The further fixes moved no pin either: `MacFontBindings.java` has no diff agains
 5 call sites of `OS.CGContextRelease`, `CTGlyphLayout` still calls `OS.CTRunGetGlyphs` twice and `CTFontFile`'s call
 sites did not move, and `MacFontBindingsTest` and every other class of the font package passed on the final tree
 (see "Measured").
+
+The Copilot review's F5 moves one pin, with the reason in the comment of `NATIVE_CALL_SITES`: the call site of
+`OS.CTFontCopyURLAttribute` goes from `CTFactory` (`createFontFile`) to `CTGlyphLayout` (`getFontSlot`), which copies
+the run font's URL before it asks for a remembered miss and before any copy of the font. `CTFactory` pins
+`OS.CFRelease*2` alone and `CTGlyphLayout` gains `OS.CTFontCopyURLAttribute`; every other entry is unchanged, and so
+is the binding: both classes call the same `OS` method the shims bind. Before the move the five golden classes failed
+at the witness, "a call site moved to another binding", and after it they pass it in both font-package runs and both
+gates of F2 to F6.
 
 ### Criteria 7 to 9
 - **7, goldens.** `git diff --stat` over the five `mac-*-golden.txt` files and over `src/test/resources` prints
@@ -1508,6 +2123,14 @@ sites did not move, and `MacFontBindingsTest` and every other class of the font 
     lines are those of `f352c6008c`; `OS.java` line 52 is still the one longer line, untouched. No tab, CR or
     trailing whitespace; the seven modified files whose header carried an older year now end in 2026, and the 11 new
     files carry their sibling's header with 2026 (checked on the tree on 2026-11-23; `git diff --check` clean).
+  - The Copilot review: `MacFontFinder` 492 lines (456 at `e1de3dd32a`). In the 6 files it changes no line is over
+    120 columns and none holds a tab or trailing whitespace (`git diff --check` clean); their headers already end in
+    2026. The two empty catches name their throwable `_` (JEP 456, final since JDK 22), each with a why-comment.
+  - F5 and F6: `CTFactory` 267 lines (180 at `e1de3dd32a`), `CTGlyphLayout` 250 (215); after R1 to R4 294 and 251,
+    with the same rules checked on the 13 files again. In the 10 files of code both
+    rounds change and the 3 new ones (`CTFactoryShim`, `MacFontFaceLookupChild`, `MacFontFaceLookupTest`) no line is
+    over 120 columns and none holds a tab or trailing whitespace; the new files carry the 2026 header, the others
+    already ended in 2026. No `var`. The two catches of `CTFactory` that keep nothing name their throwable `_`.
 
 ### Rests on review
 No test covers these paths in full; each was checked by reading, in a review. The list is what is open on the final
@@ -1538,22 +2161,29 @@ written in place, the lent-font check's wiring, and a null stored over the fonts
     returns and throws reached from the entry and the handlers that cover the region's first call; an exception that
     a call throws outside those handlers is not an exit they read. On the healthy tree such calls are the releases
     themselves (`pooledCascadeList`'s pop, `awaitList`'s `Thread.interrupt`) and, in `CascadeListTask.run`, the
-    push, `CFRelease` and pop of the task's own pool, the volatile store of `done` and the unpark. That none of these
-    throws on the worker rests on reading: its stack is fixed and shallow, the long token allocates nothing, and
-    `VirtualThread.unpark` retries an `OutOfMemoryError` itself. If one did throw, the task's reference would leak,
-    its caller would park for ever and the worker would end.
-  - No run-time test makes the read of the list throw: what each handler does with a failed read (pop the pool,
-    release the font, keep the failure, set the interrupt again before the rethrow) is pinned only in the class file.
+    unpark. Since the Copilot review (F2) what the push, `CFRelease` or pop of the task's own pool throws is kept
+    for the caller, who is woken; that the unpark, and the entry of `run` and of `releaseFont`, throw nothing on the
+    worker rests on reading: its stack is fixed and shallow, the long token allocates nothing, and
+    `VirtualThread.unpark` retries an `OutOfMemoryError` itself. If the unpark did throw, its caller would park for
+    ever; the worker would not end.
+  - Since the Copilot review a heap segment for a font makes the read and the release throw at run time
+    (`aTaskWhoseReleaseThrowsStillWakesItsCallerWithTheFailure`), which shows the read's failure kept, the release
+    made and the caller woken; that the pool is popped and the interrupt set again before the rethrow on that path is
+    still pinned only in the class file.
   - A `StackOverflowError` at the entry of `Thread.interrupt()` in `awaitList`'s `finally`, or of
     `objc_autoreleasePoolPop` in `pooledCascadeList`'s `finally` on a platform caller, is inherent to the JVM and is
     not provoked. That nothing is allocated between the native push and the `try` that pops it rests on the
     `JAVA_LONG` descriptor, which `MacObjCNativeTest` pins; no `OutOfMemoryError` is provoked there.
-  - An `Error` between the native `CFRetain` in the task's constructor and a completed queue add leaks one reference
-    to the CTFont, on purpose: never a use after free. Not provoked, nor an `Error` thrown by the add itself (the same
-    leak, and the caller gets the error) or at the entry of the unpark (a lost wake-up, which the next add's unpark
-    repairs).
-  - The worker never ends: poll, park and `Thread.interrupted` throw nothing, and every task keeps what its read
-    throws (pinned for `CascadeListTask` by the keep check); short of a VM failure this rests on reading. No run-time
+  - Since the Copilot review (F4) `queueCascadeListTask` retains the font right before the add, and a handler over
+    the add releases it and rethrows; a refused add is provoked with a null task, an add that runs out of memory is
+    not. Two windows stay, both leaks of one reference to the CTFont and never a use after free: an
+    `OutOfMemoryError` while `CFNative.CFRetain` boxes its answer, after the native retain (its descriptor answers an
+    `ADDRESS`, and a handler over it could not tell that failure from one before the retain, whose release would free
+    a font still in use), and a `StackOverflowError` at the add's call, whose handler's release then most likely
+    overflows too and replaces the error. A failure at the entry of the unpark is a lost wake-up, which the next add's
+    unpark repairs; the task keeps its reference.
+  - The worker never ends: since the Copilot review (F2) its loop catches everything a task throws, pinned in the
+    class file and at run time; that poll, park and `Thread.interrupted` throw nothing rests on reading. No run-time
     test sees a wake-up made conditional: C-M33, C-M34, C-M37 and C-M38 pass `MacFontReleaseTest`, so S4 is its only
     pin. The hand-off's memory visibility rests on the Java Memory Model: an add to the `ConcurrentLinkedQueue`
     happens before the poll that sees it, and `done` is volatile and read before the list and the failure.
@@ -1566,9 +2196,8 @@ written in place, the lent-font check's wiring, and a null stored over the fonts
     font-layer monitor and needs no class a caller could be initialising, so it cannot deadlock with it: the monitors
     are pinned, the class initialisation rests on reading.
   - C-M14 is equivalent and `hold.daemon` cannot fail: the worker's production starter is always a virtual thread,
-    whose threads are daemons. A failed start of the thread (an `OutOfMemoryError`) makes the list on the virtual
-    caller without a pool, as before this story; only the class-file check that `cascadeList` is called in that
-    handler pins it.
+    whose threads are daemons. Since the Copilot review (F3) a failed start of the thread reaches the virtual caller
+    and leaves no thread recorded; no test can make the start fail, and only the class file pins it.
   - The language-codes copy sits inside the pool; the class file pins the push before it, and no mutant moved it.
     Whether the last `CFRelease` on the error path autoreleases anything is not observed; it runs inside the task's
     own pool, so whatever it autoreleases is drained.
@@ -1586,11 +2215,52 @@ written in place, the lent-font check's wiring, and a null stored over the fonts
     `retain.afterRun` spans, the caller's call with the task's `CFRetain` and its own release, rests on reading
     `MacFontReleaseChild.cascadeListLentFont`: `MacFontReleaseVerdictTest` pins the messages' text, not that it is
     true, and the run-time check decides on the outcome alone, so under K3-M1 it printed the old wording and passed.
-- **Site 12.** Two concurrent first layouts may each parse once, as the found path can; the test is single-threaded.
-  The skipped repeat lookup stored nothing: `findFontIndex` parses with `register == false` and adds nothing to the
-  font maps. That a `CTFontFile` made by two racing layout threads costs one retained CTFont copy, not a lost font,
-  rests on reading. The body that asks `mayFindFace`, copies anyway and uses the answer only for `addFallbackFont`
-  (M12g) is pinned only by the class-file check: no run-time test sees a copy made and then leaked (deviation 20).
+- **Site 12.** The skipped repeat lookup stored nothing: `findFontIndex` parses with `register == false` and adds
+  nothing to the font maps. A copy of the run's font made before the miss check, and released (M5-11a, M5-11b), is
+  pinned only by the class-file check: no run-time test sees a copy made and then released or leaked (deviation 20).
+  Since the Copilot review (F6) callers that need a face in one file at once share one lookup, held at a hook in the
+  tests; what rests on reading follows. Since R2 two lookups of one name in two files can run at once; where both
+  files hold the face, each makes a font file and `storeInMap` keeps the later under the name, while each caller adds
+  the one its lookup made: two faces of one name, as two installed copies are. That `finish` publishes the outcome
+  through the latch rests on the Java Memory Model and on the class-file pin of the order (R3): no run-time test sees
+  a swap.
+- **Site 12, the lock trace** (F6). A caller waits for a lookup in flight with no monitor held. `GlyphLayout.layout`
+  has one production caller, `PrismTextLayout.shape` (`PrismTextLayout.java:897`), reached from its `layout()` and the
+  break-run path, which take no monitor; the text package's only `synchronized` blocks are `CACHE_SIZE_LOCK` around the
+  string cache's put, after layout, and the static `ScriptMapper.getScript`. Every class that makes a text layout
+  (`Text`, `TextFlow`, `NGCanvas`, `PrismTextLayoutFactory`, `TextLayoutFactory`, the controls' `Utils` and
+  `TextFieldSkin`, web's `TextUtilities` and `WCGraphicsPrismContext`) has no `synchronized`; `Toolkit`'s and
+  `QuantumToolkit`'s guard listeners, hooks and the pulse timer, none around a layout. `WCFontImpl.getTextRuns` and
+  `getGlyphCodes` call `TextUtilities.createLayout` outside `synchronized (FONT_MAP)`, which covers only the filling of
+  the family map (`WCFontImpl.java:51-67`). No method of the font package lays text out: it uses `GlyphLayout` only as
+  the type its factories make, so no font-layer monitor (`LogicalFont`, `FallbackResource`, the factory, a font file,
+  `FileRefCounter`, `FontFileReader`) is held at `getFontSlot`; `CTGlyphLayout`'s own methods down to the wait take none
+  (pinned). The lookup that runs takes the factory's monitor only inside `getFontResource` and `storeInMap`, and a font
+  file's and its reader's inside `CTFontFile`'s constructor, each released before it returns, in deviation 17's order;
+  it waits for nothing but its own file reads, so no cycle passes through a lookup in flight. It reads the file and
+  stats it under no monitor. The render thread, which lays out `NGCanvas` text, may hold the render lock, a
+  `ReentrantLock`, while it waits: nothing a lookup runs takes that lock (as deviation 17 has it for the font layer's
+  monitors), so the lookup it waits for is not blocked by it. A virtual caller unmounts while it waits
+  (`CountDownLatch`, pinned to take no monitor and call no `Object.wait`); no virtual-thread test checks unmounting.
+- **Site 12, what no test provokes.** A `StackOverflowError` at the entry of `endLookup`, or a removal that throws,
+  would leave the name and file in flight for good: later callers would join a lookup that never ends (the first) or
+  one that ended (the second; its `finally` still wakes the waiters, whose outcome later callers then get). The removal
+  can allocate: a `ConcurrentHashMap.remove` of a key and value counts the removal down, and under contention its
+  `fullAddCount` can allocate counter cells, so an `OutOfMemoryError` there is the second case. Since R1 the key is
+  made before the registration and `endLookup` makes none, and a registration that throws ends its own lookup: an
+  `OutOfMemoryError` from `putIfAbsent` leaves nothing in flight. A `StackOverflowError` inside `putVal` and
+  `addCount`, after the node is linked, is not covered so: the handler's own `endLookup` and its removal run at about
+  the same stack depth and can overflow again, and the entry then stays registered and unfinished, so later callers of
+  that name and file park in `await` for good. A `StackOverflowError` inside `finish`, in `countDown` before its
+  compare-and-set, in `endLookup`'s `finally`, leaves the latch closed after the entry is removed: the waiters already
+  parked stay parked for good, while later callers begin a lookup of their own. A bounded wait would end both, but
+  would change the design; none of these throws is provoked, and the class file pins the handler and the key. The
+  late leader's re-check asks `getFontResource`, which can read a font file under the factory's monitor only for a name
+  the factory's file maps hold, which `getSlotForFont` asked about a moment before.
+- **Site 12, the version.** A file rewritten in place with the same size within the file system's time resolution
+  keeps its version; on APFS the time has nanoseconds. `fileKey()` is the device and inode on macOS; a file system that
+  gives none compares time and size only. The version follows a symbolic link to its file. Each layout of a run
+  whose face is remembered missing copies the run font's URL and stats the file once; neither was measured.
 
 **The NULL guards and the verdicts** (items 6, 7, 11 and 12).
 - What `bold` becomes when the bold string is NULL: the class-file pin checks only that `CFStringFind` is skipped, so
@@ -1724,20 +2394,25 @@ written in place, the lent-font check's wiring, and a null stored over the fonts
   fallback runs that items 8b and 8c change, before its machine gate; only its comparison is skipped there, so
   nothing is compared. That no row of `linux-pango-golden.txt` or `directwrite-metrics-golden.txt` moves through 8b
   rests on reading the code and the goldens' slot bytes; the 609 DirectWrite rows of 8c were computed from the golden,
-  and that a re-capture moves exactly those rests on reading `DirectWriteMetricsGoldenTest.captureFont`.
+  since the Copilot review (F1) by a script that asserts each step, and that a re-capture moves exactly those, and
+  draws the 16 glyphs that no row of the file holds with the fonts their new codes name, rests on reading
+  `DirectWriteMetricsGoldenTest.captureFont` and the slot path.
 - That `findFontIndex` is reached under no font-layer monitor, so nothing is read from disk under the factory's,
   rests on reading its one caller chain (`CTFactory.createFontFile`, from `CTGlyphLayout.addFallbackFont` in
-  `getFontSlot`, from `layout`).
+  `getFontSlot`, from `layout`; since the Copilot review through `fontFileOfCopy` and `lookUpFallbackFont` between
+  them, and the stats of `versionOf`, from `mayFindFace` and `createFontFile`, under no monitor either).
 
 **What ran where.**
-- As of 2026-11-23 the further fixes have run only on this Mac (macOS 27.2.1 arm64). That their any-OS tests are safe
-  on Linux and Windows rests on reading: they read class files through the module, use class literals, reflection or
+- Until CI run 45278364431 the further fixes had run only on this Mac (macOS 27.2.1 arm64); that run passed them on
+  Linux aarch64 and Windows x64, while its Linux x64 job compiled nothing. That their any-OS tests are safe on Linux x64
+  rests on that and on reading: they read class files through the module, use class literals, reflection or
   a factory of no platform, load no platform factory and touch no native, as the class-file checks of
   `MacFontBindingStructureTest` already do on CI. `MacFontNullInputVerdictTest` loads the macOS-gated
   `MacFontNullInputTest` there, whose static initialiser only compiles a regular expression (ruling L6). This Mac's
   class-initialisation traces of `CompositeSlotRaceTest` and `FontSharedStateRulesTest` show no `PrismFontFactory`;
   the second was taken before that test called `MacFontBindingStructureTest.nest`.
-- How the macOS tests decide on macOS 15 is predicted by reading: `PROVED`, or `CANNOT_SHOW` at a precondition.
+- On CI run 45278364431 every verdict line was `PROVED` on both macOS 15 runners and every macOS test passed; before
+  it, how the macOS tests decide on macOS 15 was predicted by reading: `PROVED`, or `CANNOT_SHOW` at a precondition.
   `REFUTED` on a healthy tree needs one of the three host behaviours named under "Verification"; a failed plain
   assertion, or a child that fails, needs one of the host behaviours the entries above name as unseen on macOS 15: a
   two-thread image that depends on more of the cached context's history than its last draw; a CoreText thread that
@@ -1747,8 +2422,7 @@ written in place, the lent-font check's wiring, and a null stored over the fonts
   face's file is replaced or deleted under a CTFont in use. The virtual drain check keeps its hard rule, a call that
   leaves 10 or more blocks per call refuted on every host (ruling L6): on macOS 15 at `f352c6008c` a pooled call on a
   platform caller left 4.06 (arm64) and 4.01 (x64) blocks per call, and the thread per virtual call that this tree no
-  longer starts 10.73 and 10.94. What the worker's call leaves there is unmeasured; the first macOS 15 line of the
-  virtual drain check gives it.
+  longer starts 10.73 and 10.94. On CI run 45278364431 the worker's call left 4.02 (arm64) and 4.05 (x64).
 - Nine macOS tests depend on the host's composites: eight of the 11 macOS tests of `CompositeFontLocksTest` and
   `PrismFontFactoryTest.aFontAddedToACompositeIsInTheSlotItIsGiven` need room for one or two more slots under the
   0x7E slot cap. Where the host's composite has none they skip through `ParityGate.requireOracle`, or fail under
@@ -1933,6 +2607,39 @@ In the session scratch directory, which is temporary: under
   K2), of its four reviews and of its three fix rounds are `impl2/records/close-run.json`. The records of ruling K3's
   step, of its review and of the final evidence are not in the scratch directory, and their runs, diffs and logs are
   the files above.
+- **The Copilot review:** under the same parent, the directory `b0b9aae3-5178-4650-8523-65d1e0e4fbdf/scratchpad/`:
+  `font.log`, `font-require.log`, `gate-noflag.log` and `gate-require.log` (the runs of its table), `run1.log`,
+  `fixed.sha256` (the round's `MacFontFinder`), and per row `mutants/<row>.diff`, `.log` and `.summary`, each diff
+  against `e1de3dd32a` and so holding the round's fix with the row's edit; `mutants/restored-green.log`. F4-M3's
+  first run, whose child the scenario's own release crashed, was overwritten by its second.
+- **The Copilot review, F5 and F6:** in the same directory, under `round2/`: `font.log`, `font-require.log`,
+  `gate-noflag.log` and `gate-require.log` (the runs of its column), `final-font.log`, `final-font-require.log`,
+  `final-gate-noflag.log` and `final-gate-require.log` (the same four again once the story was written, on the same
+  code), `font-before-pin-move.log` (the run that failed the golden witness before the pin moved), `font-verdicts.txt`,
+  `checks.log` (no `hs_err_pid*`, no golden diff, `git diff --check`), `iter1.log` to `iter5.log` (the runs while the
+  tests were written), `fixed.sha256` (the round's `CTFactory` and `CTGlyphLayout`), `mutant.sh`, and per row
+  `mutants/<row>.diff`, `.log` and `.summary`, each diff of those two files against `e1de3dd32a` and so holding the
+  round's fix with the row's edit.
+- **The Copilot review, F1:** in the same directory, under `round3/`: the read-only scripts `scripts/dw_derive.py`,
+  `dw_slots.py`, `pango_slots.py` and `mac_slots.py` with their output `dw-derive.log` (the 609 rows, each glyph's
+  old and new font and the 16 glyphs no row holds), `dw-slots.log`, `pango-slots.log` and `mac-slots.log` (the last
+  also over `mac-layout-before-us111.txt`, the golden at `abe0943d31`); `module.log` and `gate-require.log` (the runs
+  of the third round); `checks.log` (no `hs_err_pid*`, no golden diff, `git diff --check`, the tree's checksums);
+  `start.sha256` and `status-start.txt`.
+- **The Copilot review, R1 to R4:** in the same directory, under `round4/`: `font.log`, `font-require.log`,
+  `gate-noflag.log`, `gate-require.log` and `module.log` (the runs of its column), `runs.status`, `surefire-check.txt`
+  (the count of the module run's test classes against its reports), `checks.log`, `iter1.log` (the run while the tests
+  were written), `fixed.sha256` (the round's `CTFactory` and `CTGlyphLayout` for its mutants and runs),
+  `fixed-final.sha256` (the same after one comment line of `CTGlyphLayout`, 121 columns, was re-wrapped within its
+  three lines once the runs were done; `class-before.sha256` and `recompile.log` show the recompiled class
+  byte-identical), `mutant.sh`, and per row `mutants/<row>.diff`, `.log` and `.summary`, each diff of those two files
+  against `e1de3dd32a`.
+- **The Copilot review, the fifth round:** in the same directory, under `round5/`: `font.log`, `gate-noflag.log` and
+  `gate-require.log` (its runs), `runs.status`, `iter1.log`, `fixed.sha256` (the same production files as
+  `round4/fixed-final.sha256`), `mutant.sh`, per row `mutants/<row>.diff`, `.log` and `.summary` and
+  `mutants/R5-1.javap.txt`; and the read-only CI evidence `pr-checks.txt` (`gh pr checks 71`), `run-view.json`,
+  `linux-x64-failed.log` (`gh run view 45278364431 --job 138055973171 --log-failed`) and the macOS jobs' logs
+  `job-138055973422.log` (arm64) and `job-138055973285.log` (x64), with their verdict lines.
 
 The records of the test-only fixes, of the after-runs, of the confirmation and of this record's fact check are
 `close-fix.json`, `close-measure.json`, `close-confirm.json`, `close-docs.json`, `close-docCheck.json` and
@@ -1967,20 +2674,25 @@ Decided by the session's manager, for the owner's attention:
 7. **Site 10: a fourth facade, `ObjCNative`** (two libobjc functions), beside the three the story freezes;
    `FACADES` and the initialiser check of `MacFontBindingStructureTest` were extended, and no `MacFontBindings` pin
    moved. A virtual caller got one platform thread per call; since the further fixes it hands its call to the one
-   cascade-list thread (deviation 14), and if that cannot be started the list is made inline without a pool. The
-   wait outlasts an interrupt; since the further fixes the task holds its own reference to the font, so the wait
-   need not outlast an error (deviation 13). Measured here: about 230 blocks per call without the pool (the story
+   cascade-list thread (deviation 14), and if that cannot be started the list is made inline without a pool; since
+   the Copilot review (F3) the caller gets the error instead, and the next one tries again. The wait outlasts an
+   interrupt; since the further fixes the task holds its own reference to the font, so the wait need not outlast an
+   error (deviation 13). Measured here: about 230 blocks per call without the pool (the story
    said about 232), at most 0.283 with it; the bound of 10 comes from this one machine. On the macOS 15 runners the
    region without a pool leaves about 6, below the bound, so the heap there cannot show the defect. Since the CI fix
    the two heap checks are skipped there with their figures (so on CI run 45041254324), or fail under
-   `-Djfx.parity.require=true`; since the further fixes the pool tokens can prove the drain there, which no CI run
-   has shown yet.
-8. **Site 12 is keyed by name alone, as `storeInMap` is,** so a later run font with the same display name from
-   another file is not looked at again. Until the further fixes it remembered `findFontIndex`'s -1 whatever its
-   cause, so a file that could not be read at the first layout was not read again in the process; since item 10 a
-   read failure is not remembered (deviation 23). `CTFactory.createFontFile` with a null name and no face throws
-   `NullPointerException` where it returned null; production cannot pass null (`getFontSlot` returns first), only a
-   shim caller can.
+   `-Djfx.parity.require=true`; since the further fixes the pool tokens can prove the drain there, which CI run
+   45278364431 showed on both macOS 15 runners.
+8. **Site 12's found faces are keyed by name alone, as `storeInMap` is; its misses and lookups by name and file.** A
+   face of a name found in any file is used for every run font of that name, whatever file it reports. A miss is kept
+   per name and the file the run font reports, with the version the file was read in (F5 and R2), and a lookup in
+   flight is shared only by callers of the same name and file (F6 and R2), so a run font of that name that reports
+   another file is looked up in it, and one that reports no file where one was read, or the same file changed or
+   gone, is looked up again. Until the further fixes a miss was remembered by name alone, whatever `findFontIndex`'s
+   -1 meant, so a file that could not be read at the first layout was not read again in the process; since item 10 a
+   read failure is not remembered (deviation 23), and until R2 a miss was kept by name with one file. `CTFactory`'s
+   `createFontFile` with a null name and no face throws `NullPointerException` where it returned null; production
+   cannot pass null (`getFontSlot` returns first), only a shim caller can.
 9. **Site 11: `OS.rect` needed no change;** its outcome is pinned by a test and by M11b.
 10. **Tests whose preconditions belong to the machine:** the site 12 fallback face, the heap bound and the log
     read. On the macOS 15 runners of CI run 45022158121 the fallback-face check and both heap checks failed at their
@@ -1989,8 +2701,8 @@ Decided by the session's manager, for the owner's attention:
     45041254324 shows on both macOS 15 runners. Since the further fixes every verdict-based check of the PR, the log
     read included, decides through `MacFontReleaseVerdict.decide`, and the fallback-face check makes its own missing
     face. None passes without proving its fix.
-11. **The owner committed the change** as `40e53db102` and the CI fix as `f352c6008c` (PR 71); the further fixes are
-    not committed. Only the repository owner commits.
+11. **The owner committed the change** as `40e53db102`, the CI fix as `f352c6008c` and the further fixes as
+    `e1de3dd32a` (PR 71); the fixes of the Copilot review are not committed. Only the repository owner commits.
 12. **The autorelease-pool token is a `long`** (ruling C2). `ObjCNative` binds `objc_autoreleasePoolPush` as
     `FunctionDescriptor.of(JAVA_LONG)` and `objc_autoreleasePoolPop` as `ofVoid(JAVA_LONG)`, where the C prototypes
     have `void *`: an `ADDRESS` return is boxed into a segment after libobjc has pushed the pool, and an
@@ -2008,9 +2720,10 @@ Decided by the session's manager, for the owner's attention:
     10.0 fixed for every host", a hand-off at the bound no longer shields a call at the bound, and M10a with the
     worker is `REFUTED`.
 14. **One long-lived daemon platform thread, "JavaFX font cascade list", makes the cascade lists of all virtual
-    callers, one after another.** It is started by the first virtual caller and never ends. A CoreText call that
-    hangs inside one list stalls every later virtual caller; platform callers make their lists themselves and are
-    not affected.
+    callers, one after another.** It is started by the first virtual caller and never ends, whatever a task throws
+    (the Copilot review, F2); a virtual caller that cannot start it gets that error, and the next one tries again
+    (F3). A CoreText call that hangs inside one list stalls every later virtual caller; platform callers make their
+    lists themselves and are not affected.
 15. **Item 8 changes what layout gives, on purpose** (rulings B2, E2 and E3).
     - 8a: a run whose font takes no slot is laid out as missing-glyph codes, where it drew another font's glyphs
       under the same IDs; `INVISIBLE_GLYPH_ID` entries stay.
@@ -2033,10 +2746,22 @@ Decided by the session's manager, for the owner's attention:
     compares them: the golden skips at its machine gate on this Mac and on CI's macOS 15; the comparison on the golden
     machine (macOS 27.0.1, 26A434) remains for the owner. `directwrite-metrics-golden.txt` is not edited, and 8c
     moves 609 of its rows: arial, segoeui and timesnewroman 12 pt `layout.run.5.glyphs` and `run.6.glyphs`,
-    consolas 12 pt `run.4` to `run.6`, and 300 `glyph.<code>.*` rows out and 300 in. Only its Windows 10 19045
-    capture machine can re-capture them, and the owner does so there before the merge: the module's test run of
-    `DirectWriteMetricsGoldenTest` with `-Djfx.font.golden.capture=true -Djfx.font.golden.regenerate=true`. Until
-    then the comparison fails on that machine; CI's Windows runner skips it at its machine gate. 8a and 8b add no
+    consolas 12 pt `run.4` to `run.6`, and 300 `glyph.<code>.*` rows out and 300 in. They cannot be edited by hand as
+    the ten were (the Copilot review, F1): the 9 layout rows are re-keys, but the old glyph rows were drawn with
+    other fonts than their new codes name, and 16 of the 20 glyphs that come, 240 rows, are drawn at 12 pt nowhere in
+    the file. Only its Windows 10 19045 capture machine can re-capture them, and the owner does so there before the
+    merge, from the repository root:
+    1. `mvn -pl modules/javafx.graphics -am test -Dtest=DirectWriteMetricsGoldenTest
+       -Dsurefire.failIfNoSpecifiedTests=false -Djfx.parity.require=true` is expected to fail with "609 difference(s)
+       against the golden", the first 60 listed, all of them keys of the rows above, so that every other row still
+       equals the JNI capture. Any other count or key, or a failure at the machine gate (the machine has changed since
+       the capture, and a re-capture would replace every row), is a finding: stop there.
+    2. The same command with `-Djfx.font.golden.capture=true -Djfx.font.golden.regenerate=true` in place of
+       `-Djfx.parity.require=true` writes the golden and aborts its test ("a capture run verifies nothing").
+    3. `git diff` of the golden shows only those 609 rows and `info.*` or `capture.*` rows.
+    4. The header the capture writes is the test's, which says the file comes from the JNI build; lines naming the 609
+       rows and 8c as their cause go into it, as the ten rows have theirs.
+    Until then the comparison fails on that machine; CI's Windows runner skips it at its machine gate. 8a and 8b add no
     DirectWrite row, and `linux-pango-golden.txt` does not move.
 17. **The lock order, and the render thread as a layout thread** (rulings B4, B5, F-R5 and F-R6). {`LogicalFont`,
     `FallbackResource`} before the factory instance before a font file's monitor before {`FileRefCounter`,
@@ -2054,7 +2779,11 @@ Decided by the session's manager, for the owner's attention:
     Canvas text on it, so it can block on a composite's monitor for the length of one `getFallbacks` call: accepted,
     and no deadlock. The JVM's exit can wait for the holder of the factory monitor, which the shutdown hook now takes;
     `embeddedFonts` stays a `HashMap`, for its iteration order. A slot fill of `LogicalFont.getSlotResource` lost to
-    another thread's copy is looked up again, and the factory answers the same font.
+    another thread's copy is looked up again, and the factory answers the same font. Since the Copilot review (F6) a
+    layout thread can also wait, holding no monitor, for the one lookup of a fallback face in flight; that lookup takes
+    the monitors above only in this order and releases each before it returns, and waits for nothing else, so the order
+    is unchanged (the trace is under "Rests on review"). The render thread can wait there too, for the length of one
+    lookup.
 18. **A fallback that is a variable-font named instance draws slot 0's missing-glyph boxes** (ruling E5), where it
     drew unrelated glyphs: on macOS 27 `.SF Devanagari Regular` and `Bold` (System, System Bold, System Italic and
     Times Devanagari) and `.ThonburiUI Regular Bold` (System Bold Thai). Drawing them needs fvar named-instance
@@ -2124,11 +2853,23 @@ Decided by the session's manager, for the owner's attention:
     null stores are pinned by a new helper, `assertNeverStoresNull`, not by a variant of
     `assertPublishesNewArrayOnceFilled`, whose callers keep what it accepts; one sentence of its javadoc points to the
     new helper.
+30. **The face lookup of the Copilot review** (F5 and F6). Each layout of a run whose face is remembered missing now
+    copies the run font's URL and stats its file, where it did nothing; neither creates or parses a face, and neither
+    was measured. The miss map holds one record per name and file (R2), replaced by a miss of a new version of that file
+    and kept once the face is found, which `getSlotForFont` then finds by name first; it grows with the distinct pairs
+    of name and file layout meets, never with versions, and has no other bound, as the set it replaces had none. Callers
+    of the same name and file that come while a lookup runs wait for it, the render thread included; where it fails they
+    lay their run out with no slot for this layout, as the leader does, and the next layout looks again. The lookup's
+    own re-check, once it is the one in flight, asks the factory's map through `getFontResource`, the question
+    `getSlotForFont` asked just before. `CTFactory`'s constructor is package-private, for the test factory of
+    `CTFactoryShim`; `getFactory` stays its one production caller.
 
 CI run 45022158121 ran `40e53db102` and CI run 45041254324 ran `f352c6008c`, both on macOS 15 (arm64 and x64),
-Linux x64 and aarch64 and Windows x64: see "Measured". Not run: the further fixes anywhere but this Mac (macOS
-27.2.1 arm64) as of 2026-11-23, so their outcomes on the CI hosts are predicted; the gate as such on the CI fix or
-the further fixes; and any robot or `tests/system` test, which the owner runs.
+Linux x64 and aarch64 and Windows x64: see "Measured". CI run 45278364431 ran the further fixes, `e1de3dd32a`, green
+on macOS 15 (arm64 and x64), Linux aarch64, Windows x64 and No JNI, its Linux x64 job stopped before it compiled
+anything (F1 under "The Copilot review"). Not run: the Copilot review's fixes anywhere but this Mac (macOS 27.2.1
+arm64), so their outcomes on the CI hosts are predicted; the further fixes on Linux x64; the gate as such on the CI fix
+or the further fixes alone; and any robot or `tests/system` test, which the owner runs.
 
 ### Acceptance criteria
 1. ✅ Sites 1-7 hand none of their listed inputs to CoreFoundation, CoreGraphics or CoreText as NULL or 0; each
@@ -2138,33 +2879,43 @@ the further fixes; and any robot or `tests/system` test, which the owner runs.
    threads drawing at once each get only their own pixels (measured; the lock order is review).
 3. ✅ Site 8 fences the strike until `createCTLine` returns (pinned as bytecode; that it suffices at run time is
    review).
-4. ✅ Site 10 leaves under 10 blocks per call where 230 were left, on platform and virtual threads (measured, bound
-   from this machine; without a startable thread the call runs as before, deviation 7). Site 12 looks the missing
-   face up once in 5 layouts where it did 5 times, and since the further fixes a file it could not read is looked at
-   again at the next layout. On the macOS 15 runners neither can be shown by the checks of the CI fix (a region
-   without a pool leaves about 6 blocks per call, and the child printed no lookup of a face missing from its file):
-   on CI run 45041254324 the three checks skipped there with their figures, and the sites are pinned by the
-   class-file checks (any OS) and the pop and face-memory tests (any macOS). The further fixes add the pool tokens
-   and a missing face the child makes itself, which can prove both there; as of 2026-11-23 they have run only on
-   this Mac.
+4. ✅ Site 10 leaves under 10 blocks per call where 230 were left, on platform and virtual threads (measured, bound from
+   this machine; since the Copilot review (F3) a virtual caller that cannot start the thread gets the error and no
+   caller makes a list without a pool, deviation 7). Site 12 looks the missing face up once in 5 layouts where it did 5
+   times, and since the further fixes a file it could not read is looked at again at the next layout. On the macOS 15
+   runners neither can be shown by the checks of the CI fix (a region without a pool leaves about 6 blocks per call, and
+   the child printed no lookup of a face missing from its file): on CI run 45041254324 the three checks skipped there
+   with their figures, and the sites are pinned by the class-file checks (any OS) and the pop and face-memory tests (any
+   macOS). The further fixes add the pool tokens and a missing face the child makes itself, which can prove both there,
+   and on CI run 45278364431 both proved them on both macOS 15 runners. Since the Copilot review (F5, F6) the missing
+   face is looked up once while the run font reports the same file in the same version, and again once the file or its
+   path changes, and callers that need it in one file at once share one lookup: one read and one copy for three callers,
+   found, missing or failed (measured with a held read); since R2 each file of a name is looked up and remembered apart
+   (two files read once each over 6 alternating layouts).
 5. ✅ A short or null `bb` is left as it was, and a `CGRect` with a null half throws `NullPointerException` in
    `OS.rect` before any downcall, both pinned.
 6. ✅ 27 of 29 mutants killed on the finished tree after the touch-ups, where R3 and R5 survived, 3 of 3 after the
    test-only fixes and 12 of 12 on the CI fix's final tree. Of the further fixes' 256 mutants 253 were killed, and so
-   were the 14 of US-111's rows run again, R3 and R5 among them, each on this Mac on the tree of its cluster or of
-   the later step that ran it again; that they are still killed on the final tree rests on the argument under "What
-   ran where". L2 does not compile, C-M14 is equivalent and M8g7 survives (deviation 20). The paths no test provokes
-   are under "Rests on review".
+   were the 14 of US-111's rows run again, R3 and R5 among them, each on this Mac on the tree of its cluster or of the
+   later step that ran it again; that they are still killed on the final tree rests on the argument under "What ran
+   where". L2 does not compile, C-M14 is equivalent and M8g7 survives (deviation 20). The Copilot review's 25 rows of F2
+   to F4 and 27 of F5 and F6 were all killed, the second round's on its final tree, and so were the 6 rows of R1 to R3
+   and 7 rows of F5 and F6 run again on R1 to R3's shape, and the fifth round's 3 rows and R4-6 again. The paths no test
+   provokes are under "Rests on review".
 7. **✅ on this machine; the comparison on the golden machine remains for the owner.** No golden row changed for
    the twelve sites, and the five corpora are identical before and on the final tree. Item 8 of the further fixes
    moves ten rows of `mac-layout-golden.txt`, edited by hand with the reason (deviation 16), and 609 rows of
-   `directwrite-metrics-golden.txt`, which the owner re-captures on its machine.
+   `directwrite-metrics-golden.txt`, which the owner re-captures on its machine, since 240 of them cannot be derived
+   from the file (the Copilot review, F1). The Copilot review changes no golden file.
 8. ✅ `CFNative`, `CGNative` and `CTNative` unchanged, a fourth facade beside them (deviation 7), no pin moved; since
    the further fixes `CFNative.CFRetain` is public (deviation 22) and `ObjCNative`'s token a `long` (deviation 12),
-   and still no pin moved.
+   and still no pin moved. The Copilot review's F5 moves one call-site pin, `OS.CTFontCopyURLAttribute` from
+   `CTFactory` to `CTGlyphLayout`, recorded with its reason under "The `MacFontBindings` pins"; no facade changed.
 9. ✅ Line counts and line lengths as above (measured); the other rules rest on the reviews.
 
-**Remains for the owner:** the commit of the further fixes and a `submit.yml` run of it, read for the verdict lines
-of both macOS jobs (see "Verification"); the re-capture of `directwrite-metrics-golden.txt` on its Windows capture
-machine before the merge (deviation 16); the robot and `tests/system` runs; and the flagged comparison on the golden
-machine, which now includes the ten rows edited by hand.
+**Remains for the owner:** the commit of the Copilot review's fixes (F2 to F6 and R1 to R4) and a `submit.yml` run of
+it, read for the verdict lines of both macOS jobs (see "Verification"), whose Linux x64 job must get as far as running
+the tests this time (on CI run 45278364431 of `e1de3dd32a` it stopped at an HTTP 429 of Maven Central before it compiled
+anything; see F1 under "The Copilot review"); the further fixes are committed as `e1de3dd32a`; the re-capture of
+`directwrite-metrics-golden.txt` on its Windows capture machine before the merge (deviation 16); the robot and
+`tests/system` runs; and the flagged comparison on the golden machine, which now includes the ten rows edited by hand.

@@ -329,19 +329,75 @@ public class MacFontBindingStructureTest {
     }
 
     /**
-     * Layout asks the factory whether a fallback face is worth a lookup before it copies the run's font for one, and
-     * copies it and adds the copy only when the answer is yes, so a face its font file lacks costs no copy after the
-     * first lookup. {@code MacFontReleaseTest} counts the lookups but cannot see a copy that is made and released.
+     * Layout hands the lookup of a fallback face the file the run's own font reports, and that font, and copies no
+     * font itself. The lookup asks the factory whether the face is worth looking up in that file before it looks it
+     * up, and once more, as the one lookup of the name in flight, before it copies the run's font; only the lookup
+     * copies it. So a face its font file lacks costs no copy of the run's font, and no lookup, until the file changes.
+     * {@code MacFontFaceLookupTest} counts the lookups and the copies handed to the factory, but cannot see a copy
+     * that is made and released.
      */
     @Test
-    void layoutAsksForAFallbackFaceBeforeCopyingTheRunFont() {
+    void layoutCopiesTheRunFontOnlyWhereTheFactoryMayFindItsFace() {
         String layout = CORETEXT + "CTGlyphLayout";
         String mayFindFace = CORETEXT + "CTFactory mayFindFace";
         String copy = MacFontBindings.OS + " CTFontCreateCopyWithAttributes";
-        FontCallOrder.assertFirstCallBefore(layout, "getFontSlot", mayFindFace, copy);
-        FontCallOrder.assertGuards(layout, "getFontSlot", mayFindFace, List.of(copy, layout + " addFallbackFont"),
-                                   List.of(), "a face its font file lacks costs no copy of the run's font, and no"
-                                   + " lookup, after the first");
+        String url = MacFontBindings.OS + " CTFontCopyURLAttribute";
+        String runFont = MacFontBindings.OS + " CFDictionaryGetValue";
+        String addFallbackFont = layout + " addFallbackFont";
+        String lookUp = layout + " lookUpFallbackFont";
+        String protects = "a face its font file lacks costs no copy of the run's font, and no lookup, until the file"
+                + " changes";
+        FontCallOrder.assertArgumentIsAnswerOf(layout, "getFontSlot", url, 0, runFont, protects);
+        FontCallOrder.assertArgumentIsAnswerOf(layout, "getFontSlot", addFallbackFont, 3, url, protects);
+        FontCallOrder.assertArgumentIsAnswerOf(layout, "getFontSlot", addFallbackFont, 4, runFont, protects);
+        FontCallOrder.assertNeverCalls(layout, "getFontSlot", List.of(copy), protects);
+        FontCallOrder.assertGuards(layout, "addFallbackFont", mayFindFace, List.of(lookUp), List.of(), protects);
+        FontCallOrder.assertGuards(layout, "lookUpFallbackFont", mayFindFace,
+                                   List.of(copy, layout + " fontFileOfCopy"), List.of(), protects);
+        FontCallOrder.assertCalledOnlyIn(List.of(layout, CORETEXT + "CTFactory"), copy, Set.of(lookUp), protects);
+    }
+
+    /**
+     * One lookup of a fallback face runs at a time per name and file: a caller that finds one in flight returns what
+     * it found and runs none of its own, and the one that runs it ends it on every way out, an error included, removing
+     * it before it wakes the callers that wait. A registration that throws, which may have put the lookup in the map
+     * already, ends it before the throw, and the ending makes no key of its own. The lookup's outcome is stored only
+     * in {@code finish}, straight-line code, before the count-down that lets the waiters read it. The waiters wait
+     * with no monitor held, in their own code or in a monitor's {@code wait}, so that a virtual caller unmounts, and
+     * layout's code down to the wait takes no monitor. {@code MacFontFaceLookupTest} holds a lookup with callers
+     * waiting and fails it with an exception and an error; a registration or removal that throws, a failure at the
+     * entry of {@code endLookup} or inside {@code finish}, and a waiter that reads the outcome before it is stored are
+     * not provoked.
+     */
+    @Test
+    void aLookupOfAFallbackFaceIsEndedOnEveryWayOutAndSharedByTheCallersThatWait() {
+        String layout = CORETEXT + "CTGlyphLayout";
+        String factory = CORETEXT + "CTFactory";
+        String lookup = factory + "$FaceLookup";
+        String remove = "java/util/concurrent/ConcurrentHashMap remove";
+        String protects = "callers that need a face at once share one lookup, and none waits for a lookup that ended";
+        FontCallOrder.assertFirstCallBefore(layout, "lookUpFallbackFont", factory + " beginLookup", lookup + " await");
+        FontCallOrder.assertReturnsFirstCallOf(layout, "lookUpFallbackFont", lookup + " await", protects);
+        FontCallOrder.assertReleasedOnEveryExit(layout, "lookUpFallbackFont", factory + " getFontResource",
+                                                factory + " endLookup", protects);
+        FontCallOrder.assertFirstCallBefore(factory, "endLookup", remove, lookup + " finish");
+        FontCallOrder.assertReleasedOnEveryExit(factory, "endLookup", remove, lookup + " finish", protects);
+        FontCallOrder.assertHandlerReleasesUnconditionally(factory, "beginLookup",
+                "java/util/concurrent/ConcurrentHashMap putIfAbsent", factory + " endLookup", protects);
+        FontCallOrder.assertNeverCalls(factory, "endLookup",
+                List.of(factory + " faceKey", factory + "$FaceKey", "java/lang/String"), protects);
+        String published = "a waiter the latch lets through reads the outcome";
+        FontCallOrder.assertWrittenBefore(lookup, "finish", lookup + " font",
+                "java/util/concurrent/CountDownLatch countDown", published);
+        FontCallOrder.assertFieldStoredOnlyIn(lookup, "font", List.of("finish"), published);
+        String unmounts = "a caller that waits for a lookup holds no monitor, and a virtual one unmounts";
+        FontCallOrder.assertNeverCalls(lookup, "await", List.of("java/lang/Object wait"), unmounts);
+        Map<String, List<String>> methods = new LinkedHashMap<>();
+        methods.put(layout, List.of("layout", "getFontSlot", "addFallbackFont", "lookUpFallbackFont"));
+        methods.put(factory, List.of("mayFindFace", "beginLookup", "endLookup"));
+        methods.put(lookup, List.of("await", "finish"));
+        methods.forEach((type, names) -> names.forEach(method -> FontCallOrder.assertTakesNoMonitor(type, method,
+                                                                                                   unmounts)));
     }
 
     /**
@@ -397,14 +453,15 @@ public class MacFontBindingStructureTest {
     /**
      * The calls of the hand-off, its queue helper and the wait, and their order: the hand-off starts the cascade-list
      * thread, through {@code Thread.ofPlatform} before {@code Thread.start}, makes the task before it queues it, queues
-     * it before it waits for it and returns what the wait answers; the queue helper wakes the thread after each add to
-     * the queue, with no branch, switch, return, throw or handler between the two, and a task enters the queue only
-     * through that add: only the queue helper calls {@code add}, and no method of {@code MacFontFinder} or of its nest
-     * calls {@code offer} or {@code addAll} of a {@code ConcurrentLinkedQueue}; and neither the hand-off, outside
-     * the handler of a failed start ({@link #onlyThePooledRegionAndTheThreadlessFallbackReadTheCascadeList}), nor its
-     * queue helper, nor the wait calls a method that runs the task or reads the list. That reads calls, not data flow:
-     * that the task runs on that thread, whatever call would run it on the caller, is
-     * {@code MacFontReleaseTest.aVirtualCallerWaitsForThePlatformThreadToMakeItsList}.
+     * it before it waits for it and returns what the wait answers; the queue helper wakes the thread once each add to
+     * the queue returns, with no conditional branch, switch, return, throw or handler on the way, and a task enters
+     * the queue only through that add: only the queue helper calls {@code add}, and no method of
+     * {@code MacFontFinder} or of its nest calls {@code offer} or {@code addAll} of a {@code ConcurrentLinkedQueue};
+     * and neither the hand-off, nor its queue helper, nor the wait calls a method that runs the task or reads the
+     * list. The add ends a {@code try} whose handler, for a task that does not enter the queue, lies between the add
+     * and the wake-up in code order, so the wake-up follows the add on the path the add's return takes, past that
+     * handler. That reads calls, not data flow: that the task runs on that thread, whatever call would run it on the
+     * caller, is {@code MacFontReleaseTest.aVirtualCallerWaitsForThePlatformThreadToMakeItsList}.
      */
     @Test
     void theHandOffQueuesATaskForThePlatformThreadAndNeverRunsItItself() {
@@ -450,26 +507,63 @@ public class MacFontBindingStructureTest {
     }
 
     /**
-     * Only the pooled region reads the cascade list, and the start-failure path, which has no thread to hand it to:
-     * {@code cascadeList} is called only by {@code pooledCascadeList} and in the handler of a failed start,
-     * {@code pooledCascadeList} only by {@code getCascadeList} and the task, and CoreText's cascade list only by
-     * {@code cascadeList}, in every class of the font layer. A read through reflection or a method handle, or through a
-     * second facade method over the same binding, is not seen.
+     * The reference a task holds to the font is taken by the queue helper, before the add, and is the task's once the
+     * add returns: a handler that catches everything the add throws releases it, with no condition before the
+     * release, and rethrows; the helper releases it nowhere else, and no handler covers the wake-up, so a task that
+     * entered the queue keeps its reference whatever happens after the add. Nothing else in {@code MacFontFinder}
+     * retains a font. The run-time half, a task the queue refuses, is
+     * {@code MacFontReleaseTest.aTaskTheQueueRefusesGetsNoReferenceToTheFont}; an add that cannot allocate its node no
+     * test can provoke.
      */
     @Test
-    void onlyThePooledRegionAndTheThreadlessFallbackReadTheCascadeList() {
+    void aTaskOwnsItsReferenceToTheFontOnlyOnceItIsQueued() {
         String finder = MacFontBindings.MAC_FONT_FINDER;
-        String handOff = "cascadeListOnAPlatformThread";
+        String queue = "queueCascadeListTask";
+        String add = "java/util/concurrent/ConcurrentLinkedQueue add";
+        String retain = CF + " CFRetain";
+        String release = finder + " release";
+        String protects = "a task that does not enter the queue leaves no reference to the font behind, and one that"
+                + " did is released only by the task";
+        FontCallOrder.assertFirstCallBefore(finder, queue, retain, add);
+        FontCallOrder.assertCalledOnlyIn(nest(finder), retain, Set.of(finder + " " + queue), protects);
+        FontCallOrder.assertHandlerReleasesUnconditionally(finder, queue, add, release, protects);
+        FontCallOrder.assertCalledOnlyInHandler(finder, queue, release, "java/lang/Throwable", add, protects);
+        FontCallOrder.assertNoHandlerCovers(finder, queue, "java/util/concurrent/locks/LockSupport unpark", protects);
+    }
+
+    /**
+     * Only the pooled region reads the cascade list: {@code cascadeList} and the copy of the language codes are
+     * called only by {@code pooledCascadeList}, {@code pooledCascadeList} only by {@code getCascadeList} and the task,
+     * and CoreText's cascade list only by {@code cascadeList}, in every class of the font layer. A read through
+     * reflection or a method handle, or through a second facade method over the same binding, is not seen.
+     */
+    @Test
+    void onlyThePooledRegionReadsTheCascadeList() {
+        String finder = MacFontBindings.MAC_FONT_FINDER;
         String cascadeList = finder + " cascadeList";
+        String pooled = finder + " pooledCascadeList";
         String protects = "a virtual caller reads no cascade list on its own thread";
-        FontCallOrder.assertCalledOnlyIn(nest(finder), cascadeList,
-                                         Set.of(finder + " pooledCascadeList", finder + " " + handOff), protects);
-        FontCallOrder.assertCalledOnlyInHandler(finder, handOff, cascadeList, "java/lang/OutOfMemoryError",
-                                                finder + " startCascadeListWorker", protects);
-        FontCallOrder.assertCalledOnlyIn(nest(finder), finder + " pooledCascadeList",
+        FontCallOrder.assertCalledOnlyIn(nest(finder), cascadeList, Set.of(pooled), protects);
+        FontCallOrder.assertCalledOnlyIn(nest(finder), CF + " CFLocaleCopyISOLanguageCodes", Set.of(pooled), protects);
+        FontCallOrder.assertCalledOnlyIn(nest(finder), pooled,
                                          Set.of(finder + " getCascadeList", CASCADE_LIST_TASK + " run"), protects);
         FontCallOrder.assertCalledOnlyIn(fontPackageClasses(), CT + " CTFontCopyDefaultCascadeListForLanguages",
                                          Set.of(cascadeList), protects);
+    }
+
+    /**
+     * A virtual caller whose cascade-list thread cannot be started gets that error, which no handler of the hand-off
+     * catches, and the thread is recorded only once its start has returned, so the next virtual caller tries to start
+     * it again. An empty list in its place would be kept for the life of a composite font as its fallbacks. No test
+     * can make the start fail.
+     */
+    @Test
+    void aVirtualCallerGetsWhatStartingTheThreadThrowsAndTheNextOneTriesAgain() {
+        String finder = MacFontBindings.MAC_FONT_FINDER;
+        FontCallOrder.assertNoHandlerCovers(finder, "cascadeListOnAPlatformThread", finder + " startCascadeListWorker",
+                "a failed start reaches the caller, whose composite asks for its fallbacks again");
+        FontCallOrder.assertStoredOnlyOnceCallReturns(finder, "startCascadeListWorker", finder + " cascadeListWorker",
+                "java/lang/Thread start", "a thread that did not start is never recorded as the cascade-list thread");
     }
 
     /**
@@ -493,40 +587,59 @@ public class MacFontBindingStructureTest {
     }
 
     /**
-     * The task retains the font when it is made, on the caller, before it is queued, and releases it inside a pool
-     * of its own on every way out of the read, through each handler around the read, before it marks itself done and
-     * wakes the caller. The run-time half is
-     * {@code MacFontReleaseTest.theTaskHoldsAReferenceOfItsOwnToTheLentFontUntilItHasRun}; a read that throws, a
-     * release that is the last one, which it is only where the caller's wait failed, and what that release
-     * autoreleases, no test can provoke.
+     * The task releases its reference to the font on every way out of the read, through each handler around the
+     * read, inside a pool of its own, and wakes the caller on every way out of that release, through each handler
+     * around it, after it marks itself done. The run-time halves are
+     * {@code MacFontReleaseTest.theTaskHoldsAReferenceOfItsOwnToTheLentFontUntilItHasRun} and
+     * {@code aTaskWhoseReleaseThrowsStillWakesItsCallerWithTheFailure}; a release that is the last one, which it is
+     * only where the caller's wait failed, and what that release autoreleases, no test can provoke.
      */
     @Test
     void aTaskReleasesItsOwnReferenceToTheFontOnEveryPathBeforeItWakesTheCaller() {
         String task = CASCADE_LIST_TASK;
+        String releaseFont = task + " releaseFont";
         String release = CF + " CFRelease";
-        String protects = "the font a caller lent is released once, after the read, whether the read returns or"
-                + " throws";
-        FontCallOrder.assertFirstCallBefore(task, "<init>", "java/lang/Object <init>", CF + " CFRetain");
+        String unpark = "java/util/concurrent/locks/LockSupport unpark";
         FontCallOrder.assertReleasedOnEveryExit(task, "run", MacFontBindings.MAC_FONT_FINDER + " pooledCascadeList",
-                                                release, protects);
-        FontCallOrder.assertFirstCallBefore(task, "run", OBJC + " objc_autoreleasePoolPush", release);
-        FontCallOrder.assertReleasedOnEveryExit(task, "run", release, OBJC + " objc_autoreleasePoolPop",
+                                                releaseFont, "the font a caller lent is released once, after the read,"
+                                                + " whether the read returns or throws");
+        FontCallOrder.assertFirstCallBefore(task, "releaseFont", OBJC + " objc_autoreleasePoolPush", release);
+        FontCallOrder.assertReleasedOnEveryExit(task, "releaseFont", release, OBJC + " objc_autoreleasePoolPop",
                                                 "the release leaves nothing autoreleased on the platform thread");
-        FontCallOrder.assertFirstCallBefore(task, "run", release, "java/util/concurrent/locks/LockSupport unpark");
-        FontCallOrder.assertWrittenAfter(task, "run", task + " done", release,
+        FontCallOrder.assertReleasedOnEveryExit(task, "run", releaseFont, unpark,
+                                                "the caller is woken whether the release returns or throws");
+        FontCallOrder.assertWrittenAfter(task, "run", task + " done", releaseFont,
                                          "a caller that still waits holds the font when the task's reference goes");
     }
 
     /**
-     * The task catches everything its read throws, and each of its handlers around the read stores what it caught for
-     * its caller and returns, so no read ends the cascade-list thread. No run-time test can make the read throw.
+     * The task catches everything its read and its release throw, and each of its handlers around them stores what
+     * it caught for its caller and goes on to its return; attaching the release's failure to the read's throws
+     * nothing either. So the task never throws, whatever fails. The run-time half, a release that throws after a read
+     * that answered and after one that threw, is
+     * {@code MacFontReleaseTest.aTaskWhoseReleaseThrowsStillWakesItsCallerWithTheFailure}.
      */
     @Test
-    void aTaskKeepsWhatItsReadThrowsForItsCallerAndNeverThrowsIt() {
-        FontCallOrder.assertKeepsWhatItThrows(CASCADE_LIST_TASK, "run",
-                                              MacFontBindings.MAC_FONT_FINDER + " pooledCascadeList", "failure",
-                                              "a failed read reaches its caller, and every later virtual caller still"
-                                              + " has a thread to make its list");
+    void aTaskKeepsWhatItsReadAndItsReleaseThrowAndNeverThrowsIt() {
+        String task = CASCADE_LIST_TASK;
+        String protects = "a failed read or release reaches its caller, which is woken either way";
+        FontCallOrder.assertKeepsWhatItThrows(task, "run", MacFontBindings.MAC_FONT_FINDER + " pooledCascadeList",
+                                              "failure", protects);
+        FontCallOrder.assertKeepsWhatItThrows(task, "run", task + " releaseFont", "failure", protects);
+        FontCallOrder.assertNeverThrowsFrom(task, "run", "java/lang/Throwable addSuppressed", protects);
+    }
+
+    /**
+     * The loop of the cascade-list thread catches everything a task throws, throws none of it and never returns, so
+     * no task ends the one thread every later virtual caller waits for. The run-time half is
+     * {@code MacFontReleaseTest.aTaskThatThrowsDoesNotEndTheCascadeListThread}.
+     */
+    @Test
+    void theCascadeListThreadOutlivesWhatATaskThrows() {
+        String finder = MacFontBindings.MAC_FONT_FINDER;
+        String protects = "every later virtual caller still has a thread to make its list";
+        FontCallOrder.assertNeverThrowsFrom(finder, "runCascadeListTasks", "java/lang/Runnable run", protects);
+        FontCallOrder.assertNeverReturns(finder, "runCascadeListTasks", protects);
     }
 
     /**
@@ -544,7 +657,7 @@ public class MacFontBindingStructureTest {
         Map<String, List<String>> methods = new LinkedHashMap<>();
         methods.put(finder, List.of("runCascadeListTasks", "pooledCascadeList", "cascadeList", "addCascadeEntry",
                                     "release"));
-        methods.put(CASCADE_LIST_TASK, List.of("run"));
+        methods.put(CASCADE_LIST_TASK, List.of("run", "releaseFont"));
         methods.forEach((type, names) -> names.forEach(method -> {
             FontCallOrder.assertTakesNoMonitor(type, method, protects);
             FontCallOrder.assertNeverCalls(type, method, owners, protects);

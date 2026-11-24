@@ -79,22 +79,35 @@ public final class CoreTextPeerShim {
         return mirror;
     }
 
+    /**
+     * The slot in {@code fr} of the font file a lookup makes of {@code newRef}, layout's copy of a run's font, +1,
+     * which it consumes; -1 where it makes none. The file is the one the copy reports.
+     */
     public static int addFallbackFont(CompositeFontResource fr, String fontName, long newRef) throws Exception {
-        return CTGlyphLayout.addFallbackFont((CTFactory) PrismFontFactory.getFontFactory(), fr, fontName, newRef);
+        String file = newRef == 0 ? null : OS.CTFontCopyURLAttribute(newRef);
+        FontResource font = CTGlyphLayout.fontFileOfCopy(factory(), fontName, file, newRef);
+        return font == null ? -1 : fr.addSlotFont(font);
     }
 
     /** With no factory to ask: only a reference refused before the factory is reached returns normally. */
     public static int addFallbackFontWithoutFactory(CompositeFontResource fr, String fontName, long newRef)
             throws Exception {
-        return CTGlyphLayout.addFallbackFont(null, fr, fontName, newRef);
+        FontResource font = CTGlyphLayout.fontFileOfCopy(null, fontName, null, newRef);
+        return font == null ? -1 : fr.addSlotFont(font);
     }
 
+    /** The factory's font file of the face named {@code name} in the file {@code fontRef}, +1 and consumed, reports. */
     public static FontResource createFontFile(String name, long fontRef) throws Exception {
-        return ((CTFactory) PrismFontFactory.getFontFactory()).createFontFile(name, fontRef);
+        return factory().createFontFile(name, OS.CTFontCopyURLAttribute(fontRef), fontRef);
     }
 
-    public static boolean mayFindFace(String name) {
-        return ((CTFactory) PrismFontFactory.getFontFactory()).mayFindFace(name);
+    /** Whether the factory would look up the face named {@code name} in {@code file}, null for a font without one. */
+    public static boolean mayFindFace(String name, String file) {
+        return factory().mayFindFace(name, file);
+    }
+
+    private static CTFactory factory() {
+        return (CTFactory) PrismFontFactory.getFontFactory();
     }
 
     /** A CTLine of {@code text} in {@code fontRef}, left to right, made by layout's own code, at +1 for the caller. */

@@ -45,6 +45,7 @@ import com.sun.javafx.text.GlyphLayout;
 import com.sun.javafx.text.PrismTextLayout;
 import com.sun.javafx.text.TextRun;
 import java.io.IOException;
+import java.lang.foreign.MemorySegment;
 import java.lang.ref.Reference;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
@@ -87,6 +88,9 @@ public final class MacFontReleaseChild {
     static final String CASCADE_LIST_WAIT_INTERRUPTED = "release.cascadeListWaitInterrupted";
     static final String CASCADE_LIST_WORKER = "release.cascadeListWorker";
     static final String CASCADE_LIST_LENT_FONT = "release.cascadeListLentFont";
+    static final String CASCADE_LIST_REFUSED = "release.cascadeListRefused";
+    static final String CASCADE_LIST_RELEASE_FAILS = "release.cascadeListReleaseFails";
+    static final String CASCADE_LIST_TASK_THROWS = "release.cascadeListTaskThrows";
     static final String FACE_MEMORY = "release.faceMemory";
     static final String RUN_WITHOUT_A_SLOT = "release.runWithoutASlot";
     static final String UNREADABLE_FACE_FILE = "release.unreadableFaceFile";
@@ -173,6 +177,9 @@ public final class MacFontReleaseChild {
             case CASCADE_LIST_WAIT_INTERRUPTED -> cascadeListWaitInterrupted(out);
             case CASCADE_LIST_WORKER -> cascadeListWorker(out);
             case CASCADE_LIST_LENT_FONT -> cascadeListLentFont(out);
+            case CASCADE_LIST_REFUSED -> cascadeListRefused(out);
+            case CASCADE_LIST_RELEASE_FAILS -> cascadeListReleaseFails(out);
+            case CASCADE_LIST_TASK_THROWS -> cascadeListTaskThrows(out);
             case FACE_MEMORY -> faceMemory(out);
             case RUN_WITHOUT_A_SLOT -> runWithoutASlot(out);
             case UNREADABLE_FACE_FILE -> unreadableFaceFile(out);
@@ -327,18 +334,21 @@ public final class MacFontReleaseChild {
     }
 
     /**
-     * Whether the factory may still find a face of a name, before and after it looked the name up in a copy of
-     * Helvetica's font: under {@link #NO_SUCH_FACE}, also asked in upper case, and under "Helvetica".
+     * Whether the factory may still find a face of a name in Helvetica's font file, before and after it looked the
+     * name up in a copy of Helvetica's font: under {@link #NO_SUCH_FACE}, also asked in upper case, and under
+     * "Helvetica".
      */
     private static void faceMemory(GoldenMap out) throws Exception {
         long helvetica = MacFontOracleShim.createFont("Helvetica", 12);
-        out.put("missing.before", Boolean.toString(CoreTextPeerShim.mayFindFace(NO_SUCH_FACE)));
+        String file = OSShim.CTFontCopyURLAttribute(helvetica);
+        out.put("file", file);
+        out.put("missing.before", Boolean.toString(CoreTextPeerShim.mayFindFace(NO_SUCH_FACE, file)));
         out.put("missing.made", fontFileMadeFor(helvetica, NO_SUCH_FACE));
-        out.put("missing.after", Boolean.toString(CoreTextPeerShim.mayFindFace(NO_SUCH_FACE)));
+        out.put("missing.after", Boolean.toString(CoreTextPeerShim.mayFindFace(NO_SUCH_FACE, file)));
         out.put("missing.otherCase",
-                Boolean.toString(CoreTextPeerShim.mayFindFace(NO_SUCH_FACE.toUpperCase(Locale.ROOT))));
+                Boolean.toString(CoreTextPeerShim.mayFindFace(NO_SUCH_FACE.toUpperCase(Locale.ROOT), file)));
         out.put("found.made", fontFileMadeFor(helvetica, "Helvetica"));
-        out.put("found.after", Boolean.toString(CoreTextPeerShim.mayFindFace("Helvetica")));
+        out.put("found.after", Boolean.toString(CoreTextPeerShim.mayFindFace("Helvetica", file)));
         MacFontOracleShim.release(helvetica);
     }
 
@@ -546,7 +556,7 @@ public final class MacFontReleaseChild {
      * a fresh copy of the run's font, which is what layout's lookup reads; the run font's name; that the factory
      * reads the file and finds no face named Ahem in it; and that the System font has no slot of that name.
      */
-    private static FaceRun swappedFace(GoldenMap out, String scenario) throws Exception {
+    static FaceRun swappedFace(GoldenMap out, String scenario) throws Exception {
         Path directory = fontDirectory(scenario);
         Path file = directory.resolve("face.ttf");
         Files.copy(MacFontGoldens.pinned("ahem"), file);
@@ -588,7 +598,7 @@ public final class MacFontReleaseChild {
         out.put("file.ofACopy", fileOfACopy(runFont(run)));
         FaceRun face = new FaceRun(font, line, run, systemFont(out));
         out.put("answer.unreadable", Integer.toString(fallbackSlot(face)));
-        out.put("mayFindFace.afterUnreadable", Boolean.toString(CoreTextPeerShim.mayFindFace(FACE)));
+        out.put("mayFindFace.afterUnreadable", Boolean.toString(CoreTextPeerShim.mayFindFace(FACE, path)));
         Files.copy(MacFontGoldens.pinned("ahem"), file);
         int readable = fallbackSlot(face);
         out.put("answer.readable", Integer.toString(readable));
@@ -691,13 +701,13 @@ public final class MacFontReleaseChild {
     }
 
     /** The scenario's own directory of font files, emptied first: a child that ended early may have left some. */
-    private static Path fontDirectory(String scenario) throws IOException {
+    static Path fontDirectory(String scenario) throws IOException {
         Path directory = MacFontGoldens.scenarioDirectory(scenario).resolve("fonts");
         FontGoldenRuntime.deleteTree(directory);
         return Files.createDirectories(directory);
     }
 
-    private static long fontOfFile(String path) {
+    static long fontOfFile(String path) {
         long font = MacFontProbeShim.fontOfFile(path, 12);
         if (font == 0) {
             throw new IllegalStateException("CoreText made no font of " + path);
@@ -706,7 +716,7 @@ public final class MacFontReleaseChild {
     }
 
     /** A System font of its own, and its slot for Ahem before any layout: -1 unless a font named Ahem is installed. */
-    private static CompositeFontResource systemFont(GoldenMap out) {
+    static CompositeFontResource systemFont(GoldenMap out) {
         CompositeFontResource system = FontResourceShim.newLogicalFont("System", false, false);
         out.put("slot.before", Integer.toString(system.getSlotForFont(FACE)));
         return system;
@@ -722,7 +732,7 @@ public final class MacFontReleaseChild {
     }
 
     /** As a run of another line, so that layout takes the run's font for a fallback's whatever its name. */
-    private static int fallbackSlot(FaceRun face) {
+    static int fallbackSlot(FaceRun face) {
         return CoreTextPeerShim.getFontSlot(face.run(), 0, face.system(), NOT_THE_RUN_FONT, 0);
     }
 
@@ -736,7 +746,7 @@ public final class MacFontReleaseChild {
     }
 
     /** The file CoreText reports for a fresh copy of {@code font}, as layout's lookup reads it. */
-    private static String fileOfACopy(long font) {
+    static String fileOfACopy(long font) {
         long copy = OSShim.CTFontCreateCopyWithAttributes(font, 0, null, 0);
         if (copy == 0) {
             return null;
@@ -748,7 +758,7 @@ public final class MacFontReleaseChild {
         }
     }
 
-    private static long firstRun(long line) {
+    static long firstRun(long line) {
         long runs = OSShim.CTLineGetGlyphRuns(line);
         if (runs == 0 || OSShim.CFArrayGetCount(runs) == 0) {
             throw new IllegalStateException("CoreText laid \"A\" out in no run");
@@ -757,12 +767,12 @@ public final class MacFontReleaseChild {
     }
 
     /** The font of {@code run}, which its line holds; 0 if it has none. */
-    private static long runFont(long run) {
+    static long runFont(long run) {
         long attributes = OSShim.CTRunGetAttributes(run);
         return attributes == 0 ? 0 : OSShim.CFDictionaryGetValue(attributes, OSShim.kCTFontAttributeName());
     }
 
-    private static String fontName(long font) {
+    static String fontName(long font) {
         return font == 0 ? null : OSShim.CTFontCopyAttributeDisplayName(font);
     }
 
@@ -1087,6 +1097,121 @@ public final class MacFontReleaseChild {
         return pooled[0];
     }
 
+    /**
+     * A task the queue refuses gets no reference to the font: production's hand-off takes one for it and releases it
+     * again before it rethrows what the queue threw. A null task, which the queue refuses, stands in for an add that
+     * cannot allocate its node. The child holds a second reference of its own, so that a release too many shows as a
+     * count and frees nothing.
+     */
+    private static void cascadeListRefused(GoldenMap out) throws Exception {
+        long font = MacFontOracleShim.createFont("Helvetica", 12);
+        OSShim.CFRetain(font);
+        MacFontFinderShim.cascadeListWorker();
+        long before = MacFontOracleShim.retainCount(font);
+        Throwable thrown = null;
+        try {
+            MacFontFinderShim.queueCascadeListTask(null, font);
+        } catch (RuntimeException | Error e) {
+            thrown = e;
+        }
+        out.put("retain.delta", Long.toString(MacFontOracleShim.retainCount(font) - before));
+        out.put("thrown", thrown == null ? null : thrown.getClass().getName());
+        out.put("thrown.byTheQueue", Boolean.toString(thrown != null
+                && hasFrame(thrown, "java.util.concurrent.ConcurrentLinkedQueue", "offer")));
+        // One reference stays with the child: after a release too many in the hand-off, a second one here would free
+        // the font twice.
+        MacFontOracleShim.release(font);
+    }
+
+    /**
+     * Tasks whose release of their font throws, each waited for by a virtual caller of its own: a heap segment, which
+     * no downcall takes, stands in for the font, and the tasks are handed to the cascade-list thread through
+     * production's hand-off with no reference taken. At address 0 the read asks CoreText nothing and answers the
+     * empty list, so only the release throws; at address 8 the read throws too, before CoreText is called. Then a
+     * virtual caller's call of Helvetica must still be answered by the same thread. A caller that gets no answer ends
+     * the scenario.
+     */
+    private static void cascadeListReleaseFails(GoldenMap out) throws Exception {
+        long font = MacFontOracleShim.createFont("Helvetica", 12);
+        String[] list = MacFontFinderShim.getCascadeList(font);
+        Thread worker = MacFontFinderShim.cascadeListWorker();
+        if (failingTaskAnswered(out, "readAnswers", MemorySegment.ofArray(new byte[8]))
+                && failingTaskAnswered(out, "readThrows", MemorySegment.ofArray(new byte[16]).asSlice(8))) {
+            afterTheFailures(out, font, list, worker);
+        }
+        MacFontOracleShim.release(font);
+    }
+
+    /** Whether a virtual caller got an answer from a task of {@code font}, which it waits for; written under key. */
+    private static boolean failingTaskAnswered(GoldenMap out, String key, MemorySegment font)
+            throws InterruptedException {
+        TaskCall call = new TaskCall(font);
+        Thread caller = Thread.ofVirtual().name(CASCADE_LIST_RELEASE_FAILS + "." + key).start(call);
+        boolean answered = caller.join(Duration.ofSeconds(WAIT_PARK_SECONDS));
+        out.put(key + ".answered", Boolean.toString(answered));
+        out.put(key + ".list", call.list == null ? null : Integer.toString(call.list.length));
+        out.put(key + ".thrown", call.thrown == null ? null : call.thrown.getClass().getName());
+        out.put(key + ".thrown.by", thrownBy(call.thrown));
+        Throwable[] suppressed = call.thrown == null ? new Throwable[0] : call.thrown.getSuppressed();
+        out.put(key + ".suppressed", Arrays.stream(suppressed).map(MacFontReleaseChild::thrownBy)
+                                           .collect(Collectors.joining(";")));
+        return answered;
+    }
+
+    /** Which half of a task threw {@code thrown}: its read of the list, or its release of the font. */
+    private static String thrownBy(Throwable thrown) {
+        if (thrown == null) {
+            return null;
+        }
+        if (hasFrame(thrown, "com.sun.javafx.font.MacFontFinder$CascadeListTask", "releaseFont")) {
+            return "release";
+        }
+        if (hasFrame(thrown, "com.sun.javafx.font.MacFontFinder", "cascadeList")) {
+            return "read";
+        }
+        return "elsewhere: " + thrown;
+    }
+
+    /**
+     * A task that throws an {@code Error} and one that throws a {@code RuntimeException}, handed to the cascade-list
+     * thread through production's hand-off: the thread must outlive both and make the next virtual caller's list.
+     */
+    private static void cascadeListTaskThrows(GoldenMap out) throws Exception {
+        long font = MacFontOracleShim.createFont("Helvetica", 12);
+        String[] list = MacFontFinderShim.getCascadeList(font);
+        Thread worker = MacFontFinderShim.cascadeListWorker();
+        CountDownLatch thrown = new CountDownLatch(2);
+        Consumer<Runnable> handOff = MacFontFinderShim.cascadeListHandOff();
+        handOff.accept(() -> {
+            thrown.countDown();
+            throw new AssertionError("thrown by a task of " + CASCADE_LIST_TASK_THROWS);
+        });
+        handOff.accept(() -> {
+            thrown.countDown();
+            throw new IllegalStateException("thrown by a task of " + CASCADE_LIST_TASK_THROWS);
+        });
+        out.put("tasks.ran", Boolean.toString(thrown.await(WAIT_PARK_SECONDS, TimeUnit.SECONDS)));
+        afterTheFailures(out, font, list, worker);
+        MacFontOracleShim.release(font);
+    }
+
+    /** A virtual caller's call once tasks failed: whether the thread that made the earlier lists answered it. */
+    private static void afterTheFailures(GoldenMap out, long font, String[] list, Thread worker)
+            throws InterruptedException {
+        ListCall call = new ListCall(font);
+        Thread caller = Thread.ofVirtual().name("afterTheFailures").start(call);
+        out.put("after.answered", Boolean.toString(caller.join(Duration.ofSeconds(WAIT_PARK_SECONDS))));
+        out.put("after.failure", call.failure);
+        out.put("after.sameList", Boolean.toString(Arrays.equals(list, call.list)));
+        out.put("worker.alive", Boolean.toString(worker.isAlive()));
+        out.put("worker.same", Boolean.toString(MacFontFinderShim.cascadeListWorker() == worker));
+    }
+
+    private static boolean hasFrame(Throwable thrown, String className, String methodName) {
+        return Arrays.stream(thrown.getStackTrace()).anyMatch(frame -> frame.getClassName().equals(className)
+                && frame.getMethodName().equals(methodName));
+    }
+
     /** A virtual thread's call of the cascade list of {@code font}, waited for. */
     private static ListCall virtualCall(long font) throws InterruptedException {
         ListCall call = new ListCall(font);
@@ -1228,7 +1353,7 @@ public final class MacFontReleaseChild {
     }
 
     /** A font of Ahem, a line of "A" in it, the line's first run, and the System font that lays that run out. */
-    private record FaceRun(long font, long line, long run, CompositeFontResource system) {
+    record FaceRun(long font, long line, long run, CompositeFontResource system) {
 
         void release() {
             OSShim.CFRelease(line);
@@ -1374,6 +1499,29 @@ public final class MacFontReleaseChild {
                 list = MacFontFinderShim.getCascadeList(font);
             } catch (RuntimeException | Error e) {
                 failure = e.toString();
+            }
+        }
+    }
+
+    /** A task of {@code font} made, handed to the cascade-list thread and waited for on this thread. */
+    private static final class TaskCall implements Runnable {
+
+        private final MemorySegment font;
+        private String[] list;
+        private Throwable thrown;
+
+        TaskCall(MemorySegment font) {
+            this.font = font;
+        }
+
+        @Override
+        public void run() {
+            try {
+                Runnable task = MacFontFinderShim.cascadeListTask(font);
+                MacFontFinderShim.cascadeListHandOff().accept(task);
+                list = MacFontFinderShim.awaitList(task);
+            } catch (RuntimeException | Error e) {
+                thrown = e;
             }
         }
     }

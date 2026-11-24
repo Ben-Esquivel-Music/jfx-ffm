@@ -26,6 +26,7 @@
 package com.sun.javafx.font;
 
 import java.lang.foreign.MemorySegment;
+import java.lang.reflect.Constructor;
 import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
 import java.util.ArrayList;
@@ -121,13 +122,50 @@ public final class MacFontFinderShim {
     }
 
     /**
-     * Production's hand-off of a task to {@link #cascadeListWorker}, which runs the tasks in their order. It is looked
-     * up once here, so that no reflective lookup runs in the calls it makes.
+     * Production's hand-off of a task to {@link #cascadeListWorker}, which runs the tasks in their order, with no
+     * font to take a reference to. It is looked up once here, so that no reflective lookup runs in the calls it makes.
      */
     public static Consumer<Runnable> cascadeListHandOff() {
         Thread worker = cascadeListWorker();
-        Method handOff = declaredMethod("queueCascadeListTask", Thread.class, Runnable.class);
-        return task -> invoke(handOff, worker, task);
+        Method handOff = queueCascadeListTask();
+        return task -> invoke(handOff, worker, task, MemorySegment.NULL);
+    }
+
+    /** Production's hand-off of {@code task}, with a reference to {@code font} taken for it. */
+    public static void queueCascadeListTask(Runnable task, long font) {
+        invoke(queueCascadeListTask(), cascadeListWorker(), task, MemorySegment.ofAddress(font));
+    }
+
+    /**
+     * A virtual caller's task for the cascade list of {@code font}, whose caller is this thread: once it has run, it
+     * wakes this thread's {@link #awaitList}. Making it takes no reference to the font; running it releases one.
+     */
+    public static Runnable cascadeListTask(MemorySegment font) {
+        try {
+            Constructor<?> constructor = Class.forName(MacFontFinder.class.getName() + "$CascadeListTask")
+                    .getDeclaredConstructor(MemorySegment.class);
+            constructor.setAccessible(true);
+            return (Runnable) constructor.newInstance(font);
+        } catch (ReflectiveOperationException e) {
+            throw new IllegalStateException("MacFontFinder.CascadeListTask(MemorySegment) no longer exists; re-point"
+                    + " MacFontFinderShim at its replacement", e);
+        }
+    }
+
+    /** The wait of a task of {@link #cascadeListTask}: its list, or what making it threw. */
+    public static String[] awaitList(Runnable task) {
+        try {
+            Method await = task.getClass().getDeclaredMethod("awaitList");
+            await.setAccessible(true);
+            return invokeOn(await, task);
+        } catch (NoSuchMethodException e) {
+            throw new IllegalStateException("MacFontFinder.CascadeListTask.awaitList no longer exists; re-point"
+                    + " MacFontFinderShim at its replacement", e);
+        }
+    }
+
+    private static Method queueCascadeListTask() {
+        return declaredMethod("queueCascadeListTask", Thread.class, Runnable.class, MemorySegment.class);
     }
 
     /** The display name and file {@code getCascadeList} records for one descriptor. */
@@ -153,10 +191,14 @@ public final class MacFontFinderShim {
         }
     }
 
-    @SuppressWarnings("unchecked")
     private static <T> T invoke(Method method, Object... arguments) {
+        return invokeOn(method, null, arguments);
+    }
+
+    @SuppressWarnings("unchecked")
+    private static <T> T invokeOn(Method method, Object target, Object... arguments) {
         try {
-            return (T) method.invoke(null, arguments);
+            return (T) method.invoke(target, arguments);
         } catch (IllegalAccessException e) {
             throw new IllegalStateException(e);
         } catch (InvocationTargetException e) {

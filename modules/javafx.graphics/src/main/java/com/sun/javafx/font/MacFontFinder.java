@@ -246,8 +246,8 @@ public class MacFontFinder {
 
     /**
      * Display name and file per cascade entry; none for a zero font or when CoreText gives no list. What CoreText
-     * autoreleases during the call is drained before it returns, on any thread, unless a virtual caller cannot start a
-     * platform thread.
+     * autoreleases during the call is drained before it returns, on any thread. A virtual caller that cannot start the
+     * platform thread that makes its list gets that error, and the next virtual caller tries to start it again.
      */
     public static String[] getCascadeList(long fontRef) {
         if (fontRef == 0) {
@@ -281,19 +281,16 @@ public class MacFontFinder {
      * however its wait ends.
      */
     private static String[] cascadeListOnAPlatformThread(MemorySegment font) {
-        Thread worker;
-        try {
-            worker = startCascadeListWorker();
-        } catch (OutOfMemoryError e) {
-            // Without a thread the list is made here as it was before, with no pool: a virtual thread may not push.
-            return cascadeList(font, CFNative.CFLocaleCopyISOLanguageCodes());
-        }
+        Thread worker = startCascadeListWorker();
         CascadeListTask task = new CascadeListTask(font);
-        queueCascadeListTask(worker, task);
+        queueCascadeListTask(worker, task, font);
         return task.awaitList();
     }
 
-    /** The thread of {@link #runCascadeListTasks}, started unless it runs; an {@code OutOfMemoryError} if it cannot. */
+    /**
+     * The thread of {@link #runCascadeListTasks}, started unless it runs; what starting it throws if it cannot, with
+     * no thread recorded, so that the next caller tries again.
+     */
     private static Thread startCascadeListWorker() {
         Thread worker = cascadeListWorker;
         if (worker != null) {
@@ -310,12 +307,27 @@ public class MacFontFinder {
         }
     }
 
-    private static void queueCascadeListTask(Thread worker, Runnable task) {
-        CASCADE_LIST_TASKS.add(task);
+    /**
+     * Queues {@code task} for {@code worker} and wakes it, with a reference to {@code font} taken for the task, which
+     * releases it once it has run; {@code font} is NULL for a task that holds none. If the task does not enter the
+     * queue, that reference is released here and what the queue threw is rethrown; once it has entered, it is the
+     * task's.
+     */
+    private static void queueCascadeListTask(Thread worker, Runnable task, MemorySegment font) {
+        if (font.address() != 0) {
+            CFNative.CFRetain(font);
+        }
+        try {
+            CASCADE_LIST_TASKS.add(task);
+        } catch (Throwable notQueued) {
+            // No pool is needed: the caller still holds the font it lent, so this reference is never the last.
+            release(font);
+            throw notQueued;
+        }
         LockSupport.unpark(worker);
     }
 
-    /** The loop of the cascade-list thread, for the life of the process; no task throws. */
+    /** The loop of the cascade-list thread, for the life of the process. */
     private static void runCascadeListTasks() {
         while (true) {
             Runnable task = CASCADE_LIST_TASKS.poll();
@@ -324,7 +336,12 @@ public class MacFontFinder {
                 // Virtual callers wait on this thread: an interrupt may neither end the loop nor keep it from parking.
                 Thread.interrupted();
             } else {
-                task.run();
+                try {
+                    task.run();
+                } catch (Throwable _) {
+                    // A task keeps what it throws for its caller; one that did not may not end the thread every
+                    // later virtual caller waits for.
+                }
             }
         }
     }
@@ -392,7 +409,10 @@ public class MacFontFinder {
         return MemorySegment.ofAddress(address);
     }
 
-    /** A virtual caller's cascade list, made on the cascade-list thread from a reference of its own to the font. */
+    /**
+     * A virtual caller's cascade list, made on the cascade-list thread from the reference to the font that
+     * {@link #queueCascadeListTask} took for it.
+     */
     private static final class CascadeListTask implements Runnable {
 
         private final Thread caller = Thread.currentThread();
@@ -403,9 +423,9 @@ public class MacFontFinder {
 
         CascadeListTask(MemorySegment font) {
             this.font = font;
-            CFNative.CFRetain(font);
         }
 
+        /** Throws nothing: what the read or the release throws is kept for the caller, who is woken either way. */
         @Override
         public void run() {
             try {
@@ -413,6 +433,25 @@ public class MacFontFinder {
             } catch (Throwable t) {
                 failure = t;
             }
+            try {
+                releaseFont();
+            } catch (Throwable t) {
+                if (failure == null) {
+                    failure = t;
+                } else if (failure != t) {
+                    try {
+                        failure.addSuppressed(t);
+                    } catch (Throwable _) {
+                        // The read's failure is the one the caller needs; attaching this one may not stop the wake-up.
+                    }
+                }
+            }
+            // After the release, so that a caller that still waits holds the font when this reference goes.
+            done = true;
+            LockSupport.unpark(caller);
+        }
+
+        private void releaseFont() {
             // A caller whose wait failed may have released the font already; what freeing it here autoreleases
             // would otherwise stay on this thread for the life of the process.
             long pool = ObjCNative.objc_autoreleasePoolPush();
@@ -421,9 +460,6 @@ public class MacFontFinder {
             } finally {
                 ObjCNative.objc_autoreleasePoolPop(pool);
             }
-            // After the release, so that a caller that still waits holds the font when this reference goes.
-            done = true;
-            LockSupport.unpark(caller);
         }
 
         /** The list, or what making it threw; an interrupt does not end the wait, and is set again after it. */

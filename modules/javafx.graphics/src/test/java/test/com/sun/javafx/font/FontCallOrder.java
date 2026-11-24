@@ -59,6 +59,7 @@ import java.util.ArrayList;
 import java.util.BitSet;
 import java.util.Deque;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
@@ -109,41 +110,159 @@ final class FontCallOrder {
     }
 
     /**
-     * Fails unless {@code method} of {@code type} calls {@code first}, and each of its calls of {@code first} is
-     * followed by a call of {@code then} with no instruction between the two that branches, switches, returns or
-     * throws, and no handler beginning after that call of {@code first} and at or before that call of {@code then}:
-     * javac's shape of two statements in a row, where {@code then} runs whenever {@code first} returns, unless an
-     * instruction between them throws. {@code protects} says what that is for: a failure gives it after "so that",
-     * and then what was found.
+     * Fails unless {@code method} of {@code type} calls {@code first}, and the path each of its calls of
+     * {@code first} takes once that call returns, through fall-through and unconditional gotos, reaches a call of
+     * {@code then} with no instruction on the way that branches on a condition, switches, returns or throws, and none
+     * that begins a handler: javac's shape of two statements in a row, the second also where the first ends a
+     * {@code try} whose handlers lie between the two in code order. {@code then} runs whenever {@code first} returns,
+     * unless an instruction between them throws. {@code protects} says what that is for: a failure gives it after
+     * "so that", and then what was found.
      */
     static void assertCallFollowsUnconditionally(String type, String method, String first, String then,
                                                  String protects) {
         MethodCode code = code(type, method);
         List<Instruction> instructions = code.instructions();
-        String pin = type + "." + method + " must call " + then + " after each call of " + first + ", with no"
-                + " branch, switch, return, throw or handler between them, so that " + protects + "; but ";
-        List<Integer> firstCalls = requiredCalls(instructions, first, pin);
-        List<Integer> thenCalls = requiredCalls(instructions, then, pin);
-        for (int firstIndex : firstCalls) {
-            int thenIndex = firstAtOrAfter(thenCalls, firstIndex + 1);
-            if (thenIndex < 0) {
-                fail(pin + "its call of " + first + " at instruction " + firstIndex + " is followed by no call of "
-                        + then);
-            }
-            String between = " between its call of " + first + " at instruction " + firstIndex + " and its call of "
-                    + then + " at instruction " + thenIndex;
-            for (int i = firstIndex + 1; i < thenIndex; i++) {
+        String pin = type + "." + method + " must call " + then + " once each call of " + first + " returns, with no"
+                + " conditional branch, switch, return, throw or handler on the way, so that " + protects + "; but ";
+        requiredCalls(instructions, then, pin);
+        Set<Integer> handlerStarts = new HashSet<>();
+        code.handlers().forEach(handler -> handlerStarts.add(code.labelIndexes().get(handler.handler())));
+        for (int firstIndex : requiredCalls(instructions, first, pin)) {
+            String from = " on the way from its call of " + first + " at instruction " + firstIndex + " to a call of "
+                    + then;
+            BitSet visited = new BitSet(instructions.size());
+            int i = firstIndex + 1;
+            while (!isCallOf(instructions, i, then)) {
+                if (i >= instructions.size() || visited.get(i)) {
+                    fail(pin + "the path from its call of " + first + " at instruction " + firstIndex
+                            + (i >= instructions.size() ? " runs off the code" : " loops at instruction " + i)
+                            + " before any call of " + then);
+                }
+                visited.set(i);
                 Instruction instruction = instructions.get(i);
-                if (!jumpTargets(instruction).isEmpty() || !fallsThrough(instruction)) {
-                    fail(pin + shown(instruction) + " at instruction " + i + " comes" + between);
+                if (handlerStarts.contains(i)) {
+                    fail(pin + "the handler at instruction " + i + " begins" + from);
+                }
+                if (instruction.opcode() == Opcode.GOTO || instruction.opcode() == Opcode.GOTO_W) {
+                    i = code.labelIndexes().get(((BranchInstruction) instruction).target());
+                } else if (!jumpTargets(instruction).isEmpty() || !fallsThrough(instruction)) {
+                    fail(pin + shown(instruction) + " at instruction " + i + " comes" + from);
+                } else {
+                    i++;
                 }
             }
+        }
+    }
+
+    /**
+     * Fails unless {@code method} of {@code type} calls {@code call}, and no handler's try range covers any of its
+     * calls of it: what such a call throws leaves the method. {@code protects} says what that is for: a failure gives
+     * it after "so that", and then what was found.
+     */
+    static void assertNoHandlerCovers(String type, String method, String call, String protects) {
+        MethodCode code = code(type, method);
+        String pin = type + "." + method + " must call " + call + " where no handler covers the call, so that "
+                + protects + "; but ";
+        for (int index : requiredCalls(code.instructions(), call, pin)) {
             for (ExceptionCatch handler : code.handlers()) {
-                int handlerIndex = code.labelIndexes().get(handler.handler());
-                if (firstIndex < handlerIndex && handlerIndex <= thenIndex) {
-                    fail(pin + "the handler at instruction " + handlerIndex + " begins" + between);
+                int start = code.labelIndexes().get(handler.tryStart());
+                int end = code.labelIndexes().get(handler.tryEnd());
+                if (start <= index && index < end) {
+                    fail(pin + "the handler of " + handler.catchType().map(ClassEntry::asInternalName).orElse("any")
+                            + " from instruction " + start + " to " + end + ", handled at "
+                            + code.labelIndexes().get(handler.handler()) + ", covers its call at instruction " + index);
                 }
             }
+        }
+    }
+
+    /**
+     * Fails unless {@code method} of {@code type} calls {@code call}, a handler that catches everything covers each of
+     * those calls, and no handler that covers one reaches a throw without an exception: nothing such a call throws
+     * leaves the method. {@code protects} says what that is for: a failure gives it after "so that", and then what was
+     * found.
+     */
+    static void assertNeverThrowsFrom(String type, String method, String call, String protects) {
+        MethodCode code = code(type, method);
+        List<Instruction> instructions = code.instructions();
+        String pin = type + "." + method + " must catch everything its calls of " + call + " throw, and throw none of"
+                + " it, so that " + protects + "; but ";
+        for (int index : requiredCalls(instructions, call, pin)) {
+            boolean catchesEverything = false;
+            for (ExceptionCatch handler : code.handlers()) {
+                int start = code.labelIndexes().get(handler.tryStart());
+                int end = code.labelIndexes().get(handler.tryEnd());
+                if (start <= index && index < end) {
+                    int first = code.labelIndexes().get(handler.handler());
+                    String caught = handler.catchType().map(ClassEntry::asInternalName).orElse("any");
+                    BitSet reached = reachedWithoutAnException(code, first);
+                    reached.stream().filter(i -> instructions.get(i) instanceof ThrowInstruction).findFirst()
+                            .ifPresent(i -> fail(pin + "the handler of " + caught + " from instruction " + start
+                                    + " to " + end + ", handled at " + first + ", throws at instruction " + i));
+                    catchesEverything |= handler.catchType().isEmpty() || caught.equals("java/lang/Throwable");
+                }
+            }
+            if (!catchesEverything) {
+                fail(pin + "no handler that catches everything covers its call at instruction " + index);
+            }
+        }
+    }
+
+    /**
+     * Fails if {@code method} of {@code type} has a return instruction: javac's shape of a loop that never ends.
+     * {@code protects} says what that is for: a failure gives it after "so that", and then what was found.
+     */
+    static void assertNeverReturns(String type, String method, String protects) {
+        List<Instruction> code = instructions(type, method);
+        for (int i = 0; i < code.size(); i++) {
+            if (code.get(i) instanceof ReturnInstruction) {
+                fail(type + "." + method + " must never return, so that " + protects + "; but it returns at"
+                        + " instruction " + i);
+            }
+        }
+    }
+
+    /**
+     * Fails unless {@code method} of {@code type} calls {@code call} and stores {@code field}, {@code owner name},
+     * and each store is reached, without an exception, from where a call of {@code call} returns, and from no handler
+     * that covers such a call: javac's shape of a store after the call, outside any catch or finally around it.
+     * {@code protects} says what that is for: a failure gives it after "so that", and then what was found.
+     */
+    static void assertStoredOnlyOnceCallReturns(String type, String method, String field, String call,
+                                                String protects) {
+        MethodCode code = code(type, method);
+        List<Instruction> instructions = code.instructions();
+        String pin = type + "." + method + " may store " + field + " only once its call of " + call + " has returned,"
+                + " so that " + protects + "; but ";
+        List<Integer> calls = requiredCalls(instructions, call, pin);
+        BitSet returned = new BitSet(instructions.size());
+        BitSet handled = new BitSet(instructions.size());
+        for (int index : calls) {
+            returned.or(reachedWithoutAnException(code, index + 1));
+            for (ExceptionCatch handler : code.handlers()) {
+                int start = code.labelIndexes().get(handler.tryStart());
+                int end = code.labelIndexes().get(handler.tryEnd());
+                if (start <= index && index < end) {
+                    handled.or(reachedWithoutAnException(code, code.labelIndexes().get(handler.handler())));
+                }
+            }
+        }
+        boolean stored = false;
+        for (int i = 0; i < instructions.size(); i++) {
+            if (instructions.get(i) instanceof FieldInstruction store
+                    && (store.opcode() == Opcode.PUTFIELD || store.opcode() == Opcode.PUTSTATIC)
+                    && field.equals(store.owner().asInternalName() + " " + store.name().stringValue())) {
+                stored = true;
+                if (!returned.get(i)) {
+                    fail(pin + "it stores it at instruction " + i + ", which no return of that call reaches");
+                }
+                if (handled.get(i)) {
+                    fail(pin + "it stores it at instruction " + i + ", which a handler around that call reaches");
+                }
+            }
+        }
+        if (!stored) {
+            fail(pin + "it never stores it, so this check no longer pins anything");
         }
     }
 
@@ -531,16 +650,17 @@ final class FontCallOrder {
 
     /**
      * Fails unless a handler of {@code method} of {@code type} that catches everything covers its first call of
-     * {@code region} and calls {@code release} before it throws, with no branch from its first instruction to that
-     * call. {@code protects} says what the release is for: a failure gives it after "so that", and then what was found.
+     * {@code region}, calls {@code release} before it throws, with no branch from its first instruction to that call,
+     * and then throws, reaching no return. {@code protects} says what the release is for: a failure gives it after "so
+     * that", and then what was found.
      */
     static void assertHandlerReleasesUnconditionally(String type, String method, String region, String release,
                                                      String protects) {
         MethodCode code = code(type, method);
         List<Instruction> instructions = code.instructions();
         String pin = type + "." + method + " must call " + release + ", with no condition before it, in a handler that"
-                + " catches everything its first call of " + region + " throws, before the handler throws, so that "
-                + protects + "; but ";
+                + " catches everything its first call of " + region + " throws, before the handler throws, never"
+                + " returning, so that " + protects + "; but ";
         int regionIndex = firstCall(instructions, region);
         if (regionIndex < 0) {
             fail(pin + "it never calls " + region);
@@ -557,8 +677,14 @@ final class FontCallOrder {
             int throwIndex = firstThrowAtOrAfter(instructions, first);
             int branchIndex = firstBranchAfter(instructions, first - 1);
             String found = caught + " from instruction " + start + " to " + end + ", handled at " + first;
-            if (catchesEverything && start <= regionIndex && regionIndex < end && releaseIndex >= 0
-                    && (throwIndex < 0 || releaseIndex < throwIndex)) {
+            BitSet reached = reachedWithoutAnException(code, first);
+            boolean rethrows = reached.stream().anyMatch(i -> instructions.get(i) instanceof ThrowInstruction)
+                    && reached.stream().noneMatch(i -> instructions.get(i) instanceof ReturnInstruction);
+            if (!rethrows) {
+                found += ", which reaches a return or no throw";
+            }
+            if (catchesEverything && start <= regionIndex && regionIndex < end && releaseIndex >= 0 && rethrows
+                    && releaseIndex < throwIndex) {
                 if (branchIndex < 0 || branchIndex > releaseIndex) {
                     return;
                 }
@@ -569,8 +695,8 @@ final class FontCallOrder {
             handlers.add(found);
         }
         fail(pin + "no handler that catches everything covers its call of " + region + " at instruction "
-                + regionIndex + " and calls " + release + " unconditionally before it throws; its handlers are "
-                + handlers);
+                + regionIndex + " and calls " + release + " unconditionally before it throws, reaching no return; its"
+                + " handlers are " + handlers);
     }
 
     /**
@@ -645,6 +771,31 @@ final class FontCallOrder {
         }
         if (!read) {
             fail(pin + "no method reads it, so this check no longer pins anything");
+        }
+    }
+
+    /**
+     * Fails unless {@code type} stores {@code field}, a field of its own, and every store of it lies in one of
+     * {@code methods}, constructors and initialisers included. {@code protects} says what that is for: a failure gives
+     * it after "so that", and then what was found.
+     */
+    static void assertFieldStoredOnlyIn(String type, String field, List<String> methods, String protects) {
+        String pin = type + "." + field + " may only be stored in " + String.join(" and ", methods) + ", so that "
+                + protects + "; but ";
+        boolean stored = false;
+        for (MethodModel method : FontClassFiles.classModel(type, CLASS_FILES).methods()) {
+            List<Instruction> code = instructionsOf(method);
+            for (int i = 0; i < code.size(); i++) {
+                if (accesses(code.get(i), Opcode.PUTFIELD, type, field)) {
+                    stored = true;
+                    if (!methods.contains(method.methodName().stringValue())) {
+                        fail(pin + method.methodName().stringValue() + " stores it at instruction " + i);
+                    }
+                }
+            }
+        }
+        if (!stored) {
+            fail(pin + "no method stores it, so this check no longer pins anything");
         }
     }
 
@@ -737,6 +888,48 @@ final class FontCallOrder {
                 stored = true;
                 if (i < callIndex) {
                     fail(pin + "it stores it at instruction " + i + ", before that call at instruction " + callIndex);
+                }
+            }
+        }
+        if (!stored) {
+            fail(pin + "it never stores it, so this check no longer pins anything");
+        }
+    }
+
+    /**
+     * Fails unless {@code method} of {@code type} stores {@code field}, {@code owner name}, and calls {@code call}, is
+     * straight-line code, with no branch, switch or exception handler at all, and stores the field only before its
+     * first call of {@code call} in code order: javac's shape of a field written and then published by the call. Code
+     * order is the order of execution only where nothing jumps, so a method with any branch, switch or handler fails,
+     * even where no path could carry a store past the call. {@code protects} says what that order is for: a failure
+     * gives it after "so that", and then what was found.
+     */
+    static void assertWrittenBefore(String type, String method, String field, String call, String protects) {
+        MethodCode methodCode = code(type, method);
+        List<Instruction> code = methodCode.instructions();
+        String pin = type + "." + method + " may store " + field + " only before its first call of " + call
+                + ", in straight-line code, so that " + protects + "; but ";
+        int callIndex = firstCall(code, call);
+        if (callIndex < 0) {
+            fail(pin + "it never calls " + call);
+        }
+        for (int i = 0; i < code.size(); i++) {
+            if (!jumpTargets(code.get(i)).isEmpty()) {
+                fail(pin + shown(code.get(i)) + " at instruction " + i + " can carry a store past the call");
+            }
+        }
+        if (!methodCode.handlers().isEmpty()) {
+            fail(pin + "it has " + methodCode.handlers().size() + " exception handlers, which can carry a store past"
+                    + " the call");
+        }
+        boolean stored = false;
+        for (int i = 0; i < code.size(); i++) {
+            if (code.get(i) instanceof FieldInstruction store
+                    && (store.opcode() == Opcode.PUTFIELD || store.opcode() == Opcode.PUTSTATIC)
+                    && field.equals(store.owner().asInternalName() + " " + store.name().stringValue())) {
+                stored = true;
+                if (i > callIndex) {
+                    fail(pin + "it stores it at instruction " + i + ", after that call at instruction " + callIndex);
                 }
             }
         }
@@ -1588,6 +1781,12 @@ final class FontCallOrder {
     private static String shown(Instruction instruction) {
         String opcode = instruction.opcode().name().toLowerCase(Locale.ROOT);
         return instruction instanceof InvokeInstruction invoke ? opcode + " of " + callOf(invoke) : opcode;
+    }
+
+    /** Whether the instruction at {@code index} of {@code code}, if there is one, is a call of {@code call}. */
+    private static boolean isCallOf(List<Instruction> code, int index, String call) {
+        return index < code.size() && code.get(index) instanceof InvokeInstruction invoke
+                && callOf(invoke).equals(call);
     }
 
     /** The index in {@code code} of the first call of {@code call}, or -1. */

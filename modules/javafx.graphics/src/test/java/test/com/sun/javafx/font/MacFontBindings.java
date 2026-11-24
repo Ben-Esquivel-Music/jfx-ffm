@@ -106,11 +106,13 @@ final class MacFontBindings {
             OS, OS_NATIVES, MAC_FONT_FINDER, MAC_FONT_FINDER_NATIVES, DFONT_DECODER, DFONT_DECODER_NATIVES);
 
     // Measured on the JNI build. The peers' entries are checked on every run, so a call site moved to another
-    // binding fails at once; US-067 moved them where it added or removed a release. javac copies a finally block to
-    // each exit of its try, so a release written once in a finally counts twice when the try has one normal exit.
+    // binding fails at once; US-067 moved them where it added or removed a release, and US-111 moved the copy of a
+    // run font's URL from CTFactory to CTGlyphLayout, which checks a remembered miss before it copies the run's font.
+    // javac copies a finally block to each exit of its try, so a release written once in a finally counts twice when
+    // the try has one normal exit.
     // The entries of the delegate owners describe the JNI bodies and are checked at capture.
     static final Map<String, String> NATIVE_CALL_SITES = Map.ofEntries(
-            Map.entry("com/sun/javafx/font/coretext/CTFactory", "OS.CFRelease*2 OS.CTFontCopyURLAttribute"),
+            Map.entry("com/sun/javafx/font/coretext/CTFactory", "OS.CFRelease*2"),
             Map.entry("com/sun/javafx/font/coretext/CTFontFile", "MacFontFinder.getCascadeList OS.CFRelease*15"
                     + " OS.CFURLCreateWithFileSystemPath*2 OS.CGDataProviderCreateWithURL"
                     + " OS.CGFontCreateWithDataProvider OS.CGPathApply OS.CGPathGetPathBoundingBox*2 OS.CGPathRelease*6"
@@ -130,7 +132,7 @@ final class MacFontBindings {
             Map.entry("com/sun/javafx/font/coretext/CTGlyphLayout", "OS.CFArrayGetCount OS.CFArrayGetValueAtIndex"
                     + " OS.CFAttributedStringCreate OS.CFDictionaryAddValue*2 OS.CFDictionaryCreateMutable"
                     + " OS.CFDictionaryGetValue OS.CFRelease*10 OS.CFStringCreateWithCharacters"
-                    + " OS.CTFontCopyAttributeDisplayName OS.CTFontCreateCopyWithAttributes"
+                    + " OS.CTFontCopyAttributeDisplayName OS.CTFontCopyURLAttribute OS.CTFontCreateCopyWithAttributes"
                     + " OS.CTLineCreateWithAttributedString OS.CTLineGetGlyphCount OS.CTLineGetGlyphRuns"
                     + " OS.CTLineGetTypographicBounds OS.CTParagraphStyleCreate OS.CTRunGetAttributes"
                     + " OS.CTRunGetGlyphs*2"

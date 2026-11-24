@@ -608,6 +608,64 @@ public class MacFontReleaseTest {
     }
 
     /**
+     * A task that does not enter the queue gets no reference to the font: the hand-off releases the one it took for
+     * the task, exactly once, and rethrows what the queue threw. A null task, which the queue refuses, stands in for
+     * an add that cannot allocate its node. On every machine
+     * {@code MacFontBindingStructureTest.aTaskOwnsItsReferenceToTheFontOnlyOnceItIsQueued} pins that the hand-off
+     * releases it nowhere else, so never after a successful add.
+     */
+    @Test
+    @Tag("crash-prone")
+    @Timeout(2 * MacFontGoldens.CHILD_TIMEOUT_SECONDS)
+    void aTaskTheQueueRefusesGetsNoReferenceToTheFont() throws Exception {
+        Map<String, String> values = run(MacFontReleaseChild.CASCADE_LIST_REFUSED);
+        assertEquals(NullPointerException.class.getName(), values.get("thrown"), "what the queue threw");
+        assertEquals("true", values.get("thrown.byTheQueue"), "the hand-off rethrows what the queue threw");
+        assertEquals("0", values.get("retain.delta"), "a refused task's reference to the font is released once");
+    }
+
+    /**
+     * A task whose release of its font throws still wakes its caller, with that failure where the read answered, and
+     * with the read's failure, the release's attached to it, where the read threw too; and the cascade-list thread
+     * makes the next caller's list. A heap segment, which no downcall takes, stands in for the font. On every machine
+     * {@code MacFontBindingStructureTest.aTaskKeepsWhatItsReadAndItsReleaseThrowAndNeverThrowsIt} pins in the class
+     * file that the task's handlers keep what they catch and go on to wake the caller.
+     */
+    @Test
+    @Tag("crash-prone")
+    @Timeout(2 * MacFontGoldens.CHILD_TIMEOUT_SECONDS)
+    void aTaskWhoseReleaseThrowsStillWakesItsCallerWithTheFailure() throws Exception {
+        Map<String, String> values = run(MacFontReleaseChild.CASCADE_LIST_RELEASE_FAILS);
+        String thrown = IllegalArgumentException.class.getName();
+        assertEquals("true", values.get("readAnswers.answered"), "a caller whose task's release threw was not woken");
+        assertEquals(thrown, values.get("readAnswers.thrown"), "what the caller of a task whose release threw gets");
+        assertEquals("release", values.get("readAnswers.thrown.by"),
+                     "where the read answered, the caller gets what the release threw");
+        assertEquals("", values.get("readAnswers.suppressed"), "the failures attached to the release's");
+        assertEquals("true", values.get("readThrows.answered"),
+                     "a caller whose task's read and release threw was not woken");
+        assertEquals(thrown, values.get("readThrows.thrown"), "what the caller of a task whose read threw gets");
+        assertEquals("read", values.get("readThrows.thrown.by"), "where the read threw, the caller gets the read's"
+                + " failure, not the release's");
+        assertEquals("release", values.get("readThrows.suppressed"), "the release's failure is attached to the read's");
+        assertAnsweredAfterTheFailures(values);
+    }
+
+    /**
+     * Anything a task throws leaves the cascade-list thread running: after a task that throws an {@code Error} and one
+     * that throws a {@code RuntimeException}, the same thread makes the next virtual caller's list. On every machine
+     * {@code MacFontBindingStructureTest.theCascadeListThreadOutlivesWhatATaskThrows} pins it in the class file.
+     */
+    @Test
+    @Tag("crash-prone")
+    @Timeout(2 * MacFontGoldens.CHILD_TIMEOUT_SECONDS)
+    void aTaskThatThrowsDoesNotEndTheCascadeListThread() throws Exception {
+        Map<String, String> values = run(MacFontReleaseChild.CASCADE_LIST_TASK_THROWS);
+        assertEquals("true", values.get("tasks.ran"), "the cascade-list thread did not run the two throwing tasks");
+        assertAnsweredAfterTheFailures(values);
+    }
+
+    /**
      * An interrupt does not end a virtual caller's wait for its cascade list: an interrupted caller gets the whole
      * list, and its interrupt status is still set.
      */
@@ -649,6 +707,15 @@ public class MacFontReleaseTest {
         assertEquals("true", values.get("interruptedAfter"), "the interrupt the wait cleared is set again");
     }
 
+    /** The thread that made the lists before the failures is alive, still the one, and answers a virtual caller. */
+    private static void assertAnsweredAfterTheFailures(Map<String, String> values) {
+        assertEquals("true", values.get("worker.alive"), "the cascade-list thread ended");
+        assertEquals("true", values.get("worker.same"), "the cascade-list thread was replaced");
+        assertEquals("true", values.get("after.answered"), "a virtual caller got no list once tasks had failed");
+        assertEquals(FontGoldens.NULL, values.get("after.failure"), "that caller's call of the cascade list");
+        assertEquals("true", values.get("after.sameList"), "that caller gets the cascade list of the font");
+    }
+
     /**
      * The probes' heap figures mean something only if each ran on its kind of thread and answered the list, and the
      * token cycles only if all of them ran and answered it.
@@ -675,7 +742,7 @@ public class MacFontReleaseTest {
     }
 
     /** The preconditions of a face whose file is replaced, measured apart from layout, that do not hold. */
-    private static List<String> swappedFacePreconditions(Map<String, String> values) {
+    static List<String> swappedFacePreconditions(Map<String, String> values) {
         String file = values.get("file");
         List<String> unmet = new ArrayList<>();
         expect(unmet, values, "file.reported", file, "CoreText reports another file for the font made from it");

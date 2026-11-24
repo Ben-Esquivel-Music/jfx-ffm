@@ -30,6 +30,7 @@ import java.lang.ref.Reference;
 import com.sun.javafx.font.CharToGlyphMapper;
 import com.sun.javafx.font.CompositeFontResource;
 import com.sun.javafx.font.CompositeStrike;
+import com.sun.javafx.font.FontResource;
 import com.sun.javafx.font.FontStrike;
 import com.sun.javafx.font.PGFont;
 import com.sun.javafx.font.PrismFontFactory;
@@ -114,10 +115,8 @@ class CTGlyphLayout extends GlyphLayout {
             if (slot == -1) {
                 try {
                     CTFactory factory = (CTFactory)PrismFontFactory.getFontFactory();
-                    if (factory.mayFindFace(fontName)) {
-                        long newRef = OS.CTFontCreateCopyWithAttributes(actualFont, 0, null, 0);
-                        slot = addFallbackFont(factory, fr, fontName, newRef);
-                    }
+                    String file = OS.CTFontCopyURLAttribute(actualFont);
+                    slot = addFallbackFont(factory, fr, fontName, file, actualFont);
                 } catch (Exception e) {
                     if (PrismFontFactory.debugFonts) {
                         e.printStackTrace();
@@ -131,17 +130,54 @@ class CTGlyphLayout extends GlyphLayout {
         return slot;
     }
 
-    /* newRef is the copy of the run's font, a +1 reference createFontFile consumes, or 0 when CoreText made none. */
-    static int addFallbackFont(CTFactory factory, CompositeFontResource fr, String fontName, long newRef)
+    /*
+     * The slot in fr of the face named fontName in file, which the borrowed runFont reports, or -1 where none is found.
+     * A face its file was read without is not looked up again, nor runFont copied, until the file changes.
+     */
+    static int addFallbackFont(CTFactory factory, CompositeFontResource fr, String fontName, String file,
+                               long runFont) throws Exception {
+        if (factory.mayFindFace(fontName, file)) {
+            FontResource font = lookUpFallbackFont(factory, fontName, file, runFont);
+            if (font != null) {
+                return fr.addSlotFont(font);
+            }
+        }
+        return -1;
+    }
+
+    /*
+     * The font of the face named fontName in file, or null where none is found. One caller per name and file at a time
+     * looks it up, copying runFont for it; a caller that comes meanwhile waits for that lookup and gets what it found,
+     * null where it found nothing or failed. Nothing a lookup runs lays text out: no caller waits for its own lookup.
+     */
+    static FontResource lookUpFallbackFont(CTFactory factory, String fontName, String file, long runFont)
             throws Exception {
+        CTFactory.FaceLookup lookup = new CTFactory.FaceLookup(fontName, file);
+        CTFactory.FaceLookup running = factory.beginLookup(lookup);
+        if (running != null) {
+            return running.await();
+        }
+        FontResource font = null;
+        try {
+            // A lookup that ended after this caller's checks and before its own began left what it found behind, and
+            // a face of the name found in any file is that face.
+            font = factory.getFontResource(fontName, null, false);
+            if (font == null && factory.mayFindFace(fontName, file)) {
+                long newRef = OS.CTFontCreateCopyWithAttributes(runFont, 0, null, 0);
+                font = fontFileOfCopy(factory, fontName, file, newRef);
+            }
+        } finally {
+            factory.endLookup(lookup, font);
+        }
+        return font;
+    }
+
+    /* newRef is the copy of the run's font, a +1 reference createFontFile consumes, or 0 when CoreText made none. */
+    static CTFontFile fontFileOfCopy(CTFactory factory, String fontName, String file, long newRef) throws Exception {
         if (newRef == 0) {
-            return -1;
+            return null;
         }
-        CTFontFile newFont = factory.createFontFile(fontName, newRef);
-        if (newFont == null) {
-            return -1;
-        }
-        return fr.addSlotFont(newFont);
+        return factory.createFontFile(fontName, file, newRef);
     }
 
     @Override
