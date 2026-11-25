@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2011, 2022, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2011, 2026, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -25,7 +25,9 @@
 
 package com.sun.javafx.font;
 
-import java.util.HashMap;
+import java.util.Arrays;
+import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
 
 public class CompositeGlyphMapper extends CharToGlyphMapper {
 
@@ -42,10 +44,11 @@ public class CompositeGlyphMapper extends CharToGlyphMapper {
             SIMPLE_ASCII_MASK_END - SIMPLE_ASCII_MASK_START + 1;
 
     private boolean asciiCacheOK;
-    private char charToGlyph[]; // Quick lookup
+    private volatile char charToGlyph[]; // Quick lookup
 
     CompositeFontResource font;
-    CharToGlyphMapper slotMappers[];
+    // Replaced by filled copies, never written in place: layout threads read it without a lock.
+    volatile CharToGlyphMapper slotMappers[];
 
     /* For now, we'll use a Map to store the char->glyph lookup result.
      * Maybe later I could use arrays for "common" values and
@@ -53,26 +56,25 @@ public class CompositeGlyphMapper extends CharToGlyphMapper {
      * lookup is relatively inexpensive. Or let the slot fonts do
      * the caching ? So a variety of strategies are possible.
      */
-    HashMap<Integer, Integer> glyphMap;
+    final Map<Integer, Integer> glyphMap;
 
     public CompositeGlyphMapper(CompositeFontResource compFont) {
         font = compFont;
         missingGlyph = 0; // TrueType font standard, avoids lookup.
-        glyphMap = new HashMap<>();
+        glyphMap = new ConcurrentHashMap<>();
         slotMappers = new CharToGlyphMapper[compFont.getNumSlots()];
         asciiCacheOK = true;
     }
 
     private final CharToGlyphMapper getSlotMapper(int slot) {
-        if (slot >= slotMappers.length) {
-            CharToGlyphMapper[] tmp = new CharToGlyphMapper[font.getNumSlots()];
-            System.arraycopy(slotMappers, 0, tmp, 0, slotMappers.length);
-            slotMappers = tmp;
-        }
-        CharToGlyphMapper mapper = slotMappers[slot];
+        CharToGlyphMapper[] mappers = slotMappers;
+        CharToGlyphMapper mapper = slot < mappers.length ? mappers[slot] : null;
         if (mapper == null) {
+            int length = slot < mappers.length ? mappers.length : font.getNumSlots();
             mapper = font.getSlotResource(slot).getGlyphMapper();
-            slotMappers[slot] = mapper;
+            CharToGlyphMapper[] filled = Arrays.copyOf(mappers, length);
+            filled[slot] = mapper;
+            slotMappers = filled;
         }
         return mapper;
     }
@@ -117,7 +119,8 @@ public class CompositeGlyphMapper extends CharToGlyphMapper {
         }
 
         // Construct charToGlyph array of all ASCII characters
-        if (charToGlyph == null) {
+        char[] glyphs = charToGlyph;
+        if (glyphs == null) {
             char glyphCodes[] = new char[ASCII_COUNT];
             CharToGlyphMapper mapper = getSlotMapper(0);
             int missingGlyphCode = mapper.getMissingGlyphCode();
@@ -133,11 +136,13 @@ public class CompositeGlyphMapper extends CharToGlyphMapper {
                 // Slot 0 mask is 0, so can use this glyphCode directly
                 glyphCodes[i] = (char)glyphCode;
             }
+            // Published once filled; asciiCacheOK only ever turns false, and either of its values answers right.
             charToGlyph = glyphCodes;
+            glyphs = glyphCodes;
         }
 
         int index = charCode - SIMPLE_ASCII_MASK_START;
-        return charToGlyph[index];
+        return glyphs[index];
     }
 
     @Override

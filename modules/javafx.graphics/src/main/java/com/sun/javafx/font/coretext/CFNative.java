@@ -339,7 +339,7 @@ public final class CFNative {
         }
     }
 
-    static MemorySegment CFRetain(MemorySegment object) {
+    public static MemorySegment CFRetain(MemorySegment object) {
         try {
             return (MemorySegment) CF_RETAIN.invokeExact(object);
         } catch (Throwable t) {

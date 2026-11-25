@@ -108,9 +108,15 @@ final class GlyfTableBounds {
     /** Reads the four signed coordinates after the contour count of the header at {@code offset}. */
     static boolean boundingBox(MemorySegment glyf, long offset, int[] bb) {
         if (offset + 10 < glyf.byteSize()) {
-            for (int i = 0; i < 4; i++) {
-                bb[i] = glyf.get(BE_SHORT, offset + 2 + 2L * i);
-            }
+            int xMin = glyf.get(BE_SHORT, offset + 2);
+            int yMin = glyf.get(BE_SHORT, offset + 4);
+            int xMax = glyf.get(BE_SHORT, offset + 6);
+            int yMax = glyf.get(BE_SHORT, offset + 8);
+            // Index 3 first: a bb too short for the four values is left as it was, as the C's one array copy left it.
+            bb[3] = yMax;
+            bb[2] = xMax;
+            bb[1] = yMin;
+            bb[0] = xMin;
             return true;
         }
         return false;

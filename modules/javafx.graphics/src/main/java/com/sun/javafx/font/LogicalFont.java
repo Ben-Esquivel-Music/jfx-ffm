@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2011, 2024, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2011, 2026, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -27,6 +27,7 @@ package com.sun.javafx.font;
 
 import java.lang.ref.WeakReference;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 
@@ -183,26 +184,25 @@ public class LogicalFont implements CompositeFontResource {
         }
     }
 
-    private FontResource slot0FontResource;
+    private volatile FontResource slot0FontResource;
 
     private FontResource getSlot0Resource() {
-        if (slot0FontResource == null) {
+        FontResource resource = slot0FontResource;
+        if (resource == null) {
             PrismFontFactory factory = PrismFontFactory.getFontFactory();
             if (physicalFamily != null) {
-                slot0FontResource =  factory.getFontResource(physicalFamily,
-                                                             isBold,
-                                                             isItalic, false);
+                resource = factory.getFontResource(physicalFamily, isBold, isItalic, false);
             } else {
-                slot0FontResource = factory.getFontResource(physicalFullName,
-                                                            physicalFileName,
-                                                            false);
+                resource = factory.getFontResource(physicalFullName, physicalFileName, false);
             }
             // Its unlikely but possible that this font isn't installed.
-            if (slot0FontResource == null) {
-                slot0FontResource = factory.getDefaultFontResource(false);
+            if (resource == null) {
+                resource = factory.getDefaultFontResource(false);
             }
+            // Written once, with the final answer: other threads read it without a lock.
+            slot0FontResource = resource;
         }
-        return slot0FontResource;
+        return resource;
     }
 
     volatile private String[] linkedFontNames;
@@ -212,11 +212,16 @@ public class LogicalFont implements CompositeFontResource {
 
     private void getLinkedFonts() {
         if (fallbacks == null) {
-            PrismFontFactory factory = PrismFontFactory.getFontFactory();
-            FontFallbackInfo fallbackInfo = factory.getFallbacks(getSlot0Resource());
-            linkedFontNames = fallbackInfo.getFontNames();
-            linkedFontFiles = fallbackInfo.getFontFiles();
-            fallbacks       = fallbackInfo.getFonts();
+            synchronized (this) {
+                if (fallbacks == null) {
+                    PrismFontFactory factory = PrismFontFactory.getFontFactory();
+                    FontFallbackInfo fallbackInfo = factory.getFallbacks(getSlot0Resource());
+                    linkedFontNames = fallbackInfo.getFontNames();
+                    linkedFontFiles = fallbackInfo.getFontFiles();
+                    // Set last: a caller that finds it set reads the names and files without the lock.
+                    fallbacks       = fallbackInfo.getFonts();
+                }
+            }
         }
     }
 
@@ -224,8 +229,9 @@ public class LogicalFont implements CompositeFontResource {
     public int getNumSlots() {
         getLinkedFonts();
         int num = fallbacks.length;
-        if (nativeFallbacks != null) {
-            num += nativeFallbacks.length;
+        FontResource[] added = nativeFallbacks;
+        if (added != null) {
+            num += added.length;
         }
         return num + 1;
     }
@@ -244,8 +250,9 @@ public class LogicalFont implements CompositeFontResource {
             }
             i++;
         }
-        if (nativeFallbacks != null) {
-            for (FontResource nativeFallback : nativeFallbacks) {
+        FontResource[] added = nativeFallbacks;
+        if (added != null) {
+            for (FontResource nativeFallback : added) {
                 if (fontName.equalsIgnoreCase(nativeFallback.getFullName())) {
                     return i;
                 }
@@ -270,16 +277,17 @@ public class LogicalFont implements CompositeFontResource {
             }
             return -1;
         }
-        slot = getSlotForFontNoCreate(fr.getFullName());
-        if (slot >= 0) {
-            return slot;
-        }
 
         /* Add the font to the list of native fallbacks */
         return addNativeFallback(fr);
     }
 
-    private int addNativeFallback(FontResource fr) {
+    private synchronized int addNativeFallback(FontResource fr) {
+        // Looked up again under the lock: another caller may have added it meanwhile.
+        int slot = getSlotForFontNoCreate(fr.getFullName());
+        if (slot >= 0) {
+            return slot;
+        }
         int ns = getNumSlots();
         if (ns >= 0x7E) {
             /* There are 8bits (0xFF) reserved in a glyph code to store the slot
@@ -325,25 +333,31 @@ public class LogicalFont implements CompositeFontResource {
             return getSlot0Resource();
         } else {
             getLinkedFonts();
+            FontResource[] linked = fallbacks;
             slot = slot - 1;
-            if (slot >= fallbacks.length) {
-                slot = slot - fallbacks.length;
-                if (nativeFallbacks == null || slot >= nativeFallbacks.length) {
+            if (slot >= linked.length) {
+                slot = slot - linked.length;
+                FontResource[] added = nativeFallbacks;
+                if (added == null || slot >= added.length) {
                     return null;
                 }
-                return nativeFallbacks[slot];
+                return added[slot];
             }
-            if (fallbacks[slot] == null) {
+            FontResource resource = linked[slot];
+            if (resource == null) {
                 String file = linkedFontFiles[slot];
                 String name = linkedFontNames[slot];
-                fallbacks[slot] =
-                    PrismFontFactory.getFontFactory().
-                          getFontResource(name, file, false);
-                if (fallbacks[slot] == null) {
-                    fallbacks[slot] = getSlot0Resource();
+                resource = PrismFontFactory.getFontFactory().getFontResource(name, file, false);
+                if (resource == null) {
+                    resource = getSlot0Resource();
                 }
+                // Published as a filled copy, never written in place: other threads read the slots without a lock.
+                // A fill lost to another thread's copy is looked up again, and the factory answers the font it cached.
+                FontResource[] filled = Arrays.copyOf(linked, linked.length);
+                filled[slot] = resource;
+                fallbacks = filled;
             }
-            return fallbacks[slot];
+            return resource;
         }
     }
 
@@ -434,14 +448,16 @@ public class LogicalFont implements CompositeFontResource {
         return slotResource.getAdvance(slotglyphCode, size);
     }
 
-    CompositeGlyphMapper mapper;
+    volatile CompositeGlyphMapper mapper;
     @Override
     public CharToGlyphMapper getGlyphMapper() {
         //return getSlot0Resource().getGlyphMapper();
-        if (mapper == null) {
-            mapper = new CompositeGlyphMapper(this);
+        CompositeGlyphMapper glyphMapper = mapper;
+        if (glyphMapper == null) {
+            glyphMapper = new CompositeGlyphMapper(this);
+            mapper = glyphMapper;
         }
-        return mapper;
+        return glyphMapper;
     }
 
     Map<FontStrikeDesc, WeakReference<FontStrike>> strikeMap = new ConcurrentHashMap<>();

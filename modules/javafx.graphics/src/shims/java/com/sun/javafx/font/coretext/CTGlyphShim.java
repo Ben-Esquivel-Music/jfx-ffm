@@ -25,9 +25,12 @@
 
 package com.sun.javafx.font.coretext;
 
+import com.sun.javafx.font.Glyph;
 import java.lang.reflect.Field;
+import java.lang.reflect.InvocationTargetException;
+import java.lang.reflect.Method;
 
-/** Reads {@link CTGlyph}'s process-wide state. No native call of its own. */
+/** Reads {@link CTGlyph}'s process-wide state and calls its private methods. No native call of its own. */
 public final class CTGlyphShim {
 
     private CTGlyphShim() {
@@ -38,5 +41,59 @@ public final class CTGlyphShim {
         Field field = CTGlyph.class.getDeclaredField("cachedContextRef");
         field.setAccessible(true);
         return field.getLong(null);
+    }
+
+    /** The glyph's private {@code createContext}; a context it answers is the caller's to release. */
+    public static long createContext(Glyph glyph, boolean lcd, int width, int height)
+            throws ReflectiveOperationException {
+        return invoke(glyph, "createContext", new Class<?>[] {boolean.class, int.class, int.class},
+                      lcd, width, height);
+    }
+
+    /** The glyph's private {@code getCachedContext}; the context it answers belongs to the cache. */
+    public static long getCachedContext(Glyph glyph, boolean lcd) throws ReflectiveOperationException {
+        return invoke(glyph, "getCachedContext", new Class<?>[] {boolean.class}, lcd);
+    }
+
+    /**
+     * The glyph measured, then drawn by its private {@code drawImage} into {@code context} with the options the context
+     * already has, at sub-pixel position {@code subPixel}; answers the image. Never hand it the cached context, which
+     * only a draw under the cache's lock may use.
+     */
+    public static byte[] drawInto(Glyph glyph, long context, int subPixel) throws ReflectiveOperationException {
+        glyph.getWidth();
+        Field field = CTGlyph.class.getDeclaredField("bounds");
+        field.setAccessible(true);
+        CGRect box = (CGRect) field.get(glyph);
+        return invoke(glyph, "drawImage",
+                      new Class<?>[] {long.class, double.class, double.class, int.class, int.class, int.class},
+                      context, box.origin.x, box.origin.y, (int) box.size.width, (int) box.size.height, subPixel);
+    }
+
+    /** {@code CTGlyph}'s private {@code bitmapContext}; a context it answers is the caller's to release. */
+    public static long bitmapContext(long space, int width, int height, int bytesPerRow, int flags)
+            throws ReflectiveOperationException {
+        return invoke(null, "bitmapContext",
+                      new Class<?>[] {long.class, int.class, int.class, int.class, int.class},
+                      space, width, height, bytesPerRow, flags);
+    }
+
+    @SuppressWarnings("unchecked")
+    private static <T> T invoke(Glyph glyph, String name, Class<?>[] parameterTypes, Object... arguments)
+            throws ReflectiveOperationException {
+        Method method = CTGlyph.class.getDeclaredMethod(name, parameterTypes);
+        method.setAccessible(true);
+        try {
+            return (T) method.invoke(glyph, arguments);
+        } catch (InvocationTargetException e) {
+            Throwable cause = e.getCause();
+            if (cause instanceof RuntimeException runtime) {
+                throw runtime;
+            }
+            if (cause instanceof Error error) {
+                throw error;
+            }
+            throw e;
+        }
     }
 }

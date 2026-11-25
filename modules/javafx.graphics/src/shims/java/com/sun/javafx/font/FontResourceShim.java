@@ -25,8 +25,10 @@
 
 package com.sun.javafx.font;
 
+import com.sun.javafx.text.GlyphLayout;
 import java.lang.reflect.Constructor;
 import java.lang.reflect.InvocationTargetException;
+import java.lang.reflect.Method;
 
 /**
  * Uncached font objects for the font goldens.
@@ -37,7 +39,9 @@ import java.lang.reflect.InvocationTargetException;
  * {@link #newUncachedFontFile} is neither in the factory's file map nor under any name in its resource map, a
  * {@link PrismCompositeFontResource} with a {@code null} lookup name is not put in the factory's composite map
  * and gets a fresh {@link FallbackResource}, and a {@link LogicalFont} built directly bypasses the static
- * logical font table. No {@code java.lang.foreign} and no native call of its own.
+ * logical font table. It also reaches the factory's font map and the slot lists of a composite for the lock tests of
+ * {@code CompositeFontLocksTest}, and the slot mapping of a composite. No {@code java.lang.foreign} and no native call
+ * of its own.
  */
 public final class FontResourceShim {
 
@@ -77,6 +81,41 @@ public final class FontResourceShim {
         return new PrismCompositeFontResource(primary, null);
     }
 
+    /** The slot {@link PrismCompositeFontResource} hands out for {@code fallbackSlot} of its fallback list. */
+    public static int compositeSlotOf(int fallbackSlot) {
+        try {
+            Method mapping = PrismCompositeFontResource.class.getDeclaredMethod("slotAfterThePrimary", int.class);
+            mapping.setAccessible(true);
+            return (int) mapping.invoke(null, fallbackSlot);
+        } catch (NoSuchMethodException e) {
+            throw new IllegalStateException("PrismCompositeFontResource.slotAfterThePrimary(int) no longer exists;"
+                    + " re-point FontResourceShim at its replacement", e);
+        } catch (IllegalAccessException e) {
+            throw new IllegalStateException(e);
+        } catch (InvocationTargetException e) {
+            throw new IllegalStateException(e.getCause());
+        }
+    }
+
+    /** The fallback list of a composite over {@code primary}, as {@link PrismCompositeFontResource} makes it. */
+    public static CompositeFontResource newFallbackResource(FontResource primary) {
+        return FallbackResource.getFallbackResource(primary);
+    }
+
+    /**
+     * A factory that belongs to no platform and is not the process's: it makes no font file, layout or fallback
+     * list. A store, and a lookup of a name stored in it, reach only its font map and its monitor; a lookup that
+     * misses goes on to the platform's fonts, through native calls on Windows, macOS and Linux.
+     */
+    public static PrismFontFactory newMapOnlyFactory() {
+        return new MapOnlyFactory();
+    }
+
+    /** The protected {@code PrismFontFactory.storeInMap}. */
+    public static void storeInMap(PrismFontFactory factory, String name, FontResource resource) {
+        factory.storeInMap(name, resource);
+    }
+
     /** The glyph count the Java side parsed from the font's {@code maxp} table; no native call. */
     public static int numGlyphs(FontResource resource) {
         return ((PrismFontFile) resource).getNumGlyphs();
@@ -103,6 +142,25 @@ public final class FontResourceShim {
                 throw error;
             }
             throw new IllegalStateException(cause);
+        }
+    }
+
+    private static final class MapOnlyFactory extends PrismFontFactory {
+
+        @Override
+        protected PrismFontFile createFontFile(String name, String filename, int fIndex, boolean register,
+                                               boolean embedded, boolean copy) {
+            throw new UnsupportedOperationException("a map-only factory makes no font file");
+        }
+
+        @Override
+        public GlyphLayout createGlyphLayout() {
+            throw new UnsupportedOperationException("a map-only factory makes no layout");
+        }
+
+        @Override
+        public FontFallbackInfo getFallbacks(FontResource primaryResource) {
+            throw new UnsupportedOperationException("a map-only factory looks up no fallbacks");
         }
     }
 }

@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2011, 2023, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2011, 2026, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -31,6 +31,7 @@ import com.sun.javafx.geom.transform.BaseTransform;
 import com.sun.javafx.geom.Path2D;
 import com.sun.javafx.geom.Point2D;
 import com.sun.javafx.geom.Shape;
+import java.util.Arrays;
 
 public class CompositeStrike implements FontStrike {
 
@@ -38,8 +39,9 @@ public class CompositeStrike implements FontStrike {
     private float size;
     private int aaMode;
     BaseTransform transform;
-    private FontStrike slot0Strike;
-    private FontStrike[] strikeSlots;
+    private volatile FontStrike slot0Strike;
+    // Replaced by filled copies, never written in place: render, layout and print threads read it without a lock.
+    private volatile FontStrike[] strikeSlots;
 
     private FontStrikeDesc desc;
     DisposerRecord disposer;
@@ -52,13 +54,15 @@ public class CompositeStrike implements FontStrike {
         // the slot 0 strike, but it may be that the fallback strikes
         // should be left alone as they could be shared. This needs
         // to be re-visited.
-        if (slot0Strike != null) {
-            slot0Strike.clearDesc();
+        FontStrike slot0 = slot0Strike;
+        if (slot0 != null) {
+            slot0.clearDesc();
         }
-        if (strikeSlots != null) {
-            for (int i=1; i<strikeSlots.length; i++) {
-                if (strikeSlots[i] != null) {
-                    strikeSlots[i].clearDesc();
+        FontStrike[] slots = strikeSlots;
+        if (slots != null) {
+            for (int i=1; i<slots.length; i++) {
+                if (slots[i] != null) {
+                    slots[i].clearDesc();
                 }
             }
         }
@@ -104,30 +108,29 @@ public class CompositeStrike implements FontStrike {
 
     public FontStrike getStrikeSlot(int slot) {
         if (slot == 0) {
-            if (slot0Strike == null) {
+            FontStrike strike = slot0Strike;
+            if (strike == null) {
                 FontResource slot0Resource = fontResource.getSlotResource(0);
-                slot0Strike = slot0Resource.getStrike(size, transform,
-                                                      getAAMode());
+                strike = slot0Resource.getStrike(size, transform, getAAMode());
+                slot0Strike = strike;
             }
-            return slot0Strike;
+            return strike;
         } else {
-            if (strikeSlots == null) {
-                strikeSlots = new FontStrike[fontResource.getNumSlots()];
+            FontStrike[] slots = strikeSlots;
+            if (slots == null) {
+                slots = new FontStrike[fontResource.getNumSlots()];
             }
-
-            if (slot >= strikeSlots.length) {
-                FontStrike[] tmp = new FontStrike[slot+1];
-                System.arraycopy(strikeSlots, 0, tmp, 0, strikeSlots.length);
-                strikeSlots = tmp;
-            }
-            if (strikeSlots[slot] == null) {
+            FontStrike strike = slot < slots.length ? slots[slot] : null;
+            if (strike == null) {
                 FontResource slotResource = fontResource.getSlotResource(slot);
                 if (slotResource != null) {
-                    strikeSlots[slot] = slotResource.getStrike(size, transform,
-                                                               getAAMode());
+                    strike = slotResource.getStrike(size, transform, getAAMode());
+                    FontStrike[] filled = Arrays.copyOf(slots, Math.max(slots.length, slot + 1));
+                    filled[slot] = strike;
+                    strikeSlots = filled;
                 }
             }
-            return strikeSlots[slot];
+            return strike;
         }
     }
 
@@ -150,15 +153,17 @@ public class CompositeStrike implements FontStrike {
         return getStrikeSlot(0).drawAsShapes();
     }
 
-    private PrismMetrics metrics;
+    private volatile PrismMetrics metrics;
 
     @Override
     public Metrics getMetrics() {
-        if (metrics == null) {
+        PrismMetrics strikeMetrics = metrics;
+        if (strikeMetrics == null) {
             PrismFontFile fr = (PrismFontFile)fontResource.getSlotResource(0);
-            metrics = fr.getFontMetrics(size);
+            strikeMetrics = fr.getFontMetrics(size);
+            metrics = strikeMetrics;
         }
-        return metrics;
+        return strikeMetrics;
     }
 
     @Override

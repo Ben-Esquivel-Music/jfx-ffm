@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2011, 2024, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2011, 2026, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -41,13 +41,13 @@ public class FallbackResource implements CompositeFontResource {
 
 
     FontResource primaryResource;
-    private String[] linkedFontFiles;
-    private String[] linkedFontNames;
-    private FontResource[] fallbacks;
-    private FontResource[] nativeFallbacks;
+    private volatile String[] linkedFontFiles;
+    private volatile String[] linkedFontNames;
+    private volatile FontResource[] fallbacks;
+    private volatile FontResource[] nativeFallbacks;
     private boolean isBold, isItalic;
     private int aaMode;
-    private CompositeGlyphMapper mapper;
+    private volatile CompositeGlyphMapper mapper;
 
     Map<FontStrikeDesc, WeakReference<FontStrike>> strikeMap = new ConcurrentHashMap<>();
 
@@ -191,10 +191,12 @@ public class FallbackResource implements CompositeFontResource {
 
     @Override
     public CharToGlyphMapper getGlyphMapper() {
-        if (mapper == null) {
-            mapper = new CompositeGlyphMapper(this);
+        CompositeGlyphMapper glyphMapper = mapper;
+        if (glyphMapper == null) {
+            glyphMapper = new CompositeGlyphMapper(this);
+            mapper = glyphMapper;
         }
-        return mapper;
+        return glyphMapper;
     }
 
     private int getSlotForFontNoCreate(String fontName) {
@@ -206,8 +208,9 @@ public class FallbackResource implements CompositeFontResource {
             }
             i++;
         }
-        if (nativeFallbacks != null) {
-            for (FontResource nativeFallback : nativeFallbacks) {
+        FontResource[] added = nativeFallbacks;
+        if (added != null) {
+            for (FontResource nativeFallback : added) {
                 if (fontName.equalsIgnoreCase(nativeFallback.getFullName())) {
                     return i;
                 }
@@ -233,17 +236,18 @@ public class FallbackResource implements CompositeFontResource {
             }
             return -1;
         }
-        slot = getSlotForFontNoCreate(fr.getFullName());
-        if (slot >= 0) {
-            return slot;
-        }
 
         /* Add the font to the list of native fallbacks */
         return addNativeFallback(fr);
     }
 
 
-    private int addNativeFallback(FontResource fr) {
+    private synchronized int addNativeFallback(FontResource fr) {
+        // Looked up again under the lock: another caller may have added it meanwhile.
+        int slot = getSlotForFontNoCreate(fr.getFullName());
+        if (slot >= 0) {
+            return slot;
+        }
         int ns = getNumSlots();
         if (ns >= 0x7E) {
             /* There are 8bits (0xFF) reserved in a glyph code to store the slot
@@ -267,7 +271,7 @@ public class FallbackResource implements CompositeFontResource {
         tmp[tmp.length - 1] = fr;
         nativeFallbacks = tmp;
 
-        return ns+1;
+        return ns;
     }
 
     @Override
@@ -282,11 +286,16 @@ public class FallbackResource implements CompositeFontResource {
 
     private void getLinkedFonts() {
         if (fallbacks == null) {
-            PrismFontFactory factory = PrismFontFactory.getFontFactory();
-            FontFallbackInfo fallbackInfo = factory.getFallbacks(primaryResource);
-            linkedFontNames = fallbackInfo.getFontNames();
-            linkedFontFiles = fallbackInfo.getFontFiles();
-            fallbacks       = fallbackInfo.getFonts();
+            synchronized (this) {
+                if (fallbacks == null) {
+                    PrismFontFactory factory = PrismFontFactory.getFontFactory();
+                    FontFallbackInfo fallbackInfo = factory.getFallbacks(primaryResource);
+                    linkedFontNames = fallbackInfo.getFontNames();
+                    linkedFontFiles = fallbackInfo.getFontFiles();
+                    // Set last: a caller that finds it set reads the names and files without the lock.
+                    fallbacks       = fallbackInfo.getFonts();
+                }
+            }
         }
     }
 
@@ -294,8 +303,9 @@ public class FallbackResource implements CompositeFontResource {
     public int getNumSlots() {
         getLinkedFonts();
         int num = fallbacks.length;
-        if (nativeFallbacks != null) {
-            num += nativeFallbacks.length;
+        FontResource[] added = nativeFallbacks;
+        if (added != null) {
+            num += added.length;
         }
         return num;
     }

@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2011, 2022, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2011, 2026, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -30,7 +30,8 @@ public class PrismMetrics implements Metrics {
 
     PrismFontFile fontResource;
     float ascent, descent, linegap;
-    private float[] styleMetrics;
+    // Set after this object is shared, to a filled array and never back to null: each read finds a whole array.
+    private volatile float[] styleMetrics;
     float size;
 
     static final int XHEIGHT = 0;

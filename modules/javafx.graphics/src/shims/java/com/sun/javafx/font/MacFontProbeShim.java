@@ -32,12 +32,15 @@ import java.lang.foreign.SymbolLookup;
 import java.lang.invoke.MethodHandle;
 
 import static java.lang.foreign.ValueLayout.ADDRESS;
+import static java.lang.foreign.ValueLayout.JAVA_BOOLEAN;
+import static java.lang.foreign.ValueLayout.JAVA_CHAR;
 import static java.lang.foreign.ValueLayout.JAVA_DOUBLE;
 import static java.lang.foreign.ValueLayout.JAVA_INT;
+import static java.lang.foreign.ValueLayout.JAVA_LONG;
 
 /**
- * Test-only CoreText, libobjc and malloc probes for the macOS NULL-input and release tests, over the bindings and
- * toolkit of {@link MacFontOracleShim}. An observer like it: it uses no font class of the product
+ * Test-only CoreText, CoreGraphics, libobjc and malloc probes for the macOS NULL-input and release tests, over the
+ * bindings and toolkit of {@link MacFontOracleShim}. An observer like it: it uses no font class of the product
  * ({@code MacFontBindings.requireSameBinding} checks). Every object it hands out is at +1, for the caller to release
  * with {@link MacFontOracleShim#release(long)}.
  */
@@ -54,6 +57,35 @@ public final class MacFontProbeShim {
             FunctionDescriptor.of(ADDRESS, ADDRESS, ADDRESS));
     private static final MethodHandle CF_LOCALE_COPY_ISO_LANGUAGE_CODES = MacFontOracleShim.bind(
             MacFontOracleShim.Lib.CF, "CFLocaleCopyISOLanguageCodes", FunctionDescriptor.of(ADDRESS));
+    private static final MethodHandle CF_DATA_CREATE_MUTABLE = MacFontOracleShim.bind(
+            MacFontOracleShim.Lib.CF, "CFDataCreateMutable", FunctionDescriptor.of(ADDRESS, ADDRESS, JAVA_LONG));
+    private static final MethodHandle CF_STRING_CREATE_MUTABLE_WITH_EXTERNAL_CHARACTERS_NO_COPY =
+            MacFontOracleShim.bind(MacFontOracleShim.Lib.CF, "CFStringCreateMutableWithExternalCharactersNoCopy",
+                                   FunctionDescriptor.of(ADDRESS, ADDRESS, ADDRESS, JAVA_LONG, JAVA_LONG, ADDRESS));
+    private static final MemorySegment K_CF_ALLOCATOR_NULL =
+            MacFontOracleShim.dataValue(MacFontOracleShim.Lib.CF, "kCFAllocatorNull");
+    private static final MethodHandle CF_RETAIN = MacFontOracleShim.bind(
+            MacFontOracleShim.Lib.CF, "CFRetain", FunctionDescriptor.of(ADDRESS, ADDRESS));
+    private static final MethodHandle CF_AUTORELEASE = MacFontOracleShim.bind(
+            MacFontOracleShim.Lib.CF, "CFAutorelease", FunctionDescriptor.of(ADDRESS, ADDRESS));
+    private static final MethodHandle CT_FONT_COLLECTION_CREATE_FROM_AVAILABLE_FONTS = MacFontOracleShim.bind(
+            MacFontOracleShim.Lib.CT, "CTFontCollectionCreateFromAvailableFonts",
+            FunctionDescriptor.of(ADDRESS, ADDRESS));
+    private static final MethodHandle CG_CONTEXT_SET_RGB_FILL_COLOR = MacFontOracleShim.bind(
+            MacFontOracleShim.Lib.CG, "CGContextSetRGBFillColor",
+            FunctionDescriptor.ofVoid(ADDRESS, JAVA_DOUBLE, JAVA_DOUBLE, JAVA_DOUBLE, JAVA_DOUBLE));
+    private static final MethodHandle CG_CONTEXT_SET_ALLOWS_ANTIALIASING = MacFontOracleShim.bind(
+            MacFontOracleShim.Lib.CG, "CGContextSetAllowsAntialiasing",
+            FunctionDescriptor.ofVoid(ADDRESS, JAVA_BOOLEAN));
+    private static final MethodHandle CT_FONT_MANAGER_CREATE_FONT_DESCRIPTORS_FROM_URL = MacFontOracleShim.bind(
+            MacFontOracleShim.Lib.CT, "CTFontManagerCreateFontDescriptorsFromURL",
+            FunctionDescriptor.of(ADDRESS, ADDRESS));
+    private static final MethodHandle CT_FONT_MANAGER_CREATE_FONT_DESCRIPTOR_FROM_DATA = MacFontOracleShim.bind(
+            MacFontOracleShim.Lib.CT, "CTFontManagerCreateFontDescriptorFromData",
+            FunctionDescriptor.of(ADDRESS, ADDRESS));
+    private static final MethodHandle CT_FONT_CREATE_WITH_FONT_DESCRIPTOR = MacFontOracleShim.bind(
+            MacFontOracleShim.Lib.CT, "CTFontCreateWithFontDescriptor",
+            FunctionDescriptor.of(ADDRESS, ADDRESS, JAVA_DOUBLE, ADDRESS));
 
     private static final SymbolLookup OBJC = MacFontOracleShim.load("/usr/lib/libobjc.A.dylib");
     private static final MethodHandle OBJC_AUTORELEASE_POOL_PUSH = MacFontOracleShim.bind(
@@ -74,6 +106,112 @@ public final class MacFontProbeShim {
         try {
             return ((MemorySegment) MacFontOracleShim.Lib.CT_FONT_CREATE_UI_FONT_FOR_LANGUAGE.invokeExact(type, 0.0,
                     MemorySegment.NULL)).address();
+        } catch (Throwable t) {
+            throw MacFontOracleShim.unexpected(t);
+        }
+    }
+
+    /** {@code CTFontCreateWithName(name, size, NULL)}: the font CoreText itself makes of the string {@code name}. */
+    public static long fontWithName(long name, double size) {
+        try {
+            return ((MemorySegment) MacFontOracleShim.Lib.CT_FONT_CREATE_WITH_NAME.invokeExact(
+                    MemorySegment.ofAddress(name), size, MemorySegment.NULL)).address();
+        } catch (Throwable t) {
+            throw MacFontOracleShim.unexpected(t);
+        }
+    }
+
+    /**
+     * A font of the first face of the file at {@code path}, which CoreText reports as the font's file:
+     * {@code CTFontManagerCreateFontDescriptorsFromURL}, then {@code CTFontCreateWithFontDescriptor}. 0 when CoreText
+     * reads no face there.
+     */
+    public static long fontOfFile(String path, double size) {
+        MemorySegment pathRef = MacFontOracleShim.createString(path);
+        try {
+            MemorySegment url = (MemorySegment) MacFontOracleShim.Lib.CF_URL_CREATE_WITH_FILE_SYSTEM_PATH.invokeExact(
+                    MacFontOracleShim.Lib.K_CF_ALLOCATOR_DEFAULT, pathRef, 0L, false);
+            MemorySegment descriptors;
+            try {
+                descriptors = (MemorySegment) CT_FONT_MANAGER_CREATE_FONT_DESCRIPTORS_FROM_URL.invokeExact(url);
+            } finally {
+                MacFontOracleShim.release(url);
+            }
+            if (descriptors.address() == 0) {
+                return 0;
+            }
+            try {
+                long count = (long) MacFontOracleShim.Lib.CF_ARRAY_GET_COUNT.invokeExact(descriptors);
+                return count == 0 ? 0 : fontOf(MacFontOracleShim.arrayValue(descriptors, 0), size);
+            } finally {
+                MacFontOracleShim.release(descriptors);
+            }
+        } catch (Throwable t) {
+            throw MacFontOracleShim.unexpected(t);
+        } finally {
+            MacFontOracleShim.release(pathRef);
+        }
+    }
+
+    /**
+     * A font of {@code bytes}, which reports no file: {@code CTFontManagerCreateFontDescriptorFromData}, then
+     * {@code CTFontCreateWithFontDescriptor}. 0 when CoreText reads no font there.
+     */
+    public static long fontOfData(byte[] bytes, double size) {
+        MemorySegment data = MemorySegment.ofAddress(MacFontOracleShim.createData(bytes));
+        try {
+            MemorySegment descriptor =
+                    (MemorySegment) CT_FONT_MANAGER_CREATE_FONT_DESCRIPTOR_FROM_DATA.invokeExact(data);
+            if (descriptor.address() == 0) {
+                return 0;
+            }
+            try {
+                return fontOf(descriptor, size);
+            } finally {
+                MacFontOracleShim.release(descriptor);
+            }
+        } catch (Throwable t) {
+            throw MacFontOracleShim.unexpected(t);
+        } finally {
+            MacFontOracleShim.release(data);
+        }
+    }
+
+    private static long fontOf(MemorySegment descriptor, double size) throws Throwable {
+        return ((MemorySegment) CT_FONT_CREATE_WITH_FONT_DESCRIPTOR.invokeExact(descriptor, size, MemorySegment.NULL))
+                .address();
+    }
+
+    /** {@code CTFontCollectionCreateFromAvailableFonts(NULL)}. */
+    public static long fontCollection() {
+        try {
+            return ((MemorySegment) CT_FONT_COLLECTION_CREATE_FROM_AVAILABLE_FONTS.invokeExact(MemorySegment.NULL))
+                    .address();
+        } catch (Throwable t) {
+            throw MacFontOracleShim.unexpected(t);
+        }
+    }
+
+    /**
+     * {@code CGContextSetRGBFillColor(NULL, 0, 0, 0, 1)}. CoreGraphics refuses it with one "invalid context" line in
+     * the unified log and nothing else, which makes it the control of a test that reads that log.
+     */
+    public static void setFillColorOfNoContext() {
+        try {
+            CG_CONTEXT_SET_RGB_FILL_COLOR.invokeExact(MemorySegment.NULL, 0.0, 0.0, 0.0, 1.0);
+        } catch (Throwable t) {
+            throw MacFontOracleShim.unexpected(t);
+        }
+    }
+
+    /**
+     * {@code CGContextSetAllowsAntialiasing(NULL, true)}, one of the setters a glyph's bitmap context gets.
+     * CoreGraphics refuses it as it refuses the fill colour, which makes it the control that shows those setters
+     * still log a call on NULL.
+     */
+    public static void setAllowsAntialiasingOfNoContext() {
+        try {
+            CG_CONTEXT_SET_ALLOWS_ANTIALIASING.invokeExact(MemorySegment.NULL, true);
         } catch (Throwable t) {
             throw MacFontOracleShim.unexpected(t);
         }
@@ -103,6 +241,15 @@ public final class MacFontProbeShim {
         }
     }
 
+    /** {@code CFLocaleCopyISOLanguageCodes()}. */
+    public static long languageCodes() {
+        try {
+            return ((MemorySegment) CF_LOCALE_COPY_ISO_LANGUAGE_CODES.invokeExact()).address();
+        } catch (Throwable t) {
+            throw MacFontOracleShim.unexpected(t);
+        }
+    }
+
     /** The {@code kCTFontNameAttribute} of one entry of a fresh default cascade list of font; 0 past the end. */
     public static long cascadeEntryName(long font, int entry) {
         try {
@@ -124,6 +271,54 @@ public final class MacFontProbeShim {
             } finally {
                 MacFontOracleShim.release(descriptors);
             }
+        } catch (Throwable t) {
+            throw MacFontOracleShim.unexpected(t);
+        }
+    }
+
+    /**
+     * {@code CFDataCreateMutable(NULL, 0)}. A fresh mutable object is never tagged, shared or immortal, so its retain
+     * count is exact.
+     */
+    public static long mutableData() {
+        try {
+            return ((MemorySegment) CF_DATA_CREATE_MUTABLE.invokeExact(MemorySegment.NULL, 0L)).address();
+        } catch (Throwable t) {
+            throw MacFontOracleShim.unexpected(t);
+        }
+    }
+
+    /**
+     * {@code CFStringCreateMutableWithExternalCharactersNoCopy(NULL, units, 0, 1, kCFAllocatorNull)} over a buffer of
+     * the one unit {@code unit}, which lives for the process: an empty string whose first character, read past its
+     * length, would be {@code unit}, where the constant empty string has none.
+     */
+    public static long emptyStringOver(char unit) {
+        MemorySegment units = Arena.global().allocateFrom(JAVA_CHAR, unit);
+        try {
+            return ((MemorySegment) CF_STRING_CREATE_MUTABLE_WITH_EXTERNAL_CHARACTERS_NO_COPY.invokeExact(
+                    MemorySegment.NULL, units, 0L, 1L, K_CF_ALLOCATOR_NULL)).address();
+        } catch (Throwable t) {
+            throw MacFontOracleShim.unexpected(t);
+        }
+    }
+
+    /** {@code CFRetain}, which answers {@code object}. */
+    public static long retain(long object) {
+        try {
+            return ((MemorySegment) CF_RETAIN.invokeExact(MemorySegment.ofAddress(object))).address();
+        } catch (Throwable t) {
+            throw MacFontOracleShim.unexpected(t);
+        }
+    }
+
+    /**
+     * {@code CFAutorelease}, which answers {@code object}: the reference is released when this thread pops the pool it
+     * went into.
+     */
+    public static long autorelease(long object) {
+        try {
+            return ((MemorySegment) CF_AUTORELEASE.invokeExact(MemorySegment.ofAddress(object))).address();
         } catch (Throwable t) {
             throw MacFontOracleShim.unexpected(t);
         }

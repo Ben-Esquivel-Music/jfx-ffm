@@ -31,8 +31,9 @@ import java.lang.reflect.Method;
 import java.nio.file.Files;
 
 /**
- * Delegate onto {@code DFontDecoder}: its six {@code private} methods by reflection, and the decode sequence
- * {@code PrismFontFactory.getFontResource} runs on a {@code .dfont} file, called directly.
+ * Delegate onto {@code DFontDecoder}: its {@code private} methods by reflection, and the decode sequence
+ * {@code PrismFontFactory.getFontResource} runs on a {@code .dfont} file, called directly. Each helper that takes a CF
+ * object at +1 releases it.
  */
 public final class DFontDecoderShim {
 
@@ -45,6 +46,18 @@ public final class DFontDecoderShim {
 
     public static long createCTFont(String fontName) {
         return invokeStatic("createCTFont", new Class<?>[] {String.class}, fontName);
+    }
+
+    public static long matchingDescriptors(long collection) {
+        MemorySegment descriptors = invokeStatic("matchingDescriptors", new Class<?>[] {MemorySegment.class},
+                                                 MemorySegment.ofAddress(collection));
+        return descriptors.address();
+    }
+
+    /** {@code nameRef} is borrowed. */
+    public static long fontNamed(long fonts, long nameRef) {
+        return invokeStatic("fontNamed", new Class<?>[] {MemorySegment.class, MemorySegment.class},
+                            MemorySegment.ofAddress(fonts), MemorySegment.ofAddress(nameRef));
     }
 
     public static void releaseCTFont(long font) {

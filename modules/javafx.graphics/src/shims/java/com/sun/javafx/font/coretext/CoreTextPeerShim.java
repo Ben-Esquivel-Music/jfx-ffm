@@ -29,26 +29,99 @@ import com.sun.javafx.font.CompositeFontResource;
 import com.sun.javafx.font.FontResource;
 import com.sun.javafx.font.FontStrike;
 import com.sun.javafx.font.PrismFontFactory;
+import java.lang.foreign.MemorySegment;
 import java.lang.reflect.Field;
 
 /** Package-private access to the macOS font peers for the font tests. No native call of its own. */
 public final class CoreTextPeerShim {
 
+    /** The half of a {@code CGRect} mirror a test leaves null. */
+    public enum NullHalf {
+        ORIGIN, SIZE
+    }
+
     private CoreTextPeerShim() {
     }
 
+    /** {@code OS.copyOfUIFont} with no matrix, so the font's own is kept; it takes {@code font} at +1. */
+    public static long copyOfUIFont(long font, double size) {
+        return OS.copyOfUIFont(MemorySegment.ofAddress(font), size, MemorySegment.NULL);
+    }
+
+    /** The advance CoreText gives the glyph in the font file's strike at {@code size}. */
+    public static float advanceFromPlatform(FontResource resource, int glyphCode, float size) {
+        return ((CTFontFile) resource).getAdvanceFromPlatform(glyphCode, size);
+    }
+
+    /** {@code OS.CGRectApplyAffineTransform} of the identity on {@code rect}, {x, y, w, h}, with {@code half} null. */
+    public static void transformRectWithNull(NullHalf half, double[] rect) {
+        CGAffineTransform identity = new CGAffineTransform();
+        identity.a = 1;
+        identity.d = 1;
+        OS.CGRectApplyAffineTransform(rectWithNull(half, rect), identity);
+    }
+
+    /** {@code OS.CGContextFillRect} of {@code rect}, {x, y, w, h}, with {@code half} null. */
+    public static void fillRectWithNull(long context, NullHalf half, double[] rect) {
+        OS.CGContextFillRect(context, rectWithNull(half, rect));
+    }
+
+    private static CGRect rectWithNull(NullHalf half, double[] rect) {
+        CGRect mirror = new CGRect();
+        mirror.origin.x = rect[0];
+        mirror.origin.y = rect[1];
+        mirror.size.width = rect[2];
+        mirror.size.height = rect[3];
+        switch (half) {
+            case ORIGIN -> mirror.origin = null;
+            case SIZE -> mirror.size = null;
+        }
+        return mirror;
+    }
+
+    /**
+     * The slot in {@code fr} of the font file a lookup makes of {@code newRef}, layout's copy of a run's font, +1,
+     * which it consumes; -1 where it makes none. The file is the one the copy reports.
+     */
     public static int addFallbackFont(CompositeFontResource fr, String fontName, long newRef) throws Exception {
-        return CTGlyphLayout.addFallbackFont((CTFactory) PrismFontFactory.getFontFactory(), fr, fontName, newRef);
+        String file = newRef == 0 ? null : OS.CTFontCopyURLAttribute(newRef);
+        FontResource font = CTGlyphLayout.fontFileOfCopy(factory(), fontName, file, newRef);
+        return font == null ? -1 : fr.addSlotFont(font);
     }
 
     /** With no factory to ask: only a reference refused before the factory is reached returns normally. */
     public static int addFallbackFontWithoutFactory(CompositeFontResource fr, String fontName, long newRef)
             throws Exception {
-        return CTGlyphLayout.addFallbackFont(null, fr, fontName, newRef);
+        FontResource font = CTGlyphLayout.fontFileOfCopy(null, fontName, null, newRef);
+        return font == null ? -1 : fr.addSlotFont(font);
     }
 
+    /** The factory's font file of the face named {@code name} in the file {@code fontRef}, +1 and consumed, reports. */
     public static FontResource createFontFile(String name, long fontRef) throws Exception {
-        return ((CTFactory) PrismFontFactory.getFontFactory()).createFontFile(name, fontRef);
+        return factory().createFontFile(name, OS.CTFontCopyURLAttribute(fontRef), fontRef);
+    }
+
+    /** Whether the factory would look up the face named {@code name} in {@code file}, null for a font without one. */
+    public static boolean mayFindFace(String name, String file) {
+        return factory().mayFindFace(name, file);
+    }
+
+    private static CTFactory factory() {
+        return (CTFactory) PrismFontFactory.getFontFactory();
+    }
+
+    /** A CTLine of {@code text} in {@code fontRef}, left to right, made by layout's own code, at +1 for the caller. */
+    public static long line(long fontRef, String text) {
+        char[] chars = text.toCharArray();
+        return new CTGlyphLayout().createCTLine(fontRef, chars, false, 0, chars.length);
+    }
+
+    /**
+     * Layout's slot for {@code run}, a run of a line made in {@code lineFont}, laid out with slot {@code slot} of
+     * {@code fr} (null for a plain strike), whose font is named {@code name}.
+     */
+    public static int getFontSlot(long run, long lineFont, CompositeFontResource fr, String name, int slot) {
+        return new CTGlyphLayout().getFontSlot(run, lineFont, fr, name, slot);
     }
 
     /** The CTFont a font file made from a reference owns; 0 for any other font. */

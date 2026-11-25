@@ -28,11 +28,13 @@ package test.com.sun.javafx.font.coretext;
 import com.sun.javafx.font.coretext.CoreTextPureShim;
 import java.lang.foreign.MemorySegment;
 import java.nio.ByteBuffer;
+import java.util.Arrays;
 import org.junit.jupiter.api.Test;
 
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
@@ -171,6 +173,27 @@ public class GlyfTableBoundsTest {
         assertArrayEquals(sentinel(), bb);
         assertTrue(parse(longLoca(20, 30), glyf, 0, LONG_FORMAT, bb));
         assertArrayEquals(new int[] {1, 2, 3, 4}, bb);
+    }
+
+    /** Outcome: a box too short for the four values is left as it was, as the C's one array copy left it. */
+    @Test
+    void aBoxTooShortForFourValuesIsLeftAsItWas() {
+        MemorySegment glyf = glyf(31, 20, 1, 2, 3, 4);
+        int[] box = sentinel();
+        assertTrue(CoreTextPureShim.glyfBoundingBox(glyf, 20, box), "the header is readable");
+        assertArrayEquals(new int[] {1, 2, 3, 4}, box);
+        for (int length = 1; length < 4; length++) {
+            int[] shortBox = Arrays.copyOf(sentinel(), length);
+            assertThrows(ArrayIndexOutOfBoundsException.class,
+                         () -> CoreTextPureShim.glyfBoundingBox(glyf, 20, shortBox), "a box of " + length);
+            assertArrayEquals(Arrays.copyOf(sentinel(), length), shortBox, "a box of " + length + " is left as it was");
+        }
+    }
+
+    @Test
+    void aNullBoxThrowsNullPointerException() {
+        MemorySegment glyf = glyf(31, 20, 1, 2, 3, 4);
+        assertThrows(NullPointerException.class, () -> CoreTextPureShim.glyfBoundingBox(glyf, 20, null));
     }
 
     /** What {@code bounds} does between its two table copies: {@code glyf} is read only when loca names a header. */

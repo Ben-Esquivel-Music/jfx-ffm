@@ -25,8 +25,12 @@
 
 package com.sun.javafx.font.coretext;
 
+import java.lang.ref.Reference;
+
+import com.sun.javafx.font.CharToGlyphMapper;
 import com.sun.javafx.font.CompositeFontResource;
 import com.sun.javafx.font.CompositeStrike;
+import com.sun.javafx.font.FontResource;
 import com.sun.javafx.font.FontStrike;
 import com.sun.javafx.font.PGFont;
 import com.sun.javafx.font.PrismFontFactory;
@@ -36,8 +40,8 @@ import com.sun.javafx.text.TextRun;
 
 class CTGlyphLayout extends GlyphLayout {
 
-    private long createCTLine(long fontRef, char[] chars, boolean rtl,
-                              int start, int length) {
+    long createCTLine(long fontRef, char[] chars, boolean rtl,
+                      int start, int length) {
         /* Use CoreText to analize the run */
         long alloc = OS.kCFAllocatorDefault();
         long textRef = OS.CFStringCreateWithCharacters(alloc, chars, start, length);
@@ -81,18 +85,20 @@ class CTGlyphLayout extends GlyphLayout {
         return lineRef;
     }
 
-    private int getFontSlot(long runRef, CompositeFontResource fr, String name, int slot) {
+    int getFontSlot(long runRef, long lineFont, CompositeFontResource fr, String name, int slot) {
         long runAttrs = OS.CTRunGetAttributes(runRef);
         if (runAttrs == 0) return -1;
         long actualFont = OS.CFDictionaryGetValue(runAttrs, OS.kCTFontAttributeName());
         if (actualFont == 0) return -1;
+        // The line retains the strike's font, so a run in the font at that address is the strike's, whatever its name.
+        int ownSlot = actualFont == lineFont ? slot : -1;
 
         /* Use the display name from the kCTFontDisplayNameAttribute attribute
          * instead of CTFontCopyDisplayName() to avoid localized names*/
         String fontName = OS.CTFontCopyAttributeDisplayName(actualFont);
-        if (fontName == null) return -1;
+        if (fontName == null) return ownSlot;
         if (!fontName.equalsIgnoreCase(name)) {
-            if (fr == null) return -1;
+            if (fr == null) return ownSlot;
             // macOS 13 Ventura reports ".ThonburiUI Regular Regular" as the name
             // of font used for Thai. Per inspection of the font this is incorrect.
             // Need to do fix up here.
@@ -104,10 +110,13 @@ class CTGlyphLayout extends GlyphLayout {
             }
             slot = fr.getSlotForFont(fontName);
             if (slot == -1) {
+                slot = ownSlot;
+            }
+            if (slot == -1) {
                 try {
                     CTFactory factory = (CTFactory)PrismFontFactory.getFontFactory();
-                    long newRef = OS.CTFontCreateCopyWithAttributes(actualFont, 0, null, 0);
-                    slot = addFallbackFont(factory, fr, fontName, newRef);
+                    String file = OS.CTFontCopyURLAttribute(actualFont);
+                    slot = addFallbackFont(factory, fr, fontName, file, actualFont);
                 } catch (Exception e) {
                     if (PrismFontFactory.debugFonts) {
                         e.printStackTrace();
@@ -121,17 +130,54 @@ class CTGlyphLayout extends GlyphLayout {
         return slot;
     }
 
-    /* newRef is the copy of the run's font, a +1 reference createFontFile consumes, or 0 when CoreText made none. */
-    static int addFallbackFont(CTFactory factory, CompositeFontResource fr, String fontName, long newRef)
+    /*
+     * The slot in fr of the face named fontName in file, which the borrowed runFont reports, or -1 where none is found.
+     * A face its file was read without is not looked up again, nor runFont copied, until the file changes.
+     */
+    static int addFallbackFont(CTFactory factory, CompositeFontResource fr, String fontName, String file,
+                               long runFont) throws Exception {
+        if (factory.mayFindFace(fontName, file)) {
+            FontResource font = lookUpFallbackFont(factory, fontName, file, runFont);
+            if (font != null) {
+                return fr.addSlotFont(font);
+            }
+        }
+        return -1;
+    }
+
+    /*
+     * The font of the face named fontName in file, or null where none is found. One caller per name and file at a time
+     * looks it up, copying runFont for it; a caller that comes meanwhile waits for that lookup and gets what it found,
+     * null where it found nothing or failed. Nothing a lookup runs lays text out: no caller waits for its own lookup.
+     */
+    static FontResource lookUpFallbackFont(CTFactory factory, String fontName, String file, long runFont)
             throws Exception {
+        CTFactory.FaceLookup lookup = new CTFactory.FaceLookup(fontName, file);
+        CTFactory.FaceLookup running = factory.beginLookup(lookup);
+        if (running != null) {
+            return running.await();
+        }
+        FontResource font = null;
+        try {
+            // A lookup that ended after this caller's checks and before its own began left what it found behind, and
+            // a face of the name found in any file is that face.
+            font = factory.getFontResource(fontName, null, false);
+            if (font == null && factory.mayFindFace(fontName, file)) {
+                long newRef = OS.CTFontCreateCopyWithAttributes(runFont, 0, null, 0);
+                font = fontFileOfCopy(factory, fontName, file, newRef);
+            }
+        } finally {
+            factory.endLookup(lookup, font);
+        }
+        return font;
+    }
+
+    /* newRef is the copy of the run's font, a +1 reference createFontFile consumes, or 0 when CoreText made none. */
+    static CTFontFile fontFileOfCopy(CTFactory factory, String fontName, String file, long newRef) throws Exception {
         if (newRef == 0) {
-            return -1;
+            return null;
         }
-        CTFontFile newFont = factory.createFontFile(fontName, newRef);
-        if (newFont == null) {
-            return -1;
-        }
-        return fr.addSlotFont(newFont);
+        return factory.createFontFile(fontName, file, newRef);
     }
 
     @Override
@@ -149,7 +195,13 @@ class CTGlyphLayout extends GlyphLayout {
         long fontRef = ((CTFontStrike)strike).getFontRef();
         if (fontRef == 0) return;
         boolean rtl = (run.getLevel() & 1) != 0;
-        long lineRef = createCTLine(fontRef, text, rtl, run.getStart(), run.getLength());
+        long lineRef;
+        try {
+            lineRef = createCTLine(fontRef, text, rtl, run.getStart(), run.getLength());
+        } finally {
+            // The strike's disposer releases fontRef; from here on the line retains the font itself.
+            Reference.reachabilityFence(strike);
+        }
         if (lineRef == 0) return;
         try {
             long runs = OS.CTLineGetGlyphRuns(lineRef);
@@ -163,11 +215,18 @@ class CTGlyphLayout extends GlyphLayout {
                 for (int i = 0; i < runCount; i++) {
                     long runRef = OS.CFArrayGetValueAtIndex(runs, i);
                     if (runRef == 0) continue;
-                    int slot = getFontSlot(runRef, composite, fontName, baseSlot);
+                    int slot = getFontSlot(runRef, fontRef, composite, fontName, baseSlot);
                     if (slot != -1) {
                         glyphStart += OS.CTRunGetGlyphs(runRef, slot << 24, glyphStart, glyphs);
                     } else {
+                        int runStart = glyphStart;
                         glyphStart += OS.CTRunGetGlyphs(runRef, 0, glyphStart, glyphs);
+                        // No slot holds the run's font, so its glyph IDs would draw other glyphs of the slot 0 font.
+                        for (int g = runStart; g < glyphStart; g++) {
+                            if (glyphs[g] != CharToGlyphMapper.INVISIBLE_GLYPH_ID) {
+                                glyphs[g] = CharToGlyphMapper.MISSING_GLYPH;
+                            }
+                        }
                     }
                     if (size > 0) {
                         posStart += OS.CTRunGetPositions(runRef, posStart, positions);
