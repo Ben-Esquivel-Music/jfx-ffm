@@ -64,12 +64,12 @@ import static org.junit.jupiter.api.Assumptions.abort;
 
 /**
  * Parity oracle for what the DirectWrite path of {@code javafx_font} ({@code directwrite.cpp}) delivers to
- * Prism, against goldens captured from the JNI build.
+ * Prism, against a golden first captured from the JNI build.
  * <p>
  * For four fonts that ship with Windows 10 (Arial, Segoe UI, Times New Roman, Consolas) at two sizes, and one
  * fixed string mixing ASCII, a combining mark, Latin-1, Greek, Cyrillic, Hebrew and Arabic (right-to-left,
- * contextual shaping), CJK, a Devanagari conjunct and a supplementary-plane character, the golden
- * {@value #GOLDEN} records what crosses the JNI boundary today, through Prism's own font API:
+ * contextual shaping), CJK, a Devanagari conjunct and a supplementary-plane character, the golden {@value #GOLDEN}
+ * records, as first captured from the JNI build, what crosses the native boundary through Prism's own font API:
  * <ul>
  * <li>the resolved font resource (names, file, units per em) and its metrics ({@link Metrics});</li>
  * <li>code point to glyph mapping ({@link CharToGlyphMapper}, composite fallback slots included);</li>
@@ -85,6 +85,15 @@ import static org.junit.jupiter.api.Assumptions.abort;
  * The greyscale mask path ({@code ID2D1RenderTarget::DrawGlyphRun} into a WIC bitmap) is <em>not</em> pinned:
  * it needs a {@code GraphicsPipeline} for its dispose hook, which a headless unit test does not have. The
  * masks here are captured from an explicit {@link FontResource#AA_LCD} strike, which stays inside DirectWrite.
+ * <p>
+ * The golden was captured again on the same machine, every {@code machine.} key equal, from the FFM build after
+ * US-111's fix of {@code FallbackResource.addNativeFallback}: each native fallback a font file's composite added
+ * answered the next slot, not its own, at its first lookup, so the glyph codes of that lookup carried a slot byte one
+ * too high and their {@code glyph.<code>.*} rows were drawn with the font of that next slot, or with the primary where
+ * there was none. Before that capture the comparison differed in exactly the 609 rows that fix moves (the 12 pt
+ * {@code layout.run.5.glyphs} and {@code run.6.glyphs} of Arial, Segoe UI and Times New Roman and {@code run.4} to
+ * {@code run.6.glyphs} of Consolas, and 300 {@code glyph.<code>.*} rows out and 300 in) and every other row equalled
+ * the JNI capture; {@code capture.*} and {@code info.*} describe the second capture.
  * <p>
  * DirectWrite output depends on the installed {@code dwrite.dll} and on the font files' versions, so the
  * comparison runs only where the {@code machine.} header (OS, arch, sha256 of dwrite.dll and of the four font
@@ -389,9 +398,18 @@ public class DirectWriteMetricsGoldenTest {
 
     private static List<String> header() {
         return List.of(
-                "DirectWrite metrics golden, captured from the JNI build of javafx_font (directwrite.cpp) before",
-                "any of it was rewritten. Machine-specific: DirectWrite output depends on dwrite.dll and on the",
-                "font files' versions. The comparison runs only where every machine.* key matches.",
+                "DirectWrite metrics golden. First captured from the JNI build of javafx_font (directwrite.cpp) before",
+                "any of it was rewritten; captured again on the same machine, every machine.* key equal, from the FFM",
+                "build after US-111's fix of FallbackResource.addNativeFallback: each native fallback a",
+                "font file's composite added answered the next slot, not its own, at its first lookup, so",
+                "the glyph codes of that lookup carried a slot byte one too high and their glyph.<code>.*",
+                "rows were drawn with the font of that next slot, or with the primary where there was none.",
+                "Before the second capture the comparison differed in exactly the 609 rows that fix moves",
+                "(the 12 pt layout.run.5.glyphs and run.6.glyphs of arial, segoeui and timesnewroman and",
+                "run.4 to run.6.glyphs of consolas, and 300 glyph.<code>.* rows out and 300 in) and every",
+                "other row equalled the JNI capture. capture.* and info.* describe the second capture.",
+                "Machine-specific: DirectWrite output depends on dwrite.dll and on the font files' versions. The",
+                "comparison runs only where every machine.* key matches.",
                 "",
                 "Capture:    " + FontGoldens.captureCommand(DirectWriteMetricsGoldenTest.class),
                 "Regenerate: add -D" + FontGoldens.REGENERATE_PROPERTY + "=true (reviewed as a behaviour change)",

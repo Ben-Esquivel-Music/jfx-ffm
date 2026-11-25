@@ -1,21 +1,24 @@
 # US-111 — Fix the CoreText NULL inputs and font-layer defects US-067 left
 
 **Status:** ✅ Done (2026-11-22, PR 71, commit `40e53db102` and its CI fix `f352c6008c`; the further fixes committed as
-`e1de3dd32a`, and the fixes of the Copilot review on it and of its review uncommitted on 2026-11-24; filed 2026-11-13
-from US-067; sites 1-7 hand none of their listed inputs to CoreFoundation, CoreGraphics or CoreText as NULL or 0, site 8
-keeps the strike reachable, site 9 has one owner, site 10 drains what CoreText autoreleases on any thread (deviation 7),
-site 11's outcomes are pinned and site 12 looks a missing face up once per file while that file is unchanged, by one
-caller per name and file at a time, each pinned by a test with mutant proof; CI run 45022158121 failed three checks of
-`MacFontReleaseTest` on both macOS 15 runners, where the region without a pool leaves about 6 heap blocks per call and
-the fallback-face child printed no lookup of a face missing from its file, and the test-only CI fix has them decide
-through a verdict ("The CI fix" below): on CI run 45041254324, green on all six jobs, they answer CANNOT_SHOW there and
-skip with their figures; the fourteen defects and test gaps found beside the twelve sites while PR 71 was reviewed are
-fixed in this PR ("The further fixes" below), as are five findings of the Copilot review of PR 71 on them ("The Copilot
-review" below), whose sixth, the DirectWrite rows of 8c, cannot be edited by hand, and four findings of an independent
-review of those fixes, R1 to R4, with five items of a review that confirmed them; the further fixes passed CI run
-45278364431 but for its Linux x64 job, which compiled nothing, and the review's fixes have run only on the owner's Mac;
-the commit of the review's fixes, a CI run, the re-capture of the DirectWrite golden, the robot and system tests and the
-comparison on the golden machine remain for the owner, see "Done" below) ·
+`e1de3dd32a`, and the fixes of the Copilot review on it and of its review as `2c9003b909` on 2026-11-24; filed
+2026-11-13 from US-067; sites 1-7 hand none of their listed inputs to CoreFoundation, CoreGraphics or CoreText as NULL
+or 0, site 8 keeps the strike reachable, site 9 has one owner, site 10 drains what CoreText autoreleases on any thread
+(deviation 7), site 11's outcomes are pinned and site 12 looks a missing face up once per file while that file is
+unchanged, by one caller per name and file at a time, each pinned by a test with mutant proof; CI run 45022158121 failed
+three checks of `MacFontReleaseTest` on both macOS 15 runners, where the region without a pool leaves about 6 heap
+blocks per call and the fallback-face child printed no lookup of a face missing from its file, and the test-only CI fix
+has them decide through a verdict ("The CI fix" below): on CI run 45041254324, green on all six jobs, they answer
+CANNOT_SHOW there and skip with their figures; the fourteen defects and test gaps found beside the twelve sites while
+PR 71 was reviewed are fixed in this PR ("The further fixes" below), as are five findings of the Copilot review of PR 71
+on them ("The Copilot review" below), whose sixth, the DirectWrite rows of 8c, could not be edited by hand, and four
+findings of an independent review of those fixes, R1 to R4, with five items of a review that confirmed them; the further
+fixes passed CI run 45278364431 but for its Linux x64 job, which compiled nothing, and `2c9003b909` passed CI run
+45456403357 on all six jobs, its Linux x64 job on the second attempt; on 2026-11-24 the DirectWrite golden was captured
+again on its Windows machine, exactly its 609 rows of 8c moving, thirteen macOS slot tests were enabled on Windows and
+Linux (one of them on Linux only) and two tests added, in five test files that are uncommitted and have run nowhere on
+macOS ("Windows and Linux" below); the commit and a CI run of that round, the robot and system tests and the comparison
+on the macOS golden machine remain for the owner, see "Done" below) ·
 **Found:** 2026-11-12 and 2026-11-13, the traces and the exit-path review of US-067, on the US-067 tree
 
 ## Story
@@ -145,6 +148,28 @@ Nine macOS tests depend on the host and print no line: eight of `CompositeFontLo
 `PrismFontFactoryTest.aFontAddedToACompositeIsInTheSlotItIsGiven` need room for one or two more slots under the 0x7E
 slot cap in the host's composite, and where there is none they skip through `ParityGate.requireOracle` (a failure
 under `-Djfx.parity.require=true`). On a CI run, read those two classes' skip counts in the macOS jobs: 0 on this Mac.
+On CI run 45456403357, of `2c9003b909`, they were 0 on both macOS 15 runners. Since 2026-11-24 the nine run on Windows
+and Linux too, beside the new `aCompositeWhoseFallbackListIsFullHasNoSlotForAnotherFont`, which needs room for one font
+("Windows and Linux" under "Done"); read the two classes' skip counts in every job: with that round,
+`CompositeFontLocksTest` skips 1 on Windows (the test kept off it) and 0 on Linux, and `PrismFontFactoryTest` 3 on
+both (its macOS tests).
+
+Since 2026-11-24 the slot tests and the DirectWrite golden run on Windows and Linux too. On Windows 10 19045.6466, the
+golden's capture machine, and in WSL Ubuntu (a clone in the Linux home, JDK 27, Maven 3.10, `DISPLAY` and
+`WAYLAND_DISPLAY` unset), from the repository root:
+```
+# Windows: with the flag; the DirectWrite golden is compared only on its capture machine
+mvn -B -ntp -pl modules/javafx.graphics -am test -Djfx.parity.require=true
+# WSL: without the flag; the Linux font goldens are another machine's and skip at their machine gate
+mvn -B -ntp -pl modules/javafx.graphics -am test
+# The round's four classes on either, with the flag on Windows only
+mvn -B -ntp -pl modules/javafx.graphics -am test -Dsurefire.failIfNoSpecifiedTests=false \
+    "-Dtest=PrismFontFactoryTest,CompositeFontLocksTest,DirectWriteMetricsGoldenTest,DirectWriteNoSlotLayoutTest"
+```
+The baseline, `javafx.graphics` run / failures / errors / skipped: Windows at `2c9003b909` 26,875 / 1 / 0 / 917, the one
+failure the golden's 609 differences; WSL at `abe0943d31` 26,428 / 0 / 0 / 967 and at `2c9003b909` 26,619 / 0 / 0 /
+1,034. With the round: Windows 26,877 / 0 / 0 / 905, WSL 26,621 / 0 / 0 / 1,022, and the four classes 33 / 0 / 0 / 4 on
+Windows and 33 / 0 / 0 / 6 in WSL.
 
 ## Out of scope
 - Objects kept for the life of the process by design: `CTGlyph`'s `GRAY_COLORSPACE` and `RGB_COLORSPACE`, and the
@@ -160,19 +185,26 @@ under `-Djfx.parity.require=true`). On a CI run, read those two classes' skip co
 ## Definition of Done
 - All acceptance criteria met, with the before and after results stated in this story.
   ✅ All nine, with the limits stated under "Done"; the flagged comparison on the golden machine remains for the owner.
+  Since 2026-11-24 criteria 6 and 7 are met on Windows and Linux too ("Windows and Linux").
 - An independent review (`ffm-reviewer`) repeated the macOS gate.
   ✅ Each slice's `ffm-reviewer` repeated it without the flag; the final criteria-and-gate review and the
   confirmation on the final tree repeated it without and with the flag (see "Independent review"). The gate as such
   has not been run on the CI fix or on the further fixes; on the further fixes the font package, which holds every
   font class of the gate, ran without and with the flag (see "Measured"). On the fixes of the Copilot review the gate
-  and the font package ran without and with the flag, and the module run once (see "The Copilot review").
+  and the font package ran without and with the flag, and the module run once (see "The Copilot review"). The Windows
+  and Linux round of 2026-11-24 had an independent review and two confirmations, which ran its four classes on Windows
+  with the flag and in WSL without it, the review and the first confirmation the font package too; none ran the macOS
+  gate, as no macOS host was available.
 - Status set to ✅ Done with the date and the PR, and the row moved to the done table of `backlog/README.md`.
   ✅ Status and row set on 2026-11-22 and updated on 2026-11-23; the row gives PR 71, open, with the further fixes
-  committed as `e1de3dd32a` and the fixes of its Copilot review uncommitted.
+  committed as `e1de3dd32a` and the fixes of its Copilot review uncommitted. Updated on 2026-11-24: those fixes are
+  committed as `2c9003b909`, and the Windows and Linux round is uncommitted.
 - Changes left in the working tree / a review branch — **no commits, merges or PRs without
   explicit approval from the repository owner.**
   ✅ The owner committed the change as `40e53db102`, the CI fix as `f352c6008c` and the further fixes as
   `e1de3dd32a` on PR 71, which is not merged; the fixes of the Copilot review are uncommitted in the working tree.
+  Since 2026-11-24 they are committed as `2c9003b909`; the five test files of the Windows and Linux round are
+  uncommitted in the working tree.
 
 ## Notes
 - Related: US-067 (it traced these sites and left them; see its "Deviations").
@@ -645,20 +677,23 @@ and 35 on macOS only. The column `f352c6008c` is CI run 45041254324's macOS arm6
 ### The Copilot review
 Copilot's review of PR 71 on the further fixes (`e1de3dd32a`) found three defects in `MacFontFinder`'s cascade-list
 call, named F2 to F4 as the review numbers them, and two in site 12's face lookup, F5 and F6; all five are accepted,
-with the decisions below, and fixed on 2026-11-23, uncommitted on `e1de3dd32a`, in two rounds: F2 to F4 first, then F5
-and F6. After the first round, `git diff --stat` over the 6 tracked files of code: 579 insertions, 100
-deletions (`MacFontFinder` 76 changed lines, `MacFontFinderShim` 54, `FontCallOrder` 196, `MacFontBindingStructureTest`
-141, `MacFontReleaseChild` 145, `MacFontReleaseTest` 67); no file is new. After the second, over the 10 tracked files of
-code, both rounds together: 821 insertions, 158 deletions, adding `CTFactory` 109 changed lines, `CTGlyphLayout` 59,
-`CoreTextPeerShim` 23 and `MacFontBindings` 10, with `MacFontBindingStructureTest` 201, `MacFontReleaseChild` 182 and
-`MacFontReleaseTest` 69 in all and `FontCallOrder` unchanged by the second round; new are `CTFactoryShim`,
-`MacFontFaceLookupChild` and `MacFontFaceLookupTest`. After the fourth round (R1 to R4), over the same 10 files: 888
-insertions, 158 deletions, with `CTFactory` 136 changed lines, `CTGlyphLayout` 60, `FontCallOrder` 226 and
-`MacFontBindingStructureTest` 210; the new files are `CTFactoryShim` 143 lines, `MacFontFaceLookupChild` 632 and
-`MacFontFaceLookupTest` 382. Classes as under "Criterion 6"; "S4" and "S8" as there.
+with the decisions below, and fixed on 2026-11-23 on `e1de3dd32a` (committed since as `2c9003b909`), in two rounds:
+F2 to F4 first, then F5 and F6. After the first round, `git diff --stat` over the 6 tracked files of code: 579
+insertions, 100 deletions (`MacFontFinder` 76 changed lines, `MacFontFinderShim` 54, `FontCallOrder` 196,
+`MacFontBindingStructureTest` 141, `MacFontReleaseChild` 145, `MacFontReleaseTest` 67); no file is new. After the
+second, over the 10 tracked files of code, both rounds together: 821 insertions, 158 deletions, adding `CTFactory`
+109 changed lines, `CTGlyphLayout` 59, `CoreTextPeerShim` 23 and `MacFontBindings` 10, with
+`MacFontBindingStructureTest` 201, `MacFontReleaseChild` 182 and `MacFontReleaseTest` 69 in all and `FontCallOrder`
+unchanged by the second round; new are `CTFactoryShim`, `MacFontFaceLookupChild` and `MacFontFaceLookupTest`. After
+the fourth round (R1 to R4), over the same 10 files: 888 insertions, 158 deletions, with `CTFactory` 136 changed
+lines, `CTGlyphLayout` 60, `FontCallOrder` 226 and `MacFontBindingStructureTest` 210; the new files are
+`CTFactoryShim` 143 lines, `MacFontFaceLookupChild` 632 and `MacFontFaceLookupTest` 382. Classes as under
+"Criterion 6"; "S4" and "S8" as there.
 Its first comment, F1, asks for the rows of `directwrite-metrics-golden.txt` that 8c moves; it is accepted, and a third
 round found that those rows cannot be edited by hand, so the golden stays as captured and the owner re-captures it
-(below). That round changed no file of code or test.
+(below). That round changed no file of code or test. The fixes of all rounds are committed as `2c9003b909`; since
+2026-11-24 the golden is captured again on its Windows machine, and the slot tests run on Windows and Linux ("Windows
+and Linux" below).
 
 - **F1. The DirectWrite golden still has the slots of `ns + 1`** (high). Accepted: on its capture machine the
   comparison of `DirectWriteMetricsGoldenTest` fails until the 609 rows of deviation 16 move. The rule for an edit by
@@ -708,7 +743,8 @@ round found that those rows cannot be edited by hand, so the golden stays as cap
     resolution and every module was skipped. That job says nothing of the code, and needs a run again (read with
     `gh pr checks 71` and `gh run view 45278364431 --job 138055973171 --log-failed`, `round5/`). Windows x64 runs
     `DirectWriteMetricsGoldenTest`'s capture but skips its comparison at the machine gate, so it shows that 8c lays
-    the fonts out without failing, not that the golden's rows match.
+    the fonts out without failing, not that the golden's rows match. Since then CI run 45456403357, of `2c9003b909`,
+    passed all six jobs, its Linux x64 job on a second attempt after the same HTTP 429 on the first.
   - No other golden of `src/test/resources/test/com/sun/javafx/font/` depends on `ns + 1`. In `linux-pango-golden.txt`
     a font added at layout is appended after the fallback list, and the glyphs of its first lookup carry a slot byte
     past its own, at the list's end. The composite cases use slot bytes 0, 1 and 5 only. `dvs.comp.size0`, a fresh
@@ -720,6 +756,14 @@ round found that those rows cannot be edited by hand, so the golden stays as cap
     of 33 before US-111. The layout rows of `linux-font-process-golden.txt` (7) and `mac-coretext-golden.txt` (19)
     carry no slot byte, and the other goldens lay nothing out through a composite. The five macOS corpora were compared
     before and after on this Mac (criterion 7).
+  - Since 2026-11-24 the re-capture is done, on the capture machine ("Windows and Linux" below), and it measured what
+    this reading predicted: before it the comparison differed in 609 rows; it moved exactly the 9 layout rows and the
+    300 glyph rows out and 300 in that the script found, every new slot byte below `slots.count`; the old codes had
+    drawn Yu Gothic UI's CJK glyphs with Nirmala UI, Nirmala UI's 407 with the primary and consolas' Segoe UI glyphs
+    with Yu Gothic UI; and the 16 glyphs no row held were drawn at 12 pt with the fonts their new codes name, Yu Gothic
+    UI's 3286 with advance 12.0 and 31 outline segments, Nirmala UI's 407 with 8.607422 and 91, each consistent with
+    the JNI build's 24 pt row of its code. On the Linux host the trace of `addNativeFallback` over the four corpora
+    printed nothing: no case added a font there, as read above.
 
 - **F2. A release that threw ended the cascade-list thread** (high). `CascadeListTask.run` released its reference
   inside a pool of its own with nothing around it, so a push, `CFRelease` or pop that threw (a `StackOverflowError`,
@@ -999,6 +1043,7 @@ reflection. The fifth round added no test: `assertWrittenBefore` reads straight-
   from two files and the first lacks the face. That no corpus row does is not checked: the corpora were not dumped
   again, and the goldens are no oracle on this Mac.
 - No `hs_err_pid*` file; `git diff --check` clean. CI was not run on any round, nor the module run on the first.
+  Since then CI run 45456403357 ran their commit, `2c9003b909`, on all six jobs ("Windows and Linux" below).
 
 **Mutants.** One hand edit of `MacFontFinder` per row, the classes S and R run (S alone where the row says S only),
 the edit undone by hand and the file checked against the round's checksum after each undo; all 25 killed, with
@@ -1217,6 +1262,406 @@ sees the order in which one thread stores and counts down.
 - R5-2 and R5-3: "CTFactory$FaceLookup.font may only be stored in finish, so that a waiter the latch lets through
   reads the outcome; but await stores it at instruction 8" and "… but <init> stores it at instruction 15".
 - R4-6-r5: "… but it stores it at instruction 5, after that call at instruction 2".
+
+### Windows and Linux (2026-11-24)
+Item 8 of the further fixes changed code that Windows and Linux run too: 8b, `PrismCompositeFontResource`'s
+`getSlotForFont` and `addSlotFont` answer -1 for no slot through `slotAfterThePrimary`, where `getSlotForFont` answered
+slot 0; 8c, `FallbackResource.addNativeFallback` answers `ns`, where it answered `ns + 1`; and both `addNativeFallback`
+methods are `synchronized` and look the font up again under the lock. `directwrite-metrics-golden.txt` still held the
+slots of `ns + 1`, and Copilot's F1, the one thread of six on PR 71 left unresolved (on `FallbackResource.java`, comment
+4673071231), asked: "Include a reviewed Windows recapture and Windows/Linux validation, and update the PR's macOS-only
+scope or split out the shared slot fix." On Windows and Linux only the class-file checks and the any-OS tests of the
+mapping covered 8b and 8c ("on macOS the slot tests catch a wrong index, on Linux and Windows nothing does", "Rests on
+review"), and no test showed what 8b changes in a layout. This round ran on `2c9003b909` on Windows 10 Pro
+10.0.19045.6466, the golden's capture machine, and in WSL Ubuntu; nothing of it ran on macOS, and it is uncommitted.
+
+**What changed.** Five test files, no production file, pom, native file, shim, CI file or other golden
+(`git diff --quiet HEAD -- modules/javafx.graphics/src/main` holds). `git diff --numstat`, insertions and deletions:
+- `DirectWriteMetricsGoldenTest.java`, 24 and 6: `header()` and the class Javadoc say why the golden was captured again
+  and which 609 rows moved (R1 below), and the Javadoc says the golden records, "as first captured from the JNI build",
+  what crosses the native boundary (R5). The method name `directWriteMetricsMatchTheJniGolden` is unchanged.
+- `directwrite-metrics-golden.txt`, 322 and 313: captured again (below); 8,409 lines, sha256 `b16182fd...`.
+- `PrismFontFactoryTest.java`, 58 and 5: two macOS tests enabled on Windows and Linux; the new
+  `aCompositeWhoseFallbackListIsFullHasNoSlotForAnotherFont`; and the package-private `fill` and `record Refusal`, which
+  it and `DirectWriteNoSlotLayoutTest` share.
+- `CompositeFontLocksTest.java`, 58 and 27: eleven macOS tests enabled, ten on Windows and Linux and one on Linux only;
+  the fixture of one chosen by OS; `SlotFont` package-private, for the shared `fill`.
+- `DirectWriteNoSlotLayoutTest.java`, new, 139 lines, `@EnabledOnOs(OS.WINDOWS)`.
+
+**The re-capture.** On this machine, with the header written first, as the round's decisions D1 and D2 had it.
+- The machine gate: the sha256 of `C:/WINDOWS/System32/dwrite.dll`, `arial.ttf`, `segoeui.ttf`, `times.ttf` and
+  `consola.ttf` equal the golden's `machine.*` rows, and `ver` gives 10.0.19045.6466, as `info.windows.version` does
+  (checked before the round began); under `-Djfx.parity.require=true` the comparison passed the gate and ran.
+- Before: the comparison of the golden as committed failed with "609 difference(s) against the golden captured from the
+  JNI build (first 60 shown):", in the Windows gate of `2c9003b909` and in the implementer's run (`impl/1b-parity.log`).
+- `header()` was edited before the capture, so that the file a capture writes is the committed file byte for byte. Its
+  first 3 lines became 11, and since R1 12; the `Capture`, `Regenerate` and `Keys` lines are unchanged.
+- The capture, `-Djfx.font.golden.capture=true -Djfx.font.golden.regenerate=true` in place of the flag (2 / 0 / 0 / 1,
+  the abort): 8,408 lines where there were 8,400, sha256 `3e87a1f3...`, `git diff --numstat` 321 and 313.
+- The proof, inline perl over the old and the new file (`impl/capture-diff.txt`): 8,378 key=value rows in each; the 8
+  `machine.*` rows equal; 300 keys only in the old file and 300 only in the new, each a `glyph.<code>.*` row of a 12 pt
+  capture (20 codes on each side); of the other rows, `capture.provenance` changed (the JVM `26+35-2893` to
+  `27+35`) and exactly 9 more, the 12 pt `layout.run.5.glyphs` and `run.6.glyphs` of arial, segoeui and
+  timesnewroman and `run.4` to `run.6.glyphs` of consolas, in each of which every code is unchanged or 16777216, one
+  slot, lower with the same low 24 bits. So exactly the 609 rows of deviation 16 moved.
+- The new rows hold the data of the fonts their codes name. All 214 glyph codes of the 12 pt captures have a slot byte
+  below `slots.count` and no null slot; `slots.count` is 14 for arial, segoeui and timesnewroman (12 Yu Gothic UI
+  Regular, 13 Nirmala UI) and 15 for consolas (12 Segoe UI, 13 Yu Gothic UI Regular, 14 Nirmala UI). Consolas' four
+  Segoe UI glyphs, 2925, 2932, 2933 and 2945 (60 rows), equal segoeui's own 12 pt rows of the same glyph IDs, which the
+  JNI build captured, in all 14 rows beside `.code`, and in `.code` too. The other 16 glyphs agree row for row across
+  the four fonts, and the review found each consistent with the JNI build's 24 pt row of the same code (advance and
+  bounding box exactly half, the same code, LCD flag, outline class, winding, segments and type count: 177 of 177
+  pairs):
+
+  | font | glyph ID | advance at 12 pt | outline segments |
+  | --- | --- | --- | --- |
+  | Yu Gothic UI Regular | 1954 | 12.0 | 149 |
+  | Yu Gothic UI Regular | 3286 | 12.0 | 31 |
+  | Yu Gothic UI Regular | 3724 | 12.0 | 58 |
+  | Nirmala UI | 407 | 8.607422 | 91 |
+
+- The old codes had drawn Yu Gothic UI's CJK glyphs 3286, 3724 and 1954 with Nirmala UI (old slot 13; consolas' 14),
+  Nirmala UI's 407 with the primary (old slot 14, and 15 in consolas, past `slots.count`) and consolas' Segoe UI
+  glyphs with Yu Gothic UI (old slot 13), as F1 under "The Copilot review" read them (the review's own perl).
+- Two further captures came out byte-identical, sha256 `3e87a1f3...` before and after: the implementer's second
+  (`impl/1f-capture2.log`) and the review's own (`review/logs/w-capture.log`).
+- The header correction, R1: the review found "the first native fallback a font file's composite adds took the next
+  slot" untrue, since every native fallback's first lookup did so (consolas' three all moved). The rework changed that
+  sentence in `header()` and the Javadoc and captured again: lines 3 to 9 of the golden became lines 3 to 10, and
+  nothing else changed. The 8,378 lines that are not comments are byte-identical before and after (`cmp`), the file has
+  8,409 lines, sha256 `b16182fd...`, and `git diff --numstat` is 322 and 313. The rework's second capture and the
+  confirming review's capture came out byte-identical (`b16182fd...`).
+
+**The slot tests on Windows and Linux** (D3). Thirteen run-time slot tests that were `@EnabledOnOs(OS.MAC)` only
+because they had run nowhere else now run on Windows and Linux, each Javadoc saying so:
+- `PrismFontFactoryTest`: `aCompositeHasNoSlotForAFontItsFallbacksCannotHold` and
+  `aFontAddedToACompositeIsInTheSlotItIsGiven`.
+- `CompositeFontLocksTest`: `twoFontsAddedAtOnceToALogicalFontTakeTwoSlots`,
+  `oneFontAddedTwiceAtOnceToALogicalFontTakesOneSlot`, `aLogicalFontAnswersWhatItKnowsWithoutItsLock`, their three
+  `FallbackResource` twins, `aFontAddedToAFallbackResourceIsAtTheSlotItIsHandedOutFor`,
+  `aFontACompositeAddsIsAtTheSlotItIsHandedOutFor`, `callersOfANewLogicalFontWaitForOneLookUpOfItsFallbacks`,
+  `callersOfANewFallbackResourceWaitForOneLookUpOfItsFallbacks` and
+  `aNewFallbackResourceLooksUpItsFallbacksOnceForThreeCallers`.
+- Kept off Windows, measured: `aNewFallbackResourceLooksUpItsFallbacksOnceForThreeCallers` is
+  `@EnabledOnOs({OS.MAC, OS.LINUX})`. Its control failed on Windows with "a look-up of a fallback list reads its
+  primary's style once: the count this test relies on ==> expected: <2> but was: <1>" (`impl/run1-win.log`):
+  `DWFactory.getFallbacks` makes the list without reading the primary. It passes on Linux.
+- The fixture by OS: `aFontACompositeAddsIsAtTheSlotItIsHandedOutFor` takes Helvetica.ttc on macOS, as before, and the
+  repository's Ahem (`MacFontGoldens.pinned("ahem")`) on Windows and Linux, chosen with `if (OS.current() == OS.MAC)`.
+- What macOS executes: the 12 other bodies are unchanged; in this one the macOS branch holds the old three statements,
+  with `composite` declared before the `if` and the Helvetica line wrapped, and macOS runs the OS check besides. Beside
+  that branch and the new cap test, macOS executes the statements of `2c9003b909`; that rests on reading the diff (the
+  review and both confirmations).
+- No slot test skipped at its room check: `CompositeFontLocksTest` 20 / 0 / 0 / 1 on Windows (the one kept off) and
+  20 / 0 / 0 / 0 in WSL. An invented name has no font in the process factory on either system: the composite answers
+  -1 for "US-111 No Such Font". The slot counts the tests met, from the mutants' messages: `LogicalFont` System 12 on
+  Windows and 10 on Linux, a `FallbackResource` over a stub 11 and 9, the composite over Ahem 12 and 10.
+
+**Two new tests.**
+- `DirectWriteNoSlotLayoutTest.aRunWhoseFallbackFontGetsNoSlotIsLaidOutWithTheMissingGlyph` (D4, Windows only) shows 8b
+  end to end through `DWGlyphLayout`: a run DirectWrite draws with a fallback font the composite has no slot for is laid
+  out with glyph code 0, not with that font's glyph IDs in slot 0. Each composite is its own, over Arial's file.
+  - The text is `"e\u0301 "` and the CJK run of `DirectWriteMetricsGoldenTest.TEXT`: CJK text alone is no complex run,
+    so it is shaped from the composite's glyph mapper and never reaches `DWGlyphLayout` ("the CJK run is laid out by
+    DirectWrite ==> expected: <true> but was: <false>", `impl/cjk-alone-win.log`); the combining mark makes it complex.
+  - Precondition, a control on a first composite: its CJK glyphs take slot 12, after its 12 slots, and that slot holds
+    Yu Gothic UI Regular (code 201329878, slot 12 and glyph 3286), which a later lookup finds at 12. Where DirectWrite
+    draws the run with a font the composite already holds, the test skips through `ParityGate.requireOracle`, or fails
+    under `-Djfx.parity.require=true`.
+  - The subject: a second composite filled through `addSlotFont` until it refuses a font, then laid out: every glyph
+    code 0, the run's width above 0 and the slot count unchanged; then the count 0x7F and the refusal -1. A negative
+    control (the fill's answer replaced by -1, then restored and checked with `cmp`) fails it: "a glyph code of the CJK
+    run in a composite with no slot left for its font ==> expected: <0> but was: <201329878>" (`impl/nc-win.log`).
+  - It does not pin `DWGlyphLayout.renderShape`'s `slot >= 0` (line 391) by itself:
+    `DWTextRendererObject.textRendererGetGlyphIndices` returns before it copies an ID for `slot < 0` (line 254), so
+    either place leaves the codes 0, as its Javadoc says (R2; DW1 survives).
+- `PrismFontFactoryTest.aCompositeWhoseFallbackListIsFullHasNoSlotForAnotherFont` (R4; macOS, Windows and Linux): a
+  composite over the repository's Ahem, filled by `fill` with fonts the machine does not have until it refuses one,
+  answers -1 for that font, has 0x7F slots (the list's 0x7E and the primary's), answers -1 to a lookup of the refused
+  font's name and keeps its slot count. Its precondition is its neighbour's room check,
+  `slots - 1 < FALLBACK_SLOT_CAP`, through `ParityGate.requireOracle`. It fills a 12-slot composite with 115 fonts on
+  Windows and a 10-slot one with 117 on Linux. It has not run on macOS; on CI run 45456403357 its neighbour, with the
+  same check over the same composite, skipped on neither macOS 15 runner (`PrismFontFactoryTest` 9 / 0 / 0 / 0).
+
+**Gates.** Counted from the Maven log, run / failures / errors / skipped; every class in the kept tables
+[`US-111-windows-per-class.tsv`](US-111-windows-per-class.tsv) and
+[`US-111-wsl-per-class.tsv`](US-111-wsl-per-class.tsv).
+
+Windows, `mvn -B -ntp -pl modules/javafx.graphics -am test -Djfx.parity.require=true` in the main tree: the committed
+`2c9003b909` before any edit, and the final tree. Master does not run here: a second Windows tree cannot live in the
+scratch directory (paths over 260 characters), and nothing is written elsewhere outside the repository; CI compares it.
+
+| module | `2c9003b909` (exit 1, 05:05 min) | final (exit 0, 04:49 min) |
+| --- | --- | --- |
+| `javafx-jslc` | 437 / 0 / 0 / 3 | 437 / 0 / 0 / 3 |
+| `javafx-base` | 5,510 / 0 / 0 / 22 | 5,510 / 0 / 0 / 22 |
+| `javafx-graphics` | 26,875 / 1 / 0 / 917 | 26,877 / 0 / 0 / 905 |
+
+- Of 965 and 966 classes four differ: `DirectWriteMetricsGoldenTest` 2 / 1 / 0 / 0 to 2 / 0 / 0 / 0 (the 609
+  differences, then none), `PrismFontFactoryTest` 9 / 0 / 0 / 5 to 10 / 0 / 0 / 3, `CompositeFontLocksTest`
+  20 / 0 / 0 / 11 to 20 / 0 / 0 / 1, and the new `DirectWriteNoSlotLayoutTest` 1 / 0 / 0 / 0.
+- The final gate ran twice, before and after `fill` moved (O1 below), with no per-class difference; the table holds
+  the second. No `hs_err_pid*` newer than its start in `modules/javafx.graphics`, and no other `java.exe` at the start
+  or the end.
+
+WSL Ubuntu, `mvn -B -ntp -pl modules/javafx.graphics -am test` without the flag, each in a fresh clone in the Linux
+home, the final one with the five files carried over and sha256-checked, natives built from source. The flag is left
+out because the four Linux font goldens are another machine's and skip at their machine gate here, which the flag
+turns into failures.
+
+| module | `abe0943d31` (08:35 min) | `2c9003b909` (09:24 min) | final (06:18 min) |
+| --- | --- | --- | --- |
+| `javafx-jslc` | 437 / 0 / 0 / 0 | 437 / 0 / 0 / 0 | 437 / 0 / 0 / 0 |
+| `javafx-base` | 5,510 / 0 / 0 / 22 | 5,510 / 0 / 0 / 22 | 5,510 / 0 / 0 / 22 |
+| `javafx-graphics` | 26,428 / 0 / 0 / 967 | 26,619 / 0 / 0 / 1,034 | 26,621 / 0 / 0 / 1,022 |
+
+- Each exit 0, no `hs_err_pid*` in the clone; the `dpkg` versions of FreeType, Pango, fontconfig, HarfBuzz, glibc and
+  the DejaVu fonts and the libc sha256 equal at the start and the end.
+- `abe0943d31` to `2c9003b909`: 955 to 965 classes, 15 differ, each a class US-111 adds or changes (191 more run, 67
+  more skipped). `2c9003b909` to final: three, `CompositeFontLocksTest` 20 / 0 / 0 / 11 to 20 / 0 / 0 / 0,
+  `PrismFontFactoryTest` 9 / 0 / 0 / 5 to 10 / 0 / 0 / 3 and the new `DirectWriteNoSlotLayoutTest` 1 / 0 / 0 / 1
+  (Windows only). The final gate ran twice here too, before and after O1, with no per-class difference.
+
+CI, `submit.yml`: run 44961158059 of PR 70's head `a6d6446711`, the baseline, against run 45456403357 of
+`2c9003b909`; `javafx.graphics` totals:
+
+| job | run 44961158059 | run 45456403357 |
+| --- | --- | --- |
+| Windows x64 | 26,684 / 0 / 0 / 857 | 26,875 / 0 / 0 / 924 |
+| Linux x64 | 26,428 / 0 / 0 / 967 | 26,619 / 0 / 0 / 1,034, on the second attempt |
+| Linux aarch64 | 26,428 / 0 / 0 / 967 | 26,619 / 0 / 0 / 1,034 |
+| macOS aarch64 | not read | 26,887 / 0 / 0 / 858 |
+| macOS x64 | not read | 26,887 / 0 / 0 / 864 |
+
+- Attempt 1 (2026-11-24 18:09:19Z to 18:29:58Z) failed only its Linux x64 job, 138666905973, before anything
+  compiled: Maven Central answered HTTP 429 for `org.apache.maven.plugins:maven-enforcer-plugin:pom:3.5.0`, and no test
+  ran. Attempt 2 (18:31:31Z to 18:54:58Z) ran Linux x64 alone again, job 138681290152: it compiled and ran the tests,
+  639 classes, each equal to Linux aarch64's and to the WSL gate's of `2c9003b909`. The other five jobs keep attempt
+  1's results; `gh pr checks 71` passes all six.
+- Per class, Windows x64 and Linux aarch64 against the baseline: 629 classes at the baseline and 639 in the run, the
+  same 15 differ as in WSL, 191 more run and 67 more skipped on each, no class gone. On the Windows runner
+  `DirectWriteMetricsGoldenTest` skips its comparison at the machine gate, 2 / 0 / 0 / 1 as at the baseline, so CI does
+  not verify the golden.
+- Both macOS jobs print the twelve verdict lines of "Verification", all `PROVED`, and run `CompositeFontLocksTest`
+  20 / 0 / 0 / 0 and `PrismFontFactoryTest` 9 / 0 / 0 / 0: no slot test skipped at its room check there.
+- That run is of `2c9003b909`; the five files of this round have run on no CI host.
+
+**Linux, before and after by dump.** The four Linux font goldens cannot be captured from this build, as their harness
+refuses: "refusing to capture: libjavafx_font.so is not on java.library.path (...). The Linux goldens record the JNI
+build of commit 7b43255b30 and are never captured from anything else." They skip at their machine gate in WSL, so no
+gate compares a Linux font row. In their place an evidence-only `LinuxFontGoldenDumpTest`, not in the tree (sha256
+`87d2df47...`, kept with the logs), built the four corpora's maps as `FontGoldenHarness.captureOrVerify` builds them in
+verify mode, through each golden test's own `capture`, and wrote them out, in the `abe0943d31` clone and in the
+`2c9003b909` clone.
+- Compared: 4,704 rows (`linux-fontconfig` 1,925, `linux-freetype` 1,498, `linux-pango` 928, `linux-font-process`
+  353), none different; the 33 `machine.*` rows of each file equal; the four dump files byte-identical.
+- Method check: two runs per clone, byte-identical, so no row is unstable and none was left out.
+- Control: `slotAfterThePrimary` returning `fallbackSlot + 2`, in the `2c9003b909` clone only, moved 9 rows of
+  `linux-pango`, all `pg.layout.lato.comp.*`, in the slot byte of their glyph codes only (01 to 02), and no row of the
+  other three. The slot-5 glyphs of `s09`, in runs that take their slot from `CompositeGlyphMapper`, did not move.
+- Trace: a print on entry to both `addNativeFallback` methods printed 0 lines over the four corpora, in the test JVM
+  and its child JVMs: no Pango layout on this host added a native fallback, as F1 under "The Copilot review" read it.
+- The limit: the dumps reach only the slot path where the font is in the fallback list, never 8b's -1 or 8c's `ns`.
+  "No row moved" covers the locking, volatile and cache changes on the paths they reach, not the values 8b and 8c
+  answer; the control shows sensitivity on the Pango path only; the result holds for this WSL Ubuntu x86_64 host and
+  its packages; and it compares `abe0943d31` with `2c9003b909`, whose Linux code this round does not change.
+
+**Mutants.** One production edit at a time, a copy of the original file with that one edit put in place (one file in
+`git diff --numstat`), the classes run, the original copied back and
+`git diff --quiet -- modules/javafx.graphics/src/main` checked after each; on Windows with `-Djfx.parity.require=true`,
+in WSL without it. Every row is killed by test failures unless it says otherwise. G is `DirectWriteMetricsGoldenTest`,
+NS `DirectWriteNoSlotLayoutTest`; of `PrismFontFactoryTest`, P.noSlot is
+`aCompositeHasNoSlotForAFontItsFallbacksCannotHold`, P.added `aFontAddedToACompositeIsInTheSlotItIsGiven`, P.full the
+new cap test, P.none `aCompositeSlotIsOneAboveItsFallbackSlotAndNoSlotStaysNone` and P.through
+`aCompositeAnswersItsFallbackListsSlotsThroughTheMapping` (both any OS); of `CompositeFontLocksTest`, for the fallback
+list (FB) and the logical font (LF), L.added is `aFontAddedToAFallbackResourceIsAtTheSlotItIsHandedOutFor`, L.comp
+`aFontACompositeAddsIsAtTheSlotItIsHandedOutFor`, L.noLock the `...AnswersWhatItKnowsWithoutItsLock` tests, L.one the
+`oneFontAddedTwiceAtOnceTo...` tests, L.two the `twoFontsAddedAtOnceTo...` tests, L.wait the
+`callersOfANew...WaitForOneLookUpOfItsFallbacks` tests, L.once
+`aNewFallbackResourceLooksUpItsFallbacksOnceForThreeCallers`, and the any-OS class-file checks L.lookup
+`eachCompositeLooksUpItsFallbacksOnlyWhileTheyAreUnknownUnderItsLock` and L.last
+`eachCompositeSetsItsFallbacksAfterTheirNamesAndFiles`.
+
+The implementer's 9 (`impl/mut-win-M*.log`, `impl/mut-linux-M*.log`), all killed on both systems; FB is
+`FallbackResource`, LF `LogicalFont`:
+
+| row | the only edit | Windows | Linux |
+| --- | --- | --- | --- |
+| M1 | FB `ns + 1` (8c reverted) | G, NS, P.added, L.added, L.comp, L.noLockFB, L.oneFB, L.twoFB | not G, NS |
+| M2 | LF `addNativeFallback` answers `ns + 1` | L.noLockLF, L.oneLF, L.twoLF | the same |
+| M3 | `slotAfterThePrimary` `fallbackSlot + 1` (8b reverted) | NS, P.noSlot, P.none; G passes | P.noSlot, P.none |
+| M4 | FB `addNativeFallback` not `synchronized` | L.oneFB, L.twoFB | the same |
+| M5 | LF `addNativeFallback` not `synchronized` | L.oneLF, L.twoLF | the same |
+| M6 | FB `getLinkedFonts` without its `synchronized` block | L.waitFB, L.lookup, L.last | the same, L.once |
+| M7 | the same in LF | L.waitLF, L.lookup, L.last | the same |
+| M8 | FB `addNativeFallback` without the lookup under the lock | L.oneFB | the same |
+| M9 | the same in LF | L.oneLF | the same |
+
+- M1 failed G with "609 difference(s)" and NS's control with "the slot of a glyph of the font added to a composite of
+  12 slots ==> expected: <12> but was: <13>"; M3 failed NS's subject with "... expected: <0> but was: <3286>", and G
+  passed under it: 8b moves no golden row.
+
+The independent review's 77 runs, 39 on Windows and 38 on Linux, where `DWGlyphLayout` is not used (`review/logs/`,
+`w-<row>.log` and `l-<row>.log`; FB, LF and PC edit `FallbackResource`, `LogicalFont` and
+`PrismCompositeFontResource`):
+
+| rows | the only edit | Windows | Linux |
+| --- | --- | --- | --- |
+| FB1, FB2 | `ns + 1` (8c), `ns - 1` | L.added, L.comp, L.noLockFB, L.oneFB, L.twoFB, G, NS, P.added | not G, NS |
+| FB3 to FB5 | the cap `0x7E` to `0x7F`, to `0x7D`; the cap's `-1` to 0 | NS | survived |
+| FB6 | `getSlotForFont`'s not-found -1 to 0 | L.added, L.oneFB, L.twoFB, NS, P.added, P.noSlot | the same but NS |
+| FB7 | `getSlotForFontNoCreate` from index 1 | L.added, L.comp, L.noLockFB, L.oneFB, G, NS, P.added | not G, NS |
+| FB8 | `getNumSlots` counts one added font | L.oneFB, L.twoFB, G, NS, P.added | not G, NS |
+| FB9 | `getSlotResource` one index off | L.added, L.comp, L.oneFB, L.twoFB, G, NS, P.added | not G, NS |
+| FBL1 | `addNativeFallback` not `synchronized` | L.oneFB, L.twoFB | the same |
+| FBL2 | no lookup again under the lock | L.oneFB | the same |
+| FBL3 | `getLinkedFonts` without `synchronized (this)` | L.lookup, L.last, L.waitFB | the same, L.once |
+| FBL4 | `getLinkedFonts`' inner null check always true | L.lookup only | L.lookup, L.once |
+| FBL5 | `getNumSlots` `synchronized` | L.noLockFB | the same |
+| PC1, PC4 | `fallbackSlot + 1` (8b reverted); no slot -2 | NS, P.none, P.noSlot | P.none, P.noSlot |
+| PC2, PC3 | `fallbackSlot + 2`, `+ 0` | L.comp, G, NS, P.added, P.none | L.comp, P.added, P.none |
+| PC5 to PC7 | `getNumSlots` +2, +0; `getSlotResource(slot)` | L.comp, G, NS, P.added | L.comp, P.added |
+| PC8 | the primary's slot 1 | P.noSlot | the same |
+| DW1 | `renderShape`'s `slot >= 0` to `slot >= -1` | survived | not run |
+| LF1, LF6 to LF8, LF10, LF11 | `ns + 1`; slot index and count arithmetic | L.noLockLF, L.oneLF, L.twoLF | the same |
+| LF2, LF9 | `return ns - 1`; `getNumSlots` `+ 0` | L.noLockLF, L.oneLF, L.twoLF, G | L.noLockLF, L.oneLF, L.twoLF |
+| LF3 to LF5 | the cap `0x7E` to `0x7F`, to `0x7D`; the cap's `-1` to 0 | survived | survived |
+| LFL1 | `addNativeFallback` not `synchronized` | L.oneLF, L.twoLF | the same |
+| LFL2 | no lookup again under the lock | L.oneLF | the same |
+| LFL3 | `getLinkedFonts` without `synchronized (this)` | L.lookup, L.last, L.waitLF | the same |
+| LFL4 | `getLinkedFonts`' inner null check always true | L.lookup only | L.lookup only |
+| LFL5 | `getNumSlots` `synchronized` | L.noLockLF | the same |
+
+- Survivors: DW1 on Windows; FB3 to FB5 on Linux, where only NS saw the cap; LF3 to LF5 on both. Killed only by a
+  class-file check: FBL4 on Windows, where the count test does not run, and LFL4 on both. Under LF2 and LF9 G failed
+  in 16 `slots.*` rows that an earlier class left in the process factory's cache (R6, US-129).
+
+The rework's rows after R4 (`rework/logs/`), killed on both systems; NC is a negative control, a test edit:
+
+| row | the only edit | Windows | Linux |
+| --- | --- | --- | --- |
+| FB3 | the cap `ns >= 0x7E` to `0x7F` | P.full ("... expected: <127> but was: <128>"), NS | P.full alone |
+| FB4 | the cap to `0x7D` | P.full (<127> but was <126>), NS | P.full alone |
+| FB5 | the cap's `return -1` to `return 0` | P.full ("... expected: <-1> but was: <1>"), NS | P.full alone |
+| PC1 | `fallbackSlot + 1` (8b reverted) | P.full, P.noSlot, P.none, NS (<0> but was <3286>) | the same but NS |
+| NC | the shared fill stops one font early | P.full (<-1> but was <126>), NS | P.full (NS skipped) |
+
+The confirming review's own rows (`confirm/logs/`), 16 runs, none survived; C1 to C5 are the review's FB3, FB4, FB5,
+PC1 and PC5:
+
+| row | the only edit | Windows | Linux |
+| --- | --- | --- | --- |
+| C1 to C3 | the cap `0x7F`, `0x7D`; the cap's `-1` to 0 | P.full, NS | P.full alone |
+| C4 | `fallbackSlot + 1` (8b reverted) | P.full, P.noSlot, P.none, NS | P.full, P.noSlot, P.none |
+| C5 | the composite's `getNumSlots` +2 | P.full, P.added, NS (its room check, under the flag) | P.full, P.added |
+| C6 | the cap's branch stores the refused font before `return -1` | P.full, NS | P.full alone |
+| C7 | the composite's lookup `+ 1` again, not its add | P.full, P.through, P.noSlot, NS | P.full, P.through, P.noSlot |
+| FB1 | `return ns` to `ns + 1` (8c reverted) | P.full, P.added, NS | P.full, P.added |
+
+After O1 moved `fill` and `Refusal`, FB3 and PC1 ran again on both systems (`rework2/logs/`), killed with the same
+messages, and the move's confirmation (`confirm2/`) split 8b into its two callers: W1, the composite's `addSlotFont`
+`+ 1` again (Windows: P.full, P.through, NS), W2, its `getSlotForFont` `+ 1` again (Windows: NS "... expected: <0> but
+was: <3286>", the fallback font's glyph ID in slot 0, P.full, P.noSlot, P.through), and L1, the review's FB3 (Linux:
+P.full alone). All killed.
+
+**The reviews.** An independent review of the implementation, verdict "must_fix"; a confirming review of the rework,
+"pass"; a confirmation of the move O1, "pass" with no finding. The manager's decisions, each with its reason:
+- R1, must: the header and the Javadoc said that the first native fallback a composite adds took the next slot; on
+  master `addNativeFallback` answered `ns+1` for every font it added. Accepted: reworded, captured again (above).
+- R2, should: DW1 survives `DirectWriteNoSlotLayoutTest`. Taken in part: its Javadoc names both places that leave the
+  codes 0. Declined: a second test pinning the branch through glyph offsets. Reason: the branch is upstream code PR 71
+  did not change, and the test's purpose, the composite's answer seen end to end, it shows (it kills 8b reverted). DW1
+  is recorded as surviving.
+- R3, should: the story was not updated. This section and the edits it names.
+- R4, optional: the cap and its -1 were pinned on Windows only, inside the layout test. Taken: the cross-platform cap
+  test, with one shared fill. Reason: the cap is where a composite really answers "no slot", it is plain Java, and FB3
+  to FB5 survived on Linux.
+- R5, optional: "records what crossed the JNI boundary" held for 8,069 of the 8,378 rows, 309 coming from the FFM
+  build. Taken: reworded.
+- R6, outside the story: the golden test captures through the process factory's cached composites and fonts, so its
+  `slots.*` file-name rows depend on which earlier test class cached a linked font first. Filed as US-129.
+- Declined: a `LogicalFont` cap test, though LF3 to LF5 survive on both systems. Reason: `LogicalFont`'s cap and its -1
+  are upstream code PR 71 did not change, and its -1 always reached the layouts.
+- The review's verdicts on the decisions: D1 sane, D2 sane as a mechanism (with R1's error in its text), D3 sane, D4
+  risky, D5 sane. D4's "risky" is answered by R4 and by recording that Pango's `slot != -1` branch has no run-time test
+  on any system.
+- O1, optional, from the confirming review: the cross-platform cap test called `fill` and `Refusal` of the Windows-only
+  layout test. Taken: both moved into `PrismFontFactoryTest`, their bodies byte-identical, and the layout test calls
+  them there. Reason: the dependency pointed from a test every system runs to a class that describes a DirectWrite
+  test. It changed code after the final gates, so both final gates ran again; the tables above are those runs.
+- Beside the header's (R1) and "no mutant went unkilled" (true of its own 9 only), the review contradicted two claims
+  of the implementer's record: 32 lines of the golden's body are over 120 columns, data rows, as at `2c9003b909`, where
+  the record said none; and the layout test does store in the process factory (its layout caches the fallback's
+  physical font, `storeInMap`), where the record said nothing is, which holds of the fill.
+- Order: the review ran the font package in file-system and reverse alphabetical order, 552 / 0 / 0 / 190 twice on
+  Windows and 552 / 0 / 0 / 257 twice in WSL, per class identical; the confirming review, with the cap test, 553 / 0 /
+  0 / 190 in both orders on Windows (in reverse order the cap test's class 16th, the golden 51st) and 553 / 0 / 0 /
+  257 in WSL.
+
+**What rests on review after this round.**
+- macOS: nothing of this round ran there. That the 13 enabled tests execute the statements of `2c9003b909` there,
+  except the one OS branch, and that the cap test takes only steps existing macOS tests take, rests on reading (the
+  review and both confirmations). The cap test and the OS branch first run on macOS on CI after the push.
+- CI: the five files have run on no runner; the enabled tests and the two new ones first run there after the push. The
+  Windows runner skips the golden's comparison at its machine gate, and the new layout test's precondition has not been
+  seen on a runner; where it does not hold, the test skips.
+- DW1: `DWGlyphLayout.renderShape`'s `slot >= 0` is pinned by no test on its own (R2).
+- Pango: `PangoGlyphLayout`'s `slot != -1` branch (line 179) has no run-time test on any system. No Pango layout of the
+  corpora on the WSL host added a native fallback, since fontconfig's list for the primary already holds Pango's
+  fallback fonts (D4); that no other Linux host would show it is a claim about hosts, not a proof (the review).
+- `LogicalFont`'s cap and its -1: no test fills a logical font to its cap (LF3 to LF5), and no run-time test counts a
+  logical font's look-ups on any system.
+- The dump: not the values 8b and 8c answer, not the sensitivity of the `CompositeGlyphMapper` path, and this host
+  only.
+- What the round's tests leave in the process: by reading, the cap test stores nothing in the factory's maps, and the
+  layout test caches the fallback's physical font; the order runs above pass. That the golden's `slots.*` rows can
+  depend on the classes before it is US-129.
+
+**Upstream.** Read on 2026-11-24 at openjdk/jfx `master`, `94168cc51f` ("8397455: Skip failing tests on Ubuntu 26.04",
+2026-11-23): both defects are there. `FallbackResource.addNativeFallback` ends `return ns+1;` (line 270), since
+`a1add2e3d5`, JDK-8246104 (2023-04-07, PR 1067, jfx21), whose `LogicalFont.addNativeFallback` got `return ns;`.
+`PrismCompositeFontResource.getSlotForFont` ends `return fallbackResource.getSlotForFont(fontName) + 1;` (lines 65 to
+70), older than JDK-8246104 (it is in `c420248b9b`, 2016). Upstream's `PrismCompositeFontResource` has no `addSlotFont`;
+the fork's is the fork's own. JBS searches (`addNativeFallback` 0 hits, `getSlotForFont` 2, `FallbackResource` 7, none
+of them this defect) and a pull-request search found no issue or PR for either. A draft report, one issue in two parts
+with a proposed patch, is kept outside the repository and is not filed.
+
+**Logs.** On Windows, in the session scratch directory, which is temporary:
+`C:/Users/bestq/AppData/Local/Temp/claude/50b9cf433e233190/afff22c1-2a08-459a-b423-9eb87c739ded/scratchpad/`. Nothing of
+it is in the repository. The WSL clones `~/jfx-us111-before`, `-head`, `-impl`, `-review`, `-final` and `-final2` stay
+in the Linux home; the first two hold the dump test.
+- `BRIEF.md` and `DECISIONS.md` (the round's brief and the manager's decisions with their reasons), and `results/`, the
+  agents' reports: `win-head.md`, `wsl-gates.md`, `ci.md`, `ci-rerun.md`, `impl.md`, `review.md`, `linux-dump.md`,
+  `rework.md`, `confirm.md`, `win-final.md`, `wsl-final.md`, `rework2.md`, `confirm2.md`, `win-final2.md`,
+  `wsl-final2.md` and `upstream.md` (the upstream draft), with `pr-comments.json` and `pr-reviews.json`.
+- `win-head/` (the Windows gate of `2c9003b909`: `gate.log`, `per-class.tsv`, the golden test's report); `wsl-gates/`
+  (the WSL gates of `abe0943d31` and `2c9003b909`, the refused captures, the per-class tables and their difference,
+  `machine-start.txt`, `machine-end.txt`); `ci/` and `ci2/` (the job logs of runs 45456403357 and 44961158059 and their
+  per-class tables, `ci2/run_lax2.log` the Linux x64 job of the second attempt).
+- `impl/` (`1b-parity.log`, `1d-capture.log`, `1f-capture2.log`, `capture-diff.txt`, `golden-before.txt`,
+  `run1-win.log`, `cjk-alone-win.log`, `nc-win.log`, the mutants' `mut-win-M*.log` and `mut-linux-M*.log`,
+  `final-win.log`, `final-linux.log`, `final.sha256`); `linux-dump/` (the dump test and its sha256, the seven runs'
+  dumps and logs, `compare-before1-head1.txt`, `control-diff.txt`, `step7-head1-pango.txt`, `machine-*.txt`);
+  `review/` (`logs/w-*.log` and `logs/l-*.log`: its capture, the 77 mutant runs and the order runs; `mutant-table.md`,
+  `NOTES.md`).
+- `rework/` (`logs/`: the two captures, the proof runs, FB3 to FB5, PC1 and NC on both systems;
+  `golden-before-capture.txt`, `golden-after-capture1.txt`, `body-before.txt`, `body-after.txt`, `final.sha256`);
+  `confirm/` (`logs/`: its capture, C1 to C7 and FB1 on both systems, the order runs); `rework2/` and `confirm2/` (the
+  move's extracts and diffs, its runs and mutants).
+- `win-final/` and `win-final2/` (`gate.log`, `per-class.tsv`, `files-at-gate.sha256`); `wsl-final/` and
+  `wsl-final2/` (`final-gate.log` and `final2-gate.log`, `final-per-class.tsv`, `machine-start.txt`,
+  `machine-end.txt`).
+- `writeup/pr-drafts.md`: drafts of a reply to Copilot's F1 thread and of the PR description's scope, not posted.
+
+The owner's Maven builds of another project ran on this machine during some targeted runs of the implementation and
+the review; the final gates found no other `java.exe` at their start and end. The implementer stopped one process of
+its own in WSL, a wait loop that matched its own command line, after `ps` showed it was its own.
+
+**Not done.** Nothing of this round ran on macOS. No robot or `tests/system` test was run. The round is uncommitted:
+the five files are in the working tree on `2c9003b909`. For the owner: the commit, the push and a `submit.yml` run of
+it, read for `PrismFontFactoryTest` and `CompositeFontLocksTest` in every job and for both macOS jobs' verdict lines;
+the reply to Copilot's F1 thread and the PR description (drafts only); the upstream report; the robot and
+`tests/system` runs; and the comparison of the macOS goldens on their capture machine.
 
 ### Measured (2026-11-21 to 2026-11-23; Apple arm64, macOS 27.2.1 (26B131), JDK 27.0.1.0.2, Maven 3.10.0; and CI)
 Before: a clean tree at HEAD `abe0943d31`. After: the same commit with the final tree of this change (25 files,
@@ -2096,7 +2541,8 @@ gates of F2 to F6.
   tree, stand in for them (see "Measured"). A comparison on the golden machine remains for the owner. Since the
   further fixes `mac-layout-golden.txt` has ten rows edited by hand, in the glyph field only, and 8 header lines that
   name them (deviation 16); no other golden file changed. Over the dumps taken before and after each cluster,
-  exactly those ten rows moved (see "Measured").
+  exactly those ten rows moved (see "Measured"). Since 2026-11-24 `directwrite-metrics-golden.txt` is captured again
+  on its Windows machine, exactly its 609 rows of 8c moving ("Windows and Linux").
 - **8, facades.** `CFNative`, `CGNative` and `CTNative` have no diff; no fix needed a descriptor change. A fourth
   facade, `ObjCNative`, was added beside them, with its descriptor table in `MacObjCNativeTest` (see "Deviations
   and stated properties", 7). Since the further fixes `CFNative` differs from `f352c6008c` in one modifier, `CFRetain`
@@ -2348,7 +2794,8 @@ written in place, the lent-font check's wiring, and a null stored over the fonts
 - `assertPublishesNewArrayOnceFilled` reads code order with no stack model. It sees neither an element store into
   the published array after the next allocation, nor the array escaping before its publication, nor, for
   `nativeFallbacks`, whether the store before the `putfield` writes the added font into the last element: on macOS
-  the slot tests catch a wrong index, on Linux and Windows nothing does. It reads one method, so a store of
+  the slot tests catch a wrong index, on Linux and Windows nothing does (since 2026-11-24 the same slot tests run on
+  Windows and Linux, "Windows and Linux"; no mutant of that store was run there). It reads one method, so a store of
   `styleMetrics` or `charToGlyph` from another method of its class is not checked, and it allows further stores of
   null in the method: harmless for `styleMetrics` and `charToGlyph`, whose readers make the array again when they find
   null. For `nativeFallbacks`, which no reader makes again, `noCompositeDropsTheFontsItAdded` pins on every OS that
@@ -2396,7 +2843,13 @@ written in place, the lent-font check's wiring, and a null stored over the fonts
   rests on reading the code and the goldens' slot bytes; the 609 DirectWrite rows of 8c were computed from the golden,
   since the Copilot review (F1) by a script that asserts each step, and that a re-capture moves exactly those, and
   draws the 16 glyphs that no row of the file holds with the fonts their new codes name, rests on reading
-  `DirectWriteMetricsGoldenTest.captureFont` and the slot path.
+  `DirectWriteMetricsGoldenTest.captureFont` and the slot path. Since 2026-11-24 ("Windows and Linux"): on Windows
+  `DirectWriteNoSlotLayoutTest` shows a run whose font gets no slot laid out as glyph 0 through `DWGlyphLayout`, but
+  not `renderShape`'s `slot >= 0` by itself, since `textRendererGetGlyphIndices` also leaves the IDs 0 for a slot below
+  0 (DW1 survives); with 8b reverted the DirectWrite comparison still passes; the re-capture on the capture machine
+  moved exactly the 609 rows and drew the 16 glyphs with those fonts, measured; on Linux a dump of the four corpora is
+  unchanged between `abe0943d31` and `2c9003b909`, though no corpus reaches 8b's -1. Pango's `slot != -1` branch is
+  still checked by no test, on any system.
 - That `findFontIndex` is reached under no font-layer monitor, so nothing is read from disk under the factory's,
   rests on reading its one caller chain (`CTFactory.createFontFile`, from `CTGlyphLayout.addFallbackFont` in
   `getFontSlot`, from `layout`; since the Copilot review through `fontFileOfCopy` and `lookUpFallbackFont` between
@@ -2410,7 +2863,9 @@ written in place, the lent-font check's wiring, and a null stored over the fonts
   `MacFontBindingStructureTest` already do on CI. `MacFontNullInputVerdictTest` loads the macOS-gated
   `MacFontNullInputTest` there, whose static initialiser only compiles a regular expression (ruling L6). This Mac's
   class-initialisation traces of `CompositeSlotRaceTest` and `FontSharedStateRulesTest` show no `PrismFontFactory`;
-  the second was taken before that test called `MacFontBindingStructureTest.nest`.
+  the second was taken before that test called `MacFontBindingStructureTest.nest`. Since CI run 45456403357, of
+  `2c9003b909`, whose Linux x64 job ran on its second attempt, they have run on Linux x64 too: `javafx.graphics`
+  26,619 / 0 / 0 / 1,034, every class equal to Linux aarch64's and to the WSL gate's ("Windows and Linux").
 - On CI run 45278364431 every verdict line was `PROVED` on both macOS 15 runners and every macOS test passed; before
   it, how the macOS tests decide on macOS 15 was predicted by reading: `PROVED`, or `CANNOT_SHOW` at a precondition.
   `REFUTED` on a healthy tree needs one of the three host behaviours named under "Verification"; a failed plain
@@ -2422,12 +2877,16 @@ written in place, the lent-font check's wiring, and a null stored over the fonts
   face's file is replaced or deleted under a CTFont in use. The virtual drain check keeps its hard rule, a call that
   leaves 10 or more blocks per call refuted on every host (ruling L6): on macOS 15 at `f352c6008c` a pooled call on a
   platform caller left 4.06 (arm64) and 4.01 (x64) blocks per call, and the thread per virtual call that this tree no
-  longer starts 10.73 and 10.94. On CI run 45278364431 the worker's call left 4.02 (arm64) and 4.05 (x64).
+  longer starts 10.73 and 10.94. On CI run 45278364431 the worker's call left 4.02 (arm64) and 4.05 (x64). On CI run
+  45456403357, of `2c9003b909`, all twelve verdict lines were `PROVED` on both macOS 15 runners.
 - Nine macOS tests depend on the host's composites: eight of the 11 macOS tests of `CompositeFontLocksTest` and
   `PrismFontFactoryTest.aFontAddedToACompositeIsInTheSlotItIsGiven` need room for one or two more slots under the
   0x7E slot cap. Where the host's composite has none they skip through `ParityGate.requireOracle`, or fail under
   `-Djfx.parity.require=true`, and print no console line, so on the CI macOS jobs such a skip shows only in the
-  class's count. The slot counts on macOS 15 are unknown; on this Mac all nine ran.
+  class's count. The slot counts on macOS 15 are unknown; on this Mac all nine ran. On CI run 45456403357 none of
+  the nine skipped on either macOS 15 runner. Since 2026-11-24 the nine run on Windows and Linux too, with the new
+  cap test, and none skipped there: the slot counts were 12, 11 and 12 on Windows and 10, 9 and 10 in WSL ("Windows
+  and Linux").
 - The class-file pins read the shapes javac 27 emits, and have run only against classes this Mac's JDK 27.0.1
   compiled; that Temurin 27+35 and Oracle JDK 27 on CI emit the same is assumed: they are the same OpenJDK javac. The
   hardening round's pins rely on two more shapes: `field = null;` as `aconst_null` directly before the `putfield`, and
@@ -2702,7 +3161,8 @@ Decided by the session's manager, for the owner's attention:
     read included, decides through `MacFontReleaseVerdict.decide`, and the fallback-face check makes its own missing
     face. None passes without proving its fix.
 11. **The owner committed the change** as `40e53db102`, the CI fix as `f352c6008c` and the further fixes as
-    `e1de3dd32a` (PR 71); the fixes of the Copilot review are not committed. Only the repository owner commits.
+    `e1de3dd32a` (PR 71); the fixes of the Copilot review are not committed. Only the repository owner commits. Since
+    2026-11-24 they are, as `2c9003b909`; the Windows and Linux round of that day is not.
 12. **The autorelease-pool token is a `long`** (ruling C2). `ObjCNative` binds `objc_autoreleasePoolPush` as
     `FunctionDescriptor.of(JAVA_LONG)` and `objc_autoreleasePoolPop` as `ofVoid(JAVA_LONG)`, where the C prototypes
     have `void *`: an `ADDRESS` return is boxed into a segment after libobjc has pushed the pool, and an
@@ -2731,9 +3191,13 @@ Decided by the session's manager, for the owner's attention:
       DirectWrite (`DWGlyphLayout`, `slot >= 0`) and Pango (`PangoGlyphLayout`, `slot != -1`) then lay out glyph 0
       where they drew the fallback font's IDs with the primary; advances and widths are still read. By reading, no
       Linux or Windows golden row moves through it: in the DirectWrite captures the slot bytes beyond a composite's
-      slots list are 8c's first added fonts, and the others lie inside the lists.
+      slots list are 8c's first added fonts, and the others lie inside the lists. Since 2026-11-24 measured on
+      Windows: with 8b reverted alone the DirectWrite comparison passes, and `DirectWriteNoSlotLayoutTest` shows glyph
+      0 where the composite has no slot; on Linux the dump of the four corpora is unchanged between `abe0943d31` and
+      `2c9003b909`, though no corpus reaches 8b's -1 ("Windows and Linux").
     - 8c: `FallbackResource.addNativeFallback` answers `ns`, the new font's 0-based index, where upstream answers
-      `ns + 1`, an off-by-one since JDK-8246104 that openjdk/jfx `master` still has.
+      `ns + 1`, an off-by-one since JDK-8246104 that openjdk/jfx `master` still has (read again on 2026-11-24, at
+      `94168cc51f`).
     - Items 9 and 10 change results too, on purpose: a glyph drawn into the cached context has its own strike's
       sub-pixel options (no golden row moved), and a file that could not be read is read again at the next layout
       (deviation 23). Every other change of the further fixes leaves single-threaded, healthy paths as they were.
@@ -2763,6 +3227,11 @@ Decided by the session's manager, for the owner's attention:
        rows and 8c as their cause go into it, as the ten rows have theirs.
     Until then the comparison fails on that machine; CI's Windows runner skips it at its machine gate. 8a and 8b add no
     DirectWrite row, and `linux-pango-golden.txt` does not move.
+    Since 2026-11-24 this is done, on that machine ("Windows and Linux" under "Done"): step 1 gave "609 difference(s)
+    against the golden captured from the JNI build (first 60 shown):"; the capture of step 2 changed exactly those 609
+    rows, `capture.provenance` and the header (step 3); and the lines of step 4 went into the test's `header()` before
+    the capture, so that the file a capture writes is the committed one. The comparison passes there with
+    `-Djfx.parity.require=true`.
 17. **The lock order, and the render thread as a layout thread** (rulings B4, B5, F-R5 and F-R6). {`LogicalFont`,
     `FallbackResource`} before the factory instance before a font file's monitor before {`FileRefCounter`,
     `FontFileReader`, `DWDisposer`}, and the factory instance before {`PrismFontFactory.class`,
@@ -2869,7 +3338,9 @@ Linux x64 and aarch64 and Windows x64: see "Measured". CI run 45278364431 ran th
 on macOS 15 (arm64 and x64), Linux aarch64, Windows x64 and No JNI, its Linux x64 job stopped before it compiled
 anything (F1 under "The Copilot review"). Not run: the Copilot review's fixes anywhere but this Mac (macOS 27.2.1
 arm64), so their outcomes on the CI hosts are predicted; the further fixes on Linux x64; the gate as such on the CI fix
-or the further fixes alone; and any robot or `tests/system` test, which the owner runs.
+or the further fixes alone; and any robot or `tests/system` test, which the owner runs. Since then CI run 45456403357
+ran `2c9003b909`, which holds the Copilot review's fixes, green on all six jobs, its Linux x64 job on the second
+attempt; the Windows and Linux round of 2026-11-24 ran on Windows and in WSL, on no CI host and nowhere on macOS.
 
 ### Acceptance criteria
 1. ✅ Sites 1-7 hand none of their listed inputs to CoreFoundation, CoreGraphics or CoreText as NULL or 0; each
@@ -2901,21 +3372,32 @@ or the further fixes alone; and any robot or `tests/system` test, which the owne
    where". L2 does not compile, C-M14 is equivalent and M8g7 survives (deviation 20). The Copilot review's 25 rows of F2
    to F4 and 27 of F5 and F6 were all killed, the second round's on its final tree, and so were the 6 rows of R1 to R3
    and 7 rows of F5 and F6 run again on R1 to R3's shape, and the fifth round's 3 rows and R4-6 again. The paths no test
-   provokes are under "Rests on review".
+   provokes are under "Rests on review". On Windows and Linux (2026-11-24, "Windows and Linux"): the implementer's 9
+   rows were killed on both systems; of the review's 77 runs, 39 on Windows and 38 on Linux, DW1 survived on Windows
+   (`renderShape`'s guard, which PR 71 did not change), FB3 to FB5 on Linux, killed there since by the new cap test, and
+   LF3 to LF5 on both (`LogicalFont`'s cap, for which a test was declined); the rework's 4 rows on both systems, the
+   confirming review's 8 on both, the 2 run again after the move on both and the move's confirmation's 3 were all
+   killed, and the rework's negative control failed the tests on both.
 7. **✅ on this machine; the comparison on the golden machine remains for the owner.** No golden row changed for
    the twelve sites, and the five corpora are identical before and on the final tree. Item 8 of the further fixes
    moves ten rows of `mac-layout-golden.txt`, edited by hand with the reason (deviation 16), and 609 rows of
    `directwrite-metrics-golden.txt`, which the owner re-captures on its machine, since 240 of them cannot be derived
-   from the file (the Copilot review, F1). The Copilot review changes no golden file.
+   from the file (the Copilot review, F1). The Copilot review changes no golden file. Since 2026-11-24 the DirectWrite
+   golden is captured again on its Windows machine: exactly those 609 rows moved, and its comparison passes there with
+   the flag. On Linux, where the goldens are no oracle, a dump of the four corpora is unchanged between `abe0943d31`
+   and `2c9003b909` ("Windows and Linux").
 8. ✅ `CFNative`, `CGNative` and `CTNative` unchanged, a fourth facade beside them (deviation 7), no pin moved; since
    the further fixes `CFNative.CFRetain` is public (deviation 22) and `ObjCNative`'s token a `long` (deviation 12),
    and still no pin moved. The Copilot review's F5 moves one call-site pin, `OS.CTFontCopyURLAttribute` from
    `CTFactory` to `CTGlyphLayout`, recorded with its reason under "The `MacFontBindings` pins"; no facade changed.
 9. ✅ Line counts and line lengths as above (measured); the other rules rest on the reviews.
 
-**Remains for the owner:** the commit of the Copilot review's fixes (F2 to F6 and R1 to R4) and a `submit.yml` run of
-it, read for the verdict lines of both macOS jobs (see "Verification"), whose Linux x64 job must get as far as running
-the tests this time (on CI run 45278364431 of `e1de3dd32a` it stopped at an HTTP 429 of Maven Central before it compiled
-anything; see F1 under "The Copilot review"); the further fixes are committed as `e1de3dd32a`; the re-capture of
-`directwrite-metrics-golden.txt` on its Windows capture machine before the merge (deviation 16); the robot and
-`tests/system` runs; and the flagged comparison on the golden machine, which now includes the ten rows edited by hand.
+**Remains for the owner:** the commit of the Windows and Linux round of 2026-11-24 (five test files, "Windows and
+Linux" under "Done") and a `submit.yml` run of it, read for the verdict lines of both macOS jobs (see "Verification")
+and for the counts of `PrismFontFactoryTest` and `CompositeFontLocksTest` in every job, since the new cap test and the
+OS branch of one slot test first run on macOS there; the reply to Copilot's F1 thread and the PR description's scope
+(drafts kept outside the repository); the upstream report (a draft kept outside the repository); the robot and
+`tests/system` runs; and the flagged comparison on the macOS golden machine, which now includes the ten rows edited by
+hand. The further fixes are committed as `e1de3dd32a` and the Copilot review's fixes (F2 to F6 and R1 to R4) as
+`2c9003b909`, which CI run 45456403357 ran on all six jobs, its Linux x64 job on the second attempt; the DirectWrite
+golden is captured again (deviation 16).

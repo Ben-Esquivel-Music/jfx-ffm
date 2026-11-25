@@ -45,10 +45,13 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.condition.EnabledOnOs;
 import org.junit.jupiter.api.condition.OS;
 import org.junit.jupiter.api.io.TempDir;
+import test.com.sun.javafx.font.CompositeFontLocksTest.SlotFont;
 import test.com.sun.javafx.test.ParityGate;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.fail;
 
 /**
  *
@@ -115,9 +118,12 @@ public class PrismFontFactoryTest {
         }
     }
 
-    /** A composite has slot 0 for its primary and none for a font its fallback list cannot hold. macOS. */
+    /**
+     * A composite has slot 0 for its primary and none for a font its fallback list cannot hold. macOS, Windows and
+     * Linux.
+     */
     @Test
-    @EnabledOnOs(OS.MAC)
+    @EnabledOnOs({OS.MAC, OS.WINDOWS, OS.LINUX})
     public void aCompositeHasNoSlotForAFontItsFallbacksCannotHold() {
         FontResource ahem = fontFile("ahem");
         CompositeFontResource composite = FontResourceShim.newComposite(ahem);
@@ -126,11 +132,12 @@ public class PrismFontFactoryTest {
     }
 
     /**
-     * A font a composite adds takes its next slot, which holds the font, and a later lookup finds it there. macOS:
-     * the composite's fallback list, and a lookup of the added font's name, reach the platform's fonts.
+     * A font a composite adds takes its next slot, which holds the font, and a later lookup finds it there. macOS,
+     * Windows and Linux: the composite's fallback list, and a lookup of the added font's name, reach the platform's
+     * fonts.
      */
     @Test
-    @EnabledOnOs(OS.MAC)
+    @EnabledOnOs({OS.MAC, OS.WINDOWS, OS.LINUX})
     public void aFontAddedToACompositeIsInTheSlotItIsGiven() {
         CompositeFontResource composite = FontResourceShim.newComposite(fontFile("ahem"));
         FontResource added = fontFile("fontwithfeaturesttf");
@@ -143,6 +150,29 @@ public class PrismFontFactoryTest {
         assertEquals(added.getFullName(), composite.getSlotResource(slot).getFullName(),
                      "the font at the slot it was given");
         assertEquals(slot, composite.getSlotForFont(added.getFullName()), "the slot a later lookup finds");
+    }
+
+    /**
+     * A composite whose fallback list is full has no slot for another font, and says so with -1, not with the
+     * primary's slot 0: adding the font answers -1, a lookup of its name answers -1 too, and neither takes a slot.
+     * The list is filled with fonts that are not on the machine, each at the slot it is given, until the composite
+     * refuses one. macOS, Windows and Linux: the composite's fallback list, and a lookup of each added font's name,
+     * reach the platform's fonts.
+     */
+    @Test
+    @EnabledOnOs({OS.MAC, OS.WINDOWS, OS.LINUX})
+    public void aCompositeWhoseFallbackListIsFullHasNoSlotForAnotherFont() {
+        CompositeFontResource composite = FontResourceShim.newComposite(fontFile("ahem"));
+        int slots = composite.getNumSlots();
+        ParityGate.requireOracle(PrismFontFactoryTest.class, slots - 1 < FALLBACK_SLOT_CAP, ParityGate.required(),
+                () -> "this host gives the composite " + slots + " slots, so its fallback list has no room for one");
+        Refusal refused = fill(composite);
+        assertEquals(-1, refused.slot(), "what a composite whose fallback list is full answers for another font");
+        assertEquals(FALLBACK_SLOT_CAP + 1, composite.getNumSlots(),
+                     "the slots of a composite whose fallback list is full: the list's 0x7E and the primary's");
+        assertEquals(-1, composite.getSlotForFont(refused.font().getFullName()), "a lookup of the font it refused");
+        assertEquals(refused.slotsBefore(), composite.getNumSlots(),
+                     "the slots of the composite, unchanged by the font it refused and by the lookup of that font");
     }
 
     /**
@@ -185,5 +215,28 @@ public class PrismFontFactoryTest {
         FontResource font = FontResourceShim.newUncachedFontFile(MacFontGoldens.pinned(pinned).toString());
         assertNotNull(font, "the factory opens " + MacFontGoldens.pinned(pinned));
         return font;
+    }
+
+    /**
+     * Adds fonts that are not on this machine until the composite no longer gives the next slot, and returns that
+     * font, the composite's slot count before it was offered and what the composite answered for it. The factory
+     * knows no font of these names, so each one added takes the slot it is given. The Windows layout test of a run
+     * whose fallback font gets no slot fills its composite with it too.
+     */
+    static Refusal fill(CompositeFontResource composite) {
+        for (int next = composite.getNumSlots(); next <= 0xFF; next++) {
+            SlotFont font = new SlotFont("JFX No Slot Test " + next);
+            int slots = composite.getNumSlots();
+            int slot = composite.addSlotFont(font);
+            if (slot != next) {
+                return new Refusal(font, slots, slot);
+            }
+            assertSame(font, composite.getSlotResource(slot), "the font at the slot it was given");
+        }
+        return fail("a composite gave a font slot 0xFF");
+    }
+
+    /** The font a composite did not give the next slot, its slot count before that font and its answer for it. */
+    record Refusal(SlotFont font, int slotsBefore, int slot) {
     }
 }

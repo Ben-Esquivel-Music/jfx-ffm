@@ -67,7 +67,8 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * check decides by the state of a thread against that monitor, never by time. The machine has no font with the
  * names used here, so a factory answers null for each name the test did not store itself. The class-file checks, the
  * reflection check and the store into a factory of no platform run on any OS; the slot tests use the process's
- * factory, whose look-ups reach the platform's native font calls, and run on macOS only.
+ * factory, whose look-ups reach the platform's native font calls, and run on macOS, Windows and Linux, except the
+ * count of a fallback list's look-ups, which does not run on Windows.
  */
 public class CompositeFontLocksTest {
 
@@ -118,9 +119,12 @@ public class CompositeFontLocksTest {
                 "no two threads use one of its maps at once, and a lookup finds every font a finished store stored");
     }
 
-    /** Two fonts added at once to a logical font take one slot each, and each slot holds its font. macOS. */
+    /**
+     * Two fonts added at once to a logical font take one slot each, and each slot holds its font. macOS, Windows and
+     * Linux.
+     */
     @Test
-    @EnabledOnOs(OS.MAC)
+    @EnabledOnOs({OS.MAC, OS.WINDOWS, OS.LINUX})
     void twoFontsAddedAtOnceToALogicalFontTakeTwoSlots() throws Exception {
         CompositeFontResource font = FontResourceShim.newLogicalFont(LogicalFont.SYSTEM, false, false);
         int first = font.getNumSlots();
@@ -144,9 +148,12 @@ public class CompositeFontLocksTest {
         assertEquals(slotA, font.getSlotForFont(a.getFullName()), "the slot a later lookup finds");
     }
 
-    /** One font added twice at once to a logical font takes one slot, which both callers are handed. macOS. */
+    /**
+     * One font added twice at once to a logical font takes one slot, which both callers are handed. macOS, Windows and
+     * Linux.
+     */
     @Test
-    @EnabledOnOs(OS.MAC)
+    @EnabledOnOs({OS.MAC, OS.WINDOWS, OS.LINUX})
     void oneFontAddedTwiceAtOnceToALogicalFontTakesOneSlot() throws Exception {
         CompositeFontResource font = FontResourceShim.newLogicalFont(LogicalFont.SYSTEM, false, false);
         int first = font.getNumSlots();
@@ -168,10 +175,10 @@ public class CompositeFontLocksTest {
 
     /**
      * A logical font answers its slot count, the slot of a font it has added, that font and its first font while
-     * another thread holds its monitor. macOS.
+     * another thread holds its monitor. macOS, Windows and Linux.
      */
     @Test
-    @EnabledOnOs(OS.MAC)
+    @EnabledOnOs({OS.MAC, OS.WINDOWS, OS.LINUX})
     void aLogicalFontAnswersWhatItKnowsWithoutItsLock() throws Exception {
         CompositeFontResource font = FontResourceShim.newLogicalFont(LogicalFont.SYSTEM, false, false);
         requireRoomFor(font.getNumSlots(), 1);
@@ -194,10 +201,10 @@ public class CompositeFontLocksTest {
 
     /**
      * Two fonts added at once to a fallback list take one slot each, the next two indexes, and each slot holds its
-     * font. macOS.
+     * font. macOS, Windows and Linux.
      */
     @Test
-    @EnabledOnOs(OS.MAC)
+    @EnabledOnOs({OS.MAC, OS.WINDOWS, OS.LINUX})
     void twoFontsAddedAtOnceToAFallbackResourceTakeTwoSlots() throws Exception {
         CompositeFontResource fallback = FontResourceShim.newFallbackResource(new SlotFont("JFX Slot Test Primary"));
         int first = fallback.getNumSlots();
@@ -220,9 +227,12 @@ public class CompositeFontLocksTest {
         assertEquals(first + 2, fallback.getNumSlots(), "the slots of the fallback list");
     }
 
-    /** One font added twice at once to a fallback list takes one slot, the next index, for both callers. macOS. */
+    /**
+     * One font added twice at once to a fallback list takes one slot, the next index, for both callers. macOS, Windows
+     * and Linux.
+     */
     @Test
-    @EnabledOnOs(OS.MAC)
+    @EnabledOnOs({OS.MAC, OS.WINDOWS, OS.LINUX})
     void oneFontAddedTwiceAtOnceToAFallbackResourceTakesOneSlot() throws Exception {
         CompositeFontResource fallback = FontResourceShim.newFallbackResource(new SlotFont("JFX Slot Test Primary"));
         int first = fallback.getNumSlots();
@@ -244,10 +254,11 @@ public class CompositeFontLocksTest {
 
     /**
      * A fallback list answers its slot count and the slot of a font it has added while another thread holds its
-     * monitor. Its {@code getSlotResource} is synchronized, as it is upstream, so it is not read here. macOS.
+     * monitor. Its {@code getSlotResource} is synchronized, as it is upstream, so it is not read here. macOS, Windows
+     * and Linux.
      */
     @Test
-    @EnabledOnOs(OS.MAC)
+    @EnabledOnOs({OS.MAC, OS.WINDOWS, OS.LINUX})
     void aFallbackResourceAnswersWhatItKnowsWithoutItsLock() throws Exception {
         CompositeFontResource fallback = FontResourceShim.newFallbackResource(new SlotFont("JFX Slot Test Primary"));
         requireRoomFor(fallback.getNumSlots(), 1);
@@ -262,9 +273,12 @@ public class CompositeFontLocksTest {
         assertEquals(List.of(slots, slot), read.result(), "the slot count and the slot of the font added");
     }
 
-    /** A font added to a fallback list is at the slot it is handed out for, the list's next index. macOS. */
+    /**
+     * A font added to a fallback list is at the slot it is handed out for, the list's next index. macOS, Windows and
+     * Linux.
+     */
     @Test
-    @EnabledOnOs(OS.MAC)
+    @EnabledOnOs({OS.MAC, OS.WINDOWS, OS.LINUX})
     void aFontAddedToAFallbackResourceIsAtTheSlotItIsHandedOutFor() {
         CompositeFontResource fallback = FontResourceShim.newFallbackResource(new SlotFont("JFX Slot Test Primary"));
         int first = fallback.getNumSlots();
@@ -279,14 +293,24 @@ public class CompositeFontLocksTest {
     /**
      * A font that the composite of a font file adds, for a name the factory knows, is at the slot the composite hands
      * out for it: the composite numbers its slots one above its fallback list's. The process's factory knows the name
-     * because the test stored the font under it; Helvetica's own fallbacks come from CoreText. macOS.
+     * because the test stored the font under it. The font file is Helvetica.ttc on macOS, whose own fallbacks come
+     * from CoreText, and the repository's Ahem on Windows and Linux, whose own fallbacks come from the registry's font
+     * links and from fontconfig. macOS, Windows and Linux.
      */
     @Test
-    @EnabledOnOs(OS.MAC)
+    @EnabledOnOs({OS.MAC, OS.WINDOWS, OS.LINUX})
     void aFontACompositeAddsIsAtTheSlotItIsHandedOutFor() {
-        FontResource helvetica = FontResourceShim.newUncachedFontFile(MacFontGoldens.SYSTEM_FONTS + "/Helvetica.ttc");
-        assertNotNull(helvetica, "CoreText opens Helvetica.ttc, which every macOS has");
-        CompositeFontResource composite = FontResourceShim.newComposite(helvetica);
+        CompositeFontResource composite;
+        if (OS.current() == OS.MAC) {
+            FontResource helvetica =
+                    FontResourceShim.newUncachedFontFile(MacFontGoldens.SYSTEM_FONTS + "/Helvetica.ttc");
+            assertNotNull(helvetica, "CoreText opens Helvetica.ttc, which every macOS has");
+            composite = FontResourceShim.newComposite(helvetica);
+        } else {
+            FontResource ahem = FontResourceShim.newUncachedFontFile(MacFontGoldens.pinned("ahem").toString());
+            assertNotNull(ahem, "the factory opens " + MacFontGoldens.pinned("ahem"));
+            composite = FontResourceShim.newComposite(ahem);
+        }
         int slots = composite.getNumSlots();
         requireRoomFor(slots - 1, 1);
         SlotFont added = new SlotFont("JFX Slot Test Composite Added");
@@ -297,9 +321,12 @@ public class CompositeFontLocksTest {
         assertEquals(slot, composite.getSlotForFont(added.getFullName()), "the slot a later lookup finds");
     }
 
-    /** Three callers that meet a new logical font at once wait while one of them looks up its fallbacks. macOS. */
+    /**
+     * Three callers that meet a new logical font at once wait while one of them looks up its fallbacks. macOS, Windows
+     * and Linux.
+     */
     @Test
-    @EnabledOnOs(OS.MAC)
+    @EnabledOnOs({OS.MAC, OS.WINDOWS, OS.LINUX})
     void callersOfANewLogicalFontWaitForOneLookUpOfItsFallbacks() throws Exception {
         CompositeFontResource font = FontResourceShim.newLogicalFont(LogicalFont.SYSTEM, false, false);
         List<Integer> counts = countSlotsAtOnce(font);
@@ -307,9 +334,11 @@ public class CompositeFontLocksTest {
                      "the slot counts the three callers were given");
     }
 
-    /** Three callers that meet a new fallback list at once wait while one of them looks it up. macOS. */
+    /**
+     * Three callers that meet a new fallback list at once wait while one of them looks it up. macOS, Windows and Linux.
+     */
     @Test
-    @EnabledOnOs(OS.MAC)
+    @EnabledOnOs({OS.MAC, OS.WINDOWS, OS.LINUX})
     void callersOfANewFallbackResourceWaitForOneLookUpOfItsFallbacks() throws Exception {
         CompositeFontResource fallback = FontResourceShim.newFallbackResource(new SlotFont("JFX Slot Test Primary"));
         List<Integer> counts = countSlotsAtOnce(fallback);
@@ -319,10 +348,12 @@ public class CompositeFontLocksTest {
 
     /**
      * A new fallback list is looked up once for three callers that meet it at once. The factory reads the primary's
-     * style once per look-up, which a control shows on this host before the count is relied on. macOS.
+     * style once per look-up, which a control shows on this host before the count is relied on. macOS and Linux; not
+     * Windows, whose factory makes the fallback list without reading the primary ({@code DWFactory.getFallbacks}), so
+     * that there the control counted no read.
      */
     @Test
-    @EnabledOnOs(OS.MAC)
+    @EnabledOnOs({OS.MAC, OS.LINUX})
     void aNewFallbackResourceLooksUpItsFallbacksOnceForThreeCallers() throws Exception {
         SlotFont control = new SlotFont("JFX Slot Test Control");
         CompositeFontResource controlFallback = FontResourceShim.newFallbackResource(control);
@@ -521,7 +552,7 @@ public class CompositeFontLocksTest {
      * A font with a name and nothing else. The slot code reads only its name, styles and anti-aliasing mode; how often
      * its boldness is read counts how often a fallback list was looked up for it.
      */
-    private static final class SlotFont implements FontResource {
+    static final class SlotFont implements FontResource {
 
         private final String name;
         private final AtomicInteger boldReads = new AtomicInteger();
