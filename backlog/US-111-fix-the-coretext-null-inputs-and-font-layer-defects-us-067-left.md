@@ -1534,7 +1534,7 @@ The independent review's 77 runs, 39 on Windows and 38 on Linux, where `DWGlyphL
 
 - Survivors: DW1 on Windows; FB3 to FB5 on Linux, where only NS saw the cap; LF3 to LF5 on both. Killed only by a
   class-file check: FBL4 on Windows, where the count test does not run, and LFL4 on both. Under LF2 and LF9 G failed
-  in 16 `slots.*` rows that an earlier class left in the process factory's cache (R6, US-129).
+  in 16 `slots.*` rows that an earlier class left in the process factory's cache (R6, US-130).
 
 The rework's rows after R4 (`rework/logs/`), killed on both systems; NC is a negative control, a test edit:
 
@@ -1579,7 +1579,7 @@ P.full alone). All killed.
 - R5, optional: "records what crossed the JNI boundary" held for 8,069 of the 8,378 rows, 309 coming from the FFM
   build. Taken: reworded.
 - R6, outside the story: the golden test captures through the process factory's cached composites and fonts, so its
-  `slots.*` file-name rows depend on which earlier test class cached a linked font first. Filed as US-129.
+  `slots.*` file-name rows depend on which earlier test class cached a linked font first. Filed as US-130.
 - Declined: a `LogicalFont` cap test, though LF3 to LF5 survive on both systems. Reason: `LogicalFont`'s cap and its -1
   are upstream code PR 71 did not change, and its -1 always reached the layouts.
 - The review's verdicts on the decisions: D1 sane, D2 sane as a mechanism (with R1's error in its text), D3 sane, D4
@@ -1615,7 +1615,7 @@ P.full alone). All killed.
   only.
 - What the round's tests leave in the process: by reading, the cap test stores nothing in the factory's maps, and the
   layout test caches the fallback's physical font; the order runs above pass. That the golden's `slots.*` rows can
-  depend on the classes before it is US-129.
+  depend on the classes before it is US-130.
 
 **Upstream.** Read on 2026-11-24 at openjdk/jfx `master`, `94168cc51f` ("8397455: Skip failing tests on Ubuntu 26.04",
 2026-11-23): both defects are there. `FallbackResource.addNativeFallback` ends `return ns+1;` (line 270), since

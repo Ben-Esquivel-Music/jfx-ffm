@@ -127,7 +127,6 @@ ComplexTextController::ComplexTextRun::ComplexTextRun(wkj_ref jRun, const Font& 
     : m_initialAdvance(runInitialAdvance(jRun))
     , m_font(font)
     , m_characters(characters, stringLength)
-    , m_stringLength(stringLength)
     , m_indexBegin(runStart(jRun))
     , m_indexEnd(runEnd(jRun))
     , m_glyphCount(runGlyphCount(jRun))
@@ -135,7 +134,7 @@ ComplexTextController::ComplexTextRun::ComplexTextRun(wkj_ref jRun, const Font& 
     , m_isLTR(runIsLeftToRight(jRun) != 0)
 {
     // Handle empty string runs (line breaks, etc.)
-    if (m_stringLength == 0) {
+    if (stringLength == 0) {
         m_glyphCount = 0;
         return;
     }

@@ -1,4 +1,4 @@
-# US-129 — Make the DirectWrite golden independent of the test classes that run before it
+# US-130 — Make the DirectWrite golden independent of the test classes that run before it
 
 **Status:** 📋 Ready (filed 2026-11-24 from US-111) · **Found:** finding R6 of the independent review of US-111's
 Windows and Linux round, 2026-11-24; quoted from its report and logs; nothing built or run for this story

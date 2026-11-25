@@ -72,7 +72,6 @@ const Vector<String>& LocaleNone::monthLabels()
     m_monthLabels = { WTF::monthFullName, std::size(WTF::monthFullName) };
         return m_monthLabels;
 #else
-    Vector<String> m_monthLabels;
     m_monthLabels.reserveCapacity(WTF::monthFullName.size());
     for (const auto& literal : WTF::monthFullName)
         m_monthLabels.append(String(literal));
@@ -123,10 +122,9 @@ const Vector<String>& LocaleNone::shortMonthLabels()
     m_shortMonthLabels = { WTF::monthName, std::size(WTF::monthName) };
     return m_shortMonthLabels;
 #else
-    Vector<String> m_shortMonthLabels;
-    m_monthLabels.reserveCapacity(WTF::monthName.size());
+    m_shortMonthLabels.reserveCapacity(WTF::monthName.size());
     for (const auto& literal : WTF::monthName)
-        m_monthLabels.append(String(literal));
+        m_shortMonthLabels.append(String(literal));
     return m_shortMonthLabels;
 #endif
 }
