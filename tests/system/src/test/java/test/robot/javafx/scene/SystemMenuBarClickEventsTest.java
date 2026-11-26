@@ -25,7 +25,6 @@
 
 package test.robot.javafx.scene;
 
-import com.sun.javafx.PlatformUtil;
 import javafx.application.Application;
 import javafx.geometry.Bounds;
 import javafx.geometry.Pos;
@@ -41,9 +40,10 @@ import javafx.scene.robot.Robot;
 import javafx.stage.Stage;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.Assertions;
-import org.junit.jupiter.api.Assumptions;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.condition.EnabledOnOs;
+import org.junit.jupiter.api.condition.OS;
 import test.util.Util;
 
 import java.util.concurrent.CountDownLatch;
@@ -52,6 +52,7 @@ import java.util.concurrent.CountDownLatch;
  * Tests that the system menu bar processes a mouse click event when there is a popup window
  * showing in the active stage: the menu opens, and the popup is closed only if it is an auto-hide popup.
  */
+@EnabledOnOs(value = OS.MAC, disabledReason = "System menu bar tests only apply to macOS")
 public class SystemMenuBarClickEventsTest {
 
     private static final CountDownLatch startupLatch = new CountDownLatch(1);
@@ -98,8 +99,6 @@ public class SystemMenuBarClickEventsTest {
     }
 
     private void runTest(boolean autoHide) {
-        Assumptions.assumeTrue(PlatformUtil.isMac(), "System menu bar tests only apply to macOS");
-
         // set auto-hide or non-auto-hide popup
         Util.runAndWait(() -> contextMenu.setAutoHide(autoHide));
 

@@ -170,6 +170,16 @@ the baselines of 2026-11-25 are attributed where they appear. The detail is in
    and the full run) was launched from that session after such a check. No subagent ran a robot test or anything
    under `tests/system`.
 
+Every run above predates the test's T6 gate (Notes). The macOS robot re-run of the class with it is owner-run and
+deferred, from the repository root under criterion 7:
+```
+mvn -pl tests/system -am test -DFULL_TEST=true -DUSE_ROBOT=true \
+    -Dtest='test/robot/javafx/scene/SystemMenuBarClickEventsTest' -Dsurefire.failIfNoSpecifiedTests=false
+```
+Expected: 2 tests, 0 failures, 0 errors, 0 skipped. Optional, the same command on Windows or Linux: the class reports
+its 2 tests skipped, the `<skipped>` element of its `TEST-*.xml` reading
+`Disabled on operating system: <os.name> ==> System menu bar tests only apply to macOS`, and no launch error.
+
 ## Out of scope
 - `SystemMenuBarHelpMenuTest` (disabled upstream for JDK-8381443) and the other system menu bar tests.
 - `SliderTooltipNPETest`'s timeout in the same full run, which the US-001b gate records as intermittent.
@@ -186,7 +196,8 @@ the baselines of 2026-11-25 are attributed where they appear. The detail is in
   failure of 2026-11-05 as pre-existing, and this story's fix.
 - Line numbers in Problem, Acceptance criteria, Verification and Results items 1 and 2 are of the test as it was at
   `1a6788cc4d` (upstream e84b145731's file, unchanged up to `fe5a0072df`); US-001b changes neither the test nor
-  `Util.java`. The line numbers of Results item 4 are of the ported test, upstream's file at `81cc4f0b50`.
+  `Util.java`. The line numbers of Results item 4 are of the ported test as committed in `7e136e7ae5`, upstream's
+  file at `81cc4f0b50`, before the T6 gate below, which moves line 115 to 114.
 - Changed files (working tree, uncommitted):
   - `modules/javafx.graphics/src/main/native-glass/mac/GlassMenu.m`: the grab block of `menuWillOpen:` is upstream's
     after `81cc4f0b50`, byte for byte; the fork's FFM `menu_opening` callback code after it is unchanged and now
@@ -194,8 +205,17 @@ the baselines of 2026-11-25 are attributed where they appear. The detail is in
     `Java_*`, and no `cancelTrackingWithoutAnimation` selector string.
   - `modules/javafx.graphics/src/main/native-glass/mac/glass_mac_api.h` (fork-only): the comments of
     `GmacMenuCallbacks` slots 2 and 3 state the new behaviour (comment only).
-  - `tests/system/src/test/java/test/robot/javafx/scene/SystemMenuBarClickEventsTest.java`: byte-identical to
-    upstream's file at `81cc4f0b50`.
+  - `tests/system/src/test/java/test/robot/javafx/scene/SystemMenuBarClickEventsTest.java`: upstream's file at
+    `81cc4f0b50`, byte-identical as committed in `7e136e7ae5`, with one fork divergence since, from review finding
+    T6. The macOS gate is a class-level
+    `@EnabledOnOs(value = OS.MAC, disabledReason = "System menu bar tests only apply to macOS")` instead of upstream's
+    `Assumptions.assumeTrue(PlatformUtil.isMac(), ...)` at the top of `runTest`, and the two imports only that line
+    used are gone. Upstream's assumption runs per method, after `@BeforeAll` has launched the application and
+    `Util.launch` has waited up to 15 s for the stage to take focus, so on a Windows or Linux host whose stage never
+    gets focus the class would fail with "Failed to launch FX application ... within 15 sec." instead of reporting its
+    tests skipped. The class-level condition skips the class before `@BeforeAll` and `@AfterAll`, so no toolkit
+    starts, and both tests report skipped with the same reason. On macOS the class runs as upstream's does: the same
+    focus wait, methods, order and assertions.
 - The Objective-C and the header were changed by the `native-build-engineer` agent, the test by the `java-27` agent.
   Two `ffm-reviewer` reviews (port fidelity; the changed path's behaviour in the FFM layer) found the stale header
   comment, fixed in the same change, and nothing else in the code.

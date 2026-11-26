@@ -5,10 +5,12 @@
 Every run of 2026-11-26 recorded here was on the owner's Mac: macOS 27.2.1 (26B131), arm64, OpenJDK 27.0.1
 (`java.version` 27.0.1.0.2), primary screen 1920x1080 at scale 1. The baselines of 2026-11-25 under "The full run"
 are attributed where they appear. Times are EST. The tree is `fe5a0072df`: unchanged for the diagnostic and the
-real test before the change, and with the three changed files of the story for the mutant, the 20 + 20 runs and the
-full run. Line numbers of the original test (102, 111-112, 136) are of its file before the change, which is the same
-at `1a6788cc4d` and `fe5a0072df`; line 115 is of the ported test. The raw logs and reports are not kept in the
-repository: they were in a temporary session scratch directory, and the figures here are transcribed from them.
+real test before the change, and with the three changed files of the story as committed in `7e136e7ae5`, before
+the story's T6 gate, for the mutant, the 20 + 20 runs and the full run. Line numbers of the original test (102,
+111-112, 136) are of its file before the change, which is the same at `1a6788cc4d` and `fe5a0072df`; line 115 is of
+the ported test in that tree, upstream's file at `81cc4f0b50` (line 114 with the gate). The raw logs and reports
+are not kept in the repository: they were in a temporary session scratch directory, and the figures here are
+transcribed from them.
 
 ## The diagnostic (criterion 2)
 
