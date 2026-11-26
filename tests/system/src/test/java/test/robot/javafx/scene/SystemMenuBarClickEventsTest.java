@@ -25,9 +25,7 @@
 
 package test.robot.javafx.scene;
 
-import com.sun.javafx.PlatformUtil;
 import javafx.application.Application;
-import javafx.application.Platform;
 import javafx.geometry.Bounds;
 import javafx.geometry.Pos;
 import javafx.scene.Scene;
@@ -42,17 +40,19 @@ import javafx.scene.robot.Robot;
 import javafx.stage.Stage;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.Assertions;
-import org.junit.jupiter.api.Assumptions;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.condition.EnabledOnOs;
+import org.junit.jupiter.api.condition.OS;
 import test.util.Util;
 
 import java.util.concurrent.CountDownLatch;
 
 /**
- * Tests that the system menu bar consumes a mouse click event when there is an auto-hide popup window
- * showing in the active stage, and processes the event when there is a non-auto-hide popup window showing.
+ * Tests that the system menu bar processes a mouse click event when there is a popup window
+ * showing in the active stage: the menu opens, and the popup is closed only if it is an auto-hide popup.
  */
+@EnabledOnOs(value = OS.MAC, disabledReason = "System menu bar tests only apply to macOS")
 public class SystemMenuBarClickEventsTest {
 
     private static final CountDownLatch startupLatch = new CountDownLatch(1);
@@ -79,37 +79,13 @@ public class SystemMenuBarClickEventsTest {
     }
 
     /**
-     * Verifies that the system menu bar consumes a mouse click event when there is an
-     * auto-hide popup window showing in the active stage: the popup window gets dismissed,
-     * and the system menu bar doesn't show the menu.
+     * Verifies that the system menu bar processes a mouse click event when there is an
+     * auto-hide popup window showing in the active stage: the popup gets closed,
+     * and the system menu bar shows the menu.
      */
     @Test
-    void testSystemMenuBarConsumesClickEvent() {
-        Assumptions.assumeTrue(PlatformUtil.isMac(), "System menu bar tests only apply to macOS");
-
-        // set auto-hide popup
-        Util.runAndWait(() -> contextMenu.setAutoHide(true));
-
-        // Right-click on the label, the context menu shows up
-        Util.runAndWait(() -> {
-            Bounds bounds = label.localToScreen(label.getBoundsInLocal());
-            double x = bounds.getMinX() + bounds.getWidth() / 2;
-            double y = bounds.getMinY() + bounds.getHeight() / 2;
-            robot.mouseMove((int) x, (int) y);
-            robot.mouseClick(MouseButton.SECONDARY);
-        });
-
-        Assertions.assertTrue(contextMenu.isShowing(), "Context menu should be showing after right-click");
-
-        // Click on the system menu bar, in order to try to show the menu
-        Util.runAndWait(() -> {
-            robot.mouseMove(MENU_BAR_X, MENU_BAR_Y);
-            robot.mouseClick(MouseButton.PRIMARY);
-        });
-        Util.sleep(DELAY);
-
-        Assertions.assertFalse(menu.isShowing(), "System menu should not be showing");
-        Assertions.assertFalse(contextMenu.isShowing(), "Context menu should not be showing");
+    void testSystemMenuBarProcessesClickEventAndClosesAutoHidePopup() {
+        runTest(true);
     }
 
     /**
@@ -118,11 +94,13 @@ public class SystemMenuBarClickEventsTest {
      * and the system menu bar shows the menu.
      */
     @Test
-    void testSystemMenuBarProcessesClickEvent() {
-        Assumptions.assumeTrue(PlatformUtil.isMac(), "System menu bar tests only apply to macOS");
+    void testSystemMenuBarProcessesClickEventAndKeepsNonAutoHidePopup() {
+        runTest(false);
+    }
 
-        // set non-auto-hide popup
-        Util.runAndWait(() -> contextMenu.setAutoHide(false));
+    private void runTest(boolean autoHide) {
+        // set auto-hide or non-auto-hide popup
+        Util.runAndWait(() -> contextMenu.setAutoHide(autoHide));
 
         // Right-click on the label, the context menu shows up
         Util.runAndWait(() -> {
@@ -136,14 +114,20 @@ public class SystemMenuBarClickEventsTest {
         Assertions.assertTrue(contextMenu.isShowing(), "Context menu should be showing after right-click");
 
         // Click on the system menu bar, in order to open the menu
+        CountDownLatch menuShownLatch = new CountDownLatch(1);
         Util.runAndWait(() -> {
+            menu.setOnShown(_ -> menuShownLatch.countDown());
             robot.mouseMove(MENU_BAR_X, MENU_BAR_Y);
             robot.mouseClick(MouseButton.PRIMARY);
         });
-        Util.sleep(DELAY);
+        Util.waitForLatch(menuShownLatch, 5, "System menu should be showing");
 
         Assertions.assertTrue(menu.isShowing(), "System menu should be showing");
-        Assertions.assertTrue(contextMenu.isShowing(), "Context menu should be showing after system menu bar click");
+        if (autoHide) {
+            Assertions.assertFalse(contextMenu.isShowing(), "Context menu should not be showing after system menu bar click");
+        } else {
+            Assertions.assertTrue(contextMenu.isShowing(), "Context menu should be showing after system menu bar click");
+        }
 
         // hide system menu
         Util.runAndWait(() -> menu.hide());
@@ -178,7 +162,12 @@ public class SystemMenuBarClickEventsTest {
 
             Scene scene = new Scene(root, 300, 200);
             stage.setScene(scene);
-            stage.setOnShown(_ -> Platform.runLater(startupLatch::countDown));
+            stage.focusedProperty().subscribe(focused -> {
+                if (focused) {
+                    // wait until the stage is shown and focused before starting the test
+                    startupLatch.countDown();
+                }
+            });
             stage.show();
         }
 

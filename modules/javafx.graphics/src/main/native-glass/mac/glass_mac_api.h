@@ -550,11 +550,12 @@ typedef struct GmacMenuCallbacks {
      *   YES while Java is detached. The JNI called through a null callback all the same (latent bug), which left a
      *   NullPointerException pending. */
     int32_t (*validate)(int64_t menu_id);
-    /* 2 Menu.notifyMenuOpening() of the delegate's menu, when its menu will open and no window holds the grab: when
-     *   one holds it, the C cancels the tracking and releases the grab instead (slot 6 of GmacWindowCallbacks). The
-     *   JNI called through a null menu all the same, which left a NullPointerException pending. */
+    /* 2 Menu.notifyMenuOpening() of the delegate's menu, when its menu will open. When a window holds the grab, the C
+     *   first releases it (slot 6 of GmacWindowCallbacks, FOCUS_UNGRAB, which hides an auto-hide popup) and then
+     *   calls this slot, so the menu opens (JDK-8393642). The JNI called through a null menu all the same, which left
+     *   a NullPointerException pending. */
     int32_t (*menu_opening)(int64_t menu_id);
-    /* 3 Menu.notifyMenuClosed() of the delegate's menu, when its menu closed, under the same rule. */
+    /* 3 Menu.notifyMenuClosed() of the delegate's menu, when its menu closed. */
     int32_t (*menu_closed)(int64_t menu_id);
     /* 4 The GlassMenu was deallocated, when gmac_menubar_remove or gmac_menu_remove released it: no slot runs for
      *   menu_id after this one, so it is the only place where Java may forget the id. Skipped while Java is

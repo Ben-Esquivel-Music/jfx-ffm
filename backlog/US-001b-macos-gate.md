@@ -326,12 +326,16 @@ Maven, and the sRGB IEC61966-2.1 display profile. The 2026-11-05 robot runs belo
     `MenuDoubleShortcutTest` and the manual `tests/manual/systemmenu` check: actions, `validateMenuItem:` (also its
     re-entry inside `gmac_menubar_insert`/`_remove` and `gmac_menu_remove`), `menuWillOpen:`/`menuDidClose:` with and
     without a window grab, `dealloc` → `menu_disposed`, key equivalents and item icons.
-    `SystemMenuBarClickEventsTest.testSystemMenuBarProcessesClickEvent` fails at line 136 ("Context menu should be
-    showing after right-click ==> expected: <true> but was: <false>"). It is pre-existing, not a US-001b regression:
-    on 2026-11-05 it failed there in 3 of 3 runs on workstream B's tree and 2 of 2 on the JNI build at `1a6788cc4d`,
-    each in 0.21 to 0.22 s, and a reading of the right-click path in both trees found no FFM-vs-JNI behaviour
-    difference. Filed, with the runs, as
-    [US-073](US-073-make-the-system-menu-bar-click-test-pass-with-a-non-auto-hide-context-menu.md).
+    On 2026-11-05 `SystemMenuBarClickEventsTest.testSystemMenuBarProcessesClickEvent` failed at line 136 ("Context
+    menu should be showing after right-click ==> expected: <true> but was: <false>"). It was pre-existing, not a
+    US-001b regression: it failed there in 3 of 3 runs on workstream B's tree and 2 of 2 on the JNI build at
+    `1a6788cc4d`, each in 0.21 to 0.22 s, and a reading of the right-click path in both trees found no FFM-vs-JNI
+    behaviour difference. Filed, with the runs, as
+    [US-073](US-073-make-the-system-menu-bar-click-test-pass-with-a-non-auto-hide-context-menu.md), which on
+    2026-11-26 ported upstream's fix (JDK-8393642, `81cc4f0b50`). The class's methods are now
+    `testSystemMenuBarProcessesClickEventAndClosesAutoHidePopup` and
+    `testSystemMenuBarProcessesClickEventAndKeepsNonAutoHidePopup`, and both are expected to pass (20 of 20 class
+    runs on macOS 27.2.1).
   - [ ] Metal (workstream A): the robot `painttest`, `scenegraph` and `test3d`; on Metal also a `SwingNode` with small
     dirty-rectangle repaints and an `ImageView` of an image wider than 16384 px (the packed and span upload copies).
 - [ ] Watch items during the owner's module run (audit owner-run item 5): the 19 `MacWindowNativeTest` child JVMs and
