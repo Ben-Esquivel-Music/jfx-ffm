@@ -33,6 +33,8 @@
 #include "CSSPropertyNames.h"
 #include "CSSFontSelector.h"
 #include "CSSValueKeywords.h"
+#include "DocumentPage.h"
+#include "PageSupplementJava.h"
 #include "PlatformJavaClasses.h"
 #include "HTMLInputElement.h"
 #include "HTMLMediaElement.h"
@@ -40,6 +42,7 @@
 #include "PaintInfo.h"
 #include "PlatformContextJava.h"
 #include "RenderObject.h"
+#include "RenderObjectDocument.h"
 #include "RenderElementInlines.h"
 #include "RenderProgress.h"
 #include "HTMLMeterElement.h"
@@ -115,7 +118,18 @@ bool RenderThemeJava::paintWidget(
         return false;
     }
 
+    // ImageBuffer contexts (layer tiles, view-transition snapshots, software filters) carry no theme. A page
+    // without a Java WebPage (an SVG image's utility page) gets none: the default theme refuses to create widgets.
     auto jRenderTheme = paintInfo.context().platformContext()->jRenderTheme();
+    if (!jRenderTheme) {
+        Page* page = object.document().page();
+        PageSupplementJava* pageSupplement = page ? PageSupplementJava::from(page) : nullptr;
+        WKJHandle jWebPage = pageSupplement ? pageSupplement->jWebPage() : WKJHandle();
+        if (!jWebPage)
+            return false;
+        WKJHandle theme = wkjRenderThemeForPage(jWebPage.get());
+        jRenderTheme = RQRef::create(theme.get());
+    }
     if (!jRenderTheme) {
         return false;
     }
@@ -212,17 +226,19 @@ bool RenderThemeJava::paintWidget(
         (int32_t)(a << 24 | r << 16 | g << 8 | b),
         extParams.isEmpty() ? nullptr : extParams.span().data(),
         (int32_t)extParams.size()) };
-    RefPtr<RQRef> widgetRef = RQRef::create(widget.get());
+    RefPtr<RQRef> widgetRef;
+    if (!wkjCheckAndClearException())
+        widgetRef = RQRef::create(widget.get());
     if (!widgetRef.get()) {
         //switch to WebKit default render
         return true;
     }
     wkjCheckAndClearException();
 
-    // widgetRef will go into rq's inner refs vector.
+    // jRenderTheme and widgetRef will go into rq's inner refs vector.
     paintInfo.context().platformContext()->rq().freeSpace(20)
     << (int32_t)com_sun_webkit_graphics_GraphicsDecoder_DRAWWIDGET
-    << (int32_t)*jRenderTheme
+    << jRenderTheme
     << widgetRef
     << (int32_t)rect.x() << (int32_t)rect.y();
 

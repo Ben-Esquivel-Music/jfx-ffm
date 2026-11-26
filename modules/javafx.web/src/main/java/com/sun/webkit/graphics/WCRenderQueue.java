@@ -44,6 +44,7 @@ public abstract class WCRenderQueue extends Ref {
     private final WCRectangle clip;
     private int size = 0;
     private final boolean opaque;
+    private boolean graphicsDisposed = false;
 
     // Associated graphics context (currently used to draw to a buffered image).
     protected final WCGraphicsContext gc;
@@ -107,17 +108,32 @@ public abstract class WCRenderQueue extends Ref {
             log.fine("WCRenderQueue::decode : GC is " + (gc == null ? "null" : " invalid"));
             return;
         }
-        decode(gc);
-        gc.flush();
+        try {
+            decode(gc);
+        } finally {
+            gc.flush();
+        }
     }
 
-    public synchronized void decode(int fontSmoothingType) {
+    public void decode(int fontSmoothingType) {
+        if (isEmpty()) {
+            return;
+        }
+        runDecode(() -> decodeWithSmoothing(fontSmoothingType));
+    }
+
+    private synchronized void decodeWithSmoothing(int fontSmoothingType) {
         if (gc == null || !gc.isValid()) {
             log.fine("WCRenderQueue::decode : GC is " + (gc == null ? "null" : " invalid"));
             return;
         }
         gc.setFontSmoothingType(fontSmoothingType);
         decode();
+    }
+
+    /** Runs a decode of this queue on the thread its graphics context belongs to. */
+    protected void runDecode(Runnable decode) {
+        decode.run();
     }
 
     protected abstract void flush();
@@ -158,6 +174,33 @@ public abstract class WCRenderQueue extends Ref {
 
     void fwkDisposeGraphics() {
         disposeGraphics();
+        synchronized (this) {
+            graphicsDisposed = true;
+            releaseIfUndecodable();
+        }
+    }
+
+    @Override
+    public synchronized void deref() {
+        super.deref();
+        releaseIfUndecodable();
+    }
+
+    /*
+     * An image's queue is decoded only by a command that references it. Once its native queue is gone
+     * and no command buffer references it, nothing can decode the buffers it still holds, which happens
+     * when the frame with its only decode command was dropped; disposing them is what releases the
+     * objects they reference. A page's queues have no graphics context and are released by their frame.
+     */
+    private void releaseIfUndecodable() {
+        if (gc != null && graphicsDisposed && !hasRefs() && !isEmpty()) {
+            releaseUndecodableBuffers();
+        }
+    }
+
+    /** Disposes the buffers of an image queue that nothing can decode any more. */
+    protected void releaseUndecodableBuffers() {
+        dispose();
     }
 
     private void twkRelease(Object[] bufs) {

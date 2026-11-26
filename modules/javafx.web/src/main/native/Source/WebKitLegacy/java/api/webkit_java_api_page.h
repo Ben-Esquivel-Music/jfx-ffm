@@ -704,6 +704,15 @@ WKJ_EXPORT void wkj_page_update_content(int64_t page, wkj_ref render_queue,
 WKJ_EXPORT void wkj_page_post_paint(int64_t page, wkj_ref render_queue,
                                     int32_t x, int32_t y, int32_t width, int32_t height);
 
+/*
+ * The print counterpart of wkj_page_post_paint: in compositing mode it records the composited
+ * layers into `render_queue`; it never draws the inspector highlight, and outside compositing
+ * mode it records nothing. Java calls it before wkj_page_update_content when printing a WebView: its
+ * layer sync can leave compositing mode, and wkj_page_update_content then paints the page.
+ */
+WKJ_EXPORT void wkj_page_print_composited(int64_t page, wkj_ref render_queue,
+                                          int32_t x, int32_t y, int32_t width, int32_t height);
+
 /* Was twkBeginPrinting / twkEndPrinting. Returns the page count. */
 WKJ_EXPORT int32_t wkj_page_begin_printing(int64_t page, float width, float height);
 WKJ_EXPORT void    wkj_page_end_printing(int64_t page);

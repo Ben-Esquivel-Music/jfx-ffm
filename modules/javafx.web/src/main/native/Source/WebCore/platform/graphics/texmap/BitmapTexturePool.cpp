@@ -106,6 +106,25 @@ Ref<BitmapTexture> BitmapTexturePool::acquireTexture(const IntSize& size, Option
     return selectedEntry->texture;
 }
 
+#if PLATFORM(JAVA)
+// The release timer never fires where nothing runs the WTF main RunLoop (Linux, Headless), and a reset
+// BitmapTexture keeps no content, so an unreferenced entry is worth nothing. Textures are dropped after
+// the lock is released, because destroying their buffers calls into Java.
+void BitmapTexturePool::releaseUnreferencedTextures()
+{
+    Vector<Ref<BitmapTexture>> released;
+    {
+        Locker locker { m_lock };
+        m_textures.removeAllMatching([&](const Entry& entry) {
+            if (entry.texture->refCount() != 1)
+                return false;
+            released.append(entry.texture.copyRef());
+            return true;
+        });
+    }
+}
+#endif
+
 #if USE(GBM)
 Ref<BitmapTexture> BitmapTexturePool::createTextureForImage(EGLImage image, OptionSet<BitmapTexture::Flags> flags)
 {

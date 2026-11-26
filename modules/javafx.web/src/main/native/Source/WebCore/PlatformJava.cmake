@@ -1,5 +1,11 @@
 include(platform/TextureMapper.cmake)
 
+# The Java port defines TextureMapper and BitmapTexture in TextureMapperJava.cpp and BitmapTextureJava.cpp.
+list(REMOVE_ITEM WebCore_SOURCES
+    platform/graphics/texmap/BitmapTexture.cpp
+    platform/graphics/texmap/TextureMapper.cpp
+)
+
 set(WebCore_OUTPUT_NAME WebCore)
 
 list(REMOVE_ITEM  WebCore_PRIVATE_FRAMEWORK_HEADERS
@@ -83,9 +89,6 @@ list(APPEND WebCore_PRIVATE_FRAMEWORK_HEADERS
     platform/graphics/java/PathJava.h
     platform/graphics/java/RQRef.h
     platform/graphics/java/RenderingQueue.h
-    platform/graphics/texmap/BitmapTextureJava.h
-    platform/graphics/texmap/TextureMapperJava.h
-    platform/graphics/texmap/TextureMapperJavaAdapter.h
     platform/java/DataObjectJava.h
     platform/java/PageSupplementJava.h
     platform/java/PlatformJavaClasses.h

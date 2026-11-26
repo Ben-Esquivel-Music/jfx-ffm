@@ -28,8 +28,11 @@ US-074 removed `verify-no-jni.pl`, `extract-jni.pl` and `dom-cpp-to-ffm.pl` (git
 
 **javafx.web is free of JNI.** It has 0 `native` declarations, and the `jfxwebkit.dll` in
 `../caches/sdk/bin` exports 1963 `wkj_*` symbols, 0 `Java_*` and no `JNI_OnLoad`; those 1963 names
-are exactly the set the Java facades bind (1796 `wkj_dom_*`, 167 others). Section 3 has the
-current test results, against that library and against `wkjstub`. Regenerate the scoreboard rather
+were the set the Java facades bound before US-026 (1796 `wkj_dom_*`, 167 others). The facades now
+bind 1964 names (1796 `wkj_dom_*`, 168 others): US-026 added `wkj_page_print_composited`, so that
+library, like any `build-webkit.yml` Release zip built before US-026, is stale and must be rebuilt
+from this revision (section 16.2). Section 3 has the test results, against that library and
+against `wkjstub`. Regenerate the scoreboard rather
 than trusting this table.
 
 **No area is left on JNI.** That includes the DOM bindings (1831 C++ entry points and all 1899 Java
@@ -71,16 +74,19 @@ builds. Against the tree ported in commit 939aa61ead a completeness audit of the
   `_initIDs`. `WebKitNative` is the module's only load of the library, and every `wkj_*` symbol is
   bound through it.
 * The `jfxwebkit.dll` in `../caches/sdk/bin` exports **1963 `wkj_*` symbols, 0 `Java_*` and no
-  `JNI_OnLoad`**, and those 1963 names are exactly the set the Java facades bind (1796
-  `wkj_dom_*`, 167 others): nothing bound is missing from the library and nothing it exports is
-  unbound.
+  `JNI_OnLoad`**, and those 1963 names were exactly the set the Java facades bound before US-026
+  (1796 `wkj_dom_*`, 167 others). The facades now bind 1964 (168 others): US-026 added
+  `wkj_page_print_composited`, which that library and any earlier `build-webkit.yml` Release zip
+  lack, so they must be rebuilt from this revision (section 16.2).
 * `WKJ_ABI_VERSION` is 1 in both `webkit_java_api.h` and `WebKitNative`. `WebKitNative` rejects a
   library that does not export `wkj_abi_version` or reports another version, which is what an
   official OpenJFX `jfxwebkit` (JNI, no `wkj_*`) runs into, and `WebKitLibraryAbiTest` reports the
   mismatch in one sentence under `-Djfx.web.skipTests=false`.
-* Against that library `mvn -pl modules/javafx.web test -Djfx.web.skipTests=false` gives **489
-  tests, 0 failures**, with 113 upstream skips, and `-Djfx.web.skipFfmTests=false` gives **194
-  tests, 0 failures** against `wkjstub`. CI runs the FFM binding tests on all five platforms.
+* Before US-026, against that library `mvn -pl modules/javafx.web test -Djfx.web.skipTests=false`
+  gave **489 tests, 0 failures**, with 113 upstream skips. Since US-026 the module tests no longer
+  run against it: it lacks `wkj_page_print_composited`, so `WebPageNative.<clinit>` fails and with
+  it every `WebPage`. `-Djfx.web.skipFfmTests=false` gives **194 tests, 0 failures** against
+  `wkjstub`, which is generated from the headers and follows them. CI runs the FFM binding tests on all five platforms.
   Among the module tests, `WebKitRegistryLeakTest` checks that page lifecycles against the real
   library return the `wkj_ref` registry to its baseline (FFM-ABI-CONTRACT.md section 3), and that
   `ImageBitmap`s closed on a Web Worker give their ids back there (section 13.3).
@@ -92,7 +98,7 @@ libraries the workflow's export check is what confirms the `wkj_*` symbols are e
 test run against those libraries is recorded here.
 
 **Native changes not yet in that library.** The `jfxwebkit.dll` in `../caches/sdk/bin` was built
-from the C++ of commit 26ce75d02f. Four code changes made since are unbuilt until the next
+from the C++ of commit 26ce75d02f. The code changes made since are unbuilt until the next
 `build-webkit.yml` run, so the module run above does not exercise them:
 
 * `javaUndefinedObject()` in `Source/WebCore/bridge/java/JavaBridgeUtility.cpp` and `scratchContext()` in
@@ -114,9 +120,23 @@ from the C++ of commit 26ce75d02f. Four code changes made since are unbuilt unti
   `wkj_rq_release` on the event thread (FFM-ABI-CONTRACT.md section 13.3). This is
   proxy-verified only: GCC against this tree's WTF headers, a multi-threaded stress run under
   ThreadSanitizer, AddressSanitizer and UBSan, and an MSVC stub-WTF harness.
+* US-026 (composited WebView content): the texture mapper's Java port in
+  `Source/WebCore/platform/graphics/texmap` (`TextureMapperJava.cpp` and `BitmapTextureJava.cpp`
+  define `TextureMapper` and `BitmapTexture`; the `PLATFORM(JAVA)` parts of `TextureMapper.h`,
+  `BitmapTexture.h` and `BitmapTexturePool`; a `vertices()` accessor in `ClipPath.h`; the
+  `PLATFORM(JAVA)` refusal of composited filters in `GraphicsLayerTextureMapper.cpp`;
+  `TextureMapperJava.h`, `BitmapTextureJava.h` and `TextureMapperJavaAdapter.h` deleted; the GL
+  `TextureMapper.cpp` and `BitmapTexture.cpp` removed from the Java build in `PlatformJava.cmake`),
+  the compositing, print and highlight changes in
+  `Source/WebKitLegacy/java/WebCoreSupport/WebPage.cpp` and `WebPage.h`, the render-theme fallback
+  in `Source/WebCore/platform/java/RenderThemeJava.cpp`, the decode command that `flushImageRQ` in
+  `GraphicsContextJava.cpp` now emits for every image drawn into another context, and the new
+  export `wkj_page_print_composited` in `webkit_java_api_page.h`, which a library without it fails
+  on in `WebPageNative.<clinit>`.
 
-Every other native change since that commit is a comment. None changes a struct or a signature
-in the api headers, and `WKJ_ABI_VERSION` stays 1.
+Apart from these, the native changes since that commit are comments. US-026 adds a function to
+`webkit_java_api_page.h`; no change alters a struct or the signature of an existing function in
+the api headers, and `WKJ_ABI_VERSION` stays 1 (section 16.2).
 
 **Tests to add once jfxwebkit is rebuilt.** Each depends on a change above that the library in
 `../caches/sdk/bin` lacks:
@@ -539,6 +559,12 @@ prebuilt that could export `wkj_*` at all, so a bump now costs a coordinated edi
 `WebKitNative` for no reader. The rule going forward: **the first bump is the one that ships**, and
 after that every shape change bumps.
 
+An added entry point is not a shape change under the header's rule and does not bump the version.
+A library built before it therefore passes the version check and fails instead with the
+missing-symbol `UnsatisfiedLinkError` from the facade's class initializer. US-026 is the first such
+addition: a `jfxwebkit` built before it (the cached `../caches/sdk` library, any earlier
+`build-webkit.yml` Release zip) fails in `WebPageNative.<clinit>` on `wkj_page_print_composited`.
+
 ### 16.3 The registry is reference-counted
 
 Settled after it blocked two slices. `WKJHandle`'s copy constructor retains and its destructor
@@ -604,8 +630,8 @@ US-074 removed `CodeGeneratorJava.pm` (git history has it).
 * **0 build-file entries that need the JDK**: no `find_package(JNI)`, `JAVA_INCLUDE_PATH` or
   `JAVA_JVM_LIBRARY` in `Source/cmake/OptionsJava.cmake` or any `PlatformJava.cmake`, and no
   `javac -h` in the module pom or the root pom.
-* **1963 `wkj_*` symbols**, bound by Java and exported by the library, with no difference between
-  the two sets (section 3).
+* **1964 `wkj_*` symbols** bound by Java since US-026 added `wkj_page_print_composited`; the cached
+  library exports the 1963 bound before it and must be rebuilt (section 16.2).
 
 What is left is housekeeping, not JNI: five uncompiled, JNI-free C++ files
 (`JavaDOMSelection.cpp`, `JavaWheelEvent.cpp`, `BufferImageSkiaJava.cpp`,
@@ -632,8 +658,9 @@ Windows, and reaches the library path as a prebuilt binary (section 3). So:
 * The migrated C++ is compiled only by that workflow or another out-of-tree WebKit build. Of the
   native sources, the Maven build compiles only the ABI headers, which `wkjstub` includes.
 * The `jfxwebkit.dll` in `../caches/sdk/bin` exports **1963 `wkj_*` symbols, 0 `Java_*` and no
-  `JNI_OnLoad`**, and those 1963 names are exactly the set the Java facades bind. A C++ change made
-  after that library was built is not in it until `jfxwebkit` is rebuilt. `WebKitLibraryAbiTest`
+  `JNI_OnLoad`**, and those 1963 names were exactly the set the Java facades bound before US-026,
+  which added `wkj_page_print_composited` (1964 bound now). A C++ change made after that library
+  was built is not in it until `jfxwebkit` is rebuilt. `WebKitLibraryAbiTest`
   is a deliberate non-skippable sentinel, so that a green build cannot hide a library that lacks
   the `wkj_*` ABI or reports another ABI version.
 * The default `jfx.web.skipTests=true` excludes both the web module suite and the WebKit-dependent
@@ -648,7 +675,8 @@ Windows, and reaches the library path as a prebuilt binary (section 3). So:
    on all three platforms and confirm with `dumpbin /EXPORTS`, `nm -D --defined-only` and
    `nm -gU` that the `wkj_*` symbols are exported: the globs `wkj_*;` and `_wkj_*` are the only
    thing standing between the ABI and a silent link-time hole. Section 3 records the Windows
-   check: the library in `../caches/sdk/bin` exports exactly the 1963 names Java binds. For Linux
+   check: the library in `../caches/sdk/bin` exports exactly the 1963 names Java bound before US-026
+   added `wkj_page_print_composited`. For Linux
    and macOS, `build-webkit.yml` runs `nm` on each library but fails it only when it exports no
    `wkj_*` symbol at all. Left: comparing the Linux and macOS export sets with the bound set, and
    building the native changes section 3 lists as unbuilt, on every platform.

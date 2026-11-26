@@ -124,15 +124,18 @@ static void flushImageRQ(PlatformGraphicsContext* context, const PlatformImagePt
 
     auto rq = image->getRenderingQueue();
 
-    if (!rq->isEmpty()) {
-        // 1. Drawing is flushed to the buffered image's RenderQueue.
-        rq->flushBuffer();
+    // An image drawn into its own context keeps the previous rule: its queue is decoded only when it has commands.
+    if (rq.get() == &context->rq() && rq->isEmpty())
+        return;
 
-        // 2. The buffered image's RenderQueue is to be decoded.
-        context->rq().freeSpace(8)
-        << (int32_t)com_sun_webkit_graphics_GraphicsDecoder_DECODERQ
-        << rq->getRQRenderingQueue();
-    }
+    // 1. Drawing is flushed to the buffered image's RenderQueue.
+    rq->flushBuffer();
+
+    // 2. The buffered image's RenderQueue is to be decoded even when nothing was flushed now: the page frame
+    // that carried the decode of earlier buffers may have been dropped, which leaves them pending in Java.
+    context->rq().freeSpace(8)
+    << (int32_t)com_sun_webkit_graphics_GraphicsDecoder_DECODERQ
+    << rq->getRQRenderingQueue();
 }
 
 GraphicsContextJava::GraphicsContextJava(PlatformGraphicsContext* context) // TODO-java: , bool shouldUseContextColors) // todo tav new param

@@ -688,6 +688,12 @@ public final class WebPage {
             final WCRenderQueue rq = WCGraphicsManager.getGraphicsManager().
                     createRenderQueue(new WCRectangle(x, y, w, h), true);
             FutureTask<Void> f = new FutureTask<>(() -> {
+                if (isDisposed) {
+                    return;
+                }
+                // In compositing mode the page is drawn only by its composited layers, and their sync can
+                // leave compositing mode, after which only the page paint draws the page.
+                twkPrintComposited(getPage(), rq, x, y, w, h);
                 twkUpdateContent(getPage(), rq, x, y, w, h);
             }, null);
             Invoker.getInvoker().invokeOnEventThread(f);
@@ -2785,6 +2791,10 @@ public final class WebPage {
 
     private void twkPostPaint(long pPage, WCRenderQueue rq, int x, int y, int w, int h) {
         WebPageNative.postPaint(pPage, rq, x, y, w, h);
+    }
+
+    private void twkPrintComposited(long pPage, WCRenderQueue rq, int x, int y, int w, int h) {
+        WebPageNative.printComposited(pPage, rq, x, y, w, h);
     }
 
     private String twkGetEncoding(long pPage) {

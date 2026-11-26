@@ -35,6 +35,7 @@ import java.util.concurrent.TimeUnit;
 import javafx.application.Application;
 import javafx.application.Platform;
 import javafx.scene.Scene;
+import javafx.scene.image.WritableImage;
 import javafx.scene.web.WebEngine;
 import javafx.scene.web.WebView;
 import javafx.stage.Stage;
@@ -116,6 +117,65 @@ public class TextureMapperTest {
             assertEquals(Boolean.TRUE, executeScript("window.transitionReady"),
                     "View transition " + i + " was skipped, so it never entered compositing mode");
         }
+    }
+
+    /**
+     * @test
+     * @summary With default settings, a view transition whose update callback changes the DOM shows the
+     * new content in a snapshot taken after {@code ready} and before {@code finished}. The group's own
+     * 1000 s animation holds the transition open and the static pseudo-element styles show the new state
+     * opaque, so the snapshot is not taken mid-fade.
+     */
+    @Test
+    public void testViewTransitionShowsTheNewContentBeforeItFinishes() {
+        loadContent("""
+                <html><head><style>
+                html{background:#f00} html.after{background:#0f0} body{margin:0}
+                ::view-transition-group(root){animation:hold 1000s linear}
+                ::view-transition-old(root){animation:none;opacity:0}
+                ::view-transition-new(root){animation:none;opacity:1}
+                @keyframes hold{from{opacity:1}to{opacity:1}}
+                </style><script>
+                function startTransition() {
+                    window.state = {ready: false, updated: false, finished: false, errors: ''};
+                    window.transition = document.startViewTransition(function() {
+                        document.documentElement.className = 'after';
+                        state.updated = true;
+                    });
+                    transition.ready.then(function() { state.ready = true; },
+                        function(e) { state.errors += ' ready: ' + e; });
+                    transition.finished.then(function() { state.finished = true; },
+                        function(e) { state.errors += ' finished: ' + e; });
+                }
+                </script></head><body></body></html>
+                """);
+        Util.waitForIdle(webView.getScene(), 5);
+        assertEquals(0xffff0000, centrePixel(), "the page before the transition");
+
+        executeScript("startTransition()");
+        waitForScript("state.ready && state.updated", "the view transition to become ready");
+        Util.waitForIdle(webView.getScene(), 5);
+        int during = centrePixel();
+        assertEquals("ready=true updated=true finished=false errors=", executeScript(
+                "'ready=' + state.ready + ' updated=' + state.updated + ' finished=' + state.finished"
+                + " + ' errors=' + state.errors"), "the view transition's state when the snapshot was taken");
+        assertEquals(0xff00ff00, during, "the page while the view transition runs");
+
+        executeScript("transition.skipTransition()");
+        waitForScript("state.finished", "the view transition to finish");
+        Util.waitForIdle(webView.getScene(), 5);
+        assertEquals(0xff00ff00, centrePixel(), "the page after the view transition");
+    }
+
+    /** The snapshot is taken at the screen's scale, so the centre is found through its own size. */
+    private int centrePixel() {
+        int[] argb = new int[1];
+        Util.runAndWait(() -> {
+            WritableImage snapshot = webView.snapshot(null, null);
+            argb[0] = snapshot.getPixelReader().getArgb((int) (snapshot.getWidth() / 2),
+                    (int) (snapshot.getHeight() / 2));
+        });
+        return argb[0];
     }
 
     private void loadContent(String content) {

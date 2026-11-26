@@ -219,6 +219,9 @@ final class WebPageNative {
     private static final MethodHandle PAGE_POST_PAINT = WebKitNative.downcall(
             "wkj_page_post_paint",
             FunctionDescriptor.ofVoid(JAVA_LONG, JAVA_LONG, JAVA_INT, JAVA_INT, JAVA_INT, JAVA_INT));
+    private static final MethodHandle PAGE_PRINT_COMPOSITED = WebKitNative.downcall(
+            "wkj_page_print_composited",
+            FunctionDescriptor.ofVoid(JAVA_LONG, JAVA_LONG, JAVA_INT, JAVA_INT, JAVA_INT, JAVA_INT));
     private static final MethodHandle PAGE_BEGIN_PRINTING = WebKitNative.downcall(
             "wkj_page_begin_printing",
             FunctionDescriptor.of(JAVA_INT, JAVA_LONG, JAVA_FLOAT, JAVA_FLOAT));
@@ -875,6 +878,29 @@ final class WebPageNative {
         long ref = WebKitNative.register(rq);
         try {
             PAGE_POST_PAINT.invokeExact(pPage, ref, x, y, w, h);
+        } catch (Throwable t) {
+            throw new AssertionError(t);
+        } finally {
+            WebKitNative.release(ref);
+        }
+    }
+
+    /**
+     * Encodes the composited layers of a page being printed, before {@link #updateContent}: the sync
+     * of the layers can leave compositing mode, and the page paint then draws the page. Encodes nothing
+     * outside compositing mode, and never the inspector highlight.
+     *
+     * @param pPage the page handle
+     * @param rq the render queue the commands are encoded into
+     * @param x the left edge of the printed region
+     * @param y the top edge of the printed region
+     * @param w the width of the printed region
+     * @param h the height of the printed region
+     */
+    static void printComposited(long pPage, WCRenderQueue rq, int x, int y, int w, int h) {
+        long ref = WebKitNative.register(rq);
+        try {
+            PAGE_PRINT_COMPOSITED.invokeExact(pPage, ref, x, y, w, h);
         } catch (Throwable t) {
             throw new AssertionError(t);
         } finally {
