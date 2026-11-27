@@ -1,5 +1,14 @@
 # US-092 — Play low-latency mixed sound effects through javafx.media
 
+## In short
+- **Problem:** `AudioClip` promises short sounds with minimal delay, but each play builds a whole player and pipeline,
+  at most 16 sounds play at once, loops have gaps, and raw PCM clips throw.
+- **Seen failing?** Read from the code; the delay is measured first, as part of the story.
+- **Goal:** Short sounds start at once, many play together, each one can be controlled, and loops have no gap.
+- **Done when:** Today's delay and limits are measured, then tests show the low delay, the stated number of voices,
+  gapless loops and PCM clips, with nothing else in media playback broken.
+- **Order:** With the planned media refactor. It shares one audio output with US-100.
+
 **Status:** 📋 Ready (filed 2026-11-07 from the game-toolkit design review) · **Epic:** Media formats (game-audio
 requirements) · **Blocked by:** none · **Blocks:** none
 

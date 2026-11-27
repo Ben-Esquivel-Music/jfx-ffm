@@ -1,5 +1,14 @@
 # US-098 — Play A-law, µ-law and ADPCM audio in WAV and AIFC
 
+## In short
+- **Problem:** WAV and AIFC files with A-law, µ-law or ADPCM audio (telephone recordings, old game sounds) do not
+  play. The file parser knows them, but no decoder for them is bundled.
+- **Seen failing?** Read from the code: they are refused with "Compressed WAVE is not supported!".
+- **Goal:** These encodings play like PCM.
+- **Done when:** Test files decode to exactly the samples the specifications give, on all five targets, and broken
+  files only raise an error.
+- **Order:** After US-097.
+
 **Status:** 📋 Ready (filed 2026-11-07 from the media-format survey) · **Epic:** Media formats ·
 **Blocked by:** US-097 (these files must first get past the detection it changes) · **Blocks:** none
 

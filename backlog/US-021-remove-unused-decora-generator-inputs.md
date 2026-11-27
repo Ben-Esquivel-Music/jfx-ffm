@@ -1,6 +1,17 @@
 # US-021 — Remove the unused Decora and Prism generator inputs
 
-**Status:** 🔷 Implemented (2026-11-15; filed 2026-09-27); the Windows and WSL gates and filing the upstream issues
+## In short
+- **Problem:** Nine input files of the shader generators and two runtime classes (`ZoomRadialBlur`) were dead: no
+  build step read them and the effect could not run.
+- **Goal:** Delete them (11 files, 981 lines) with every generated file unchanged.
+- **State:** Merged (PR #65, 2026-11-16).
+- **Left to do (owner):** file the two upstream issues (draft outside the repository). The Windows and WSL gates this
+  story asks for have since been run on later trees that contain this change (US-023 and US-024, 0 failures on both
+  systems).
+
+**Status:** 🔶 Merged, not Done (PR #65, 2026-11-16). What is left is under "In short".
+The status as written before the merge:
+🔷 Implemented (2026-11-15; filed 2026-09-27); the Windows and WSL gates and filing the upstream issues
 are [owner-run](#owner-run-and-pending) · **Found:** 2026-09-27, US-008 (filing US-019: replacing each `.jsl` file
 in turn with text that cannot lex showed that the build never parses `BoxBlur.jsl`, `GaussianBlur.jsl`,
 `ZoomRadialBlur.jsl`, `PaintTextureYUV422.jsl` and `PaintTextureYUV444.jsl`, and reading the Decora drivers showed
@@ -295,13 +306,13 @@ file's text, which still described the tree of 2026-09-27; they are fixed here
 ([Independent review](#independent-review-2026-11-15)).
 
 Kept with the change:
-- [`US-021-macos-per-class.tsv`](US-021-macos-per-class.tsv), the module gate's per-class list, before and after;
-- [`US-021-macos-gensrc.md5`](US-021-macos-gensrc.md5), the after run's `target/gensrc` md5 list (the before run's is
+- `US-021-macos-per-class.tsv`, the module gate's per-class list, before and after;
+- `US-021-macos-gensrc.md5`, the after run's `target/gensrc` md5 list (the before run's is
   `cmp`-identical);
-- [`US-021-macos-classes.txt`](US-021-macos-classes.txt), the after run's `target/classes` file list, 3,902 names (the
+- `US-021-macos-classes.txt`, the after run's `target/classes` file list, 3,902 names (the
   before run's is this list plus `./com/sun/scenario/effect/ZoomRadialBlur.class` and
   `./com/sun/scenario/effect/impl/state/ZoomRadialBlurState.class`);
-- [`US-021-regeneration.md5`](US-021-regeneration.md5), the after side's 1,059 files of the regeneration (the before
+- `US-021-regeneration.md5`, the after side's 1,059 files of the regeneration (the before
   side's is `cmp`-identical).
 
 The scratch clones, the gate and build logs, the probes and the JFR recordings are not kept. The sections below
@@ -420,7 +431,7 @@ tests (review).
 | --- | --- | --- |
 | Files deleted | The working tree lacks the 11 files of [Change](#change), and no other file outside `backlog/` changes: `git status --short` lists exactly 11 ` D` lines. `git ls-files` listed all 11 before the deletion; `git ls-files --deleted` lists the 11 now. The index is unchanged, so `git ls-files` itself drops them with the owner's commit | Met in the working tree; `git ls-files` with the commit |
 | No reference left | The 10 searches find nothing after the deletion; before it, the 4 drivers' `public class` lines and `ZoomRadialBlur` in exactly 4 files, so the patterns and paths are right ([Reference searches](#reference-searches)) | Met |
-| No build step reads them | With `-d3d -es2 -mtl`, 1,059 files before and after, identical by name and md5, from 31 and 29 JVMs that all exit 0 ([md5 list](US-021-regeneration.md5)). A copy without `SepiaTone.jsl` and `PaintTextureYV12.jsl` exits 1 with `Input file not found` in the Decora JVM and in all 27 Prism JVMs; the review's five single-file cases fail too. JFR: the Decora JVM reads exactly the 29 remaining Decora `.jsl` files and the first Prism JVM the 28 Prism ones ([Generator runs](#generator-runs)) | Met |
+| No build step reads them | With `-d3d -es2 -mtl`, 1,059 files before and after, identical by name and md5, from 31 and 29 JVMs that all exit 0 (md5 list). A copy without `SepiaTone.jsl` and `PaintTextureYV12.jsl` exits 1 with `Input file not found` in the Decora JVM and in all 27 Prism JVMs; the review's five single-file cases fail too. JFR: the Decora JVM reads exactly the 29 remaining Decora `.jsl` files and the first Prism JVM the 28 Prism ones ([Generator runs](#generator-runs)) | Met |
 | Generator classes | `target/jsl-compilers/decora` 11 classes before, 7 after, the 4 drivers' classes the difference; the 7 and the 8 of `prism` byte-identical to before, in the regeneration's compiles, the implementation's build, the module gate and the review's build | Met |
 | Build gate | macOS, the WSL command with `-Dmaven.test.failure.ignore=true`, before and after: no per-class difference, `target/gensrc` (797 files) and `target/classes` as required ([Final gates](#final-gates-2026-11-15-macos)), extra evidence. jslc 276 tests, no failure. Windows (with `-am`) and WSL: [owner-run](#owner-run-and-pending) | Passed on macOS (extra evidence); Windows and WSL owner-run |
 | With (B1), no compiled reference | `command grep -rlF ZoomRadialBlur` over `target/{classes,mods,shims,test-classes}`: 8 files before, none after, in the module gate and in the implementation's build ([Final gates](#final-gates-2026-11-15-macos)) | Met on macOS; Windows and WSL owner-run |
@@ -493,9 +504,9 @@ each `java`), taken while the module gate was running on the host.
 - **Regeneration with `-d3d -es2 -mtl`.** Before: 31 JVMs (1 Decora, 30 Prism); after: 29 (1 and 28). Every JVM exits
   0 and prints nothing. Each side writes 1,059 files (`jsl-decora` 208, `jsl-prism` 848, `mtl-headers` 3), and the two
   md5 lists (`find . -type f | LC_ALL=C sort | xargs md5sum`) are `cmp`-identical
-  ([md5 list](US-021-regeneration.md5)). Three setup checks, on both sides:
+  (md5 list). Three setup checks, on both sides:
   - (a) the list without its `.hlsl` files has 797 lines and is `cmp`-identical to
-    [`US-020-macos-gensrc.md5`](US-020-macos-gensrc.md5) and to the same list made from the clone's own `target/gensrc`;
+    `US-020-macos-gensrc.md5` and to the same list made from the clone's own `target/gensrc`;
   - (b) there are 262 `.hlsl` files, 50 Decora and 212 Prism;
   - (c) `DecoraShaderCommon.h` holds 50 `_Uniforms` structs and 50 `_Uniform_VarID_Dict` functions and
     `PrismShaderCommon.h` 212 of each, matching the names of the generated `.metal` files exactly.
@@ -544,10 +555,10 @@ are run / failures / errors / skipped.
 
 | Gate | Command | Result |
 | --- | --- | --- |
-| Module gate | `mvn -B -ntp -l <log> -Dmaven.test.failure.ignore=true -pl buildtools/jslc,modules/javafx.graphics -am clean test`, before and after | Both exit 0 with BUILD SUCCESS (Maven total time 01:24 min and 01:15 min), and `jsl-codegen`, `cmake-configure` and `cmake-build` ran once in each. jslc 276 / 0 / 0 / 0 in 31 classes, base 5,510 / 0 / 0 / 22 in 290 and graphics 26,696 / 0 / 0 / 858 in 629, in both. 950 per-class lines on each side, and `diff` shows no difference ([per class](US-021-macos-per-class.tsv)). No class has a failure or an error. The after list is `cmp`-identical to the after column of [`US-020-macos-per-class.tsv`](US-020-macos-per-class.tsv). No `hs_err_pid*` file in either clone |
-| Generated files | The module gate's `target/gensrc` | 797 files (`jsl-decora` 158, `jsl-prism` 636, `mtl-headers` 3) and no `headers` directory, identical by name and md5 before and after ([md5 list](US-021-macos-gensrc.md5), the after run's) and to `US-020-macos-gensrc.md5` |
+| Module gate | `mvn -B -ntp -l <log> -Dmaven.test.failure.ignore=true -pl buildtools/jslc,modules/javafx.graphics -am clean test`, before and after | Both exit 0 with BUILD SUCCESS (Maven total time 01:24 min and 01:15 min), and `jsl-codegen`, `cmake-configure` and `cmake-build` ran once in each. jslc 276 / 0 / 0 / 0 in 31 classes, base 5,510 / 0 / 0 / 22 in 290 and graphics 26,696 / 0 / 0 / 858 in 629, in both. 950 per-class lines on each side, and `diff` shows no difference (per class). No class has a failure or an error. The after list is `cmp`-identical to the after column of `US-020-macos-per-class.tsv`. No `hs_err_pid*` file in either clone |
+| Generated files | The module gate's `target/gensrc` | 797 files (`jsl-decora` 158, `jsl-prism` 636, `mtl-headers` 3) and no `headers` directory, identical by name and md5 before and after (md5 list, the after run's) and to `US-020-macos-gensrc.md5` |
 | Generator classes | `md5sum` of `target/jsl-compilers/{decora,prism}` | `decora` 11 classes before and 7 after; the 4 missing are `CompileBoxBlur`, `CompileExternal`, `CompileGaussian` and `CompileZoomRadialBlur`, and nothing is only in the after run. The 7 common ones (`CompileBlend`, `CompileJSL`, `CompileLinearConvolve`, `CompilePhong$1`, `CompilePhong`, `GenAllDecoraShaders$Shader`, `GenAllDecoraShaders`) are `cmp`-identical. `prism` 8 and 8, identical |
-| `target/classes` | `find . -type f` and `md5sum` | 3,904 files before and 3,902 after; `diff` of the file lists shows exactly `./com/sun/scenario/effect/ZoomRadialBlur.class` and `./com/sun/scenario/effect/impl/state/ZoomRadialBlurState.class` removed ([file list](US-021-macos-classes.txt), the after run's), and `diff` of the md5 lists only the same two lines, so none of the 3,902 common files differs |
+| `target/classes` | `find . -type f` and `md5sum` | 3,904 files before and 3,902 after; `diff` of the file lists shows exactly `./com/sun/scenario/effect/ZoomRadialBlur.class` and `./com/sun/scenario/effect/impl/state/ZoomRadialBlurState.class` removed (file list, the after run's), and `diff` of the md5 lists only the same two lines, so none of the 3,902 common files differs |
 | Byte search | `command grep -rlF ZoomRadialBlur` in `target/{classes,mods,shims,test-classes}` | 8 files before, `ZoomRadialBlur.class` and `ZoomRadialBlurState.class` in each of `classes`, `mods/javafx.graphics`, `shims/javafx.graphics` and `test-classes`; none after |
 | Shader resources | `target/classes` and `target/gensrc` | 277 `*.frag` files and 1 `*.metallib` in `target/classes` in both; no file named `BoxBlur_*`, `GaussianBlur_*`, `ZoomRadialBlur_*`, `*TextureYUV422*` or `*TextureYUV444*` in either clone |
 

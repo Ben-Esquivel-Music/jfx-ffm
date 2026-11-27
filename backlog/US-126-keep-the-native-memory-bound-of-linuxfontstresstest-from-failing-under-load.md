@@ -1,5 +1,13 @@
 # US-126 — Keep the native-memory bound of LinuxFontStressTest from failing under load
 
+## In short
+- **Problem:** One font stress test on Linux checks that native memory does not grow beyond a fixed limit. On a busy
+  machine it once exceeded the limit although the code under test had not changed, and that stopped a whole gate.
+- **Seen failing?** Once, in a WSL gate of US-027. It passed when run alone right after.
+- **Goal:** The test fails only for a real leak (memory that grows with every call), not because the machine is busy.
+- **Done when:** Run repeatedly under load, the test fails before the change and never after it.
+- **Order:** Can start now. Small; test only.
+
 **Status:** 📋 Ready (filed 2026-11-17 from US-027) · **Found:** the WSL run of US-027's review-fix final gate,
 2026-11-16; quoted from its logs and reports; nothing built or run for this story
 

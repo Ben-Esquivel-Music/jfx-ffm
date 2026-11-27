@@ -1,5 +1,15 @@
 # US-134 — Make a JavaScript assignment to a wrapper-typed Java field store the value every time
 
+## In short
+- **Problem:** A page script assigns to a public field of a Java object (`obj.n1 = 1.23`) and, in about half of the
+  test runs, the field is still `null` afterwards, with no error. Assigning through a setter method never fails.
+- **Seen failing?** Yes: `JavaScriptBridgeTest` fails intermittently on Windows, with the old and the new WebKit
+  library. The cause is not known.
+- **Goal:** The assignment stores the value every time.
+- **Done when:** The cause is found and shown by a test that fails every time on the unfixed code and passes
+  after the fix.
+- **Order:** High priority: wrong behaviour an application can see. Start with finding the cause.
+
 **Status:** 📋 Ready (filed 2026-11-27) · **Found:** 2026-11-27, running the `javafx.web` tests on Windows against the
 newly installed `jfxwebkit-28-b6`; the failure is intermittent and also occurs with `jfxwebkit-28-b5`, so the new
 library did not bring it; the cause is not determined

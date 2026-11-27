@@ -1,5 +1,14 @@
 # US-099 — Keep MP3, AAC and H.264 playing on Linux whatever ffmpeg is installed
 
+## In short
+- **Problem:** On Linux, MP3, AAC and H.264 are decoded by the ffmpeg the user has installed. The fork builds one
+  plugin against the build machine's ffmpeg, so on a machine with another ffmpeg version they may not play at all.
+- **Seen failing?** No. Inferred from the build files. The story reproduces it first.
+- **Goal:** These formats play with every supported ffmpeg version, and fail with a clear error on any other.
+- **Done when:** The failure is reproduced, each accepted ffmpeg version plays the test files, and CI checks every
+  plugin.
+- **Order:** Can start now with the reproduction.
+
 **Status:** 📋 Ready (filed 2026-11-07 from the media-format survey) · **Epic:** Media formats ·
 **Blocked by:** none · **Blocks:** none
 

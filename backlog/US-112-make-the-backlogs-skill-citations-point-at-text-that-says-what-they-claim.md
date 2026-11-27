@@ -1,6 +1,22 @@
 # US-112 — Make the backlog's skill citations point at text that says what they claim
 
-**Status:** 📋 Ready (filed 2026-11-13 from the US-075 game-toolkit-reviewer agent creation; criterion 2 needs the
+## In short
+- **Closed without change on 2026-11-27 (owner's decision).**
+  Paperwork: no build or test reads these pointers. One thing does not go away with it: the game-toolkit and media
+  stories (US-079, US-081, US-100 to US-105, US-107) rely on a rule that no skill states (a ported file keeps its
+  upstream notices and is marked as altered). Whoever starts US-079 writes that rule down first.
+- **Problem:** Backlog stories point at rules in the agent skills by line number (for example
+  `openjfx-conventions/SKILL.md:86-89`). The skills are local files that change without a trace, so some of those
+  pointers now land on the wrong text, and seven point past the end of the file.
+- **Seen failing?** Counted: 54 such pointers on 2026-11-13. It affects records only; no build or test reads them.
+- **Goal:** Every such pointer names the section that states the rule, and the rule for ported files is written down
+  in one place.
+- **Done when:** Every pointer lands on text that says what the story claims, and none points past the end of
+  a file.
+
+**Status:** ⛔ Closed without change (2026-11-27, owner's decision; the reason is under "In short").
+The status as written before:
+📋 Ready (filed 2026-11-13 from the US-075 game-toolkit-reviewer agent creation; criterion 2 needs the
 owner's ruling) · **Priority:** Low (records only; no build or test reads these citations) · **Estimate:** S ·
 **Found:** 2026-11-13, while the agent definition `.claude/agents/game-toolkit-reviewer.agent.md` was written for
 US-075

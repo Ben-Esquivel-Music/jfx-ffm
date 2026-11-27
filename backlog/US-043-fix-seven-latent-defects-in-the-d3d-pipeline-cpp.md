@@ -1,5 +1,16 @@
 # US-043 — Fix seven latent defects in the D3D pipeline's C++
 
+## In short
+- **Problem:** Seven defects in the Direct3D pipeline's C++. The worst: if creating one lighting shader fails (for
+  example, out of video memory), disposing the context crashes the JVM. The others are uninitialised blend settings
+  for an unknown blend mode, a pixel read-back that copies four times too much, and a divide by a zero width.
+- **Seen failing?** No. All seven were read from the code. Six came over unchanged from the JNI code.
+- **Goal:** A failed shader creation, an unknown blend mode or a zero-width read-back returns an error; none can crash
+  or draw garbage.
+- **Done when:** A test forces the shader failure and the context is disposed without a crash, the other cases return
+  defined results, and the existing D3D tests stay green.
+- **Order:** Can start now. US-047 waits for it.
+
 **Status:** 📋 Ready (filed 2026-09-30 from the Rust-port survey of `native-prism-d3d`; each site was confirmed by
 reading the source. Six of them are the latent bugs that the JNI→FFM migration carried verbatim (its prism_d3d
 audit, §12 R-9); the seventh is new. Nothing was built or run) · **Found:** 2026-09-30, Rust-port survey (the

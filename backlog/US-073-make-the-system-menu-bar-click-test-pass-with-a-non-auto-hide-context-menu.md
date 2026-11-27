@@ -100,7 +100,7 @@ while `testSystemMenuBarConsumesClickEvent` passed; the method alone, under its 
 The changes are in the working tree, uncommitted, for the owner to commit. Every run of 2026-11-26 below was on the
 owner's Mac, macOS 27.2.1 (26B131), arm64, OpenJDK 27.0.1, times EST; the upstream facts, the run of 2026-11-05 and
 the baselines of 2026-11-25 are attributed where they appear. The detail is in
-[US-073-macos-evidence.md](US-073-macos-evidence.md).
+US-073-macos-evidence.md.
 
 1. **Upstream first** (searched 2026-11-25). Upstream tracks and fixes this failure as JDK-8393642 ("[macOS]
    Application hangs when a system menu bar is clicked while a ContextMenu is open, starting macOS 27"),
@@ -162,7 +162,7 @@ the baselines of 2026-11-25 are attributed where they appear. The detail is in
    0 failures and 0 errors in every module. `tests/system` 1,099 / 0 / 0 / 60 against 1,099 / 1 / 0 / 60 in the
    owner's run of 2026-11-25 14:56-15:54 (`c5448d8440`); 268 classes in both with the same names, and the same
    counts in every class but this one (2 / 1 / 0 / 0 to 2 / 0 / 0 / 0;
-   [per class](US-073-macos-per-class.tsv)). javafx.graphics 26,889 / 0 / 0 / 859, and 0 failures and 0 errors in
+   per class). javafx.graphics 26,889 / 0 / 0 / 859, and 0 failures and 0 errors in
    its 607 reports both before (2026-11-25, `3f19f2c154`) and after. No `hs_err_pid*` file.
 7. **Robot runs.** The owner authorized robot runs from the session for this story on 2026-11-26 and granted it
    event posting; `CGPreflightPostEventAccess` and `AXIsProcessTrusted` were both true at 05:52:53 and again before
@@ -192,7 +192,7 @@ its 2 tests skipped, the `<skipped>` element of its `TEST-*.xml` reading
   explicit approval from the repository owner.**
 
 ## Notes
-- Related: US-001b; its gate ([US-001b-macos-gate.md](US-001b-macos-gate.md), "Menus (slice 9)") records this
+- Related: US-001b; its gate (US-001b-macos-gate.md, "Menus (slice 9)") records this
   failure of 2026-11-05 as pre-existing, and this story's fix.
 - Line numbers in Problem, Acceptance criteria, Verification and Results items 1 and 2 are of the test as it was at
   `1a6788cc4d` (upstream e84b145731's file, unchanged up to `fe5a0072df`); US-001b changes neither the test nor

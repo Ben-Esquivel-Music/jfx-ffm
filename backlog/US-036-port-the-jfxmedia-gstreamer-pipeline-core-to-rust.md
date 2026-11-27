@@ -1,5 +1,15 @@
 # US-036 — Port the jfxmedia GStreamer pipeline core to Rust behind the jfxm_* ABI
 
+## In short
+- **Problem:** The playback core of `libjfxmedia` (pipelines, teardown, event dispatch; 9,544 lines of C++) keeps
+  cross-thread state and a hand-written shutdown handshake.
+- **Seen failing?** No. The races the survey read in the code are copied as they are, not fixed, so that behaviour
+  does not change.
+- **Goal:** The core in Rust behind the same 33 exports, with the same events, error codes and threads.
+- **Done when:** Event recordings from the C++ match the Rust build, the media tests pass unchanged, and the C++ is
+  deleted.
+- **Order:** Second half of the `libjfxmedia` port. After US-035.
+
 **Status:** 📋 Ready (drafted 2026-09-30 from a read-only survey; read the bus-watch, dispose, stall/resume,
 javasource-wiring and dispatcher code and `jfxmedia_api.h`; counted lines and refcount/lock sites with `wc -l`/
 `git grep -c`; NOT checked: which threads call `UpdatePlayerState`, the lock state of every cross-thread field,

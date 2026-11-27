@@ -1,6 +1,15 @@
 # US-023 — Run the Prism shader generator once per build, not once per `.jsl` file
 
-**Status:** 🔷 Implemented (2026-11-17; filed 2026-09-27): option (a), one forked `<java>` step runs the Prism
+## In short
+- **Problem:** Every build started the Prism shader generator 28 times, one Java process per shader file, which cost
+  about 9 to 14 seconds even when nothing had changed.
+- **Goal:** Start it once per build, with the same generated files.
+- **State:** Merged (PR #68, 2026-11-17). The step now takes under a second.
+- **Left to do (owner):** file the upstream issue (draft outside the repository).
+
+**Status:** 🔶 Merged, not Done (PR #68, 2026-11-17). What is left is under "In short".
+The status as written before the merge:
+🔷 Implemented (2026-11-17; filed 2026-09-27): option (a), one forked `<java>` step runs the Prism
 generator once per build in place of 28 JVMs, and writes, rewrites and fails as the loop did, on Windows and in WSL;
 the commit and the PR, filing the upstream issue and an optional macOS build are
 [owner-run](#owner-run-and-pending) · **Found:** 2026-09-27, US-008 (filing US-021: its generator runs, one JVM per
@@ -304,13 +313,13 @@ Windows and in WSL. This section describes the final change; [Independent review
 [Rework and confirming review](#rework-and-confirming-review-2026-11-17) give the findings and what was done with them.
 
 Kept with the change:
-- [`US-023-build-runs.md`](US-023-build-runs.md): how each build and generator run was made, with its start count,
+- `US-023-build-runs.md`: how each build and generator run was made, with its start count,
   the files it wrote or rewrote, the failure text, the mutants and the step times;
-- [`US-023-windows-per-class.tsv`](US-023-windows-per-class.tsv) and
-  [`US-023-wsl-per-class.tsv`](US-023-wsl-per-class.tsv), the final gates' per-class lists, before and after;
-- [`US-023-windows-gensrc.md5`](US-023-windows-gensrc.md5) and [`US-023-wsl-gensrc.md5`](US-023-wsl-gensrc.md5), the
+- `US-023-windows-per-class.tsv` and
+  `US-023-wsl-per-class.tsv`, the final gates' per-class lists, before and after;
+- `US-023-windows-gensrc.md5` and `US-023-wsl-gensrc.md5`, the
   after gates' `target/gensrc` md5 lists (the before lists are `cmp`-identical);
-- [`US-023-regeneration.md5`](US-023-regeneration.md5), the 1,059 files that the new pom's clean build with
+- `US-023-regeneration.md5`, the 1,059 files that the new pom's clean build with
   `-Djfx.jsl.backends="-d3d -es2 -mtl"` writes in WSL (the old pom's list is `cmp`-identical, and so is
   `US-022-regeneration.md5`).
 
@@ -416,10 +425,10 @@ The other line references of Problem, Measured and Proposed fix were not checked
 | Criterion | Evidence | State |
 | --- | --- | --- |
 | One step | `git grep -n -e '<apply' -e '<srcfile' -e '"-name"' -- modules/javafx.graphics/pom.xml` finds nothing in the tree with the change; on `7a66c85e39` it finds `:186`, `:201` and `:202`. The step has every argument of the `<apply>` but `-name` and the file, `-mtlheaders` included ([Change](#change)) | Met |
-| One JVM | With the amended command: old pom 28 starts (56 logged blocks), new pom 1 (2 blocks), on Windows and in WSL; in WSL also 28 against 1 with `-Djfx.jsl.backends="-d3d -es2 -mtl"`. The counter gives 28 on every old-pom log, so a count of 1 is not a miss ([starts](US-023-build-runs.md#starts)) | Met, as amended |
-| Same files, clean | `-d3d -es2 -mtl` through Maven in WSL: 1,059 files (`jsl-decora` 208, `jsl-prism` 848, `mtl-headers` 3) from both poms, `cmp`-identical to each other and to `US-022-regeneration.md5` ([md5 list](US-023-regeneration.md5)); outside Maven on Windows, old and new identical. `-d3d` on Windows and `-es2` in WSL: 532 files (108, 424, no Metal header) from both poms, `cmp`-identical to the baseline gates' lists | Met |
-| Same files, without `clean` | After `touch src/main/jsl-prism/MaskFillPgram.jsl`: 32 files with a new time on Windows (16 `.hlsl`, 16 loaders) and in WSL (16 `.frag`, 16 loaders), the same paths with the old pom and the new one, no md5 changed ([files](US-023-build-runs.md#same-files-without-clean)). The `-force` mutant: 320 on Windows and 228 in WSL, so the check fails | Met, as amended |
-| Same failure | In WSL clones through Maven: both poms exit 1 in `jsl-codegen` with `MaskFillPgram.jsl:109:4: in program FillPgram_Color: missing ';' at 'return'` after writing the same 32 files (16 `.frag`, 16 loaders), md5-identical to a clean build's; built again unfixed, exit 1 and nothing rewritten; fixed and built without `clean`, 392 files added, none rewritten, and `target/gensrc` equals a clean build's by name and md5 ([failure](US-023-build-runs.md#failure-case)). Outside Maven on Windows, the same with 32 files for `-d3d` and 64 for three backends, old and new alike | Met: through Maven in WSL, outside Maven on Windows |
+| One JVM | With the amended command: old pom 28 starts (56 logged blocks), new pom 1 (2 blocks), on Windows and in WSL; in WSL also 28 against 1 with `-Djfx.jsl.backends="-d3d -es2 -mtl"`. The counter gives 28 on every old-pom log, so a count of 1 is not a miss (starts) | Met, as amended |
+| Same files, clean | `-d3d -es2 -mtl` through Maven in WSL: 1,059 files (`jsl-decora` 208, `jsl-prism` 848, `mtl-headers` 3) from both poms, `cmp`-identical to each other and to `US-022-regeneration.md5` (md5 list); outside Maven on Windows, old and new identical. `-d3d` on Windows and `-es2` in WSL: 532 files (108, 424, no Metal header) from both poms, `cmp`-identical to the baseline gates' lists | Met |
+| Same files, without `clean` | After `touch src/main/jsl-prism/MaskFillPgram.jsl`: 32 files with a new time on Windows (16 `.hlsl`, 16 loaders) and in WSL (16 `.frag`, 16 loaders), the same paths with the old pom and the new one, no md5 changed (files). The `-force` mutant: 320 on Windows and 228 in WSL, so the check fails | Met, as amended |
+| Same failure | In WSL clones through Maven: both poms exit 1 in `jsl-codegen` with `MaskFillPgram.jsl:109:4: in program FillPgram_Color: missing ';' at 'return'` after writing the same 32 files (16 `.frag`, 16 loaders), md5-identical to a clean build's; built again unfixed, exit 1 and nothing rewritten; fixed and built without `clean`, 392 files added, none rewritten, and `target/gensrc` equals a clean build's by name and md5 (failure). Outside Maven on Windows, the same with 32 files for `-d3d` and 64 for three backends, old and new alike | Met: through Maven in WSL, outside Maven on Windows |
 | Time recorded | [Runs](#runs): the clean gates' Prism tail and the Prism step of builds without `clean` and without changes, on Windows and in WSL | Recorded |
 | Build gate | Both commands before and after ([Final gates](#final-gates-2026-11-17)): exit 0, the same totals, the per-class lists and the `target/gensrc` md5 lists `cmp`-identical, 108 and 424 files and no Metal header, `javafx-jslc` 405 tests without a failure | Met |
 | Upstream | [Upstream check](#upstream-check-2026-11-17): the story's JBS searches give the same counts and none is about the loop; proposing the change upstream decided; the draft is kept outside the repository | Checked and drafted; filing pending |
@@ -432,7 +441,7 @@ cite, while the records of US-018 and US-021 stay as they are; the logs are not 
 files are listed above); the status is ✅ Done only after the owner's commit and the PR.
 
 ### Runs
-[`US-023-build-runs.md`](US-023-build-runs.md) gives the commands, counts, file lists and excerpts. In short:
+`US-023-build-runs.md` gives the commands, counts, file lists and excerpts. In short:
 - **Starts.** In the debug builds the old pom starts the Prism `CompileJSL` 28 times and the new pom once, on Windows
   and in WSL, and so with three backends; logged, the two command lines differ as [Change](#change) says.
 - **Same files.** Clean: 532 files on each host and 1,059 with three backends, identical by name and md5 between the
@@ -464,8 +473,8 @@ failures / errors / skipped.
 | Before | 14:02 to 14:09, exit 0, BUILD SUCCESS, Maven total 07:08 min | 14:12 to 14:19, exit 0, BUILD SUCCESS, 07:22 min |
 | After | 16:29 to 16:37, exit 0, BUILD SUCCESS, 07:39 min | 16:40 to 16:48, exit 0, BUILD SUCCESS, 08:35 min |
 | Modules, before and after | `javafx-jslc` 405 / 0 / 0 / 3, `javafx-base` 5,510 / 0 / 0 / 22, `javafx-graphics` 26,684 / 0 / 0 / 850 | `javafx-jslc` 405 / 0 / 0 / 0, `javafx-base` 5,510 / 0 / 0 / 22, `javafx-graphics` 26,428 / 0 / 0 / 967 |
-| Per class | 954 classes, the lists `cmp`-identical ([per class](US-023-windows-per-class.tsv)) | 954, `cmp`-identical ([per class](US-023-wsl-per-class.tsv)) |
-| `target/gensrc` | 532 files, `jsl-decora` 108 and `jsl-prism` 424, no `mtl-headers`; identical by name and md5 ([md5 list](US-023-windows-gensrc.md5)) | the same counts, identical ([md5 list](US-023-wsl-gensrc.md5)) |
+| Per class | 954 classes, the lists `cmp`-identical (per class) | 954, `cmp`-identical (per class) |
+| `target/gensrc` | 532 files, `jsl-decora` 108 and `jsl-prism` 424, no `mtl-headers`; identical by name and md5 (md5 list) | the same counts, identical (md5 list) |
 | Other outputs, by md5 | `target/jsl-compilers` 7 and 8 classes, `target/classes` 3,901 files and the 262 compiled shaders (`.obj`) identical | `target/jsl-compilers` 7 and 8 classes and `target/classes` 3,901 files identical |
 | Crash files | no `hs_err_pid*` newer than the start under `modules/javafx.base`, `modules/javafx.graphics` or `buildtools/jslc` | none |
 
@@ -498,7 +507,7 @@ the `<pathconvert>` removed; `-mtlheaders` kept, which is required (`native/mac.
 since no unit test can run antrun and the loop coming back would cost time, not correctness; the comment, whose wording
 it asked to tighten; and the CRLF line ends, which the whole file has.
 
-What it confirmed, besides its cases and mutants ([review](US-023-build-runs.md#the-reviews-own-cases-and-mutants)):
+What it confirmed, besides its cases and mutants (review):
 the same executable, class path and arguments but `-cp` and `-name`; the same working directory attribute and the
 inherited environment; the same output on failure under another prefix; the backends of macOS and `INCLUDE_ES2`
 passed by the unchanged `<arg line="${jfx.jsl.backends}"/>`; a clean build in a directory whose path holds a space

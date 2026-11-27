@@ -1,5 +1,15 @@
 # US-090 — Give JavaFX 3D the rendering a 3D game needs
 
+## In short
+- **Problem:** JavaFX 3D cannot draw what a 3D game needs: one material, at most three lights per shape, no shadows,
+  no animated (skinned) meshes, no cheap drawing of many copies.
+- **Seen failing?** Not a defect. Missing features in the renderer.
+- **Goal:** Shadows, more lights, skinned and instanced meshes, lines and points, sorted transparency and simple game
+  materials, on every pipeline.
+- **Done when:** Each feature draws the same on every pipeline, and what worked before draws as before. Today's limits
+  are measured first.
+- **Order:** Can start now with the measurement. It is too big for one story and will likely be split after that.
+
 **Status:** 📋 Ready (filed 2026-11-07 from the game-toolkit design review) · **Epic:** Game toolkit ·
 **Blocked by:** none · **Blocks:** US-091 (skinned meshes only)
 

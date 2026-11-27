@@ -1,5 +1,15 @@
 # US-051 — Keep the MTA alive for mfwrapper's COM calls on GStreamer threads
 
+## In short
+- **Problem:** The Windows H.265 decoder element starts COM and leaves it again at once, then makes its COM calls
+  later on threads that never started COM. It works today only because another part of every pipeline (the audio
+  sink) happens to keep COM alive.
+- **Seen failing?** No. Read from the code. It would fail in a pipeline without that audio sink, which the test
+  driver of US-034 is.
+- **Goal:** The element keeps COM alive itself for as long as it uses it.
+- **Done when:** A one-off run without the audio sink fails before the fix and works after it.
+- **Order:** Can start now. US-034 waits for it.
+
 **Status:** 📋 Ready (filed 2026-10-01 from a review of US-034; read: `mfwrapper.cpp`'s instance init and dispose,
 where it creates the decoder MFT and the colour converter and their callers, jfxmedia's creation of the element,
 and every `CoInitialize`, `CoInitializeEx`, `OleInitialize` and `CoIncrementMTAUsage` call in the media natives and

@@ -7,8 +7,8 @@ them `windows_x64_build` (AC 6, third bullet).
 852 lines (`WinGlassNative`; the largest aggregate is `WinMenuCalls`, 751); the split is behaviour-neutral, the
 targeted run of the 24 `test.com.sun.glass.ui.win` classes and the full module run on Windows give the same counts per
 class as `e9d25742bc` with no crash file, and `ffm-reviewer` signed off (AC 7). Evidence:
-[US-070-windows-gate.md](US-070-windows-gate.md) and
-[US-070-windows-full-per-class.tsv](US-070-windows-full-per-class.tsv) ·
+US-070-windows-gate.md and
+US-070-windows-full-per-class.tsv ·
 **Found:** 2026-10-23, the US-066 survey · The story states the requirement; the implementer designs the split, as
 for US-066
 

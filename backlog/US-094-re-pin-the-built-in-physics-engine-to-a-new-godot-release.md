@@ -1,5 +1,15 @@
 # US-094 — Re-pin the built-in physics engine to a new Godot release
 
+## In short
+- **Problem:** The built-in engine is a port of one fixed Godot version. Godot keeps fixing its physics, and the port
+  would fall behind.
+- **Seen failing?** Not a defect. Maintenance work for later.
+- **Goal:** A written procedure to move the port to a newer Godot release, in which every changed result is traced to
+  the Godot commit that caused it.
+- **Done when:** The port is moved to one newer release by the procedure, and every recording that changed names its
+  upstream commit.
+- **Order:** After US-079 (2D) and US-086 (3D).
+
 **Status:** 📋 Ready (filed 2026-11-07 from the game-toolkit design review) · **Epic:** Game toolkit ·
 **Blocked by:** US-079 (2D part), US-086 (3D part) · **Blocks:** none
 

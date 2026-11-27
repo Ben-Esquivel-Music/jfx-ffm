@@ -1,5 +1,15 @@
 # US-062 — Fix two fixed-point edge cases in `prism_sw`: a box sliver painted as a column, and REPEAT past 32767 texels
 
+## In short
+- **Problem:** Two rounding slips in the software renderer: a box edge that covers less than 1/65536 of a pixel is
+  painted as a full column, and a repeating texture wider than 32,767 pixels overflows a calculation.
+- **Seen failing?** Yes for the first: 16 of 5,184 test drawings differ. The second was read from the code.
+- **Goal:** Both are computed correctly.
+- **State:** Implemented in commit `4d8454ce46` on the branch `US-062-fix-two-prism-sw-fixed-point-edge-cases`,
+  which is pushed and passed CI. There is no pull request, and the branch is behind `master`.
+- **Left to do (owner):** bring the branch up to date and open the pull request. US-063 was filed on that branch and
+  reaches `master` with it.
+
 **Status:** 🚧 Implemented, not merged (2026-10-18: commit `4d8454ce46` on the pushed branch
 `US-062-fix-two-prism-sw-fixed-point-edge-cases`, CI green in run 39191326649, no PR; that branch's copy of this story
 says Done). Filed 2026-10-16 from US-059's review; one probed by the reviewer, one read; both the same

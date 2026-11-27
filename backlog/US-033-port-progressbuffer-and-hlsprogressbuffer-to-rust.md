@@ -1,5 +1,14 @@
 # US-033 — Port progressbuffer and hlsprogressbuffer to Rust inside fxplugins
 
+## In short
+- **Problem:** Two GStreamer elements buffer media downloaded over HTTP and HLS (2,357 lines of C, three threads
+  sharing state). No test reaches either of them today.
+- **Seen failing?** No. No defect is known; one overflow in this code is item 4 of US-041.
+- **Goal:** Both elements and their file cache in Rust, with the same buffering, underrun and seek behaviour.
+- **Done when:** Recordings from the C (made with US-032's driver, because no test exists) match the Rust build, and
+  the C is deleted.
+- **Order:** After US-032.
+
 **Status:** 📋 Ready (drafted 2026-09-30 from a read-only survey; read: `progressbuffer.c` excerpts (pads, threads,
 `getrange`, monitor), `cache.h`, both `filecache.c` excerpts, the jfxmedia message consumers; not checked:
 `hlsprogressbuffer.c` beyond its type and factory, the property ranges; no in-repo test reaches either element;

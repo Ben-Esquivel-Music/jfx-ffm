@@ -7,9 +7,9 @@ and aggregates fifteen package-private binding classes and the library query's h
 lines (`GtkGlassNative`; the largest aggregate is `GtkCallbackTables`, 653). The split is behaviour-neutral: in WSL,
 the module run with `DISPLAY` unset (911 test classes) and the GTK display suite with no window manager and under
 openbox give the same counts per class as `14d7e2a18d`, with no crash file, and `ffm-reviewer` signed off (AC 7).
-Evidence: [US-071-linux-gate.md](US-071-linux-gate.md),
-[US-071-linux-headless-per-class.tsv](US-071-linux-headless-per-class.tsv) and
-[US-071-linux-display-per-class.tsv](US-071-linux-display-per-class.tsv) · **Found:** 2026-10-23, the US-066
+Evidence: US-071-linux-gate.md,
+US-071-linux-headless-per-class.tsv and
+US-071-linux-display-per-class.tsv · **Found:** 2026-10-23, the US-066
 survey · The story states the requirement; the implementer designs the split, as for US-066
 
 ## Story
@@ -143,7 +143,7 @@ Built on `14d7e2a18d`, where `GtkGlassNative.java` is the same as at `e9d25742bc
   - AC 3: the guarantees above, with the census order unchanged.
   - AC 4: no descriptor, layout, export, arena, ownership or threading change; the `ggtk` ABI version is unchanged.
   - AC 5: comment pass done and reviewed.
-  - AC 6: bullets 1 and 2 met ([gate](US-071-linux-gate.md)); bullet 3 met: `linux_x64_build` and
+  - AC 6: bullets 1 and 2 met (gate); bullet 3 met: `linux_x64_build` and
     `linux_aarch64_build` are green in Actions run 40875501864, GTK display step included (the gate's "CI" section).
   - AC 7: `ffm-reviewer` signed off.
 - **Skill.** `jni-to-ffm-migration` §2 rule 2 now names `GtkGlassNative` as the third worked example, and adds its

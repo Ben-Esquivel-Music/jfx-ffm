@@ -1,5 +1,15 @@
 # US-093 — Step physics off the FX thread and restore snapshots bit-exactly
 
+## In short
+- **Problem:** Physics runs on the JavaFX thread, so a large scene slows the UI. A world's state also cannot be saved
+  and restored, which rewind, replay and reload need.
+- **Seen failing?** Not a defect. New work.
+- **Goal:** Physics can step on its own thread and hand its results to the FX thread safely, and a world can be
+  saved and restored exactly.
+- **Done when:** The same scenario gives the same bits on either thread, and a restored snapshot continues bit for
+  bit, also in a fresh JVM.
+- **Order:** After US-078, US-079 and US-080.
+
 **Status:** 📋 Ready (filed 2026-11-07 from the game-toolkit design review) · **Epic:** Game toolkit ·
 **Blocked by:** US-078 (the loop that moves off the FX thread), US-079 (the built-in 2D engine that must support
 snapshots), US-080 (the engine contract that declares the capability) · **Blocks:** none

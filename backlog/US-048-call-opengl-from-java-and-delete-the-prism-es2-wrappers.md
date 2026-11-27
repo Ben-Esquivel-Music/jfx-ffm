@@ -1,5 +1,16 @@
 # US-048 — Call OpenGL from Java and delete the prism_es2 wrappers (Windows and Linux)
 
+## In short
+- **Problem:** On Windows and Linux the OpenGL pipeline calls each GL function through a one-line C wrapper (58 of
+  them). Java could call the GL function directly.
+- **Seen failing?** No. No defect; this removes native code (goal 1).
+- **Goal:** Java calls OpenGL directly, and Windows and Linux build no `prism_es2` C (2,047 lines deleted; the shared
+  2,837 lines stay for macOS).
+- **Done when:** Rendered reference images are identical, frame times are within a bound agreed first, and the
+  Windows and Linux builds make no ES2 library.
+- **Order:** Needs the owner's ruling first: an earlier audit said these GL calls must stay native, and this story
+  says they need not. Without the ruling nothing starts.
+
 **Status:** 🔶 Needs a maintainer ruling first (drafted 2026-09-30 from the Rust-port survey of `native-prism-es2`;
 exports and OS calls counted with `git grep`/`wc -l`; no frame-time measurement exists; nothing built. 2026-10-01,
 after PR review: read `es2_uniform1i` (`prism_es2_api.c:740-747`) and the JDK's `SharedUtils.checkSymbol`; the
@@ -69,8 +80,8 @@ no COM and no UB to gain from Rust.
 
    This story was drafted on 2026-09-30, before this project had a macOS host. A macOS host has built and tested
    `javafx.graphics` since 2026-10-24 (US-003), and its US-001b runs of 2026-11-03 and 2026-11-05 built
-   `libprism_es2.dylib` and passed `ES2NativeTest` ([gate](US-001b-macos-gate.md),
-   [per-class results](US-001b-macos-before-per-class.tsv)).
+   `libprism_es2.dylib` and passed `ES2NativeTest` (gate,
+   per-class results).
 
 ## Acceptance criteria
 - The slice-1 corpus is exact on both recorded machines.

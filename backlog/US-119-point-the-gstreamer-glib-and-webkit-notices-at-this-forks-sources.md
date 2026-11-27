@@ -1,5 +1,15 @@
 # US-119 — Point the GStreamer, GLib and WebKit notices at this fork's sources
 
+## In short
+- **Problem:** The legal notices for GStreamer, GLib and WebKit say that the modified source code is in the OpenJDK
+  repository. This fork has changed those sources further, so the notices point at the wrong place. These are LGPL
+  libraries, where saying where the modified source is matters.
+- **Seen failing?** Yes: read in the notice files and compared with the fork's history.
+- **Goal:** Each notice names this fork as the place of the sources the binaries were built from.
+- **Done when:** The shipped notices in the jars and the SDK carry the corrected text, and the legal-notice check
+  passes.
+- **Order:** Can start now. Small: text only.
+
 **Status:** 📋 Ready (filed 2026-11-15 from US-040) · **Found:** 2026-11-15, while US-040 changed vendored media
 sources; the notices, the patch manifest and the git history read for this story, nothing built or run ·
 **Related:** US-040, US-075

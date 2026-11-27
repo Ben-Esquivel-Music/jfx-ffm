@@ -1,5 +1,15 @@
 # US-054 — Test the libjpeg merged upsampler, then replace it with the separate path if the two are identical
 
+## In short
+- **Problem:** The JPEG decoder has a fast path ("merged upsampling") that certain image files trigger, and an image
+  URL can supply such a file. None of the test images reaches that path, so it is untested.
+- **Seen failing?** No defect is known. The gap is in the tests.
+- **Goal:** Part 1: test images that reach the path, with their results pinned. Part 2 (optional): if those results
+  equal the normal path's, compile the fast path out, so US-045 has less to port.
+- **Done when:** Part 1: the new images decode identically on Windows and WSL and a test proves each reaches the fast
+  path. No native source changes in part 1.
+- **Order:** Part 1 can start now; US-045 waits for it.
+
 **Status:** 📋 Ready (filed 2026-10-01 from the PR review of US-044, which found the path live and untested, and
 from an independent review of that correction; read: `jdmaster.c:20-532`, `jdinput.c:40-354`, `jdmerge.c`,
 `jdsample.c:60-341`, `jdcolor.c:186-230,716-760,795-808`, `jdmarker.c:325-392`,

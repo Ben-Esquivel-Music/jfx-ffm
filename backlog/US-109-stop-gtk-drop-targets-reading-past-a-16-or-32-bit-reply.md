@@ -182,7 +182,7 @@ built from source. Before: a clone of master `a10949f250`. After: the same commi
 Run / failures / errors / skipped. The only difference is the new class, 5 / 0 / 0 / 0 in both passes; every other
 class is equal per class and per method. Under openbox the same 5 classes, the script's expected list, run no test.
 No `hs_err_pid` in any run (module run, both passes and their child JVMs). Per class:
-[US-109-linux-display-per-class.tsv](US-109-linux-display-per-class.tsv).
+US-109-linux-display-per-class.tsv.
 
 ### Acceptance criteria
 1. ✅ No upstream fix or bug: openjdk/jfx `master` `c6413874cc` still multiplies, no JBS issue is about it, and no

@@ -1,5 +1,15 @@
 # US-113 — Make an error in any Prism generator input fail the build
 
+## In short
+- **Problem:** The Prism shader generator reads three input files (`MaskSolid.jsl`, `MaskAlphaOne.jsl`,
+  `PaintColor.jsl`) and then leaves their text out of every shader, as a shortcut. So a typo in one of them is never
+  compiled and never reported, while the same typo in any other input stops the build.
+- **Seen failing?** Yes, measured: five kinds of error in each of the three files, and all 15 builds pass.
+- **Goal:** An error in any file the generator reads fails the build, and the generated shaders stay byte-identical.
+- **Done when:** The 15 runs fail with a message that states the error, and with the unmodified files every generated
+  file is identical to today's.
+- **Order:** Can start now. Small; it affects only someone who edits those three files.
+
 **Status:** 📋 Ready (filed 2026-11-14 from US-020) ·
 **Found:** 2026-11-14, the end-to-end run of US-020 on macOS (its case P6), measured again for this story the same day
 

@@ -1,5 +1,13 @@
 # US-016 — Run the GTK display tests in CI on a virtual display
 
+## In short
+- **Problem:** The GTK tests that need a display never ran in CI, because CI has no display. A break in the Linux
+  windowing code showed up only on a developer's desktop.
+- **Goal:** CI runs those tests on a private virtual display, once without a window manager and once with one.
+- **State:** Merged (PR #35, 2026-10-20). Both Linux CI jobs have run the 32 test classes on every push since.
+- **Left to do (owner):** push one deliberately failing run on a throwaway branch, to show that CI reports a failure
+  properly; then fill in the two "First CI runs" tables of this story from the logs.
+
 **Status:** 🔶 Merged, not Done (landed 2026-10-20 as `c666773a96`, PR #35; implemented and verified in WSL, see "Implementation"; the green CI run is Actions run 39505183373, but the failure-path run has not been pushed and "First CI runs" is still TBD - not Done before both) · **Found:** 2026-09-27, US-008 (F3: the GTK display-test failures depended on the window manager, and CI had never run those tests)
 
 ## Story

@@ -1,5 +1,15 @@
 # US-083 — Prove a native 2D physics engine plugs in through FFM
 
+## In short
+- **Problem:** The 2D physics API of US-080 claims that any engine fits, also a native one. With only the Java engine
+  behind it, that claim is untested.
+- **Seen failing?** Not a defect. A proof.
+- **Goal:** A native 2D physics engine, bound through FFM, that passes the test kit of US-080. It is for testing only
+  and never ships in the SDK.
+- **Done when:** The native engine passes the kit for everything it declares, its difference table is published, and
+  the SDK's list of native libraries is unchanged.
+- **Order:** After US-080.
+
 **Status:** 📋 Ready (filed 2026-11-07 from the game-toolkit design review) · **Epic:** Game toolkit ·
 **Blocked by:** US-080 (the 2D contract and its conformance kit) · **Blocks:** none
 

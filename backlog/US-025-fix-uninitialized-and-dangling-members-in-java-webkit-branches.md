@@ -1,6 +1,17 @@
 # US-025 — Fix three uninitialized or dangling members in the Java branches of WebKit
 
-**Status:** 🔷 Implemented (2026-11-21, uncommitted; filed 2026-09-30): the three fixes in five WebKit files; on
+## In short
+- **Problem:** Three pieces of the Java port of WebKit read memory that was never set or was already freed: the
+  month names of date inputs, a text-run length, and the type of a custom CSS cursor. Upstream OpenJFX has the same
+  code. Nothing a JavaFX page does today reaches the first two.
+- **Goal:** All three are initialised properly, with no change in what reaches Java.
+- **State:** Merged (PR #72, 2026-11-23).
+- **Left to do (owner, as last recorded):** the `tests/system` web tests; the manual check that a custom cursor shows
+  on screen; a `build-webkit.yml` run for Linux and macOS; file the upstream issue.
+
+**Status:** 🔶 Merged, not Done (PR #72, 2026-11-23). What is left is under "In short".
+The status as written before the merge:
+🔷 Implemented (2026-11-21, uncommitted; filed 2026-09-30): the three fixes in five WebKit files; on
 Windows, native probes linked into private copies of `jfxwebkit` show each fixed and kill every mutant, and the
 `modules/javafx.web` tests pass against a local `jfxwebkit` with the change (492 / 0 / 0 / 113: the baseline's 489 plus
 the new `CustomCursorTest`); left for the owner: the commit and the PR, the `tests/system` web tests, the manual
@@ -92,9 +103,9 @@ libraries (17:23 to 18:33); the second after gate (18:35 to 18:41); an independe
 (20:00 to 20:06).
 
 Kept with the change:
-- [`US-025-native-probes.md`](US-025-native-probes.md): why and how the native probes were made, with the author's and
+- `US-025-native-probes.md`: why and how the native probes were made, with the author's and
   the reviewer's commands, sources, mutants and results;
-- [`US-025-windows-per-class.tsv`](US-025-windows-per-class.tsv): the per-class lists of the baseline and final gates.
+- `US-025-windows-per-class.tsv`: the per-class lists of the baseline and final gates.
 
 Not kept: the libraries, the build, gate and test logs, the surefire reports, the mutant copies, and the probe bundles,
 objects, links and outputs. They are in the temporary scratch directory
@@ -128,7 +139,7 @@ WebKit build in that tree.
   `modules/javafx.web/src/main/native/Source/cmake`). An optional review finding, recorded here and not changed.
 - **Verification.** Nothing on the Java port reaches `LocaleNone`'s month labels or `Cursor::type()`
   ([Corrections](#corrections-to-the-story-as-filed)), so the checks of acceptance criteria 1 and 3 are native probes
-  linked into private copies of the library ([evidence](US-025-native-probes.md)). The committed test guards the path
+  linked into private copies of the library (evidence). The committed test guards the path
   of a custom cursor to the `WebView`; it passes with and without the fix.
 - **Acceptance criterion 4** names `perl buildtools/ffm-web/verify-no-jni.pl`, which US-074 deleted; its successor,
   `java buildtools/CheckNoJni.java .`, was run.
@@ -188,7 +199,7 @@ MSYS2_ARG_CONV_EXCL='*' cmd /v:on /c "call C:\PROGRA~1\MICROS~4\2022\COMMUN~1\VC
 | Baseline (`dll-before`) | `f0a91dd650e68f75a7e91c32b3f0815fb09d1f1292ca7d175a6603fca02a0e2f` | 100,508,672 | clean `6832730e09`, 13:58:52 to 15:49:34 (1 h 50 min 42 s), 1,607 ninja steps | the baseline gate; `CustomCursorTest` run (b); the review's run against the baseline |
 | First after (`dll-after`) | `6c2896316485bcac05b46d3a306c97cac4437069891c7d7a5dbb3dbc86dbabc6` | 100,509,184 | the change as reviewed, incremental, 16:11:39 to 16:14:44, 14 steps (the two binding generators, a header copy, 9 unified bundles, `WebCore.lib`, the DLL) | the first and second after gates; `CustomCursorTest` runs (a) and (e1) to (e5); the review's runs |
 | Final (`dll-final`) | `d55e45271ef80eb81aab81875bb877740616246f82dfb8b1f17269d2389f7647` | 100,509,184 | the final change, 19:43:10 to 19:46:07 (177 s), 5 steps (the two binding generators, bundle 28 with `CursorJava.cpp`, `WebCore.lib`, the DLL) | the final gate |
-| `dll-mut-noupcall` | `fc93e6d5ca1e64f04bc4a1c06f7a9467fdfd9d311d36e1031f60f84de60d337d` | 100,509,184 | linked at 16:47 outside the build, bundle 28 with `return;` before the upcall ([evidence](US-025-native-probes.md#mutants)) | `CustomCursorTest` run (c) |
+| `dll-mut-noupcall` | `fc93e6d5ca1e64f04bc4a1c06f7a9467fdfd9d311d36e1031f60f84de60d337d` | 100,509,184 | linked at 16:47 outside the build, bundle 28 with `return;` before the upcall (evidence) | `CustomCursorTest` run (c) |
 | `dll-mut-hotspot` | `7b0924d4cc5a1e3244c856f49e9fb7f82dbe798a19bab128e703231dd2505253` | 100,509,184 | the same, with `m_hotSpot` passed to Java | `CustomCursorTest` run (d) |
 
 - Every library exports 15,249 names, 1,963 of them `wkj_`, and their name lists are identical (`dumpbin /EXPORTS`).
@@ -228,7 +239,7 @@ The filed sections above are unchanged. What the runs and reads of 2026-11-21 sh
 
 | Criterion | Evidence | State |
 | --- | --- | --- |
-| 1. The month lists are 12 full and 12 short names from members that persist; a month is formatted with `MMM` and `MMMM` | Native probes ([evidence](US-025-native-probes.md)). The author's: in both call orders each list comes from the same address inside the locale object on every call (`monthLabels` at +176, `shortMonthLabels` at +160 of 192 bytes), holds 12 entries after every call and equals `WTF::monthFullName` or `WTF::monthName`; `Locale::formatDateTime` gives `March\|March`, `Mar\|Mar`, `September\|September` and `Sep\|Sep` for `MMMM\|LLLL` and `MMM\|LLL`. The reviewer's: 7 calls in each of two orders, the stand-alone variants included, and all 12 months of 2031 with `MMM yyyy` and `MMMM yyyy`; 107 checks | Met, by native probes |
+| 1. The month lists are 12 full and 12 short names from members that persist; a month is formatted with `MMM` and `MMMM` | Native probes (evidence). The author's: in both call orders each list comes from the same address inside the locale object on every call (`monthLabels` at +176, `shortMonthLabels` at +160 of 192 bytes), holds 12 entries after every call and equals `WTF::monthFullName` or `WTF::monthName`; `Locale::formatDateTime` gives `March\|March`, `Mar\|Mar`, `September\|September` and `Sep\|Sep` for `MMMM\|LLLL` and `MMM\|LLL`. The reviewer's: 7 calls in each of two orders, the stand-alone variants included, and all 12 months of 2031 with `MMM yyyy` and `MMMM yyyy`; 107 checks | Met, by native probes |
 | 2. No constructor compiled for Java leaves a `ComplexTextRun` member uninitialized | The member is deleted. The review's table of the three constructors compiled for Java (the Java one, the missing-glyphs one, the vector one; the CoreText and HarfBuzz ones are in no bundle): every member is set in the initializer list or the body, or has a default initializer, before it is read. The reviewer's probes: 53 value checks and 33 clamp checks; Java-built runs read what `6832730e09` computes, generic runs clamp to their real length | Met |
 | 3. A custom CSS cursor reports `Type::Custom` with its image and hotspot | Native probes: the author's, without a host (type `Custom`, the image passed in, hotspot 3,5 for 3,5 and 0,0 for 40,40, a null image and `Image::nullImage()` tolerated, the pointer as the fallback), and the reviewer's, with a fake host (also the upcall count and arguments and the ids, equal to the baseline's) | Met, by native probes |
 | 3. ... and still shows on screen (manual check on Windows) | `CustomCursorTest` shows a `cursor: url(...)` reaching the `WebView` as an `ImageCursor` with its image and hotspot, with the final library in the final gate; nobody looked at a screen | Left for the owner ([step 3](#left-for-the-owner)) |
@@ -259,7 +270,7 @@ javafx.media natives incrementally. The `ffm`-tagged classes stay excluded, as b
 | Crash files | no `hs_err_pid*` under `modules/javafx.web` | none |
 
 - Per class: the 50 class lines of the baseline are unchanged, and the one new line is `CustomCursorTest`, 3 / 0 / 0 / 0
-  ([per class](US-025-windows-per-class.tsv)). The other modules of the reactor ran no surefire test.
+  (per class). The other modules of the reactor ran no surefire test.
 - The 113 skipped tests, read from the baseline's surefire XML: 112 upstream `@Disabled` and 1 assumption
   (`LoadTest.loadJrtResource`); the final gate's class lines equal the baseline's, so they were not attributed again.
 - Between the two: the first after gate (17:11 to 17:16, first after library) failed with 492 / 1 / 0 / 113, only on
@@ -306,7 +317,7 @@ added `assertAll` with its import. `submit.yml` does not run the test: it passes
 the root pom's default is `true`.
 
 ### Native probes
-- **The author's** ([evidence](US-025-native-probes.md#the-authors-probes)) cover `LocaleNone` and the custom `Cursor`
+- **The author's** (evidence) cover `LocaleNone` and the custom `Cursor`
   without a host, the pointer cursor carrying the sentinel `0x5EED`. The fixed code passes all 38 locale and 17 cursor
   checks. Eight mutants, each killed: `L-M1`, `L-M2` (the local of one function restored) and `L-M0` (the baseline
   file) at step 1, the address check, before any list is read, since their references lie outside the object; `L-M3`
@@ -316,7 +327,7 @@ the root pom's default is `true`.
   hotspot of an out-of-image hotspot, a null image and `Image::nullImage()`. 47 of the 193 result rows fail, all checks
   of mutants. With `-Werror=return-stack-address` the compiler rejects `L-M1`, `L-M2` and `L-M0` and accepts the fixed
   file and `L-M3`.
-- **The reviewer's** ([evidence](US-025-native-probes.md#the-reviewers-probes)) add a fake host and `ComplexTextRun`.
+- **The reviewer's** (evidence) add a fake host and `ComplexTextRun`.
   The fixed code passes all 282 checks (locale 107, cursor 89, `ComplexTextRun` values 53 and clamps 33). The baseline
   fails 12 of 17 locale checks, stopping at the address gate before reading any list, and 19 of 89 cursor checks, all
   of type, image or hotspot; its 12 observations of what reaches Java (the predefined ids, the custom upcalls and their
@@ -497,7 +508,7 @@ run is the command of [Gates](#gates) with `-Dtest=test/javafx/scene/web/CustomC
   the symptom of `dll-mut-noupcall` in run (c) of [The test](#the-test).
 - The gate ran after the last code change (the test file's mtime is 15:28:12; of the tracked files only this one is
   newer), and a process check just before it started found no `java`, `ninja`, `cl`, `link` or `cmake` process.
-  Per class it equals the after column of [per class](US-025-windows-per-class.tsv): 0 differences, none
+  Per class it equals the after column of per class: 0 differences, none
   missing, none extra; `CustomCursorTest` 3 / 0 / 0 / 0. Its `Loaded` line names the build-tree library, `caches` is on
   `java.library.path` in none of the 51 `TEST-*.xml`, and there is no `hs_err_pid*` under `modules/javafx.web`.
 

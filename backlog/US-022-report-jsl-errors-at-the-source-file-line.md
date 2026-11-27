@@ -1,6 +1,17 @@
 # US-022 — Report JSL errors at the source file and line
 
-**Status:** 🔷 Implemented (2026-11-16, final macOS gate 2026-11-17; filed 2026-09-27); the Windows and WSL
+## In short
+- **Problem:** A shader error was reported at a line of the program the generator had stitched together
+  (`line 147:4`), not at a line of the file the developer edits, so the error could not be found.
+- **Goal:** Errors name the source file, line and column: `Blend_ADD.jsl:76:4: ...`.
+- **State:** Merged (PR #67, 2026-11-17).
+- **Left to do (owner):** the check on Windows and Linux that the "file is closed" test can fail (the command is
+  under "Owner-run and pending" below); file the upstream issue. The Windows and WSL gates have since been run on
+  later trees that contain this change (US-023 and US-024, 0 failures on both systems).
+
+**Status:** 🔶 Merged, not Done (PR #67, 2026-11-17). What is left is under "In short".
+The status as written before the merge:
+🔷 Implemented (2026-11-16, final macOS gate 2026-11-17; filed 2026-09-27); the Windows and WSL
 gates, the Windows and Linux mutant proof of the file-closed test and filing the upstream issue are
 [owner-run](#owner-run-and-pending) · **Found:** 2026-09-27, US-008 (filing US-019: with its end-of-input check
 prototyped, a stray `}` on line 43 of `PaintImagePattern.jsl` was reported as `line 44:0`, with no file name)
@@ -401,13 +412,13 @@ confirming review, three test pins and the final macOS gate. This section descri
 done with them.
 
 Kept with the change:
-- [`US-022-generator-cases.md`](US-022-generator-cases.md): the generator cases before and after, the regeneration
+- `US-022-generator-cases.md`: the generator cases before and after, the regeneration
   with `-d3d -es2 -mtl` outside Maven and the macOS module gate, how each was run, and the md5 of the 31 Java files of
   the change;
-- [`US-022-macos-per-class.tsv`](US-022-macos-per-class.tsv), the module gate's per-class list, before and after;
-- [`US-022-macos-gensrc.md5`](US-022-macos-gensrc.md5), the after run's `target/gensrc` md5 list (the before run's is
+- `US-022-macos-per-class.tsv`, the module gate's per-class list, before and after;
+- `US-022-macos-gensrc.md5`, the after run's `target/gensrc` md5 list (the before run's is
   `cmp`-identical);
-- [`US-022-regeneration.md5`](US-022-regeneration.md5), the after side's 1,059 files of the regeneration (the before
+- `US-022-regeneration.md5`, the after side's 1,059 files of the regeneration (the before
   side's is `cmp`-identical).
 
 The scratch clones, the gate and build logs, the drivers, the mutant runs and the whole output of each generator case
@@ -743,7 +754,7 @@ files that did not change between the two commits.
 | Limits of the Java peer are errors of the input | J01 to J08 exit 1 with a `JSLSourceException` at the construct after writing the 3 shaders, and J01s to J08s, with the shader outputs only, exit 0 with the same shaders. `JavaPeerLimitTest` pins the 8 full messages, the 3 files written and the shader-only compile | Met |
 | Mutant proof | Every mutant that the criterion lists fails its tests as they stood at 389 tests, also in the review's own form; the position dropped in a single `visitX` is equivalent for some tests and killed for the others ([Mutant proofs](#mutant-proofs)). The 16 tests added or changed since (rows 15 to 27, `aSemanticErrorInAFileNamesTheFileItsLineAndTheProgram` and the two glue tests) each fail under the mutant they pin, and each fails under the valid-program, other-cause and one-line-down mutants, run on them on 2026-11-17: 48 of 48; the identity map and the dropped position were not run again on them | Met |
 | Messages without a file | The 9 parser tests pass unchanged; the assertions of [Message forms](#message-forms) changed as decided | Met, as amended |
-| Generated files unchanged | Outside Maven with `-d3d -es2 -mtl`, 29 JVMs exit 0 before and after, and the 1,059 files are identical by name and md5 ([md5 list](US-022-regeneration.md5)) | Met |
+| Generated files unchanged | Outside Maven with `-d3d -es2 -mtl`, 29 JVMs exit 0 before and after, and the 1,059 files are identical by name and md5 (md5 list) | Met |
 | Build gate | macOS, with `-Dmaven.test.failure.ignore=true`, before and after ([Final gates](#final-gates-2026-11-17-macos)), extra evidence: jslc 276 and 405 tests, no failure. Windows (with `-am`) and WSL: [owner-run](#owner-run-and-pending) | Passed on macOS (extra evidence); Windows and WSL owner-run |
 | Upstream | [Upstream check](#upstream-check-2026-11-16); the draft issue, kept outside the repository, says that upstream runs no jslc test (JDK-8226635) | Checked and drafted; filing pending |
 
@@ -917,7 +928,7 @@ Not run: the mutant proof of `SourceFileClosedTest` on Windows and Linux
 
 ### Generator runs
 Outside Maven, as the pom's `jsl-codegen` execution runs the generators, with the arguments `GenAllDecoraShaders`
-passes for each shader plus `-d3d -es2 -mtl`; [`US-022-generator-cases.md`](US-022-generator-cases.md) has the class
+passes for each shader plus `-d3d -es2 -mtl`; `US-022-generator-cases.md` has the class
 path, the command lines, the inputs and the times. Both sides used the before clone's graphics and base classes and
 `.jsl` inputs, which the change does not edit, and each side its own jslc and generator classes: before, a fresh clone
 of `726d7f74a5` built by its module gate on 2026-11-16; after, a fresh clone with the change, built by its module gate
@@ -927,7 +938,7 @@ which stayed empty.
 - **Regeneration with `-d3d -es2 -mtl`.** On each side 29 JVMs, `GenAllDecoraShaders` and the Prism `CompileJSL` once
   per Prism `.jsl` file, all exit 0 and print nothing, and write 1,059 files (`jsl-decora` 208, `jsl-prism` 848,
   `mtl-headers` 3), identical by name and md5 between the sides and to `US-021-regeneration.md5`
-  ([md5 list](US-022-regeneration.md5)). Without its 262 `.hlsl` lines (50 Decora, 212 Prism) the list has 797 lines,
+  (md5 list). Without its 262 `.hlsl` lines (50 Decora, 212 Prism) the list has 797 lines,
   identical to the after gate's `target/gensrc` list. The implementation, the review, the rework and the confirming
   review each ran it on their own builds, with the same result.
 - **The cases.** PCE is `ParseCancellationException`, JSE `JSLSourceException`, RE `RuntimeException` and IE
@@ -1000,8 +1011,8 @@ are run / failures / errors / skipped.
 
 | Gate | Result |
 | --- | --- |
-| Module gate | Both exit 0 with BUILD SUCCESS (Maven total time 01:16 min and 01:11 min). jslc 276 / 0 / 0 / 0 in 31 classes before and 405 / 0 / 0 / 0 in 35 after, 276 + 129 tests in 31 + 4 classes; base 5,510 / 0 / 0 / 22 in 290 and graphics 26,696 / 0 / 0 / 858 in 629 in both. Of the 950 per-class lines before and 954 after, `diff` shows only `JSLSourceTest 73 0 0 0`, `JavaPeerLimitTest 8 0 0 0`, `SourceFileClosedTest 3 0 0 0` and `SourceLocationTest 45 0 0 0` added ([per class](US-022-macos-per-class.tsv)). No class has a failure or an error, and jslc skips nothing, so `SourceFileClosedTest` ran its macOS check |
-| Generated files | The module gate's `target/gensrc`: 797 files (`jsl-decora` 158, `jsl-prism` 636, `mtl-headers` 3) and no `headers` directory, identical by name and md5 before and after ([md5 list](US-022-macos-gensrc.md5), the after run's) and to `US-021-macos-gensrc.md5` |
+| Module gate | Both exit 0 with BUILD SUCCESS (Maven total time 01:16 min and 01:11 min). jslc 276 / 0 / 0 / 0 in 31 classes before and 405 / 0 / 0 / 0 in 35 after, 276 + 129 tests in 31 + 4 classes; base 5,510 / 0 / 0 / 22 in 290 and graphics 26,696 / 0 / 0 / 858 in 629 in both. Of the 950 per-class lines before and 954 after, `diff` shows only `JSLSourceTest 73 0 0 0`, `JavaPeerLimitTest 8 0 0 0`, `SourceFileClosedTest 3 0 0 0` and `SourceLocationTest 45 0 0 0` added (per class). No class has a failure or an error, and jslc skips nothing, so `SourceFileClosedTest` ran its macOS check |
+| Generated files | The module gate's `target/gensrc`: 797 files (`jsl-decora` 158, `jsl-prism` 636, `mtl-headers` 3) and no `headers` directory, identical by name and md5 before and after (md5 list, the after run's) and to `US-021-macos-gensrc.md5` |
 | Logs | No `[ERROR]` line and no `warning(131)` in either log, and no `warning(` line after. Of the 132 `[WARNING]` lines of each log, 120 are surefire's `Tests run:` lines of classes and modules with skipped tests (118 and 2); the other 12 are `javac` notes, identical in both once the clone path is normalised. `jsl-codegen`, `cmake-configure` and `cmake-build` ran once in each |
 | Crash files | No `hs_err_pid*` file in either clone; each holds 27 `hs_err` directories without a file, which child-JVM tests create |
 

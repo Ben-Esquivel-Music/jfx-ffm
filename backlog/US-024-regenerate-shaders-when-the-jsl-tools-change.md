@@ -1,6 +1,15 @@
 # US-024 — Regenerate the shaders when the JSL compiler or a generator changes
 
-**Status:** 🔷 Implemented (2026-11-21; filed 2026-09-28): option (c), refined: the build passes `-force` to both
+## In short
+- **Problem:** After a change to the shader compiler or to a generator, a build without `clean` did not regenerate
+  the shaders, so it shipped shaders made by the old tool.
+- **Goal:** Every build regenerates, and writes a file only when its content changes.
+- **State:** Merged (PR #69, 2026-11-21). It costs about 2.5 seconds per build.
+- **Left to do (owner):** post the comment on JDK-8090470 (draft outside the repository).
+
+**Status:** 🔶 Merged, not Done (PR #69, 2026-11-21). What is left is under "In short".
+The status as written before the merge:
+🔷 Implemented (2026-11-21; filed 2026-09-28): option (c), refined: the build passes `-force` to both
 generator steps, so every program is compiled in every build, and a forced run writes an output only when its bytes
 differ from the file's or the file is missing; on Windows and in WSL a build without `clean` now regenerates after a
 change to the compiler, a generator or a `.jsl` file, a restored one included, writes nothing when nothing changed,
@@ -117,21 +126,21 @@ final change; [Independent review](#independent-review-2026-11-17-to-2026-11-18)
 [Rework and confirming review](#rework-and-confirming-review-2026-11-21) give the findings and what was done with them.
 
 Kept with the change:
-- [`US-024-build-runs.md`](US-024-build-runs.md): how each build and generator run was made, what it edited, the files
+- `US-024-build-runs.md`: how each build and generator run was made, what it edited, the files
   it wrote or rewrote by kind, its comparison with a clean build and with the same run before the change, the failure
   texts, the mutants and the step times;
-- [`US-024-windows-per-class.tsv`](US-024-windows-per-class.tsv) and
-  [`US-024-wsl-per-class.tsv`](US-024-wsl-per-class.tsv), the per-class lists of the baseline and final gates;
-- [`US-024-windows-gensrc-times.tsv`](US-024-windows-gensrc-times.tsv) and
-  [`US-024-wsl-gensrc-times.tsv`](US-024-wsl-gensrc-times.tsv), the modification-time lists of the Definition of Done:
+- `US-024-windows-per-class.tsv` and
+  `US-024-wsl-per-class.tsv`, the per-class lists of the baseline and final gates;
+- `US-024-windows-gensrc-times.tsv` and
+  `US-024-wsl-gensrc-times.tsv`, the modification-time lists of the Definition of Done:
   path, time and md5 of the 532 files of `target/gensrc` after each final gate, before the builds without `clean`
   that followed it; the snapshots after each of those builds, five on Windows and four in WSL, are `cmp`-identical to
   them.
 
 No new md5 list is kept. The `target/gensrc` md5 lists of the baseline and final gates are `cmp`-identical to
-[`US-023-windows-gensrc.md5`](US-023-windows-gensrc.md5) and [`US-023-wsl-gensrc.md5`](US-023-wsl-gensrc.md5), and the
+`US-023-windows-gensrc.md5` and `US-023-wsl-gensrc.md5`, and the
 lists of the two clean builds with `-Djfx.jsl.backends="-d3d -es2 -mtl"` in WSL clones with the change are
-`cmp`-identical to [`US-023-regeneration.md5`](US-023-regeneration.md5).
+`cmp`-identical to `US-023-regeneration.md5`.
 
 Not kept: the gate and build logs, the other snapshots, the WSL clones, the mutant copies, the scratch classes and
 outputs of the runs outside Maven, and the review's scratch tests. They are in the temporary scratch directory
@@ -288,10 +297,10 @@ the change:
 
 | Criterion | Evidence | Before (mutant proof) | State |
 | --- | --- | --- | --- |
-| A compiler change regenerates | Through Maven in WSL clones, after a clean build, each edit and a build without `clean`: `PrismGlue.stg:32` rewrites the 30 Prism peers (`PPS*Peer.java`), `JSWGlue.stg:33` the 28 Java peers, `ES2Backend.java:119` all 262 `.frag`; each time the files with a new time are those with a new md5, and `target/gensrc` equals a clean build of the edited tree by name and md5. Outside Maven on Windows with three backends: `PrismGlue.stg` 30 files, `HLSLBackend.java:118` all 262 `.hlsl`, each equal to a clean run. The review's own edit of `ES2Backend.java` and `PrismLoaderGlue.stg`: 368 files, equal to a clean build ([runs](US-024-build-runs.md#a-compiler-or-template-change)) | 0 files rewritten in each case run before; the tree then differs from a clean build in 30, 262, 30, 262 and 368 files (`JSWGlue.stg` not run before) | Met |
-| A generator change regenerates | `CompileJSL.java:395`, `== 0.0` to `<= 0.0`: through Maven in WSL 106 `.frag` (every `_AlphaTest` program) with `-es2`, and 318 (106 each of `.frag`, `.hlsl` and `.metal`, no header) with `-d3d -es2 -mtl`; outside Maven on Windows with three backends 318; each equal to a clean build of the changed generator. The loader template, `PrismLoaderGlue.stg:30`: the 212 loaders, through Maven in WSL with one and three backends and outside Maven on Windows with `-d3d`, each equal to a clean build ([runs](US-024-build-runs.md#the-generators-alpha-test)) | 0 rewritten; 106 files (WSL) and 318 (Windows) differ from the clean build. The loader template: 0, and 212 differ (WSL; on Windows with `38911806e8`'s Prism generator) | Met |
-| Nothing changed, nothing written | 21 builds without `clean` and without changes after the change, on Windows (9, two of them with natives) and in WSL (12, two of them with three backends): no file of `target/gensrc` got a new time or a new md5, none was added or removed ([runs](US-024-build-runs.md#nothing-changed)). Option (c) is chosen, so the cost on Windows and Linux is recorded in [Cost](#cost) | The baseline writes nothing either: 0 in each of its 11 such builds | Met; cost recorded |
-| With (b), a restored file regenerates | Written for (b); (c) meets it too. Through Maven in WSL, `src/main/jsl-decora/ColorAdjust.jsl:144` and `src/main/jsl-prism/MaskFillPgram.jsl:108` edited and built without `clean` (18 files rewritten), then both put back with `cp -p` and built again: the same 18 rewritten, and `target/gensrc` equals a clean build of the restored tree. Outside Maven on Windows, `ColorAdjust.jsl:139` with three backends: 4 files and 4, the end tree equal to a clean run's ([runs](US-024-build-runs.md#restored-jsl-files)) | After the restore 0 rewritten, and 18 files (WSL) and 4 (Windows) of the edited version stay | Met, by (c) |
+| A compiler change regenerates | Through Maven in WSL clones, after a clean build, each edit and a build without `clean`: `PrismGlue.stg:32` rewrites the 30 Prism peers (`PPS*Peer.java`), `JSWGlue.stg:33` the 28 Java peers, `ES2Backend.java:119` all 262 `.frag`; each time the files with a new time are those with a new md5, and `target/gensrc` equals a clean build of the edited tree by name and md5. Outside Maven on Windows with three backends: `PrismGlue.stg` 30 files, `HLSLBackend.java:118` all 262 `.hlsl`, each equal to a clean run. The review's own edit of `ES2Backend.java` and `PrismLoaderGlue.stg`: 368 files, equal to a clean build (runs) | 0 files rewritten in each case run before; the tree then differs from a clean build in 30, 262, 30, 262 and 368 files (`JSWGlue.stg` not run before) | Met |
+| A generator change regenerates | `CompileJSL.java:395`, `== 0.0` to `<= 0.0`: through Maven in WSL 106 `.frag` (every `_AlphaTest` program) with `-es2`, and 318 (106 each of `.frag`, `.hlsl` and `.metal`, no header) with `-d3d -es2 -mtl`; outside Maven on Windows with three backends 318; each equal to a clean build of the changed generator. The loader template, `PrismLoaderGlue.stg:30`: the 212 loaders, through Maven in WSL with one and three backends and outside Maven on Windows with `-d3d`, each equal to a clean build (runs) | 0 rewritten; 106 files (WSL) and 318 (Windows) differ from the clean build. The loader template: 0, and 212 differ (WSL; on Windows with `38911806e8`'s Prism generator) | Met |
+| Nothing changed, nothing written | 21 builds without `clean` and without changes after the change, on Windows (9, two of them with natives) and in WSL (12, two of them with three backends): no file of `target/gensrc` got a new time or a new md5, none was added or removed (runs). Option (c) is chosen, so the cost on Windows and Linux is recorded in [Cost](#cost) | The baseline writes nothing either: 0 in each of its 11 such builds | Met; cost recorded |
+| With (b), a restored file regenerates | Written for (b); (c) meets it too. Through Maven in WSL, `src/main/jsl-decora/ColorAdjust.jsl:144` and `src/main/jsl-prism/MaskFillPgram.jsl:108` edited and built without `clean` (18 files rewritten), then both put back with `cp -p` and built again: the same 18 rewritten, and `target/gensrc` equals a clean build of the restored tree. Outside Maven on Windows, `ColorAdjust.jsl:139` with three backends: 4 files and 4, the end tree equal to a clean run's (runs) | After the restore 0 rewritten, and 18 files (WSL) and 4 (Windows) of the edited version stay | Met, by (c) |
 | Build gate | Both commands, with `-am` on Windows, before and after ([Final gates](#final-gates-2026-11-21)): exit 0; jslc 405 and 437 tests, base and graphics the same totals; per class only `ForcedRunTest` added; `target/gensrc`, 532 files with `jsl-decora` 108 and `jsl-prism` 424, identical by name and md5 to US-023's lists | – | Met, as amended |
 | DoD: logs, md5 lists and modification-time lists kept | The kept files above. The logs are not kept, as for US-019 to US-023; the md5 lists are US-023's, `cmp`-identical | – | Met as recorded |
 | DoD: the chosen option and the reason | [Choice](#choice-option-c-refined) | – | Met |
@@ -300,7 +309,7 @@ the change:
 | DoD: JDK-8090470 decided, a draft outside the repository | [Upstream check](#upstream-check-2026-11-17): comment on it with the draft; posting is the owner's | – | Decided and drafted |
 
 ### Runs
-[`US-024-build-runs.md`](US-024-build-runs.md) gives the commands, edits, counts and excerpts. In short:
+`US-024-build-runs.md` gives the commands, edits, counts and excerpts. In short:
 - **Baseline,** 2026-11-17: the two gates, then three timed builds without `clean` on each host, none writing a file.
 - **Nothing changed:** the 21 builds above, and on Windows the `fxc` objects of the builds with natives.
 - **Changes,** most with the same run before the change: compiler templates and a compiler class, the generator's
@@ -316,7 +325,7 @@ the change:
 The cost of always forcing is the generator time: both steps compile every program in every build. Through Maven a
 step time is the wall time from the step's `[java] Executing` line to the first line of the next task, in timed builds
 without `clean` and without changes; outside Maven it is the wall time of the generator's JVM
-([methods](US-024-build-runs.md#commands-and-methods)).
+(methods).
 
 | Comparison | Same session | Runs | Decora step, before and after | Prism step, before and after | Both steps, added |
 | --- | --- | --- | --- | --- | --- |
@@ -352,7 +361,7 @@ criterion as amended. Counts are run / failures / errors / skipped.
 | After | 2026-11-21, 10:21 to 10:32, exit 0, BUILD SUCCESS, 11:01 min | 2026-11-21, 10:57 to 11:04, exit 0, BUILD SUCCESS, 06:29 min |
 | Modules, before | `javafx-jslc` 405 / 0 / 0 / 3, `javafx-base` 5,510 / 0 / 0 / 22, `javafx-graphics` 26,684 / 0 / 0 / 850 | `javafx-jslc` 405 / 0 / 0 / 0, `javafx-base` 5,510 / 0 / 0 / 22, `javafx-graphics` 26,428 / 0 / 0 / 967 |
 | Modules, after | `javafx-jslc` 437 / 0 / 0 / 3, `javafx-base` and `javafx-graphics` the same | `javafx-jslc` 437 / 0 / 0 / 0, `javafx-base` and `javafx-graphics` the same |
-| Per class | 954 classes before, 955 after; one class differs, `ForcedRunTest`, new, 32 / 0 / 0 / 0 ([per class](US-024-windows-per-class.tsv)) | the same ([per class](US-024-wsl-per-class.tsv)) |
+| Per class | 954 classes before, 955 after; one class differs, `ForcedRunTest`, new, 32 / 0 / 0 / 0 (per class) | the same (per class) |
 | `target/gensrc` | 532 files, `jsl-decora` 108 and `jsl-prism` 424, no `mtl-headers`; before and after `cmp`-identical to `US-023-windows-gensrc.md5` | the same counts; before and after `cmp`-identical to `US-023-wsl-gensrc.md5` |
 | The five files of the change | md5s `cmp`-identical to the final list before and after the gate, and at the end | md5s equal to the final list before the gate (compared by eye), then `cmp`-identical to that copy after the gate and after the cost builds |
 | Crash files | no `hs_err_pid*` under `modules/javafx.base`, `modules/javafx.graphics` or `buildtools/jslc` | none in the clone |
@@ -402,7 +411,7 @@ forced loader site; the position of `-force` and the one comment; the reworked `
 What else it checked: the jslc tests in its after clone, 435 / 0 / 0 / 0; 23 tests of its own (not kept), among them a
 same-length change, a non-ASCII glue block, a directory or a write-only file in an output's place, a truncated output
 and an exception in the middle of a forced run, all passing on the change, the first two being what killed the
-mutants of findings 1 and 2; its mutants ([record](US-024-build-runs.md#the-reviews-own-runs-and-mutants)); that
+mutants of findings 1 and 2; its mutants (record); that
 `-force` is read only at `pom.xml:163`, `:199` and `JSLC.java:408` (`git grep`); and that the steps that read the
 generated files' times, the CMake `fxc` and Metal rules, `copy-shaders` and the second-pass and shim `javac`s, gain
 from compare-before-write. Not checked by it: Windows, three backends, the alpha-test change, a touch or a `cp -p`
@@ -474,7 +483,7 @@ restore end to end, and the gates.
   Metal compiler; `fxc` at the baseline; a same-session Maven comparison on Windows (the cost outside Maven is one);
   `target/classes` after the truncated-output case (checked in `target/gensrc` only). Some WSL extra cases compare an
   after clone with the clean list of the same clone from before the case rather than a new clean build
-  ([record](US-024-build-runs.md#a-touch-truncated-outputs-and-a-source-time-in-the-future)).
+  (record).
 
 ### Owner-run and pending
 - **The commit and the PR,** with the five files of the change and the backlog files of this write-up. The PR's
@@ -485,7 +494,7 @@ restore end to end, and the gates.
 - **Optional, a macOS build,** the only place where `.metal` files are written and compiled
   (`native/mac.cmake:220-240`), in a fresh clone of the commit:
   `mvn -B -ntp -pl buildtools/jslc,modules/javafx.graphics -am clean test`. Expected, derived from US-022's macOS
-  gate (its [per class](US-022-macos-per-class.tsv) and [md5 list](US-022-macos-gensrc.md5)) plus this story's 32
+  gate (its per class and md5 list) plus this story's 32
   tests, not run: BUILD SUCCESS, `javafx-jslc` 437 / 0 / 0 / 0, `javafx-base` 5,510 / 0 / 0 / 22, `javafx-graphics`
   26,696 / 0 / 0 / 858, and `target/gensrc` (797 files: `jsl-decora` 158, `jsl-prism` 636, `mtl-headers` 3) identical
   by name and md5 to `US-022-macos-gensrc.md5`.

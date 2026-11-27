@@ -1,5 +1,14 @@
 # US-086 — Port Godot's 3D rigid-body physics to pure Java, bit-exact
 
+## In short
+- **Problem:** The same as US-079, for 3D: port Godot's 3D rigid-body engine (about 19,000 lines of C++ without soft
+  bodies) faithfully to Java.
+- **Seen failing?** Not a defect. New work, and the largest story of the epic.
+- **Goal:** A pure-Java 3D physics engine with exactly Godot's results, the same on every platform.
+- **Done when:** The 3D recordings of US-076 match bit for bit on all five CI targets, a step allocates nothing, the
+  speed is within the limit of US-077, and it passes the 3D kit of US-085.
+- **Order:** After US-077, US-079 and US-085.
+
 **Status:** 📋 Ready (filed 2026-11-07 from the game-toolkit design review) · **Epic:** Game toolkit ·
 **Blocked by:** US-075 (the notices must ship before any ported file does), US-076 (the 3D goldens), US-077 (its
 speed gate has passed), US-079 (the 2D port matches exactly; it brings the shared core code and BVH), US-085 (the 3D

@@ -1,6 +1,17 @@
 # US-019 — Make the JSL compiler reject input after the last declaration
 
-**Status:** 🔷 Implemented (2026-11-14; filed 2026-09-27); the Windows and WSL gates and filing the upstream issue
+## In short
+- **Problem:** The shader compiler ignored everything after the last declaration of a file. A stray `}` made it write
+  shaders without a `main` function and report success.
+- **Goal:** Text after the last declaration is a syntax error, and nothing is written.
+- **State:** Merged (PR #62, 2026-11-14).
+- **Left to do (owner):** file the upstream issue (draft outside the repository). The Windows and WSL gates this
+  story asks for have since been run on later trees that contain this change (US-023 and US-024, 0 failures on both
+  systems).
+
+**Status:** 🔶 Merged, not Done (PR #62, 2026-11-14). What is left is under "In short".
+The status as written before the merge:
+🔷 Implemented (2026-11-14; filed 2026-09-27); the Windows and WSL gates and filing the upstream issue
 are [owner-run](#owner-run-and-pending) · **Found:** 2026-09-27, US-008 (review of the jslc test port:
 the rule-level tests needed an end-of-input check, and the compiler has none)
 
@@ -583,8 +594,8 @@ They are extra evidence: the criterion's gates are Windows and WSL. Counts are r
 
 | Gate | Command | Result |
 | --- | --- | --- |
-| M1 module gate | `mvn -B -ntp -l <log> -Dmaven.test.failure.ignore=true -pl buildtools/jslc,modules/javafx.graphics -am clean test`, before and after | Both exit 0 with BUILD SUCCESS, and `jsl-codegen`, `cmake-configure` and `cmake-build` ran. jslc 196 / 0 / 0 / 0 in 25 classes before and 235 / 0 / 0 / 0 in 28 after; base 5,510 / 0 / 0 / 22 in 290 classes and graphics 26,696 / 0 / 0 / 858 in 629 in both. Of the 944 per-class lines before and 947 after, `diff` shows only `ProgramCommentTest 17 0 0 0`, `TranslationUnitTest 7 0 0 0` and `lexer.UnterminatedCommentTest 8 0 0 0` added, `lexer.CommentTest` going from `3 0 0 0` to `7 0 0 0` and `lexer.LineCommentTest` from `2 0 0 0` to `5 0 0 0` ([per class](US-019-macos-per-class.tsv)). No class has a failure or an error. No `hs_err_pid*` file in either clone |
-| M2 generated files | M1's `target/gensrc` | 797 files (`jsl-decora` 158, `jsl-prism` 636, `mtl-headers` 3), identical by name and md5 before and after ([md5 list](US-019-macos-gensrc.md5), the after run's; the before run's is `cmp`-identical). `DecoraShaderCommon.h` lists 50 shaders and `PrismShaderCommon.h` 212 |
+| M1 module gate | `mvn -B -ntp -l <log> -Dmaven.test.failure.ignore=true -pl buildtools/jslc,modules/javafx.graphics -am clean test`, before and after | Both exit 0 with BUILD SUCCESS, and `jsl-codegen`, `cmake-configure` and `cmake-build` ran. jslc 196 / 0 / 0 / 0 in 25 classes before and 235 / 0 / 0 / 0 in 28 after; base 5,510 / 0 / 0 / 22 in 290 classes and graphics 26,696 / 0 / 0 / 858 in 629 in both. Of the 944 per-class lines before and 947 after, `diff` shows only `ProgramCommentTest 17 0 0 0`, `TranslationUnitTest 7 0 0 0` and `lexer.UnterminatedCommentTest 8 0 0 0` added, `lexer.CommentTest` going from `3 0 0 0` to `7 0 0 0` and `lexer.LineCommentTest` from `2 0 0 0` to `5 0 0 0` (per class). No class has a failure or an error. No `hs_err_pid*` file in either clone |
+| M2 generated files | M1's `target/gensrc` | 797 files (`jsl-decora` 158, `jsl-prism` 636, `mtl-headers` 3), identical by name and md5 before and after (md5 list, the after run's; the before run's is `cmp`-identical). `DecoraShaderCommon.h` lists 50 shaders and `PrismShaderCommon.h` 212 |
 
 The md5 list is the output of the command the gates document, `find . -type f | LC_ALL=C sort | xargs md5sum`, with
 two spaces between hash and path. The first version's list had one (finding 10); its hashes and paths were the same.

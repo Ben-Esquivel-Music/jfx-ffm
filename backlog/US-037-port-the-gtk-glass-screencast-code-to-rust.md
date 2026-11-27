@@ -1,5 +1,13 @@
 # US-037 — Port the GTK Glass screencast code to Rust behind the `screencast_api.h` ABI
 
+## In short
+- **Problem:** On Wayland, `Robot` captures the screen through the desktop portal and PipeWire (3,051 lines of C in
+  GTK Glass). That code runs its own thread and reads frame buffers that another process describes.
+- **Seen failing?** No. Its known defects are US-042.
+- **Goal:** That code in Rust behind the same 11 exports.
+- **Done when:** Recordings from the C match the Rust build on the test bed of US-038, and the C is deleted.
+- **Order:** Blocked. It cannot be tested on this machine or in CI until US-038 exists; then US-042, then this.
+
 **Status:** 🔶 Blocked (drafted 2026-09-30 from a read-only survey. Read: `screencast_api.h`, excerpts of
 `screencast_pipewire.c` and sweeps of `screencast_portal.c`, counted with `wc -l` and `grep -c`. NOT checked: the
 `screencast_portal.c` logic beyond counts, `screencast_api.c`, the Java `ScreencastHelper`, the contents of the

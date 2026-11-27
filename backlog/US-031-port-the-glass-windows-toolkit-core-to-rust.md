@@ -1,5 +1,16 @@
 # US-031 — Port the Glass Windows toolkit core (loop, WndProcs, IME, key tables) to Rust behind the glass_win_api ABI
 
+## In short
+- **Problem:** The core of Glass on Windows (message loop, window procedures, keyboard, mouse and IME input; 9,306
+  lines of C++) tracks window lifetimes and cross-thread state by hand.
+- **Seen failing?** No. The defects known in this code are separate stories (US-052, US-053). The case for Rust over
+  Java rests on a guess that window-procedure calls into Java would be too frequent; nobody measured it.
+- **Goal:** The same 65 exports in Rust. The only C++ left in glass.dll is the common dialogs.
+- **Done when:** Recordings taken from the C++ match the Rust build, the Windows tests and the owner's robot run are
+  unchanged, and the C++ is deleted.
+- **Order:** The largest and riskiest Rust story. After US-030 and the ruling on US-049 part 1; better after US-052,
+  US-053 and US-132.
+
 **Status:** 📋 Ready (drafted 2026-09-30 from a read-only survey; read `glass_win_api.h:1-262,573-757,807-870,
 1182-1216`, `BaseWnd.cpp:140-219`, `GlassApplication.cpp:70-96`, `glass_win_api.cpp:596-622` and class declarations by
 `grep`; the bodies of `ViewContainer.cpp`, `GlassWindow.cpp`, `FullScreenWindow.cpp` and `GlassInputTextInfo.cpp` were

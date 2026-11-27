@@ -1,9 +1,18 @@
 # US-001b — Migrate `glass/mac` and `prism_mtl` from JNI to FFM (macOS)
 
+## In short
+- **Problem:** Glass on macOS and the Metal pipeline were the last two libraries that Java reached through JNI.
+- **Goal:** Both use FFM, so `javafx.graphics` has no JNI on any platform.
+- **State:** Merged (PR #48, 2026-11-05). The module tests on the Mac matched the JNI build.
+- **Left to do (owner, as last recorded):** the robot-test comparison before and after on the Mac; the VoiceOver
+  check; the ruling on whether the last review rounds count as the Glass sign-off (criterion 10); accepting or
+  rejecting the recorded behaviour differences. The detailed list was in `US-001b-macos-gate.md`, removed from this
+  folder on 2026-11-27: `git show cee405c84e:backlog/US-001b-macos-gate.md`.
+
 | Field | Value |
 | --- | --- |
-| **Status** | 🔷 **Implemented** (2026-11-05), uncommitted in the working tree on `1a6788cc4d`. Both libraries are on FFM: `libglass.dylib` and `libprism_mtl.dylib` export no `Java_` function and no `JNI_OnLoad`, and no class of `com.sun.glass.ui.mac` or `com.sun.prism.mtl` declares a `native` method. Owner-run and pending: AC 6's `tests/system` run, AC 8's VoiceOver check and the Definition of Ready's robot baseline on `1a6788cc4d` (see the [gate file's owner-run checklist](US-001b-macos-gate.md#owner-run-deferred)). Pending the owner's ruling: whether the review rounds of the PR 48 review's key-chars fix are AC 10's sign-off for Glass mac |
-| **Records** | [US-001b-glass-mac-audit.md](US-001b-glass-mac-audit.md) (workstream B: inventory, slices, divergences, owner-run items), [US-001b-prism-mtl-audit.md](US-001b-prism-mtl-audit.md) (workstream A), [US-001b-macos-gate.md](US-001b-macos-gate.md) (AC 6 module runs and the owner-run checklist), [US-001b-macos-before-per-class.tsv](US-001b-macos-before-per-class.tsv) |
+| **Status** | 🔶 **Merged, not Done** (PR #48, 2026-11-05); what is left is under "In short". Before the merge this read: 🔷 **Implemented** (2026-11-05), uncommitted in the working tree on `1a6788cc4d`. Both libraries are on FFM: `libglass.dylib` and `libprism_mtl.dylib` export no `Java_` function and no `JNI_OnLoad`, and no class of `com.sun.glass.ui.mac` or `com.sun.prism.mtl` declares a `native` method. Owner-run and pending: AC 6's `tests/system` run, AC 8's VoiceOver check and the Definition of Ready's robot baseline on `1a6788cc4d` (see the gate file's owner-run checklist). Pending the owner's ruling: whether the review rounds of the PR 48 review's key-chars fix are AC 10's sign-off for Glass mac |
+| **Records** | US-001b-glass-mac-audit.md (workstream B: inventory, slices, divergences, owner-run items), US-001b-prism-mtl-audit.md (workstream A), US-001b-macos-gate.md (AC 6 module runs and the owner-run checklist), US-001b-macos-before-per-class.tsv |
 | **Parent** | [US-001](US-001-descope-glass-gtk-glass-mac-prism-mtl-ffm-migration.md), split by OS on 2026-10-27; the Linux half is [US-001a](US-001a-migrate-glass-gtk-jni-to-ffm-on-linux.md) |
 | **Branch of record** | `ffm/graphics` |
 | **Repository** | `Ben-Esquivel-Music/jfx-ffm` |
@@ -109,11 +118,11 @@ Measured on the final working tree, macOS 27.0.1 arm64 only; x86_64 is for CI.
 | 3 | ✅ Met: `glass_mac_api.h` (195 `gmac_*`) and `prism_mtl_api.h` (53 `mtl_*`) declare no JNI type; `nm -gU` shows the same 195 and 53 names and no `Java_` |
 | 4 | ✅ Met: no `Call*Method` is left in either library. Glass mac calls Java through the 8 tables of `glass_mac_api.h` (75 slots); `prism_mtl` makes no upcall. Each upcall target catches `Throwable` and reports it where the JNI did (PB7) |
 | 5 | ✅ Met by construction and review (glass audit §6 of each group, PB8): AppKit work stays on the main thread, `MacView._begin`/`_end`/`_getNativeFrameBuffer` and `MTLContext` work on the render thread, and the upcall stubs live in `Arena.global()`. The live check is the owner's AC 6 run |
-| 6 | 🔶 Module tests met: the final run, on the tree with the PR 48 review's key-chars fix, equals the "Before" run plus 21 new classes, the "Before" run's one failure (from its clone's path) passes, and no test was deleted or disabled ([gate file](US-001b-macos-gate.md#after-the-key-chars-fix-final)). `tests/system` and robot, before and after: owner-run, pending |
+| 6 | 🔶 Module tests met: the final run, on the tree with the PR 48 review's key-chars fix, equals the "Before" run plus 21 new classes, the "Before" run's one failure (from its clone's path) passes, and no test was deleted or disabled (gate file). `tests/system` and robot, before and after: owner-run, pending |
 | 7 | ✅ Met for everything a golden covers: `MTLGoldenRenderTest` (4 profiles) and `MTLShaderTableGoldenTest` match the `1a6788cc4d` goldens exactly under `-Djfx.parity.require=true`. The swap chain has no golden; the robot `painttest`, `scenegraph` and `test3d` cover it (owner-run) |
 | 8 | 🔶 Owner-run, pending: VoiceOver before and after |
 | 9 | ✅ Met on macOS: `mac.cmake`'s `add_jfx_library` has no `JNI` keyword (`mac.cmake:133`), so no target, `glass` and `prismMTL` included, gets the JDK include directories or `HEADERS_DIR` (`:151`). Workstream A added the `JNI` opt-in, which only `glass` passed; slice 11 removed it with Glass mac's last JNI. `glass`'s `javac -h`-named constant imports resolve in `native-glass/mac/constants` (`:169`), which `MacConstantsHeaderTest` checks. The `javac -h` step stays for Windows `glass` only |
-| 10 | 🔶 Met for `prism_mtl`, pending for Glass mac. Workstream A (`prism_mtl`): signed off in review round 2; the key-chars fix changed none of its files. Workstream B (Glass mac): slices 0-10 signed off one review at a time, slice 11 in review round 2, and the final whole-library review of Glass mac in round 1 on 2026-11-05, verdict mergeable, with one docs nit (FR1-N1: the workstream B after run and the owner checklist were not checked in yet), which the close-out docs step resolved ([gate file](US-001b-macos-gate.md)). That review was of workstream B's tree; the PR 48 review's key-chars fix (glass audit g2 §6 (n)) changed Glass mac after it. Three review rounds of the fix ran on 2026-11-05: every lens judged Copilot comment 4485919806 fully addressed, and the findings they confirmed, all in comments and docs, are fixed in the tree. Pending: the owner's ruling on whether those rounds are the sign-off on Glass mac's final diff |
+| 10 | 🔶 Met for `prism_mtl`, pending for Glass mac. Workstream A (`prism_mtl`): signed off in review round 2; the key-chars fix changed none of its files. Workstream B (Glass mac): slices 0-10 signed off one review at a time, slice 11 in review round 2, and the final whole-library review of Glass mac in round 1 on 2026-11-05, verdict mergeable, with one docs nit (FR1-N1: the workstream B after run and the owner checklist were not checked in yet), which the close-out docs step resolved (gate file). That review was of workstream B's tree; the PR 48 review's key-chars fix (glass audit g2 §6 (n)) changed Glass mac after it. Three review rounds of the fix ran on 2026-11-05: every lens judged Copilot comment 4485919806 fully addressed, and the findings they confirmed, all in comments and docs, are fixed in the tree. Pending: the owner's ruling on whether those rounds are the sign-off on Glass mac's final diff |
 | 11 | ✅ Met: `README.md` ("Building") says that `javafx.graphics` has no JNI on any platform, and that the `javac -h` step remains for the constant headers of Windows `glass`. The `jfx-native-build`, `jfx-graphics-native` and `jni-to-ffm-migration` skills say the same; they are local files (`.claude/**` is gitignored) |
 
 ---
@@ -125,7 +134,7 @@ Two independent workstreams. Never migrate both in one step.
 ### A. `prism_mtl` — first (smallest: 5 JNI files, 1 upcall)
 
 - [x] `jni-auditor` inventory of `native-prism-mtl` + `com.sun.prism.mtl`, with an OS-CALL / WRAPPER / PURE /
-      PURE-HOT verdict per function: [US-001b-prism-mtl-audit.md](US-001b-prism-mtl-audit.md).
+      PURE-HOT verdict per function: US-001b-prism-mtl-audit.md.
 - [x] Capture golden render output from the unmodified JNI build: `mtl-golden-1a6788cc4d.txt`/`.bin` and
       `mtl-shaders-golden-1a6788cc4d.txt` under `src/test/resources/test/com/sun/prism/mtl/`.
 - [x] Define the C ABI header and export table: `prism_mtl_api.h` (`PRISM_MTL_ABI_VERSION` 1, 53 `mtl_*`, all
@@ -144,7 +153,7 @@ Two independent workstreams. Never migrate both in one step.
 Hardest part: Objective-C, `objc_msgSend`, AppKit main-thread confinement, and the `NSAccessibility` protocol.
 
 - [x] `jni-auditor` inventory of `native-glass/mac` + `com.sun.glass.ui.mac` (127 upcall sites):
-      [US-001b-glass-mac-audit.md](US-001b-glass-mac-audit.md), groups g0-g4 and Reconciliation R1-R4.
+      US-001b-glass-mac-audit.md, groups g0-g4 and Reconciliation R1-R4.
 - [x] Plain-C shims over the Objective-C surface. **Do not** call `objc_msgSend` from Java; its variadic ABI is
       not portably expressible via `Linker`: `glass_mac_api.h/.m` (`GLASS_MAC_ABI_VERSION` 1, 195 `gmac_*`); the
       only libobjc function Java binds is `objc_release`.
@@ -202,7 +211,7 @@ Skills: `jni-to-ffm-migration`, `jfx-graphics-native`, `jfx-native-build`, `jfx-
 
 - `modules/javafx.graphics/native/mac.cmake:130-154` (`add_jfx_library`), `:159` (`glass`), `:186` (`prismMTL`) at
   `1a6788cc4d`; `:132-153`, `:166` and `:194` in the final tree
-- [US-001b-glass-mac-audit.md](US-001b-glass-mac-audit.md), [US-001b-prism-mtl-audit.md](US-001b-prism-mtl-audit.md)
-  and [US-001b-macos-gate.md](US-001b-macos-gate.md)
+- US-001b-glass-mac-audit.md, US-001b-prism-mtl-audit.md
+  and US-001b-macos-gate.md
 - `modules/javafx.graphics/src/main/java/com/sun/glass/ui/gtk/GtkGlassNative.java` — the Linux Glass facade
 - [US-003](US-003-migrate-javafx-font-jni-to-ffm.md) — the macOS font migration on the same host

@@ -1,5 +1,13 @@
 # US-106 — Show SRT and WebVTT subtitles with media
 
+## In short
+- **Problem:** `javafx.media` has no way to show subtitles: no API delivers the text or the times.
+- **Seen failing?** Not a defect. A missing feature with new public API.
+- **Goal:** An application attaches an SRT or WebVTT file to a `Media` and is told which lines are active as it plays.
+- **Done when:** The active lines follow play, pause, seek and rate; both formats and their text encodings parse; and
+  malformed files only raise an error.
+- **Order:** Can start now.
+
 **Status:** 📋 Ready (filed 2026-11-07 from the media-format survey) · **Epic:** Media formats ·
 **Blocked by:** none · **Blocks:** none
 

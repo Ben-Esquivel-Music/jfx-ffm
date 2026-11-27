@@ -1,5 +1,13 @@
 # US-088 — Read gamepads into the per-tick input snapshot
 
+## In short
+- **Problem:** JavaFX cannot read a game controller. Nothing in the tree does.
+- **Seen failing?** Not a defect. A missing feature.
+- **Goal:** Standard gamepads on Windows, macOS and Linux, delivered in the same per-step input snapshot as keys and
+  mouse, with plugging and unplugging handled and a stable slot per player.
+- **Done when:** Tests cover the standard button layout, hot-plug, player slots and dead zones on all three desktops.
+- **Order:** After US-078.
+
 **Status:** 📋 Ready (filed 2026-11-07 from the game-toolkit design review) · **Epic:** Game toolkit ·
 **Blocked by:** US-078 (the per-tick input snapshot and the actions that pads join) · **Blocks:** none
 

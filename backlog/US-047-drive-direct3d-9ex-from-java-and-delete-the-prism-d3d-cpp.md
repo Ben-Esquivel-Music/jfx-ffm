@@ -1,5 +1,14 @@
 # US-047 — Drive Direct3D 9Ex from Java and delete the prism_d3d C++
 
+## In short
+- **Problem:** The Direct3D pipeline is 7,545 lines of C++ that only pass calls on to Direct3D. Recovery from a lost
+  device is split between Java and C++, each deleting its half of the same objects.
+- **Seen failing?** No. No defect is known beyond US-043. This removes native code (goal 1).
+- **Goal:** Java calls Direct3D 9Ex directly through FFM, and `prism_d3d.dll` and its C++ are deleted.
+- **Done when:** Rendered reference images are identical, frame times are no worse than a bound agreed first,
+  recovery after locking the screen works as today, and no D3D C++ is left.
+- **Order:** After US-043. If the speed check fails, the C++ stays.
+
 **Status:** 📋 Ready (drafted 2026-09-30 from the Rust-port survey of `native-prism-d3d`; exports, classes and COM
 entry points counted with `git grep`/`wc -l`; no frame-time measurement exists; nothing built) · **Epic:** Less native
 code (goal 1); routed here by the Rust-port survey · **Blocked by:** US-043 (the port reproduces the
