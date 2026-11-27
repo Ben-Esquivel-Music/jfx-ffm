@@ -29,7 +29,8 @@
 #include <atomic>
 
 #include "BaseWnd.h"
-#include "PlatformSupport.h"
+#include "glass_win_api.h"
+#include "glass_win_prefs.h"
 
 class Action {
 public:
@@ -72,17 +73,34 @@ public:
 // A synchronous call from another thread, sent with SendNotifyMessage; WPARAM names a pending record that
 // the toolkit window procedure looks up and ignores when it does not find it (GlassApplication.cpp).
 #define WM_DO_ACTION_NOTIFY (WM_USER+3)
-// Posted by PlatformSupport's two WinRT sinks; WPARAM carries their PlatformSupport::PreferenceType bits, or 0
-// for the wake a sink posts after keeping the types of a failed post (PlatformSupport::PostPreferencesChanged).
+// Posted by the two WinRT sinks of the glass-win crate (prefs.rs); WPARAM carries their GWIN_PT_* bits, or 0 for the
+// wake a sink posts after keeping the types of a failed post (post_preferences_changed in prefs.rs).
 #define WM_PREFERENCES_CHANGED (WM_USER+4)
 // Sent, never posted, by ArmPreferencesTimer from a sink on another thread when that wake was refused too; WPARAM
 // and LPARAM are 0. The toolkit window procedure only arms its preferences timer: it never calls Java.
 #define WM_PREFERENCES_ARM_TIMER (WM_USER+5)
 
+/*
+ * The opaque handle of the WinRT preferences of one GlassApplication (glass_win_prefs.h): created where the member
+ * is initialised, destroyed where it is destroyed, after ~GlassApplication's body and before ~BaseWnd.
+ */
+class PreferencesHandle {
+public:
+    PreferencesHandle() : m_handle(glass_prefs_create()) {}
+    ~PreferencesHandle() { glass_prefs_destroy(m_handle); }
+    void* Get() const { return m_handle; }
+
+private:
+    PreferencesHandle(const PreferencesHandle&);
+    PreferencesHandle& operator=(const PreferencesHandle&);
+
+    void* const m_handle;
+};
+
 class GlassApplication : protected BaseWnd {
 public:
-    // gwin_app_create's constructor (glass_win_api.h): the toolkit window, with a PlatformSupport that holds no
-    // JNI state.
+    // gwin_app_create's constructor (glass_win_api.h): the toolkit window, with the WinRT preferences of the glass-win
+    // crate (PreferencesHandle).
     GlassApplication();
     virtual ~GlassApplication();
 
@@ -123,9 +141,10 @@ public:
     static void ExecActionLater(Action *action);
 
     /*
-     * What PlatformSupport::PostPreferencesChanged does when the wake it posts is refused too, with the toolkit
-     * window published: arms the one-shot preferences timer on the toolkit window, whose WM_TIMER arm delivers
-     * the kept types (PlatformSupport::RunDeferredPreferences). SetTimer works only on the window's own thread.
+     * What a preferences sink does when the wake it posts is refused too, with the toolkit window published
+     * (post_preferences_changed in the glass-win crate's prefs.rs): arms the one-shot preferences timer on the
+     * toolkit window, whose WM_TIMER arm delivers the kept types (glass_prefs_run_deferred). SetTimer works only on
+     * the window's own thread.
      * On the toolkit thread it is called here, with no guard, as ExecAction's inline path; from any other
      * thread WM_PREFERENCES_ARM_TIMER is sent with SendNotifyMessage inside the shared side of the publication
      * lock, and the toolkit thread arms the timer at its next message retrieval, in any pump, ahead of the
@@ -141,14 +160,14 @@ public:
     void UnregisterClipboardViewer();
 
     /*
-     * The live PlatformSupport, or NULL before Application.run() creates the toolkit window and after
-     * it is destroyed. glass_win_api.h's gwin_prefs_query_ui_settings / gwin_prefs_query_network reach
-     * the WinRT objects through this; NULL means "no WinRT keys" (both report available == 0), not "no
-     * preference keys": WinPreferences.collect still returns the user32 keys it reads itself
-     * (Windows.SysColor.*, Windows.SPI.*).
+     * The live preferences handle, or NULL before Application.run() creates the toolkit window and after
+     * it is destroyed: what glass_prefs_live_handle answers. glass_win_api.h's gwin_prefs_query_ui_settings /
+     * gwin_prefs_query_network reach the WinRT objects through this; NULL means "no WinRT keys" (both report
+     * available == 0), not "no preference keys": WinPreferences.collect still returns the user32 keys it reads
+     * itself (Windows.SysColor.*, Windows.SPI.*).
      */
-    static PlatformSupport* GetPlatformSupport() {
-        return pInstance ? &pInstance->m_platformSupport : NULL;
+    static void* GetPreferencesHandle() {
+        return pInstance ? pInstance->m_platformSupport.Get() : NULL;
     }
 
     /*
@@ -173,7 +192,7 @@ private:
     static GlassApplication *pInstance;
     HWND    m_hNextClipboardView;
     DWORD m_mainThreadId;
-    PlatformSupport m_platformSupport;
+    PreferencesHandle m_platformSupport;
 
     // These are static because the GlassApplication instance may be
     // destroyed while the nested loop is spinning

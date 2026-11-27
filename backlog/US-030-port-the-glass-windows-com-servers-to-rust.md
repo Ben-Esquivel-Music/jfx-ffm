@@ -119,3 +119,29 @@ because CI does not run `tests/system`. The C++ is deleted. `backlog/README.md` 
 | 5 | Blocks from `gwin_alloc` freed by the other side during the transition (port rule P7). | `gwin_alloc`/`gwin_free` stay the only pair for crossing blocks, and C++ that frees one calls `gwin_free`. |
 | 6 | OLE-marshalled calls on the UIA path could reorder once objects move. | The traces record order and thread, and no marshalling is added. |
 
+## Facts from US-029 (2026-11-26)
+US-029 is implemented and committed as `7c38bdc73a` (the fixes of its code review of 2026-11-27 as `fcfc41cf48`); its
+"Implementation" has the details.
+- **The crate exists:** `modules/javafx.graphics/src/main/native-rust/glass-win/`, linked into `glass` and
+  `glass_test` by `native/win.cmake` (slice `GLASS_WIN_PREFERENCES`, `C_DELETED`). Its modules are `ffi` (the C ABI and
+  the seam, `unsafe`), `sys` (raw OS and vtable calls, `unsafe`) and `prefs` (safe). Both glass.dll builds still
+  export 97 and 123 names, and `GLASS_WIN_ABI_VERSION` is still 7.
+- **`windows` 0.62.2 is vendored** with its closure in `buildtools/rust/vendor/` (15 crates, 1,068 files, 118,053,047
+  bytes), whole and untrimmed, and `buildtools/rust/cargo-config.toml` replaces crates.io with it. The crate's
+  features today are `UI_ViewManagement`, `Networking_Connectivity` and `Win32_System_WinRT`. The notices of its nine
+  linked crates are in `modules/javafx.graphics/src/main/legal/rust-crates.md`.
+- **No C path in the same tree:** `-DJFX_RUST=false` is a configure error for javafx.graphics on Windows (`glass: the
+  C implementation of its slice GLASS_WIN_PREFERENCES is deleted, so it cannot be built with -DJFX_RUST=false`), and
+  the switch covers the whole tree. US-029 therefore took its A/B baseline from the commit before it: the goldens,
+  traces, export lists and DLLs of `5a709c189d`, captured before any native change.
+- **Functions between the crate and the C++:** one the crate defines for the C++, such as a non-exported constructor,
+  is registered under `INTERNAL` of `jfx_add_rust_slice` and declared without an export macro in a header listed in
+  `HEADERS`; a C++ function the crate calls goes under `IMPORTS`. The ABI check compares both directions with the
+  header (`native-glass/win/glass_win_prefs.h` and the crate's `abi_check.cpp` are the example). Test-build-only code
+  sits behind the cargo feature `test-hooks`, which only `glass_test` links (`FEATURES test-hooks`).
+- **COM objects from the crate answer more interfaces:** the delegates built with the crate's constructors are agile
+  and answer the delegate IID, `IUnknown`, `IAgileObject` and `IMarshal`; WRL's `Callback<>` objects were ClassicCom
+  without `FtmBase`. What an `#[implement]` object answers was not examined.
+- **Dependents:** glass.dll now imports `combase.dll`, `api-ms-win-core-winrt-l1-1-0.dll`, `ntdll.dll` and
+  `api-ms-win-core-synch-l1-2-0.dll` at load time, with second, lower-case `kernel32.dll` and `oleaut32.dll`
+  descriptors; the C++'s `CoTaskMemAlloc` and `CoTaskMemFree` bind to `combase.dll`.

@@ -28,6 +28,16 @@
 # two more --config arguments, "packed" on a *-windows-msvc host, else "off". The environment of these calls, and what
 # a cargo config file can still change, are in the comment of the cargo action in jfx_rust.cmake.
 
+# The third-party crates come from buildtools/rust/vendor, filled by cargo vendor, and never from a registry, so a
+# cargo call of the build needs neither the network nor a registry cache in CARGO_HOME. Cargo resolves a relative
+# path of a configuration file, one given with --config too, against the parent of the directory that holds the
+# file, not against the working directory: "rust/vendor" is buildtools/rust/vendor wherever cargo runs.
+[source.crates-io]
+replace-with = "vendored-sources"
+
+[source.vendored-sources]
+directory = "rust/vendor"
+
 [build]
 incremental = false
 # An empty string drops a wrapper that a cargo config file sets

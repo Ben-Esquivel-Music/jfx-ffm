@@ -84,3 +84,7 @@ Thumbs.db
 .github/agents/**
 .github/skills/**
 .github/hooks/**
+
+# Vendored Rust crates are committed whole: cargo checks every file against the crate's .cargo-checksum.json,
+# Cargo.toml.orig and directories named Debug included. Last, so that it overrides every rule above.
+!buildtools/rust/vendor/**

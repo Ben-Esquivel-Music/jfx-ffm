@@ -60,6 +60,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.Consumer;
 import java.util.function.Supplier;
@@ -4670,7 +4671,7 @@ public final class WinGlassNativeShim {
     public static final int EVENT_RELEASE_NETWORK_FACTORY = 5;
     public static final int EVENT_RO_UNINITIALIZE = 6;
 
-    /** {@code enum GwinTestDelegate}: which of {@code PlatformSupport}'s two delegates. */
+    /** {@code enum GwinTestDelegate}: which of the two delegates of the glass-win crate's preferences. */
     public static final int DELEGATE_AUTO_HIDE = 0;
     public static final int DELEGATE_NETWORK = 1;
 
@@ -4900,7 +4901,7 @@ public final class WinGlassNativeShim {
 
     /**
      * {@code gwin_test_prefs_capture(on)}: {@code true} keeps one extra reference to each delegate
-     * {@code PlatformSupport} registers from now on, as an event source does. Before {@link #toolkitCreate}.
+     * the toolkit's preferences register from now on, as an event source does. Before {@link #toolkitCreate}.
      */
     public static void prefsCapture(boolean on) {
         try {
@@ -4978,8 +4979,8 @@ public final class WinGlassNativeShim {
 
     /**
      * Creates the Glass toolkit window on the calling thread, which becomes the toolkit thread: installs the
-     * application callback table (idempotent) and calls {@code gwin_app_create}. Once, and only in a JVM that
-     * exists for this one toolkit: {@code WinApplication} never creates a second one either.
+     * application callback table (idempotent) and calls {@code gwin_app_create}. One toolkit at a time: another only
+     * once the earlier toolkit window is destroyed and its {@code gwin_run_loop} has returned, on any thread.
      *
      * @return the toolkit HWND, or 0 when no window resulted
      */
@@ -5485,6 +5486,324 @@ public final class WinGlassNativeShim {
             MemorySegment symbol = SymbolLookup.libraryLookup("kernel32.dll", Arena.global()).find(name).orElseThrow(
                     () -> new UnsatisfiedLinkError("missing native symbol: " + name + " in kernel32.dll"));
             return Linker.nativeLinker().downcallHandle(symbol, fd);
+        }
+    }
+
+    /*
+     * The preferences dispatch of the toolkit window and what surrounds it: a send with a chosen WPARAM and LPARAM,
+     * a recording GwinPrefsCallbacks table that answers a chosen value and keeps the user pointer it was handed, the
+     * two other tables gwin_prefs_set_callbacks accepts (cleared, a NULL slot), the two queries with their statuses
+     * and raw bytes, the COM apartment of the calling thread, and the system message the preferences write for an
+     * HRESULT that RoInitialize failed with (RoException at 5a709c189d, ro_initialize_failed_line of glass-win now).
+     */
+
+    /** One {@code preferences_changed} upcall into the table of {@link #installAnsweringPreferencesTable}. */
+    public record AnsweredPreferencesCall(Thread thread, int nativeThreadId, int types, long user) {
+    }
+
+    /** What a preferences query export answered, and every byte of its out struct after the call. */
+    public record QueryResult(int status, byte[] bytes) {
+    }
+
+    /**
+     * What {@code ole32!CoGetApartmentType} answered for the calling thread: its {@code HRESULT}, and the
+     * {@code APTTYPE} and {@code APTTYPEQUALIFIER} it wrote, -1 for each it left as preset.
+     */
+    public record ComApartment(int hresult, int type, int qualifier) {
+    }
+
+    /**
+     * {@code user32!SendMessageW(hwnd, message, wParam, lParam)}: its answer. Sent by the thread that owns
+     * {@code hwnd}, it calls the window procedure directly and handles no other message meanwhile.
+     */
+    public static long sendMessage(long hwnd, int message, long wParam, long lParam) {
+        try {
+            return (long) PreferenceProbes.SEND_MESSAGE_W.invokeExact(MemorySegment.ofAddress(hwnd), message, wParam,
+                    lParam);
+        } catch (Throwable t) {
+            throw hookFailure("SendMessageW", t);
+        }
+    }
+
+    /**
+     * {@link #sendMessage} with {@code lParam} pointing at {@code text}: its UTF-16 code units copied unit for unit,
+     * so that a lone surrogate stays itself, followed by a {@code U+0000}, in native memory that lives until the
+     * call has returned.
+     */
+    public static long sendMessageWithText(long hwnd, int message, long wParam, char[] text) {
+        try (Arena arena = Arena.ofConfined()) {
+            MemorySegment units = arena.allocate(JAVA_CHAR, text.length + 1L);
+            MemorySegment.copy(text, 0, units, JAVA_CHAR, 0, text.length);
+            units.setAtIndex(JAVA_CHAR, text.length, '\0');
+            return sendMessage(hwnd, message, wParam, units.address());
+        }
+    }
+
+    /**
+     * Installs a {@code GwinPrefsCallbacks} table whose {@code preferences_changed} records every call - its thread,
+     * the native thread id, the types and the {@code user} pointer it received - into
+     * {@link #answeredPreferencesCalls()} and answers what {@link #answerPreferences} set last (0 before that). The
+     * table's user pointer is {@code user}, which nothing dereferences. Before {@link #toolkitCreate}, in place of
+     * the production table; nothing puts that one back.
+     */
+    public static void installAnsweringPreferencesTable(long user) {
+        requireHookOk(setPreferencesTable(PreferenceProbes.ANSWERING_STUB, user), "gwin_prefs_set_callbacks");
+    }
+
+    /** What the table of {@link #installAnsweringPreferencesTable} answers from now on. */
+    public static void answerPreferences(int answer) {
+        PreferenceProbes.ANSWER.set(answer);
+    }
+
+    /** The calls the table of {@link #installAnsweringPreferencesTable} recorded, in order. */
+    public static List<AnsweredPreferencesCall> answeredPreferencesCalls() {
+        return List.copyOf(PreferenceProbes.CALLS);
+    }
+
+    /** {@code gwin_prefs_set_callbacks(NULL, NULL)}: its status. */
+    public static int clearPreferencesTable() {
+        try {
+            return (int) ToolkitDriver.PREFS_SET_CALLBACKS.invokeExact(MemorySegment.NULL, MemorySegment.NULL);
+        } catch (Throwable t) {
+            throw hookFailure("gwin_prefs_set_callbacks", t);
+        }
+    }
+
+    /** {@code gwin_prefs_set_callbacks} with a table whose {@code preferences_changed} is {@code NULL}: its status. */
+    public static int installPreferencesTableWithNullSlot(long user) {
+        return setPreferencesTable(MemorySegment.NULL, user);
+    }
+
+    private static int setPreferencesTable(MemorySegment slot, long user) {
+        try (Arena arena = Arena.ofConfined()) {
+            MemorySegment table = arena.allocate(WinPreferenceCalls.GWIN_PREFS_CALLBACKS_LAYOUT);
+            table.set(ADDRESS, WinPreferenceCalls.GWIN_PREFS_CALLBACKS_LAYOUT.byteOffset(
+                    PathElement.groupElement("preferences_changed")), slot);
+            return (int) ToolkitDriver.PREFS_SET_CALLBACKS.invokeExact(table, MemorySegment.ofAddress(user));
+        } catch (Throwable t) {
+            throw hookFailure("gwin_prefs_set_callbacks", t);
+        }
+    }
+
+    /**
+     * {@code gwin_prefs_query_ui_settings} into a {@code GwinUiSettings} each of whose bytes is {@code fill} before
+     * the call: its status and every byte after it.
+     */
+    public static QueryResult queryUiSettingsRaw(byte fill) {
+        return query(PreferenceProbes.QUERY_UI_SETTINGS, "gwin_prefs_query_ui_settings",
+                WinPreferenceCalls.GWIN_UI_SETTINGS_LAYOUT.byteSize(), fill);
+    }
+
+    /** {@link #queryUiSettingsRaw} for {@code gwin_prefs_query_network} and its {@code GwinNetworkInfo}. */
+    public static QueryResult queryNetworkRaw(byte fill) {
+        return query(PreferenceProbes.QUERY_NETWORK, "gwin_prefs_query_network",
+                WinPreferenceCalls.GWIN_NETWORK_INFO_LAYOUT.byteSize(), fill);
+    }
+
+    /** {@code gwin_prefs_query_ui_settings(NULL)}: its status. */
+    public static int queryUiSettingsIntoNull() {
+        try {
+            return (int) PreferenceProbes.QUERY_UI_SETTINGS.invokeExact(MemorySegment.NULL);
+        } catch (Throwable t) {
+            throw hookFailure("gwin_prefs_query_ui_settings", t);
+        }
+    }
+
+    /** {@code gwin_prefs_query_network(NULL)}: its status. */
+    public static int queryNetworkIntoNull() {
+        try {
+            return (int) PreferenceProbes.QUERY_NETWORK.invokeExact(MemorySegment.NULL);
+        } catch (Throwable t) {
+            throw hookFailure("gwin_prefs_query_network", t);
+        }
+    }
+
+    private static QueryResult query(MethodHandle export, String name, long size, byte fill) {
+        try (Arena arena = Arena.ofConfined()) {
+            MemorySegment out = arena.allocate(size);
+            out.fill(fill);
+            int status = (int) export.invokeExact(out);
+            return new QueryResult(status, out.toArray(JAVA_BYTE));
+        } catch (Throwable t) {
+            throw hookFailure(name, t);
+        }
+    }
+
+    /** {@code ole32!CoGetApartmentType} on the calling thread. */
+    public static ComApartment comApartment() {
+        try (Arena arena = Arena.ofConfined()) {
+            MemorySegment out = arena.allocate(JAVA_INT, 2);
+            out.setAtIndex(JAVA_INT, 0, -1);
+            out.setAtIndex(JAVA_INT, 1, -1);
+            int hresult = (int) PreferenceProbes.CO_GET_APARTMENT_TYPE.invokeExact(out,
+                    out.asSlice(JAVA_INT.byteSize()));
+            return new ComApartment(hresult, out.getAtIndex(JAVA_INT, 0), out.getAtIndex(JAVA_INT, 1));
+        } catch (Throwable t) {
+            throw hookFailure("CoGetApartmentType", t);
+        }
+    }
+
+    public static int coInitializeEx(int coInit) {
+        try {
+            return (int) PreferenceProbes.CO_INITIALIZE_EX.invokeExact(MemorySegment.NULL, coInit);
+        } catch (Throwable t) {
+            throw hookFailure("CoInitializeEx", t);
+        }
+    }
+
+    public static void coUninitialize() {
+        try {
+            PreferenceProbes.CO_UNINITIALIZE.invokeExact();
+        } catch (Throwable t) {
+            throw hookFailure("CoUninitialize", t);
+        }
+    }
+
+    /**
+     * The text {@code RoException(message, hr)} appended for {@code hresult} at {@code 5a709c189d}, as bytes: what
+     * {@code _com_error::ErrorMessage} of MSVC's {@code comdef.h} answers -
+     * {@code FormatMessage(FORMAT_MESSAGE_FROM_SYSTEM | FORMAT_MESSAGE_IGNORE_INSERTS)} in
+     * {@code MAKELANGID(LANG_NEUTRAL, SUBLANG_DEFAULT)}, with one trailing line feed and the carriage return before it
+     * cut off - converted by {@code WideCharToMultiByte(CP_ACP, 0, ...)}, without its terminator. Asked on the calling
+     * machine, so it is in the language the C would write it in there.
+     *
+     * @throws AssertionError when the system has no message for {@code hresult}
+     */
+    public static byte[] systemMessageAnsi(int hresult) {
+        try (Arena arena = Arena.ofConfined()) {
+            int capacity = 65_536;
+            MemorySegment wide = arena.allocate(JAVA_CHAR, capacity);
+            int length = (int) PreferenceProbes.FORMAT_MESSAGE_W.invokeExact(
+                    PreferenceProbes.FORMAT_MESSAGE_FROM_SYSTEM | PreferenceProbes.FORMAT_MESSAGE_IGNORE_INSERTS,
+                    MemorySegment.NULL, hresult, PreferenceProbes.LANG_NEUTRAL_SUBLANG_DEFAULT, wide, capacity,
+                    MemorySegment.NULL);
+            if (length == 0) {
+                throw new AssertionError("FormatMessageW has no message for 0x" + Integer.toHexString(hresult));
+            }
+            if (length > 1 && wide.getAtIndex(JAVA_CHAR, length - 1) == '\n') {
+                length--;
+                if (wide.getAtIndex(JAVA_CHAR, length - 1) == '\r') {
+                    length--;
+                }
+            }
+            wide.setAtIndex(JAVA_CHAR, length, '\0');
+            int size = (int) PreferenceProbes.WIDE_CHAR_TO_MULTI_BYTE.invokeExact(PreferenceProbes.CP_ACP, 0, wide, -1,
+                    MemorySegment.NULL, 0, MemorySegment.NULL, MemorySegment.NULL);
+            MemorySegment ansi = arena.allocate(Math.max(size, 1));
+            int written = (int) PreferenceProbes.WIDE_CHAR_TO_MULTI_BYTE.invokeExact(PreferenceProbes.CP_ACP, 0, wide,
+                    -1, ansi, size, MemorySegment.NULL, MemorySegment.NULL);
+            if (written <= 0) {
+                throw new AssertionError("WideCharToMultiByte(CP_ACP) answered " + written);
+            }
+            return ansi.asSlice(0, written - 1L).toArray(JAVA_BYTE);
+        } catch (Throwable t) {
+            throw hookFailure("FormatMessageW", t);
+        }
+    }
+
+    /**
+     * The bindings of the preferences section above, and the recording table that answers a chosen value. Binds no
+     * {@code gwin_test_*} hook, so it initializes on the release build of {@code glass.dll} too.
+     */
+    private static final class PreferenceProbes {
+
+        static {
+            WinGlassNative.ensureLoaded();
+        }
+
+        static final int FORMAT_MESSAGE_FROM_SYSTEM = 0x0000_1000;
+        static final int FORMAT_MESSAGE_IGNORE_INSERTS = 0x0000_0200;
+
+        /** {@code MAKELANGID(LANG_NEUTRAL, SUBLANG_DEFAULT)}, the language {@code _com_error} asks for. */
+        static final int LANG_NEUTRAL_SUBLANG_DEFAULT = 0x0400;
+
+        static final int CP_ACP = 0;
+
+        private static final Linker LINKER = Linker.nativeLinker();
+
+        /** {@code LRESULT SendMessageW(HWND hWnd, UINT Msg, WPARAM wParam, LPARAM lParam)}. */
+        static final MethodHandle SEND_MESSAGE_W = bindSystem("user32.dll", "SendMessageW",
+                FunctionDescriptor.of(JAVA_LONG, ADDRESS, JAVA_INT, JAVA_LONG, JAVA_LONG));
+
+        /** {@code int32_t gwin_prefs_query_ui_settings(GwinUiSettings* out)}. */
+        static final MethodHandle QUERY_UI_SETTINGS = bindGlass("gwin_prefs_query_ui_settings",
+                FunctionDescriptor.of(JAVA_INT, ADDRESS));
+
+        /** {@code int32_t gwin_prefs_query_network(GwinNetworkInfo* out)}. */
+        static final MethodHandle QUERY_NETWORK = bindGlass("gwin_prefs_query_network",
+                FunctionDescriptor.of(JAVA_INT, ADDRESS));
+
+        /** {@code HRESULT CoGetApartmentType(APTTYPE* pAptType, APTTYPEQUALIFIER* pAptQualifier)}. */
+        static final MethodHandle CO_GET_APARTMENT_TYPE = bindSystem("ole32.dll", "CoGetApartmentType",
+                FunctionDescriptor.of(JAVA_INT, ADDRESS, ADDRESS));
+
+        /** {@code HRESULT CoInitializeEx(LPVOID pvReserved, DWORD dwCoInit)}. */
+        static final MethodHandle CO_INITIALIZE_EX = bindSystem("ole32.dll", "CoInitializeEx",
+                FunctionDescriptor.of(JAVA_INT, ADDRESS, JAVA_INT));
+
+        /** {@code void CoUninitialize(void)}. */
+        static final MethodHandle CO_UNINITIALIZE = bindSystem("ole32.dll", "CoUninitialize",
+                FunctionDescriptor.ofVoid());
+
+        /**
+         * {@code DWORD FormatMessageW(DWORD dwFlags, LPCVOID lpSource, DWORD dwMessageId, DWORD dwLanguageId,
+         * LPWSTR lpBuffer, DWORD nSize, va_list* Arguments)}.
+         */
+        static final MethodHandle FORMAT_MESSAGE_W = bindSystem("kernel32.dll", "FormatMessageW",
+                FunctionDescriptor.of(JAVA_INT, JAVA_INT, ADDRESS, JAVA_INT, JAVA_INT, ADDRESS, JAVA_INT, ADDRESS));
+
+        /**
+         * {@code int WideCharToMultiByte(UINT CodePage, DWORD dwFlags, LPCWCH lpWideCharStr, int cchWideChar,
+         * LPSTR lpMultiByteStr, int cbMultiByte, LPCCH lpDefaultChar, LPBOOL lpUsedDefaultChar)}.
+         */
+        static final MethodHandle WIDE_CHAR_TO_MULTI_BYTE = bindSystem("kernel32.dll", "WideCharToMultiByte",
+                FunctionDescriptor.of(JAVA_INT, JAVA_INT, JAVA_INT, ADDRESS, JAVA_INT, ADDRESS, JAVA_INT, ADDRESS,
+                        ADDRESS));
+
+        static final AtomicInteger ANSWER = new AtomicInteger();
+        static final List<AnsweredPreferencesCall> CALLS = new CopyOnWriteArrayList<>();
+
+        /** {@code int32_t (*preferences_changed)(void* user, int32_t types)}. */
+        private static final FunctionDescriptor PREFS_CHANGED_FD = FunctionDescriptor.of(JAVA_INT, ADDRESS, JAVA_INT);
+
+        static final MemorySegment ANSWERING_STUB = answeringStub();
+
+        private PreferenceProbes() {
+        }
+
+        static int recordAndAnswer(MemorySegment user, int types) {
+            try {
+                CALLS.add(new AnsweredPreferencesCall(Thread.currentThread(), nativeThreadId(), types,
+                        user.address()));
+            } catch (Throwable t) {
+                CALLS.add(new AnsweredPreferencesCall(Thread.currentThread(), 0, types, user.address()));
+            }
+            return ANSWER.get();
+        }
+
+        @SuppressWarnings("restricted")
+        private static MethodHandle bindGlass(String name, FunctionDescriptor fd) {
+            MemorySegment symbol = NativeLibLoader.loadedLibrariesLookup().find(name).orElseThrow(
+                    () -> new UnsatisfiedLinkError("missing native symbol: " + name + " in glass"));
+            return LINKER.downcallHandle(symbol, fd);
+        }
+
+        @SuppressWarnings("restricted")
+        private static MethodHandle bindSystem(String library, String name, FunctionDescriptor fd) {
+            MemorySegment symbol = SymbolLookup.libraryLookup(library, Arena.global()).find(name).orElseThrow(
+                    () -> new UnsatisfiedLinkError("missing native symbol: " + name + " in " + library));
+            return LINKER.downcallHandle(symbol, fd);
+        }
+
+        @SuppressWarnings("restricted")
+        private static MemorySegment answeringStub() {
+            try {
+                MethodHandle target = MethodHandles.lookup().findStatic(PreferenceProbes.class, "recordAndAnswer",
+                        PREFS_CHANGED_FD.toMethodType());
+                return LINKER.upcallStub(target, PREFS_CHANGED_FD, Arena.global());
+            } catch (ReflectiveOperationException e) {
+                throw new AssertionError("no recording target recordAndAnswer", e);
+            }
         }
     }
 }

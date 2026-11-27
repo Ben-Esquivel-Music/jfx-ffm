@@ -34,7 +34,7 @@
  * receive WM_COMMAND; read by HandleMenuCommand, which runs on the Glass toolkit thread only - every
  * WM_COMMAND arrives through DispatchMessage -> BaseWnd::StaticWindowProc -> GlassWindow::WindowProc
  * -> GlassWindow::HandleCommand, and an inter-thread SendMessage still executes the WndProc on the
- * window's owning thread. No lock, by design, same as g_prefsCallbacks in PlatformSupport.cpp.
+ * window's owning thread. No lock, by design, same as the preferences table of the glass-win crate (ffi.rs).
  */
 static GwinMenuCallbacks g_menuCallbacks = { NULL };
 static void* g_menuUser = NULL;

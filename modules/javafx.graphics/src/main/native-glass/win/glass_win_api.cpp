@@ -35,7 +35,7 @@
  * GlassApplication.cpp's _runLoop / _terminateLoop / _invokeAndWait / _submitForLaterInvocation
  * moved rather than rewritten. For WinMenuImpl only gwin_sizeof_menu_callbacks is here; the menu table and
  * gwin_menu_set_callbacks live in GlassMenu.cpp beside their one reader, as the preferences table
- * lives in PlatformSupport.cpp.
+ * lives in the glass-win crate (native-rust/glass-win/src/ffi.rs) beside its reader.
  *
  * The view section (ABI 4): the two installers (the tables themselves are GlassView statics,
  * because ViewContainer.cpp and FullScreenWindow.cpp dial them too), the test hook, and the eleven
@@ -214,6 +214,9 @@ static_assert(COLOR_3DFACE == 15 && COLOR_BTNTEXT == 18 && COLOR_GRAYTEXT == 17
  * The two preferences structs. gwin_sizeof_ui_settings / gwin_sizeof_network_info let a Java test
  * compare a MemoryLayout against the real sizeof; these say what that sizeof has to be, so a padding
  * surprise is a compile error on every platform that ever builds this file, not a failing test on one.
+ * The two probes are Rust (native-rust/glass-win/src/ffi.rs) and measure the crate's repr(C) copies of
+ * the structs: the crate asserts the same size and offsets for them, and its abi_check.cpp compares
+ * them with these declarations field by field, so the numbers here are also what the probes return.
  */
 static_assert(sizeof(GwinUiSettings) == 60, "GwinUiSettings layout - update glass_win_api.h");
 static_assert(offsetof(GwinUiSettings, colors) == 8, "GwinUiSettings.colors");
@@ -406,7 +409,7 @@ static int32_t CaptureScreen(int32_t x, int32_t y, int32_t width, int32_t height
  * The application callback table. Written once by gwin_app_set_callbacks, from Java, on the launcher
  * thread before the Glass toolkit thread exists; read on the toolkit thread only - the launchable
  * inside gwin_run_loop, and every WM_DO_ACTION, WM_DO_ACTION_NOTIFY and WM_DO_ACTION_LATER the toolkit
- * window dispatches. No lock, by design, same as g_prefsCallbacks in PlatformSupport.cpp; see
+ * window dispatches. No lock, by design, same as the preferences table of the glass-win crate (ffi.rs); see
  * gwin_app_set_callbacks in glass_win_api.h.
  */
 static GwinAppCallbacks g_appCallbacks = { NULL };
@@ -570,7 +573,7 @@ void gwin_run_loop(int64_t launchable_id)
     while (GlassApplication::GetInstance() && ::GetMessage(&msg, NULL, 0, 0) > 0) {
         ::TranslateMessage(&msg);
         ::DispatchMessage(&msg);
-        PlatformSupport::RunDeferredPreferences();
+        glass_prefs_run_deferred();
     }
 
     if (GlassApplication::GetAccessibilityCount() > 0 && !IS_WIN8) {
@@ -640,23 +643,15 @@ int32_t gwin_invoke_later(int64_t runnable_id)
 }
 
 /*
- * Preferences: gwin_prefs_set_callbacks, gwin_prefs_query_ui_settings and gwin_prefs_query_network
- * live in PlatformSupport.cpp, which owns the WinRT objects and the RO_CHECKED machinery. Only the
- * two sizeof probes belong here, beside the static_asserts that pin the same numbers.
+ * Preferences: gwin_sizeof_ui_settings, gwin_sizeof_network_info, gwin_prefs_set_callbacks,
+ * gwin_prefs_query_ui_settings and gwin_prefs_query_network are defined by the glass-win crate
+ * (native-rust/glass-win/src/ffi.rs), linked into both builds of glass.dll, whose prefs module owns the WinRT
+ * objects; the static_asserts above pin the numbers the two probes return.
  */
-int32_t gwin_sizeof_ui_settings(void)
-{
-    return (int32_t) sizeof(GwinUiSettings);
-}
-
-int32_t gwin_sizeof_network_info(void)
-{
-    return (int32_t) sizeof(GwinNetworkInfo);
-}
 
 /*
  * Menus: gwin_menu_set_callbacks and the table it writes live in GlassMenu.cpp, which owns
- * HandleMenuCommand - the one reader. Only the sizeof probe belongs here, beside the other two.
+ * HandleMenuCommand - the one reader. Only the sizeof probe belongs here.
  */
 int32_t gwin_sizeof_menu_callbacks(void)
 {

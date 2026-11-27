@@ -184,3 +184,30 @@ The C++ is deleted. The WSL Linux build still configures. `backlog/README.md` is
 | 5 | Upcall order and timing in the invoke and fullscreen-animation paths. | Traces record order and thread; no new thread, timer or lock. |
 | 6 | The shared side of the toolkit guard held across a `SendMessageW`, an upcall or a wait deadlocks teardown. | One function owns the shared side and makes one OS call inside it; US-039 part 1's parked-poster and exit-from-a-runnable tests run against the slice. |
 
+## Facts from US-029 (2026-11-26)
+US-029 is implemented and committed as `7c38bdc73a` (the fixes of its code review of 2026-11-27 as `fcfc41cf48`); its
+"Implementation" has the details.
+- **The crate, the vendored `windows` crate and the switch:** as in US-030's "Facts from US-029": the `glass-win`
+  crate links into `glass` and `glass_test`, `windows` 0.62.2 is vendored in `buildtools/rust/vendor/`, and
+  `-DJFX_RUST=false` is a configure error for javafx.graphics on Windows, so a slice's C path cannot be built in the
+  same tree.
+- **The C++ side of the preferences seam is toolkit-core code:** `GlassApplication.h` holds `PreferencesHandle
+  m_platformSupport`, which creates and destroys the crate's handle (`GetPlatformSupport()` is now
+  `GetPreferencesHandle()`); the `GlassApplication` window procedure (`WM_DO_ACTION_LATER`, `WM_CREATE`,
+  `WM_NCDESTROY`, `WM_SETTINGCHANGE`, `WM_PREFERENCES_CHANGED`, `WM_TIMER`, `WM_THEMECHANGED`, `WM_SYSCOLORCHANGE`,
+  `WM_DWMCOLORIZATIONCOLORCHANGED`), `EnterNestedEventLoop` and `gwin_run_loop`'s pump call `glass_prefs_update`,
+  `glass_prefs_setting_changed`, `glass_prefs_run_deferred` and `glass_prefs_discard_deferred` (since US-029's code
+  review the first two take no handle: `int32_t glass_prefs_update(int32_t types)`,
+  `int32_t glass_prefs_setting_changed(uintptr_t wparam, intptr_t lparam)`);
+  `GlassApplication.cpp:517-551` defines the four functions the crate calls (`glass_prefs_post` over `PostToToolkit`,
+  `glass_prefs_arm_timer`, `glass_prefs_live_handle`, `glass_prefs_stderr`), and `glass_win_test.cpp:187-204` the
+  three probes.
+  `win.cmake` lists them under `INTERNAL` and `IMPORTS`. The `GlassApplication` and `gwin_run_loop` parts of it are
+  in the code slice 3 moves.
+- **Sizes:** `GlassApplication.cpp` 608 and `GlassApplication.h` 214 lines after US-029 (573 and 195 at
+  `5a709c189d`); `glass_win_api.cpp` 1,735.
+- **Untested call sites:** six of the seven sites of US-132 (the deferred delivery in `gwin_run_loop`'s pump,
+  `EnterNestedEventLoop`, `WM_DO_ACTION_LATER` and the `WM_PREFERENCES_CHANGED` wake arm; the discards in `WM_CREATE`
+  and `WM_NCDESTROY`) failed no test when removed in US-029's mutant run.
+- **The sinks are agile delegates:** the OS may invoke them on its own thread; they only post, through
+  `glass_prefs_post`, the guarded post of US-039 part 1.

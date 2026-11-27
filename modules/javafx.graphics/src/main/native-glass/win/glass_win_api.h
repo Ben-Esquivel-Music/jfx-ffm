@@ -438,7 +438,7 @@ GLASS_WIN_EXPORT int32_t gwin_key_code_for_char(uint16_t c, int32_t hint);
  */
 
 /*
- * ---- Platform preferences (PlatformSupport.cpp) ----
+ * ---- Platform preferences (the prefs module of the glass-win crate, native-rust/glass-win) ----
  *
  * PlatformSupport built a java.util.Map in C. Its eleven Call*Method / NewObject sites are
  * HashMap.<init>, Map.put x5, Color.rgb x2, Object.equals, Collections.unmodifiableMap and
@@ -455,7 +455,7 @@ GLASS_WIN_EXPORT int32_t gwin_key_code_for_char(uint16_t c, int32_t hint);
  * an upcall, because only native code knows when a preference may have changed.
  */
 
-/* PlatformSupport::PreferenceType, PlatformSupport.h. A bitmask, not an index. */
+/* The glass-win crate's GWIN_PT_* constants mirror these (its abi_check.cpp asserts it). A bitmask, not an index. */
 enum GwinPreferenceType {
     GWIN_PT_SYSTEM_COLORS       = 1,
     GWIN_PT_SYSTEM_PARAMS       = 2,
@@ -465,14 +465,14 @@ enum GwinPreferenceType {
 };
 
 /* Background, Foreground, AccentDark3..1, Accent, AccentLight1..3 - the order of the former
- * PlatformSupport::queryUISettings (collectUISettings keeps it), which is also the order WinPreferences
+ * PlatformSupport::queryUISettings (the crate's collect_ui_settings keeps it), which is also the order WinPreferences
  * must name the keys in. */
 #define GWIN_UI_COLOR_COUNT 9
 
 /*
  * Three generations of IUISettings, each with its own validity flag, because the C returned out of the
- * former queryUISettings on the first RoException and so dropped every later key too (collectUISettings
- * returns at the same point). The flags are monotone:
+ * former queryUISettings on the first RoException and so dropped every later key too (the crate's
+ * collect_ui_settings returns at the same point). The flags are monotone:
  * !colors_valid => !advanced_effects_valid => !auto_hide_valid. A 0 flag means "no key at all for
  * this group", not "false" - the C emitted no map entry in that case, and Java must not either.
  *
@@ -513,9 +513,9 @@ enum GwinNetworkCost {
 
 typedef struct GwinNetworkInfo {
     /*
-     * 0: the activation factory was unavailable, or an RoException was caught before the C reached
-     * its putString - in both cases there is NO key. 1 with cost_type == GWIN_NET_COST_UNKNOWN is the
-     * different case where the C DID write the key, with the value "Unknown": either there is no
+     * 0: the activation factory was unavailable, or a WinRT call failed before the C reached its putString
+     * (it threw an RoException there) - in both cases there is NO key. 1 with cost_type == GWIN_NET_COST_UNKNOWN is
+     * the different case where the C DID write the key, with the value "Unknown": either there is no
      * internet connection profile, or the profile reported a cost the switch does not name.
      */
     int32_t available;
@@ -529,8 +529,8 @@ typedef struct GwinPrefsCallbacks {
      * 4 (the "ImmersiveColorSet" WM_SETTINGCHANGE and the AutoHideScrollBars sink), 5
      * (WM_THEMECHANGED / WM_SYSCOLORCHANGE / WM_DWMCOLORIZATIONCOLORCHANGED), 6 (SPI_SETHIGHCONTRAST),
      * 8 (the NetworkStatusChanged sink) and 12 (4 | 8). A sink whose post failed keeps its type (see
-     * THREAD): PlatformSupport::PostPreferencesChanged ORs it into one process-wide word with
-     * InterlockedOr, and PlatformSupport::RunDeferredPreferences delivers the whole word in one call, so a
+     * THREAD): post_preferences_changed in the glass-win crate's prefs.rs ORs it into one process-wide word
+     * atomically, and its run_deferred (glass_prefs_run_deferred) delivers the whole word in one call, so a
      * delivery of kept types is 4, 8 or 12. GWIN_PT_ALL is never sent here - that is the
      * collect-only path, WinPreferences.collect(GWIN_PT_ALL) behind WinApplication.getPlatformPreferences.
      *
@@ -551,8 +551,9 @@ typedef struct GwinPrefsCallbacks {
      * for the types a sink kept (below), with no lock held where a retrieved message has just been dispatched:
      * right after a DispatchMessage of the pump of gwin_run_loop or gwin_enter_nested_event_loop, or in
      * the toolkit window's WM_DO_ACTION_LATER arm, the arm for the sink's wake or its WM_TIMER arm.
-     * WRL Callback<> delegates are not agile, so the OS may invoke a sink on the toolkit thread or on a
-     * thread of its own; either way the sink only posts its types to the toolkit window through the
+     * The sinks are the windows crate's delegates, which are agile (they answer IAgileObject and a
+     * free-threaded IMarshal), so the OS may invoke a sink on the toolkit thread or directly on a thread of
+     * its own; either way the sink only posts its types to the toolkit window through the
      * guarded post of gwin_invoke_later, and the notification reaches Java asynchronously, on the
      * toolkit thread. A sink invoked once the toolkit window is cleared posts nothing and keeps nothing.
      * When the PostMessage fails with the toolkit window published - the toolkit thread's
@@ -572,8 +573,9 @@ typedef struct GwinPrefsCallbacks {
      *
      * RUNDOWN: only the toolkit window's procedure and the two pumps call this slot, and the toolkit
      * thread retrieves no message once gwin_run_loop has returned, so no call starts after that return -
-     * also when the pump ended with the window still alive. PlatformSupport's destructor removes both sink
-     * registrations with the tokens it kept and releases every WinRT object before RoUninitialize.
+     * also when the pump ended with the window still alive. The teardown of the preferences handle
+     * (glass_prefs_destroy, from ~GlassApplication) removes both sink registrations with the tokens it kept
+     * and releases every WinRT object before RoUninitialize.
      * Java may therefore clear the table with gwin_prefs_set_callbacks(NULL, NULL) on the toolkit
      * thread where gwin_run_loop returned and then free the upcall stub (WinApplication closes its
      * application arena there). The SWT-embedded case never calls gwin_run_loop and has no such point:
@@ -592,33 +594,39 @@ GLASS_WIN_EXPORT int32_t gwin_sizeof_network_info(void);
  * close it, but the upcall stub it holds must stay valid until the table is cleared at the rundown
  * point (see GwinPrefsCallbacks RUNDOWN). `user` is passed back unchanged and is never dereferenced here.
  *
- * THE TABLE IS THE ONLY NOTIFICATION PATH. While no table is installed,
- * PlatformSupport::updatePreferences delivers nothing and answers false; its JNI arm, which built the
- * java.util.Map in C and called Application.notifyPreferencesChanged, is gone.
+ * THE TABLE IS THE ONLY NOTIFICATION PATH. While no table is installed, the update of the glass-win
+ * crate (glass_prefs_update) delivers nothing and answers false; the JNI arm of the former
+ * PlatformSupport::updatePreferences, which built the java.util.Map in C and called
+ * Application.notifyPreferencesChanged, is gone.
  *
  * No lock, by design. Install once from WinApplication's static initializer, which runs on the
  * launcher thread before runLoop starts the Glass toolkit thread, so "installed before the first
  * WndProc message" holds by construction; lazy installation would drop every notification that
  * arrives during startup. Clear it (cb == NULL) only on the toolkit thread after gwin_run_loop has
- * returned: the only reader, updatePreferences, runs on that thread inside its message retrieval, so
- * the clear comes after its last read. updatePreferences loads the slot once per call.
+ * returned: the only reader, the crate's update, runs on that thread inside its message retrieval, so
+ * the clear comes after its last read. The update loads the slot once per call.
  *
- * Always returns GWIN_OK.
+ * Returns GWIN_OK. GWIN_ERR_INVALID_ARG only when the crate caught a panic of its own in this call (a bug):
+ * the panic never reaches the caller.
  */
 GLASS_WIN_EXPORT int32_t gwin_prefs_set_callbacks(const GwinPrefsCallbacks* cb, void* user);
 
 /*
- * Fills *out with the IUISettings half of the preferences (PlatformSupport::collectUISettings, the former
- * queryUISettings) resp. the INetworkInformationStatics half (collectNetworkInfo, the former
- * queryNetworkInformation). Both zero-fill *out first, so an
- * `available` of 0 always comes with a fully zeroed struct.
+ * Fills *out with the IUISettings half of the preferences (collect_ui_settings of the glass-win crate's
+ * prefs.rs, the former queryUISettings) resp. the INetworkInformationStatics half (collect_network_info,
+ * the former queryNetworkInformation). Every byte of *out is written, and an `available` of 0 always
+ * comes with a fully zeroed struct.
  *
  * out == NULL -> GWIN_ERR_INVALID_ARG, nothing written. Otherwise GWIN_OK; every failure the C
  * tolerated is reported through the struct's flags, not the return value, because the C tolerated it
  * by emitting fewer map keys and this ABI has to be able to say the same thing.
+ * A panic the crate caught (a bug, never passed on to the caller) while it read the live toolkit's
+ * preferences handle poisons that handle: that query and every later one on the handle answer as a
+ * toolkit without WinRT objects does, a zeroed struct and GWIN_OK, until the toolkit window is
+ * destroyed. A panic caught anywhere else in the call answers GWIN_ERR_INVALID_ARG with nothing written.
  *
  * available == 0 also covers "the Glass toolkit is not running": these read the WinRT objects the
- * live GlassApplication's PlatformSupport activated, and before Application.run() (or after the
+ * live GlassApplication's preferences handle activated, and before Application.run() (or after the
  * toolkit window is destroyed) there are none. That means no WinRT keys, not no keys: the method
  * itself is Java now - WinApplication.getPlatformPreferences is WinPreferences.collect, which calls
  * these two and still returns the user32 keys it reads itself, where the former JNI
@@ -703,11 +711,12 @@ GLASS_WIN_EXPORT int32_t gwin_app_set_callbacks(const GwinAppCallbacks* cb, void
  * WinApplication._init's former JNI body without its DPI-awareness step, which Java performs itself
  * (shcore!SetProcessDpiAwareness, else user32!SetProcessDPIAware) immediately before this call:
  * new GlassApplication() - RegisterClassExW + CreateWindowExW of the hidden toolkit window, whose
- * WM_CREATE publishes the instance every other export reads - including PlatformSupport's WinRT
- * activation (RoInitialize(RO_INIT_SINGLETHREADED), UISettings, NetworkInformation and their two event
- * sinks). If no toolkit window exists afterwards the object is deleted, as the JNI did. Returns the
- * toolkit HWND or NULL; Java DISCARDS it, exactly as it discarded _init's jlong, and must never cache it
- * for DestroyWindow (gwin_terminate_loop reads the published HWND - HWND values are recycled).
+ * WM_CREATE publishes the instance every other export reads - including the WinRT activation of its
+ * preferences handle (glass_prefs_create of the glass-win crate: RoInitialize(RO_INIT_SINGLETHREADED),
+ * UISettings, NetworkInformation and their two event sinks). If no toolkit window exists afterwards the
+ * object is deleted, as the JNI did. Returns the toolkit HWND or NULL; Java DISCARDS it, exactly as it
+ * discarded _init's jlong, and must never cache it for DestroyWindow (gwin_terminate_loop reads the published
+ * HWND - HWND values are recycled).
  * THREAD: the thread that will call gwin_run_loop (SWT-embedded: the embedder's UI thread), before it -
  * RoInitialize's apartment is the one gwin_run_loop's OleInitialize then joins. A second call leaks the
  * first instance, as the JNI did. No upcall on the calling thread; the two WinRT sinks may be invoked
@@ -724,10 +733,10 @@ GLASS_WIN_EXPORT void* gwin_app_create(void);
  *      run the launchable itself before the downcall: the JNI ran it after OleInitialize and before
  *      the pump, and Application.run passes Screen.initScreens() + FX startup as it.
  *   3. while (GlassApplication::GetInstance() && GetMessage(&msg, NULL, 0, 0) > 0)
- *          { TranslateMessage; DispatchMessage; PlatformSupport::RunDeferredPreferences; }
+ *          { TranslateMessage; DispatchMessage; glass_prefs_run_deferred(); }
  *      - the instance may be destroyed by a nested loop, and WM_QUIT is deliberately LEFT on the
  *      queue. The GetInstance() term is load-bearing; the queue is not drained. The JNI body had no
- *      RunDeferredPreferences step: it delivers the preference types a WinRT sink kept because its
+ *      glass_prefs_run_deferred step: it delivers the preference types a WinRT sink kept because its
  *      post failed (see GwinPrefsCallbacks THREAD), and does nothing else.
  *   4. the Windows 7 + Narrator workaround: if GetAccessibilityCount() > 0 && !IS_WIN8, one more
  *      SetTimer(NULL, NULL, 1000, NULL) / GetMessage / KillTimer round. Unreachable on Windows 10+;
@@ -3096,8 +3105,8 @@ enum GwinTestCounter {
     GWIN_TEST_COUNTER_BSTR_FREE     = 9,  /* of those, released by its VariantClear */
     GWIN_TEST_COUNTER_PREFS_DEFERRED = 10, /* preference-sink posts whose PostMessage failed with the toolkit
                                             * window published; their types were kept for a later delivery */
-    GWIN_TEST_COUNTER_PREFS_DEFERRED_RUN = 11, /* deliveries of kept types: updatePreferences calls of
-                                                * PlatformSupport::RunDeferredPreferences */
+    GWIN_TEST_COUNTER_PREFS_DEFERRED_RUN = 11, /* deliveries of kept types: the updates of the glass-win
+                                                * crate's run_deferred (glass_prefs_run_deferred) */
     GWIN_TEST_COUNTER_PREFS_WAKE_TIMER = 12    /* wake timers armed on the toolkit window because a sink's wake
                                                 * post was refused with the window published: SetTimer
                                                 * succeeded, on the toolkit thread, from either path */
@@ -3124,11 +3133,11 @@ GLASS_WIN_EXPORT int64_t gwin_test_counter(int32_t which);
 GLASS_WIN_EXPORT int32_t gwin_test_publication(int64_t* out2);
 #endif /* GLASS_WIN_TEST_HOOKS */
 
-/* gwin_test_event_log codes: the teardown steps of PlatformSupport and RoActivationSupport. */
+/* gwin_test_event_log codes: the teardown steps of the preferences handle (glass_prefs_destroy). */
 enum GwinTestEvent {
     GWIN_TEST_EVENT_REMOVE_AUTO_HIDE         = 1,  /* remove_AutoHideScrollBarsChanged with the kept token */
     GWIN_TEST_EVENT_REMOVE_NETWORK           = 2,  /* remove_NetworkStatusChanged with the kept token      */
-    GWIN_TEST_EVENT_RELEASE_UI_SETTINGS      = 3,  /* PlatformSupport released its IUISettings             */
+    GWIN_TEST_EVENT_RELEASE_UI_SETTINGS      = 3,  /* the handle released its UISettings                   */
     GWIN_TEST_EVENT_RELEASE_NETWORK_STATICS  = 4,  /* ... its INetworkInformationStatics                   */
     GWIN_TEST_EVENT_RELEASE_NETWORK_FACTORY  = 5,  /* ... the IActivationFactory it was queried from       */
     GWIN_TEST_EVENT_RO_UNINITIALIZE          = 6   /* immediately before RoUninitialize                    */
@@ -3200,7 +3209,7 @@ GLASS_WIN_EXPORT int32_t gwin_test_decoy_messages(int64_t* out3, int32_t capacit
 GLASS_WIN_EXPORT int32_t gwin_test_decoy_stop(void);
 #endif /* GLASS_WIN_TEST_HOOKS */
 
-/* gwin_test_prefs_invoke / gwin_test_prefs_delegate_calls: which of PlatformSupport's two delegates. */
+/* gwin_test_prefs_invoke / gwin_test_prefs_delegate_calls: which of the two preference-sink delegates. */
 enum GwinTestDelegate {
     GWIN_TEST_DELEGATE_AUTO_HIDE = 0,   /* IUISettings5::AutoHideScrollBarsChanged             */
     GWIN_TEST_DELEGATE_NETWORK   = 1    /* INetworkInformationStatics::NetworkStatusChanged    */
@@ -3208,9 +3217,11 @@ enum GwinTestDelegate {
 
 #ifdef GLASS_WIN_TEST_HOOKS
 /*
- * TEST HOOK. on != 0: from now on PlatformSupport keeps one extra reference to each delegate it registers -
+ * TEST HOOK. on != 0: from now on glass_prefs_create keeps one extra reference to each delegate it registers -
  * the reference an event source takes at registration - releasing any it kept before. on == 0: stops and
- * releases both. Not concurrently with gwin_app_create or gwin_test_prefs_invoke. Always GWIN_OK.
+ * releases both. Not concurrently with gwin_app_create or gwin_test_prefs_invoke. Returns GWIN_OK.
+ * GWIN_ERR_INVALID_ARG only when the crate caught a panic of its own in this call (a bug): the panic never
+ * reaches the caller.
  */
 GLASS_WIN_EXPORT int32_t gwin_test_prefs_capture(int32_t on);
 
