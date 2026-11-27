@@ -1,0 +1,39 @@
+# glass/win preferences query golden: the GwinUiSettings (60 bytes) and GwinNetworkInfo (8 bytes)
+# that gwin_prefs_query_ui_settings and gwin_prefs_query_network wrote on the toolkit thread of a live
+# toolkit, and their statuses, as raw bytes in memory order. Captured by
+# test.com.sun.glass.ui.win.WinPreferenceQueryGoldenTest from the C++ of commit 5a709c189d
+# (PlatformSupport::collectUISettings and collectNetworkInfo) on one machine. The values are that
+# machine's theme, accent colour, transparency effects, scroll-bar setting and network: compare only
+# there, with those unchanged.
+# Lines beginning with # are ignored. machine.* must match before anything is compared; info.* and
+# capture.* are recorded, never compared; query.* are compared exactly; decoded.* restate query.* for
+# a reader. Regenerating this file is a behaviour change, not a test fix.
+machine.os.name=Windows 10
+machine.os.arch=amd64
+machine.windows.build=10.0.19045
+info.windows.version=10.0.19045.6466
+capture.provenance=OpenJDK 64-Bit Server VM 27+35
+capture.glass.sha256=227d900bb2cce6036ba0f45373c6e0f628fc43dc1e5d586d50a1e03e816d93c3
+capture.commit=5a709c189d
+capture.date=2026-11-26
+query.ui.status=0
+query.ui.bytes=0100000001000000ffffffff000000ff422600ff754200ff9e5a00ffd77800ffe39c42ffedb976ffffd8a6ff01000000010000000100000001000000
+query.network.status=0
+query.network.bytes=0100000001000000
+decoded.ui.available=1
+decoded.ui.colors_valid=1
+decoded.ui.colors.0.Background=0xffffffff
+decoded.ui.colors.1.Foreground=0xff000000
+decoded.ui.colors.2.AccentDark3=0xff002642
+decoded.ui.colors.3.AccentDark2=0xff004275
+decoded.ui.colors.4.AccentDark1=0xff005a9e
+decoded.ui.colors.5.Accent=0xff0078d7
+decoded.ui.colors.6.AccentLight1=0xff429ce3
+decoded.ui.colors.7.AccentLight2=0xff76b9ed
+decoded.ui.colors.8.AccentLight3=0xffa6d8ff
+decoded.ui.advanced_effects_valid=1
+decoded.ui.advanced_effects_enabled=1
+decoded.ui.auto_hide_valid=1
+decoded.ui.auto_hide_scroll_bars=1
+decoded.network.available=1
+decoded.network.cost_type=1 UNRESTRICTED

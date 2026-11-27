@@ -41,7 +41,8 @@
 #
 # The Linux, macOS and Windows jobs also set up the Rust toolchain that
 # rust-toolchain.toml pins, plus cbindgen for the build's lint, because
-# jfxmedia links a Rust staticlib. A step after the build checks its exports.
+# jfxmedia links a Rust staticlib, and on Windows glass links one too. A step
+# after the build checks the exports of jfxmedia.
 # On Linux and Windows jfxmedia must export exactly the JFXM_EXPORT names of
 # jfxmedia_api.h. On macOS it must export each of those names and otherwise
 # exactly the names of its C build (jfxmedia_avf imports C++ ones), which the
@@ -1192,7 +1193,7 @@ jobs:
           CACHE_RUSTUP_HOME: ${{ steps.rust.outputs.rustup_home }}
           CACHE_CARGO_HOME: ${{ steps.rust.outputs.cargo_home }}
         run: |
-          # jfxmedia links a Rust staticlib (buildtools/rust/jfx_rust.cmake). In the repository root,
+          # jfxmedia and glass link Rust staticlibs (buildtools/rust/jfx_rust.cmake). In the repository root,
           # rustup installs the toolchain that rust-toolchain.toml pins, and the lint of the build
           # (jfx_rust_lint) needs the pinned cbindgen. An image without rustup gets rustup-init the
           # way the boot JDK is fetched. A restore that was not a hit can still have written part of

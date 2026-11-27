@@ -28,8 +28,10 @@
  * counters and logs with their switch, the reads of GlassApplication's published toolkit window and
  * thread that STALE and gwin_test_publication use, the park gate, the private-message send and queue
  * peek, the decoy windows and the IME composition driver. The preference-sink hooks that need the
- * delegates live in PlatformSupport.cpp. The probes production code carries (glass_win_test.h) read only
- * the flags written here, and nothing here runs unless a test calls a gwin_test_* export.
+ * delegates, gwin_test_prefs_capture and gwin_test_prefs_invoke, are in the glass-win crate (ffi.rs), which
+ * places its probes through the three glass_prefs_test_* functions below. The probes production code carries
+ * (glass_win_test.h) read only the flags written here, and nothing here runs unless a test calls a gwin_test_*
+ * export.
  *
  * Compiled only into the test build of glass.dll (GLASS_WIN_TEST_HOOKS, US-068): in the release build
  * this translation unit is empty.
@@ -177,6 +179,29 @@ void GwinTestRecordDelegateCallSlow(int32_t which)
     }
     ::ReleaseSRWLockExclusive(&s_delegateCallLock);
 }
+
+/*
+ * The probes of glass_win_test.h for the glass-win crate's preferences (glass_win_prefs.h): first thing in each
+ * sink, the teardown events, the two deferral counters.
+ */
+extern "C" {
+
+void glass_prefs_test_record_delegate_call(int32_t which) noexcept
+{
+    GwinTestRecordDelegateCall(which);
+}
+
+void glass_prefs_test_log_event(int32_t code) noexcept
+{
+    GwinTestLogEvent(code);
+}
+
+void glass_prefs_test_count(int32_t which) noexcept
+{
+    GwinTestCount(which);
+}
+
+} // extern "C"
 
 /*
  * ---- the park gate ----

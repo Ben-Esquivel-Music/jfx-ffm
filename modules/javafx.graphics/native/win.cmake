@@ -225,10 +225,50 @@ set(GLASS_LIBRARY_ARGS
 
 add_jfx_library(glass ${GLASS_LIBRARY_ARGS})
 
+# The WinRT preferences come from the glass-win crate (buildtools/rust/jfx_rust.cmake): the five preferences
+# exports of glass_win_api.h, and the functions of glass_win_prefs.h, the boundary to the C++ toolkit core, that the
+# crate defines (INTERNAL) or calls (IMPORTS). Their C++ is deleted (C_DELETED), so -DJFX_RUST=false is a configure
+# error here. glass_win_api.h stands for the export list of both builds: the helper reads its GLASS_WIN_EXPORT
+# lines, the test hooks under #ifdef GLASS_WIN_TEST_HOOKS included, and on Windows uses them only to check that each
+# EXPORTS symbol is declared there. The test build links the crate's archive built with its test-hooks feature, with
+# the two preference test hooks and the three probes it calls; the release glass.dll links the one without, which
+# holds neither. The ABI check of the test-hooks archive defines GLASS_WIN_TEST_HOOKS as the compile of glass_test
+# does.
+set(GLASS_RUST_HEADERS
+    "${GRAPHICS_SRC}/native-glass/win/glass_win_api.h"
+    "${GRAPHICS_SRC}/native-glass/win/glass_win_prefs.h")
+set(GLASS_RUST_EXPORTS
+    gwin_sizeof_ui_settings gwin_sizeof_network_info
+    gwin_prefs_set_callbacks gwin_prefs_query_ui_settings gwin_prefs_query_network)
+set(GLASS_RUST_INTERNAL
+    glass_prefs_create glass_prefs_destroy glass_prefs_update glass_prefs_setting_changed
+    glass_prefs_run_deferred glass_prefs_discard_deferred)
+set(GLASS_RUST_IMPORTS
+    glass_prefs_post glass_prefs_arm_timer glass_prefs_live_handle glass_prefs_stderr)
+jfx_add_rust_slice(glass
+    CRATE "${GRAPHICS_SRC}/native-rust/glass-win"
+    SLICE GLASS_WIN_PREFERENCES
+    HEADERS ${GLASS_RUST_HEADERS}
+    EXPORTS ${GLASS_RUST_EXPORTS}
+    INTERNAL ${GLASS_RUST_INTERNAL}
+    IMPORTS ${GLASS_RUST_IMPORTS}
+    C_DELETED)
+
 if(GLASS_WIN_TEST_HOOKS)
     add_jfx_library(glass_test ${GLASS_LIBRARY_ARGS}
         OUTPUT_DIR "${GLASS_TEST_BIN_DIR}"
         COMPILE_OPTIONS /DGLASS_WIN_TEST_HOOKS=1)
+    jfx_add_rust_slice(glass_test
+        CRATE "${GRAPHICS_SRC}/native-rust/glass-win"
+        SLICE GLASS_WIN_PREFERENCES
+        HEADERS ${GLASS_RUST_HEADERS}
+        EXPORTS ${GLASS_RUST_EXPORTS} gwin_test_prefs_capture gwin_test_prefs_invoke
+        INTERNAL ${GLASS_RUST_INTERNAL}
+        IMPORTS ${GLASS_RUST_IMPORTS}
+            glass_prefs_test_record_delegate_call glass_prefs_test_log_event glass_prefs_test_count
+        FEATURES test-hooks
+        ABI_CHECK_DEFINITIONS GLASS_WIN_TEST_HOOKS=1
+        C_DELETED)
 endif()
 
 # ---------------------------------------------------------------------------

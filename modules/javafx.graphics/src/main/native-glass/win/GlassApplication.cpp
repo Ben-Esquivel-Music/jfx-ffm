@@ -29,7 +29,6 @@
 #include "GlassClipboard.h"
 #include "GlassScreen.h"
 #include "GlassWindow.h"
-#include "RoActivationSupport.h"
 #include "glass_win_test.h"
 
 
@@ -169,7 +168,8 @@ void SetPreferencesTimer(HWND hWnd)
 
 /*
  * gwin_app_create's constructor (glass_win_api.h, ABI 5): the four statements of the former JNI
- * constructor GlassApplication(jobject), with the no-JNI PlatformSupport - the same WinRT activation.
+ * constructor GlassApplication(jobject), with the same WinRT activation, now glass_prefs_create of the glass-win
+ * crate in m_platformSupport's initialisation.
  */
 GlassApplication::GlassApplication() : BaseWnd(), m_platformSupport()
 {
@@ -202,7 +202,7 @@ LRESULT GlassApplication::WindowProc(UINT msg, WPARAM wParam, LPARAM lParam)
                     GwinTestCount(GWIN_TEST_COUNTER_ACTION_FREE);
                     // A posted message, so whichever pump dispatched it - also one that is not ours - is
                     // where the WM_PREFERENCES_CHANGED arm would run: deliver what a sink kept.
-                    PlatformSupport::RunDeferredPreferences();
+                    glass_prefs_run_deferred();
                 }
             }
             return 0;
@@ -225,8 +225,8 @@ LRESULT GlassApplication::WindowProc(UINT msg, WPARAM wParam, LPARAM lParam)
             // gwin_app_create is called again, the toolkit window of the earlier instance, whose WM_NCDESTROY
             // has not run, so a guarded post or send that loaded it still reaches a window that exists.
             // Preference types a sink kept under an earlier toolkit window are dropped before this one is
-            // published (PlatformSupport::PostPreferencesChanged).
-            PlatformSupport::DiscardDeferredPreferences();
+            // published (post_preferences_changed in the glass-win crate's prefs.rs).
+            glass_prefs_discard_deferred();
             pInstance = this;
             sm_toolkitThreadId.store(m_mainThreadId);
             sm_toolkitHwnd.store(GetHWND());
@@ -247,7 +247,7 @@ LRESULT GlassApplication::WindowProc(UINT msg, WPARAM wParam, LPARAM lParam)
             sm_toolkitHwnd.store(NULL);
             sm_toolkitThreadId.store(0);
             ::ReleaseSRWLockExclusive(&sm_publicationLock);
-            PlatformSupport::DiscardDeferredPreferences();
+            glass_prefs_discard_deferred();
             // pInstance is deleted in BaseWnd::StaticWindowProc
             pInstance = NULL;
             RunDownPendingActions();
@@ -273,7 +273,7 @@ LRESULT GlassApplication::WindowProc(UINT msg, WPARAM wParam, LPARAM lParam)
             }
             break;
         case WM_SETTINGCHANGE:
-            if (m_platformSupport.onSettingChanged(wParam, lParam)) {
+            if (glass_prefs_setting_changed(m_platformSupport.Get(), (uintptr_t)wParam, (intptr_t)lParam) != 0) {
                 return 0;
             }
 
@@ -285,17 +285,17 @@ LRESULT GlassApplication::WindowProc(UINT msg, WPARAM wParam, LPARAM lParam)
             GlassScreen::HandleDisplayChange();
             break;
         case WM_PREFERENCES_CHANGED:
-            // A WinRT sink posted from its own thread (PlatformSupport::PostPreferencesChanged); handled
+            // A WinRT sink posted from its own thread (post_preferences_changed in prefs.rs); handled
             // here like the arms below, so preferences_changed only ever runs on this thread. wParam 0 is
             // the wake that follows a failed post: it delivers the types the sink kept instead, and answers
             // what DefWindowProc answers for it without touching this instance afterwards.
             {
-                const int types = (int)wParam & PlatformSupport::PT_ALL;
+                const int types = (int)wParam & GWIN_PT_ALL;
                 if (types == 0) {
-                    PlatformSupport::RunDeferredPreferences();
+                    glass_prefs_run_deferred();
                     return 0;
                 }
-                if (m_platformSupport.updatePreferences(PlatformSupport::PreferenceType(types))) {
+                if (glass_prefs_update(m_platformSupport.Get(), types) != 0) {
                     return 0;
                 }
             }
@@ -312,16 +312,14 @@ LRESULT GlassApplication::WindowProc(UINT msg, WPARAM wParam, LPARAM lParam)
             // deliver what a sink kept, as the wake arm does, without touching this instance afterwards.
             if (wParam == IDT_PREFERENCES_WAKE) {
                 ::KillTimer(GetHWND(), IDT_PREFERENCES_WAKE);
-                PlatformSupport::RunDeferredPreferences();
+                glass_prefs_run_deferred();
                 return 0;
             }
             break;
         case WM_THEMECHANGED:
         case WM_SYSCOLORCHANGE:
         case WM_DWMCOLORIZATIONCOLORCHANGED:
-            if (m_platformSupport.updatePreferences(
-                    PlatformSupport::PreferenceType(PlatformSupport::PT_SYSTEM_COLORS |
-                                                    PlatformSupport::PT_UI_SETTINGS))) {
+            if (glass_prefs_update(m_platformSupport.Get(), GWIN_PT_SYSTEM_COLORS | GWIN_PT_UI_SETTINGS) != 0) {
                 return 0;
             }
             break;
@@ -516,6 +514,43 @@ void GlassApplication::ArmPreferencesTimer()
 }
 
 /*
+ * ---- glass_win_prefs.h: what the toolkit core does for the glass-win crate's preferences ----
+ *
+ * The crate's two sinks call the first two, on whatever thread the OS invokes them: a thread of its own or the
+ * toolkit thread (gwin_test_prefs_invoke invokes them on its caller's thread). The third is called by the queries
+ * gwin_prefs_query_ui_settings / gwin_prefs_query_network, on the thread that calls them (glass_win_api.h asks for
+ * the toolkit thread), and by glass_prefs_run_deferred on the toolkit thread; the fourth by glass_prefs_create when
+ * RoInitialize fails. Each is noexcept and calls nothing that throws.
+ */
+extern "C" {
+
+int32_t glass_prefs_post(int32_t types, int32_t* published) noexcept
+{
+    bool isPublished = false;
+    const bool posted = GlassApplication::PostToToolkit(WM_PREFERENCES_CHANGED, (WPARAM)types, (LPARAM)0,
+                                                        &isPublished);
+    *published = isPublished ? 1 : 0;
+    return posted ? 1 : 0;
+}
+
+void glass_prefs_arm_timer(void) noexcept
+{
+    GlassApplication::ArmPreferencesTimer();
+}
+
+void* glass_prefs_live_handle(void) noexcept
+{
+    return GlassApplication::GetPreferencesHandle();
+}
+
+void glass_prefs_stderr(const char* text) noexcept
+{
+    ::fputs(text, stderr);
+}
+
+} // extern "C"
+
+/*
  * static
  *
  * The pump itself, with no JVM in it: glass_win_api.h's gwin_enter_nested_event_loop forwards here.
@@ -534,7 +569,7 @@ void GlassApplication::EnterNestedEventLoop()
     {
         ::TranslateMessage(&msg);
         ::DispatchMessage(&msg);
-        PlatformSupport::RunDeferredPreferences();
+        glass_prefs_run_deferred();
     }
 
     sm_shouldLeaveNestedLoop = false;

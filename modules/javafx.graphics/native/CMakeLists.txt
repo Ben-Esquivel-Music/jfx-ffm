@@ -62,8 +62,8 @@ endif()
 
 set(GRAPHICS_SRC "${CMAKE_CURRENT_SOURCE_DIR}/../src/main")
 
-# Rust slices of the libraries (none in this tree yet), the JFX_RUST option and the jfx_rust_test and
-# jfx_rust_lint targets
+# Rust slices of the libraries (on Windows, glass.dll links the glass-win crate), the JFX_RUST option and the
+# jfx_rust_test and jfx_rust_lint targets
 include("${CMAKE_CURRENT_SOURCE_DIR}/../../../buildtools/rust/jfx_rust.cmake")
 
 if(WIN32)

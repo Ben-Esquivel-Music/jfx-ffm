@@ -28,34 +28,59 @@
 #   jfx_add_rust_slice(<target>
 #       CRATE <crate dir>                 # modules/<module>/src/main/native-rust/<crate>
 #       SLICE <NAME>                      # JFX_RUST_<NAME>=1 is defined for <target> when JFX_RUST is on
-#       HEADERS <h>...                    # their <LIB>_EXPORT lines are the target's whole export list
+#       HEADERS <h>...                    # declare the slice's functions; their <LIB>_EXPORT lines, read as lines
+#                                         # (#if ignored), are the target's whole export list on Linux only
 #       EXPORTS <sym>...                  # the symbols this slice implements in Rust
+#       [INTERNAL <sym>...]               # functions the crate defines for the target's own C/C++, not exported
+#       [IMPORTS <sym>...]                # functions the target's C/C++ defines for the crate to call
+#       [FEATURES <feature>...]           # the cargo features of the archive this target links
+#       [ABI_CHECK_DEFINITIONS <def>...]  # compile definitions of the ABI check of that feature set
 #       [ABI_CHECK_INCLUDE_DIRS <dir>...] # what the header(s) need to compile in the ABI check
 #       [C_DELETED])                      # the slice's C is gone: JFX_RUST=OFF is then a configure error
 #
-# With JFX_RUST on, the crate's staticlib (cargo's default name, built by "cargo rustc --locked --offline
-# --crate-type staticlib" in the repository root with the toolchain rust-toolchain.toml pins, the profiles of
-# cargo-config.toml plus a triple-dependent split-debuginfo, and --target <triple>, into
-# <cargo directory>/<triple>/<profile directory>) is linked into <target>. <triple> is the rustc host on Windows and
-# Linux, and on macOS that of the one architecture CMake builds for. The cargo directory is <build tree>/cargo, on
-# macOS <build tree>/cargo/macos-<CMAKE_OSX_DEPLOYMENT_TARGET> if set: cargo and rustc run with that
-# MACOSX_DEPLOYMENT_TARGET, and cargo does not rebuild when it changes. Only the staticlib is built there: with the
-# rlib in the same rustc call, cargo would not apply the profile's lto. Two targets that register the same crate share
-# one cargo step and one IMPORTED library. Windows exports the Rust symbols with /EXPORT:, which also pulls them out of
-# the archive, since no C code references them. Linux pulls them in with --require-defined= and links every target that
-# has a slice, with JFX_RUST on or off, with a version script that exports exactly the headers' names, which also keeps
-# the Rust standard library's symbols local. macOS pulls them in with -u, which also fails the link when nothing
-# defines them, and keeps the rest of the archive local with an -unexported_symbols_list, written from nm of the
-# archive before each link: an exported list of the headers' names would also hide the C++ names that
-# libjfxmedia_avf imports from libjfxmedia, so the C exports stay as they are, and with JFX_RUST off the link is
-# unchanged. All three linkers take a C definition left in an object file over the archive member without a word, so
-# after each link the linker map must show every EXPORTS symbol defined by the crate's archive; on macOS nm -gU of the
-# library must also list each of them and no other name that the map takes from the archive.
+# With JFX_RUST on, the crate's staticlib (cargo's default name, built by "cargo rustc --locked --offline --crate-type
+# staticlib" in the repository root with the toolchain rust-toolchain.toml pins, the profiles of cargo-config.toml plus
+# a triple-dependent split-debuginfo, and --target <triple>, into <cargo directory>/<triple>/<profile directory>) is
+# linked into <target>. <triple> is the rustc host on Windows and Linux, and on macOS that of the one architecture CMake
+# builds for. The cargo directory is <build tree>/cargo, on macOS <build tree>/cargo/macos-<CMAKE_OSX_DEPLOYMENT_TARGET>
+# if set: cargo and rustc run with that MACOSX_DEPLOYMENT_TARGET, and cargo does not rebuild when it changes. Only the
+# staticlib is built there: with the rlib in the same rustc call, cargo would not apply the profile's lto. Two targets
+# that register the same crate with the same FEATURES share one cargo step and one IMPORTED library. A target that names
+# FEATURES links an archive built with them ("--features <crate>/<feature>") in a cargo directory of that feature set,
+# <build tree>/cargo-with-<the sorted features joined by +> (on macOS with the same macos-<version> below it), so that
+# the archives of two feature sets never overwrite each other, in a parallel build neither; both cargo steps always run,
+# so a source change rebuilds both. All slices of one crate on one target use one feature set, and two feature sets of a
+# crate whose directories or target names would coincide, compared without case, are a configure error. Windows exports
+# the Rust symbols with /EXPORT:, which also pulls them out of the archive, since no C code references them, and pulls
+# an INTERNAL one in with /INCLUDE:, which keeps it through /OPT:REF without exporting it. Linux pulls them in with
+# --require-defined= and links every target that has a slice, with JFX_RUST on or off, with a version script that
+# exports exactly the headers' names, which also keeps the Rust standard library's symbols and the INTERNAL ones local.
+# macOS pulls them in with -u, which also fails the link when nothing defines them, and keeps the rest of the archive
+# local with an -unexported_symbols_list, written from nm of the archive before each link: an exported list of the
+# headers' names would also hide the C++ names that libjfxmedia_avf imports from libjfxmedia, so the C exports stay as
+# they are, and with JFX_RUST off the link is unchanged. All three linkers take a C definition left in an object file
+# over the archive member without a word, so after each link the linker map must show every EXPORTS and INTERNAL symbol
+# defined by the crate's archive; on macOS nm -gU of the library must also list each EXPORTS symbol and no other name
+# that the map takes from the archive.
+#
+# INTERNAL and IMPORTS name the functions of the boundary between the crate and the target's own C/C++. An INTERNAL
+# symbol must be a plain declaration in one of the HEADERS (one without an export macro), an IMPORTS symbol a
+# declaration of either kind; anything else is a configure error, as is a symbol under two keywords, in one slice or
+# in two slices of a target. Linux links with --require-defined= for each IMPORTS symbol too, so that one the C/C++
+# does not define fails the link there as on Windows and macOS, not its first call. cbindgen writes a function the
+# crate defines as a declaration and one it declares in an unsafe extern "C" block as an extern declaration, so the
+# ABI check compares both directions with the header; a cfg without a [defines] entry fails the lint.
 #
 # The targets jfx_rust_test (cargo test) and jfx_rust_lint (cargo fmt --check, clippy -D warnings, the ABI
 # check of each library crate, then buildtools/rust/check-crate-licences.pl --self-test and the licence check
 # itself) exist in every tree; with no enabled slice they only print that there is nothing to do, and need no
-# Rust tool.
+# Rust tool. cargo test and clippy run once for the crates registered without FEATURES (with jfx-rust-support) and
+# once more per other feature set, in that feature set's cargo directory. The ABI check runs once per crate and
+# feature set: cbindgen into its own directory, then the completeness check, then the compile of abi_check.cpp with
+# the ABI_CHECK_DEFINITIONS of that set. The completeness check evaluates the #if defined(<X>) blocks cbindgen writes
+# for a [defines] entry with <X> defined exactly when ABI_CHECK_DEFINITIONS defines it, as the compile does; the
+# functions it then sees must be exactly the EXPORTS, INTERNAL and IMPORTS of the crate's slices of that feature
+# set, the first two written as declarations, the IMPORTS as extern declarations.
 #
 # Every cargo call writes stdout and stderr into one log file, printed when cargo ends: exec-maven-plugin
 # copies a child's two streams into the Maven log concurrently, which garbles both. The log of a running
@@ -83,13 +108,10 @@ function(_jfx_rust_lines text out_var)
     set(${out_var} "${lines}" PARENT_SCOPE)
 endfunction()
 
-# The names of the functions an extern "C" header of cbindgen declares: per statement, the identifier
-# before its first "("
-function(_jfx_rust_declared_functions header out_var)
-    file(READ "${header}" text)
-    string(REGEX REPLACE "/[*]([^*]|[*]+[^*/])*[*]+/" "" text "${text}")
-    string(REGEX REPLACE "//[^\n]*" "" text "${text}")
-    string(REGEX REPLACE "(^|\n)[ \t]*#[^\n]*" "\\1" text "${text}")
+# The function statements of a piece of a cbindgen header (no comments, no preprocessor lines): per statement, the
+# identifier before its first "(" into <out_var>, and those written "extern" (declared, not defined, by the crate)
+# also into <out_externs>
+function(_jfx_rust_function_statements header text out_var out_externs)
     string(REPLACE "extern \"C\" {" "" text "${text}")
     string(REPLACE "}" "" text "${text}")
     string(REPLACE ";" "\n;\n" text "${text}")
@@ -97,6 +119,7 @@ function(_jfx_rust_declared_functions header out_var)
     string(REPLACE " ; " ";" text "${text}")
     string(REPLACE " ;" ";" text "${text}")
     set(names)
+    set(externs)
     foreach(statement ${text})
         string(STRIP "${statement}" statement)
         if(statement STREQUAL "")
@@ -105,9 +128,80 @@ function(_jfx_rust_declared_functions header out_var)
         if(NOT statement MATCHES "^[^(]*[^A-Za-z0-9_]([A-Za-z_][A-Za-z0-9_]*) ?[(]")
             message(FATAL_ERROR "jfx_rust_lint: cannot read a function name in ${header}: ${statement}")
         endif()
-        list(APPEND names "${CMAKE_MATCH_1}")
+        set(name "${CMAKE_MATCH_1}")
+        list(APPEND names "${name}")
+        if(statement MATCHES "^extern ")
+            list(APPEND externs "${name}")
+        endif()
     endforeach()
     set(${out_var} "${names}" PARENT_SCOPE)
+    set(${out_externs} "${externs}" PARENT_SCOPE)
+endfunction()
+
+# The names of the functions an extern "C" header of cbindgen declares, as the compiler sees them with the macros
+# <defined> defined: <out_var> those outside every #if block or inside blocks that are true, <out_var>_EXTERN those of
+# them written "extern", <out_var>_HIDDEN those only inside false blocks. cbindgen writes #if defined(<X>) or
+# #if !defined(<X>) around an item whose cfg has a [defines] entry; another directive but #include and #endif fails.
+function(_jfx_rust_declared_functions header defined_macros out_var)
+    file(READ "${header}" text)
+    string(REPLACE "\r" "" text "${text}")
+    string(REGEX REPLACE "/[*]([^*]|[*]+[^*/])*[*]+/" "" text "${text}")
+    string(REGEX REPLACE "//[^\n]*" "" text "${text}")
+    set(shown "")
+    set(hidden "")
+    set(open)
+    while(NOT text STREQUAL "")
+        string(FIND "${text}" "\n" end)
+        if(end EQUAL -1)
+            set(line "${text}")
+            set(text "")
+        else()
+            string(SUBSTRING "${text}" 0 ${end} line)
+            math(EXPR end "${end} + 1")
+            string(SUBSTRING "${text}" ${end} -1 text)
+        endif()
+        set(condition "^[ \t]*#[ \t]*if[ \t]+(!?)[ \t]*defined[ \t]*[(][ \t]*([A-Za-z_][A-Za-z0-9_]*)[ \t]*[)][ \t]*$")
+        if(line MATCHES "${condition}")
+            set(negated "${CMAKE_MATCH_1}")
+            set(macro "${CMAKE_MATCH_2}")
+            set(value 0)
+            if(macro IN_LIST defined_macros)
+                set(value 1)
+            endif()
+            if(negated STREQUAL "!")
+                math(EXPR value "1 - ${value}")
+            endif()
+            list(APPEND open ${value})
+        elseif(line MATCHES "^[ \t]*#[ \t]*endif([ \t]|$)")
+            list(LENGTH open depth)
+            if(depth EQUAL 0)
+                message(FATAL_ERROR "jfx_rust_lint: ${header} has an #endif without #if")
+            endif()
+            list(POP_BACK open)
+        elseif(line MATCHES "^[ \t]*#[ \t]*include[ \t<\"]")
+        elseif(line MATCHES "^[ \t]*#")
+            message(FATAL_ERROR "jfx_rust_lint: ${header} holds the directive \"${line}\", which the completeness "
+                "check cannot evaluate: it reads #if defined(<X>), #if !defined(<X>), #endif and #include, what "
+                "cbindgen writes for the [defines] entry of a feature. Give the cfg of the item that this directive "
+                "guards a [defines] entry of that form in the crate's cbindgen-functions.toml.")
+        elseif("0" IN_LIST open)
+            string(APPEND hidden "${line}\n")
+        else()
+            string(APPEND shown "${line}\n")
+        endif()
+    endwhile()
+    list(LENGTH open depth)
+    if(NOT depth EQUAL 0)
+        message(FATAL_ERROR "jfx_rust_lint: ${header} has an #if without #endif")
+    endif()
+    _jfx_rust_function_statements("${header}" "${shown}" names externs)
+    _jfx_rust_function_statements("${header}" "${hidden}" hidden_names hidden_externs)
+    foreach(name IN LISTS names)
+        list(REMOVE_ITEM hidden_names "${name}")
+    endforeach()
+    set(${out_var} "${names}" PARENT_SCOPE)
+    set(${out_var}_EXTERN "${externs}" PARENT_SCOPE)
+    set(${out_var}_HIDDEN "${hidden_names}" PARENT_SCOPE)
 endfunction()
 
 function(_jfx_rust_origin_fail text)
@@ -265,6 +359,16 @@ if(CMAKE_SCRIPT_MODE_FILE)
                     "cbindgen-${jfx_rust_kind}.toml (above): the item it names is missing from "
                     "${jfx_rust_header}, so the ABI check would not see it")
             endif()
+            # For a cfg with no [defines] entry cbindgen warns and writes the item with no #if, so the completeness
+            # check and the ABI check of every feature set would count an item that only some archives contain
+            string(FIND "${jfx_rust_out}" "Missing `[defines]` entry" jfx_rust_at)
+            if(NOT jfx_rust_at EQUAL -1)
+                message(NOTICE "${jfx_rust_out}")
+                message(FATAL_ERROR "jfx_rust_lint: cbindgen has no [defines] entry for a cfg of the "
+                    "${JFX_RUST_CRATE} crate in cbindgen-${jfx_rust_kind}.toml (above), so it wrote the item that cfg "
+                    "guards into ${jfx_rust_header} with no #if. Add the entry, as for the feature test-hooks of the "
+                    "glass-win crate.")
+            endif()
             _jfx_rust_lines("${jfx_rust_out}" jfx_rust_out_lines)
             foreach(jfx_rust_line IN LISTS jfx_rust_out_lines)
                 message(STATUS "jfx_rust_lint: cbindgen (${JFX_RUST_CRATE}, ${jfx_rust_kind}): ${jfx_rust_line}")
@@ -272,34 +376,99 @@ if(CMAKE_SCRIPT_MODE_FILE)
             message(STATUS "jfx_rust_lint: cbindgen ${JFX_CBINDGEN_VERSION} wrote ${jfx_rust_header}")
         endforeach()
 
-        # The ABI check compiles what cbindgen emitted, so each Rust export must be there, and nothing else
-        _jfx_rust_declared_functions("${JFX_RUST_GEN_DIR}/${JFX_RUST_LIB_NAME}_rs_functions.h" jfx_rust_emitted)
-        set(jfx_rust_problems)
-        foreach(jfx_rust_sym IN LISTS JFX_RUST_EXPORTS)
-            if(NOT jfx_rust_sym IN_LIST jfx_rust_emitted)
-                string(CONCAT jfx_rust_problem "${jfx_rust_sym} is an EXPORTS symbol of a slice of the "
-                    "${JFX_RUST_CRATE} crate, and cbindgen emitted no declaration of it: the ABI check cannot see "
-                    "its signature. Define it as a plain #[unsafe(no_mangle)] pub extern \"C\" fn in the crate's "
-                    "module tree, not through a macro or a re-export.")
-                list(APPEND jfx_rust_problems "${jfx_rust_problem}")
+        # The ABI check compiles what cbindgen emitted, so each Rust export must be there, and nothing else. The
+        # functions of a feature set are those the compile of abi_check.cpp sees: the #if defined(<X>) blocks
+        # cbindgen writes for a feature are true when ABI_CHECK_DEFINITIONS of that set defines <X>.
+        # A leading -D is dropped, as target_compile_definitions drops it for the compile
+        set(jfx_rust_defined)
+        foreach(jfx_rust_definition IN LISTS JFX_RUST_DEFINITIONS)
+            if(jfx_rust_definition MATCHES "^(-D)?([A-Za-z_][A-Za-z0-9_]*)")
+                list(APPEND jfx_rust_defined "${CMAKE_MATCH_2}")
             endif()
+        endforeach()
+        _jfx_rust_declared_functions("${JFX_RUST_GEN_DIR}/${JFX_RUST_LIB_NAME}_rs_functions.h" "${jfx_rust_defined}"
+            jfx_rust_emitted)
+        set(jfx_rust_what "the ${JFX_RUST_CRATE} crate")
+        if(JFX_RUST_FEATURES)
+            list(JOIN JFX_RUST_FEATURES ", " jfx_rust_text)
+            string(APPEND jfx_rust_what " with the features ${jfx_rust_text}")
+        endif()
+        set(jfx_rust_problems)
+        foreach(jfx_rust_keyword EXPORTS INTERNAL IMPORTS)
+            foreach(jfx_rust_sym IN LISTS JFX_RUST_${jfx_rust_keyword})
+                if(NOT jfx_rust_sym IN_LIST jfx_rust_emitted)
+                    if(jfx_rust_keyword STREQUAL "IMPORTS")
+                        string(CONCAT jfx_rust_problem "${jfx_rust_sym} is an IMPORTS symbol of a slice of "
+                            "${jfx_rust_what}, and cbindgen emitted no declaration of it: the ABI check cannot compare "
+                            "the crate's declaration with the header's. Declare it in an unsafe extern \"C\" block of "
+                            "the crate's module tree.")
+                    else()
+                        string(CONCAT jfx_rust_problem "${jfx_rust_sym} is an ${jfx_rust_keyword} symbol of a slice "
+                            "of ${jfx_rust_what}, and cbindgen emitted no declaration of it: the ABI check cannot see "
+                            "its signature. Define it as a plain #[unsafe(no_mangle)] pub extern \"C\" fn in the "
+                            "crate's module tree, not through a macro or a re-export.")
+                    endif()
+                    if(jfx_rust_sym IN_LIST jfx_rust_emitted_HIDDEN)
+                        string(APPEND jfx_rust_problem " cbindgen wrote it inside an #if block that is false for "
+                            "this feature set (ABI_CHECK_DEFINITIONS: ${JFX_RUST_DEFINITIONS}): list it only for a "
+                            "target whose FEATURES enable it, with the ABI_CHECK_DEFINITIONS that make the block true.")
+                    endif()
+                    list(APPEND jfx_rust_problems "${jfx_rust_problem}")
+                elseif(jfx_rust_keyword STREQUAL "IMPORTS" AND NOT jfx_rust_sym IN_LIST jfx_rust_emitted_EXTERN)
+                    string(CONCAT jfx_rust_problem "${jfx_rust_sym} is an IMPORTS symbol of a slice of "
+                        "${jfx_rust_what}, which the target's C/C++ defines, and the crate defines it too: cbindgen "
+                        "emitted a declaration, not an extern one. Declare it in an unsafe extern \"C\" block, or list "
+                        "it in EXPORTS or INTERNAL and delete the C/C++ definition.")
+                    list(APPEND jfx_rust_problems "${jfx_rust_problem}")
+                elseif(NOT jfx_rust_keyword STREQUAL "IMPORTS" AND jfx_rust_sym IN_LIST jfx_rust_emitted_EXTERN)
+                    string(CONCAT jfx_rust_problem "${jfx_rust_sym} is an ${jfx_rust_keyword} symbol of a slice of "
+                        "${jfx_rust_what}, which the crate must define, and the crate only declares it in an unsafe "
+                        "extern \"C\" block: cbindgen emitted an extern declaration. Define it as a plain "
+                        "#[unsafe(no_mangle)] pub extern \"C\" fn, or list it in IMPORTS if the target's C/C++ defines "
+                        "it.")
+                    list(APPEND jfx_rust_problems "${jfx_rust_problem}")
+                endif()
+            endforeach()
         endforeach()
         foreach(jfx_rust_sym IN LISTS jfx_rust_emitted)
-            if(NOT jfx_rust_sym IN_LIST JFX_RUST_EXPORTS)
-                string(CONCAT jfx_rust_problem "${jfx_rust_sym} is an extern \"C\" function of the "
-                    "${JFX_RUST_CRATE} crate, and no slice lists it in EXPORTS: no library exports it. Add it to "
-                    "EXPORTS of the slice that implements it, or remove it.")
-                list(APPEND jfx_rust_problems "${jfx_rust_problem}")
+            if(jfx_rust_sym IN_LIST JFX_RUST_EXPORTS OR jfx_rust_sym IN_LIST JFX_RUST_INTERNAL
+                    OR jfx_rust_sym IN_LIST JFX_RUST_IMPORTS)
+                continue()
             endif()
+            if(jfx_rust_sym IN_LIST jfx_rust_emitted_EXTERN)
+                string(CONCAT jfx_rust_problem "${jfx_rust_sym} is declared in an unsafe extern \"C\" block of "
+                    "${jfx_rust_what}, and no slice lists it in IMPORTS: the ABI check would not compare it with "
+                    "a header. Add it to IMPORTS of the slice whose target defines it, or remove it.")
+            else()
+                string(CONCAT jfx_rust_problem "${jfx_rust_sym} is an extern \"C\" function of "
+                    "${jfx_rust_what}, and no slice lists it in EXPORTS: no library exports it. Add it to "
+                    "EXPORTS of the slice that implements it, or remove it.")
+            endif()
+            list(APPEND jfx_rust_problems "${jfx_rust_problem}")
         endforeach()
+        set(jfx_rust_keywords "EXPORTS")
+        if(JFX_RUST_INTERNAL OR JFX_RUST_IMPORTS)
+            set(jfx_rust_keywords "EXPORTS, INTERNAL and IMPORTS")
+        endif()
         if(jfx_rust_problems)
             list(JOIN jfx_rust_problems "\n" jfx_rust_text)
-            message(FATAL_ERROR "jfx_rust_lint: the functions cbindgen emitted for the ${JFX_RUST_CRATE} crate "
-                "differ from the EXPORTS of its slices:\n${jfx_rust_text}")
+            message(FATAL_ERROR "jfx_rust_lint: the functions cbindgen emitted for ${jfx_rust_what} "
+                "differ from the ${jfx_rust_keywords} of its slices:\n${jfx_rust_text}")
         endif()
         list(LENGTH jfx_rust_emitted jfx_rust_count)
-        message(STATUS "jfx_rust_lint: the ${JFX_RUST_CRATE} crate declares exactly the ${jfx_rust_count} "
-            "EXPORTS symbol(s) of its slices")
+        if(JFX_RUST_FEATURES OR JFX_RUST_INTERNAL OR JFX_RUST_IMPORTS OR jfx_rust_emitted_HIDDEN)
+            list(LENGTH JFX_RUST_EXPORTS jfx_rust_exports_count)
+            list(LENGTH JFX_RUST_INTERNAL jfx_rust_internal_count)
+            list(LENGTH JFX_RUST_IMPORTS jfx_rust_imports_count)
+            list(LENGTH jfx_rust_emitted_HIDDEN jfx_rust_hidden_count)
+            message(STATUS "jfx_rust_lint: ${jfx_rust_what} declares exactly the ${jfx_rust_count} symbol(s) of "
+                "its slices: ${jfx_rust_exports_count} EXPORTS, ${jfx_rust_internal_count} INTERNAL, "
+                "${jfx_rust_imports_count} IMPORTS; ${jfx_rust_hidden_count} more inside #if blocks that are false "
+                "for this feature set")
+        else()
+            message(STATUS "jfx_rust_lint: the ${JFX_RUST_CRATE} crate declares exactly the ${jfx_rust_count} "
+                "EXPORTS symbol(s) of its slices")
+        endif()
     elseif(JFX_RUST_ACTION STREQUAL "unexported-list")
         # Every name the crate's archive defines but the EXPORTS of the target's slices, for ld64's
         # -unexported_symbols_list, which skips a name that the link does not define. Apple's nm cannot read the LLVM
@@ -416,11 +585,11 @@ if(CMAKE_SCRIPT_MODE_FILE)
             endif()
         endforeach()
 
-        # (a) Each EXPORTS symbol of the slice is defined by a member of the archive, and by nothing else
+        # (a) Each EXPORTS and INTERNAL symbol of the slice is defined by a member of the archive, and by nothing else
         set(jfx_rust_found "")
         set(jfx_rust_problems "")
         set(jfx_rust_remedy FALSE)
-        foreach(jfx_rust_sym IN LISTS JFX_RUST_EXPORTS)
+        foreach(jfx_rust_sym IN LISTS JFX_RUST_EXPORTS JFX_RUST_INTERNAL)
             string(REGEX MATCHALL "\t${jfx_rust_lb} *[0-9]+${jfx_rust_rb} _${jfx_rust_sym}\n" jfx_rust_lines
                 "${jfx_rust_symbols}")
             if(NOT jfx_rust_lines)
@@ -609,7 +778,8 @@ if(CMAKE_SCRIPT_MODE_FILE)
         endif()
         set(jfx_rust_found)
         set(jfx_rust_problems)
-        foreach(jfx_rust_sym IN LISTS JFX_RUST_EXPORTS)
+        # An INTERNAL symbol is checked as an export: the C/C++ that calls it must reach the crate's definition
+        foreach(jfx_rust_sym IN LISTS JFX_RUST_EXPORTS JFX_RUST_INTERNAL)
             set(jfx_rust_objects)
             if(JFX_RUST_MAP_FORMAT STREQUAL "msvc")
                 # 0001:00000000       jfxm_abi_version   0000000180001000 f   jfxmedia:jfxmedia-<hash>.rcgu.o
@@ -818,16 +988,110 @@ function(_jfx_rust_header_exports out_var)
     set(${out_var} "${names}" PARENT_SCOPE)
 endfunction()
 
-function(_jfx_rust_fail_toolchain library problem)
-    message(FATAL_ERROR "${library}: its Rust slices need the Rust toolchain ${JFX_RUST_PINNED_VERSION} "
-        "pinned in ${JFX_RUST_REPO_ROOT}/rust-toolchain.toml, and ${problem}.\n"
-        "Install rustup from https://rustup.rs and run \"rustup toolchain install\" in ${JFX_RUST_REPO_ROOT}, "
-        "or configure with -DJFX_RUST=false to build the C implementation of ${library} instead.")
+# Which of the SYMBOLS (C identifiers) the HEADERS declare as functions: into <out_plain> those with a plain
+# declaration, "<type> <name>(<parameters>) [<words>];" with no export macro, typedef, static, inline or return before
+# the name, in extern "C" { } or not; into <out_macro> those whose declaration names an export macro (<UPPER>_EXPORT)
+# before the name. Comments and preprocessor lines are no declarations, nor is a definition ("{" after the parameter
+# list), a call or a function pointer. The text is cut with string(FIND) and split into statements, never matched as a
+# whole: CMake's regular expressions recurse for each repetition of a group.
+function(_jfx_rust_header_declarations out_plain out_macro)
+    cmake_parse_arguments(DECL "" "" "SYMBOLS;HEADERS" ${ARGN})
+    string(ASCII 1 group)
+    string(ASCII 2 lb)
+    string(ASCII 3 rb)
+    string(ASCII 4 sc)
+    string(ASCII 5 bs)
+    set(plain)
+    set(macro)
+    foreach(header ${DECL_HEADERS})
+        file(READ "${header}" text)
+        string(REPLACE "\r" "" text "${text}")
+        # Each comment becomes one blank; the newline that ends a line comment stays
+        set(code "")
+        while(TRUE)
+            string(FIND "${text}" "/*" block_at)
+            string(FIND "${text}" "//" line_at)
+            if(block_at EQUAL -1 AND line_at EQUAL -1)
+                string(APPEND code "${text}")
+                break()
+            endif()
+            if(line_at EQUAL -1 OR (NOT block_at EQUAL -1 AND block_at LESS line_at))
+                set(at ${block_at})
+                set(closer "*/")
+            else()
+                set(at ${line_at})
+                set(closer "\n")
+            endif()
+            string(SUBSTRING "${text}" 0 ${at} head)
+            string(APPEND code "${head} ")
+            math(EXPR at "${at} + 2")
+            string(SUBSTRING "${text}" ${at} -1 text)
+            string(FIND "${text}" "${closer}" end)
+            if(end EQUAL -1)
+                break()
+            endif()
+            if(closer STREQUAL "*/")
+                math(EXPR end "${end} + 2")
+            endif()
+            string(SUBSTRING "${text}" ${end} -1 text)
+        endwhile()
+        string(REPLACE "\\\n" " " code "${code}")
+        string(REGEX REPLACE "(^|\n)[ \t]*#[^\n]*" "\\1" code "${code}")
+        # One list element per statement, ending in its terminator: ";" (as the control character 4), "{" or "}"
+        string(REPLACE "\\" "${bs}" code "${code}")
+        string(REPLACE "[" "${lb}" code "${code}")
+        string(REPLACE "]" "${rb}" code "${code}")
+        string(REPLACE ";" "${sc};" code "${code}")
+        string(REPLACE "{" "{;" code "${code}")
+        string(REPLACE "}" "};" code "${code}")
+        foreach(statement IN LISTS code)
+            foreach(sym IN LISTS DECL_SYMBOLS)
+                string(FIND "${statement}" "${sym}" at)
+                if(at EQUAL -1 OR NOT " ${statement}" MATCHES "^(.*[^A-Za-z0-9_])${sym}[ \t\n]*([(].*)$")
+                    continue()
+                endif()
+                set(before "${CMAKE_MATCH_1}")
+                set(rest "${CMAKE_MATCH_2}")
+                if(before MATCHES "[()=]" OR NOT before MATCHES "[A-Za-z_]"
+                        OR before MATCHES "(^|[^A-Za-z0-9_])(typedef|static|inline|return)([^A-Za-z0-9_]|$)")
+                    continue()
+                endif()
+                while(rest MATCHES "[(][^()]*[)]")
+                    string(REGEX REPLACE "[(][^()]*[)]" "${group}" rest "${rest}")
+                endwhile()
+                if(NOT rest MATCHES "^${group}[A-Za-z0-9_ \t\n${group}]*${sc}$")
+                    continue()
+                endif()
+                if(before MATCHES "(^|[^A-Za-z0-9_])[A-Z][A-Z0-9_]*_EXPORT([^A-Za-z0-9_]|$)")
+                    list(APPEND macro "${sym}")
+                else()
+                    list(APPEND plain "${sym}")
+                endif()
+            endforeach()
+        endforeach()
+    endforeach()
+    set(${out_plain} "${plain}" PARENT_SCOPE)
+    set(${out_macro} "${macro}" PARENT_SCOPE)
 endfunction()
 
-# The command that runs <command> <args> through the cargo action above, logging to logs/<log name>.log.
-# $<SEMICOLON> keeps the command one argument of the returned command list.
-function(_jfx_rust_action_command out_var log_name)
+# Called from _jfx_rust_require_toolchain, whose deleted_slice names the slice being registered when its C is deleted
+# (C_DELETED): -DJFX_RUST=false is then no remedy, as it is a configure error, so it is not offered
+function(_jfx_rust_fail_toolchain library problem)
+    set(remedy "Install rustup from https://rustup.rs and run \"rustup toolchain install\" in ${JFX_RUST_REPO_ROOT}")
+    if("${deleted_slice}" STREQUAL "")
+        string(APPEND remedy ", or configure with -DJFX_RUST=false to build the C implementation of ${library} "
+            "instead.")
+    else()
+        string(APPEND remedy ". ${library} has no C implementation of its slice ${deleted_slice} to fall back to "
+            "(C_DELETED), so the toolchain is required.")
+    endif()
+    message(FATAL_ERROR "${library}: its Rust slices need the Rust toolchain ${JFX_RUST_PINNED_VERSION} "
+        "pinned in ${JFX_RUST_REPO_ROOT}/rust-toolchain.toml, and ${problem}.\n${remedy}")
+endfunction()
+
+# The command that runs <command> <args> through the cargo action above, with <cargo dir> as CARGO_TARGET_DIR,
+# logging to logs/<log name>.log. $<SEMICOLON> keeps the command one argument of the returned command list.
+function(_jfx_rust_action_command_in out_var cargo_dir log_name)
     get_property(toolchain GLOBAL PROPERTY JFX_RUST_PINNED_VERSION)
     set(command ${ARGN})
     string(REPLACE ";" "$<SEMICOLON>" command "${command}")
@@ -836,15 +1100,68 @@ function(_jfx_rust_action_command out_var log_name)
         set(deployment_target "-DJFX_RUST_DEPLOYMENT_TARGET=${CMAKE_OSX_DEPLOYMENT_TARGET}")
     endif()
     set(${out_var} "${CMAKE_COMMAND}" -DJFX_RUST_ACTION=cargo
-        "-DJFX_RUST_CARGO_TARGET_DIR=${JFX_RUST_CARGO_TARGET_DIR}" "-DJFX_RUST_TOOLCHAIN=${toolchain}"
+        "-DJFX_RUST_CARGO_TARGET_DIR=${cargo_dir}" "-DJFX_RUST_TOOLCHAIN=${toolchain}"
         "-DJFX_RUST_RUSTC=${JFX_RUST_RUSTC}" ${deployment_target}
         "-DJFX_RUST_LOG=${JFX_RUST_BINARY_DIR}/logs/${log_name}.log"
         "-DJFX_RUST_COMMAND=${command}" -P "${JFX_RUST_HELPER}" PARENT_SCOPE)
 endfunction()
 
-function(_jfx_rust_cargo_command out_var log_name)
-    _jfx_rust_action_command(command "${log_name}" "${JFX_RUST_CARGO}" ${ARGN})
+# The same in the cargo directory of the crates' default features
+function(_jfx_rust_action_command out_var log_name)
+    _jfx_rust_action_command_in(command "${JFX_RUST_CARGO_TARGET_DIR}" "${log_name}" ${ARGN})
     set(${out_var} ${command} PARENT_SCOPE)
+endfunction()
+
+function(_jfx_rust_cargo_command_in out_var cargo_dir log_name)
+    _jfx_rust_action_command_in(command "${cargo_dir}" "${log_name}" "${JFX_RUST_CARGO}" ${ARGN})
+    set(${out_var} ${command} PARENT_SCOPE)
+endfunction()
+
+function(_jfx_rust_cargo_command out_var log_name)
+    _jfx_rust_cargo_command_in(command "${JFX_RUST_CARGO_TARGET_DIR}" "${log_name}" ${ARGN})
+    set(${out_var} ${command} PARENT_SCOPE)
+endfunction()
+
+# What a feature set of a crate is called. The features of <ARGN>, sorted and once each, into <prefix>_FEATURES. With
+# none (the crate's default features): <prefix>_KEY "base", <prefix>_SUFFIX and <prefix>_TAG empty, and <prefix>_DIR the
+# cargo directory above, so that a slice without FEATURES names, logs and builds exactly as before FEATURES existed.
+# Else: <prefix>_KEY "with-<id>", <prefix>_SUFFIX "_with_<id as a C identifier>" for target names, <prefix>_TAG
+# "-with-<id>" for file names, and <prefix>_DIR <build tree>/cargo-with-<id>, on macOS with the deployment target below
+# it as above, where <id> is the features joined by "+". <prefix>_ARGS is the cargo arguments that select them for
+# <crate>: none, or --features <crate>/<feature>,...
+function(_jfx_rust_feature_set prefix crate_name)
+    set(features ${ARGN})
+    list(REMOVE_DUPLICATES features)
+    list(SORT features)
+    foreach(feature IN LISTS features)
+        if(NOT feature MATCHES "^[A-Za-z0-9_][A-Za-z0-9_+.-]*$")
+            message(FATAL_ERROR "jfx_add_rust_slice: \"${feature}\" is no feature name of the ${crate_name} crate "
+                "that FEATURES can take: letters, digits, \"_\", \"-\", \"+\" and \".\", not starting with \"-\", "
+                "\"+\" or \".\"")
+        endif()
+    endforeach()
+    set(${prefix}_FEATURES "${features}" PARENT_SCOPE)
+    if(NOT features)
+        set(${prefix}_KEY base PARENT_SCOPE)
+        set(${prefix}_SUFFIX "" PARENT_SCOPE)
+        set(${prefix}_TAG "" PARENT_SCOPE)
+        set(${prefix}_DIR "${JFX_RUST_CARGO_TARGET_DIR}" PARENT_SCOPE)
+        set(${prefix}_ARGS "" PARENT_SCOPE)
+        return()
+    endif()
+    list(JOIN features "+" id)
+    string(MAKE_C_IDENTIFIER "${id}" c_id)
+    set(dir "${CMAKE_BINARY_DIR}/cargo-with-${id}")
+    if(APPLE AND CMAKE_OSX_DEPLOYMENT_TARGET)
+        string(APPEND dir "/macos-${CMAKE_OSX_DEPLOYMENT_TARGET}")
+    endif()
+    list(TRANSFORM features PREPEND "${crate_name}/" OUTPUT_VARIABLE qualified)
+    list(JOIN qualified "," qualified)
+    set(${prefix}_KEY "with-${id}" PARENT_SCOPE)
+    set(${prefix}_SUFFIX "_with_${c_id}" PARENT_SCOPE)
+    set(${prefix}_TAG "-with-${id}" PARENT_SCOPE)
+    set(${prefix}_DIR "${dir}" PARENT_SCOPE)
+    set(${prefix}_ARGS --features "${qualified}" PARENT_SCOPE)
 endfunction()
 
 # The arguments of every cargo call that compiles: the profiles, then split-debuginfo, which has no value that
@@ -885,8 +1202,9 @@ function(_jfx_rust_darwin_triple library out_var)
 endfunction()
 
 # Finds cargo and rustc, checks rustc against the pin, reads its host target, chooses the target triple and probes the
-# platform libraries std needs. Runs once per tree, and only for a tree with an enabled slice.
-function(_jfx_rust_require_toolchain library)
+# platform libraries std needs. Runs once per tree, and only for a tree with an enabled slice. <deleted_slice> is the
+# slice being registered when its C is deleted, else empty; _jfx_rust_fail_toolchain reads it.
+function(_jfx_rust_require_toolchain library deleted_slice)
     get_property(done GLOBAL PROPERTY JFX_RUST_TOOLCHAIN_FOUND)
     if(done)
         return()
@@ -1028,10 +1346,12 @@ function(_jfx_rust_require_toolchain library)
     set_property(GLOBAL PROPERTY JFX_RUST_TOOLCHAIN_FOUND TRUE)
 endfunction()
 
-# The cargo step and the IMPORTED staticlib of one crate, created by the first slice that links it
+# The cargo step and the IMPORTED staticlib of one crate and feature set (the features are <ARGN>), created by the
+# first slice that links them
 function(_jfx_rust_crate_library crate_dir crate_name out_var)
     string(REPLACE "-" "_" lib_name "${crate_name}")
-    set(imported "jfx_rust_${lib_name}")
+    _jfx_rust_feature_set(set "${crate_name}" ${ARGN})
+    set(imported "jfx_rust_${lib_name}${set_SUFFIX}")
     set(${out_var} "${imported}" PARENT_SCOPE)
     if(TARGET ${imported})
         return()
@@ -1043,8 +1363,8 @@ function(_jfx_rust_crate_library crate_dir crate_name out_var)
         set(archive "lib${lib_name}.a")
     endif()
     get_property(triple GLOBAL PROPERTY JFX_RUST_TARGET_TRIPLE)
-    set(debug_archive "${JFX_RUST_CARGO_TARGET_DIR}/${triple}/debug/${archive}")
-    set(release_archive "${JFX_RUST_CARGO_TARGET_DIR}/${triple}/release/${archive}")
+    set(debug_archive "${set_DIR}/${triple}/debug/${archive}")
+    set(release_archive "${set_DIR}/${triple}/release/${archive}")
     if(JFX_RUST_MULTI_CONFIG)
         set(profile "$<IF:$<CONFIG:Debug>,dev,release>")
         set(byproducts "${debug_archive}" "${release_archive}")
@@ -1061,13 +1381,19 @@ function(_jfx_rust_crate_library crate_dir crate_name out_var)
 
     # Always run: cargo decides what is out of date
     _jfx_rust_pins(pins)
-    _jfx_rust_cargo_command(cargo_build "${lib_name}-build-${profile}"
-        rustc --locked --offline ${pins} -p ${crate_name} --lib --profile ${profile} --crate-type staticlib)
+    _jfx_rust_cargo_command_in(cargo_build "${set_DIR}" "${lib_name}${set_TAG}-build-${profile}"
+        rustc --locked --offline ${pins} -p ${crate_name} ${set_ARGS} --lib --profile ${profile}
+        --crate-type staticlib)
+    set(comment "cargo build of the ${crate_name} crate's staticlib")
+    if(set_FEATURES)
+        list(JOIN set_FEATURES ", " features_text)
+        string(APPEND comment " with the features ${features_text}")
+    endif()
     add_custom_target(${imported}_cargo
         COMMAND ${cargo_build}
         WORKING_DIRECTORY "${JFX_RUST_REPO_ROOT}"
         BYPRODUCTS ${byproducts}
-        COMMENT "cargo build of the ${crate_name} crate's staticlib"
+        COMMENT "${comment}"
         VERBATIM)
 
     get_property(native_libs GLOBAL PROPERTY JFX_RUST_NATIVE_LIBS)
@@ -1159,7 +1485,8 @@ function(_jfx_rust_darwin_link target crate_dir crate_name imported)
 endfunction()
 
 function(jfx_add_rust_slice target)
-    cmake_parse_arguments(SLICE "C_DELETED" "CRATE;SLICE" "HEADERS;EXPORTS;ABI_CHECK_INCLUDE_DIRS" ${ARGN})
+    cmake_parse_arguments(SLICE "C_DELETED" "CRATE;SLICE"
+        "HEADERS;EXPORTS;INTERNAL;IMPORTS;FEATURES;ABI_CHECK_DEFINITIONS;ABI_CHECK_INCLUDE_DIRS" ${ARGN})
     if(NOT TARGET ${target})
         message(FATAL_ERROR "jfx_add_rust_slice: ${target} is not a target")
     endif()
@@ -1193,6 +1520,107 @@ function(jfx_add_rust_slice target)
         endif()
     endforeach()
 
+    # The functions between the crate and the target's own C/C++: each declared in the headers, under one keyword in
+    # all slices of the target together
+    foreach(keyword INTERNAL IMPORTS)
+        foreach(sym ${SLICE_${keyword}})
+            if(NOT sym MATCHES "^[A-Za-z_][A-Za-z0-9_]*$")
+                message(FATAL_ERROR "jfx_add_rust_slice(${target}): \"${sym}\", an ${keyword} symbol of the slice "
+                    "${SLICE_SLICE}, is no C identifier")
+            endif()
+        endforeach()
+    endforeach()
+    foreach(keyword EXPORTS INTERNAL IMPORTS)
+        get_target_property(earlier_${keyword} ${target} JFX_RUST_LISTED_${keyword})
+        if(NOT earlier_${keyword})
+            set(earlier_${keyword} "")
+        endif()
+    endforeach()
+    foreach(keyword EXPORTS INTERNAL IMPORTS)
+        foreach(sym ${SLICE_${keyword}})
+            foreach(other EXPORTS INTERNAL IMPORTS)
+                if(other STREQUAL keyword)
+                    continue()
+                endif()
+                if(sym IN_LIST SLICE_${other})
+                    message(FATAL_ERROR "jfx_add_rust_slice(${target}): ${sym} of the slice ${SLICE_SLICE} is listed "
+                        "under two of EXPORTS, INTERNAL and IMPORTS: ${keyword} and ${other}")
+                elseif(sym IN_LIST earlier_${other})
+                    message(FATAL_ERROR "jfx_add_rust_slice(${target}): ${sym} is listed under ${keyword} by the "
+                        "slice ${SLICE_SLICE} and under ${other} by an earlier slice of ${target}: a symbol is "
+                        "under one of EXPORTS, INTERNAL and IMPORTS in all slices of a target")
+                endif()
+            endforeach()
+        endforeach()
+    endforeach()
+    foreach(keyword EXPORTS INTERNAL IMPORTS)
+        set_property(TARGET ${target} APPEND PROPERTY JFX_RUST_LISTED_${keyword} ${SLICE_${keyword}})
+    endforeach()
+    if(SLICE_INTERNAL OR SLICE_IMPORTS)
+        _jfx_rust_header_declarations(declared declared_with_macro
+            SYMBOLS ${SLICE_INTERNAL} ${SLICE_IMPORTS} HEADERS ${SLICE_HEADERS})
+        foreach(sym ${SLICE_INTERNAL})
+            if(sym IN_LIST exports OR sym IN_LIST declared_with_macro)
+                message(FATAL_ERROR "jfx_add_rust_slice(${target}): ${sym}, an INTERNAL symbol of the slice "
+                    "${SLICE_SLICE}, is declared with an export macro in ${header_text}, and an INTERNAL function "
+                    "is not exported: declare it without the macro, or list it in EXPORTS")
+            elseif(NOT sym IN_LIST declared)
+                message(FATAL_ERROR "jfx_add_rust_slice(${target}): ${sym}, an INTERNAL symbol of the slice "
+                    "${SLICE_SLICE}, is declared by none of ${header_text}. Declare it in one of them as a plain "
+                    "function declaration without an export macro, <type> ${sym}(<parameters>);, which the ABI check "
+                    "compares with the crate's definition.")
+            endif()
+        endforeach()
+        foreach(sym ${SLICE_IMPORTS})
+            if(NOT sym IN_LIST exports AND NOT sym IN_LIST declared_with_macro AND NOT sym IN_LIST declared)
+                message(FATAL_ERROR "jfx_add_rust_slice(${target}): ${sym}, an IMPORTS symbol of the slice "
+                    "${SLICE_SLICE}, is declared by none of ${header_text}. Declare it in one of them, "
+                    "<type> ${sym}(<parameters>);, which the ABI check compares with the crate's unsafe extern \"C\" "
+                    "declaration.")
+            endif()
+        endforeach()
+    endif()
+
+    # One archive per target and crate: all slices of the crate on the target name the same features
+    _jfx_rust_feature_set(set "${crate_name}" ${SLICE_FEATURES})
+    # Two feature sets of a crate never share a cargo directory or a target name: "a+b" as one feature and the
+    # features a and b give one directory, "test-hooks" and "test_hooks" one target name. The sets are kept with
+    # their features joined by ",", which no feature name holds.
+    if(set_FEATURES)
+        list(JOIN set_FEATURES "," set_text)
+        string(REPLACE "-" "_" lib_name "${crate_name}")
+        get_property(known_sets GLOBAL PROPERTY JFX_RUST_FEATURE_LISTS_${crate_name})
+        foreach(known_text IN LISTS known_sets)
+            if(known_text STREQUAL set_text)
+                continue()
+            endif()
+            string(REPLACE "," ";" known_features "${known_text}")
+            _jfx_rust_feature_set(known "${crate_name}" ${known_features})
+            # Compared without case: the file systems of Windows and macOS, and the project files of the Visual
+            # Studio generator, do not tell case apart
+            string(TOLOWER "${known_DIR}" known_dir)
+            string(TOLOWER "${set_DIR}" set_dir)
+            string(TOLOWER "${known_SUFFIX}" known_suffix)
+            string(TOLOWER "${set_SUFFIX}" set_suffix)
+            if(known_dir STREQUAL set_dir OR known_suffix STREQUAL set_suffix)
+                message(FATAL_ERROR "jfx_add_rust_slice(${target}): the feature sets \"${set_text}\" and "
+                    "\"${known_text}\" of the ${crate_name} crate would share the cargo directory ${set_DIR} or the "
+                    "target name jfx_rust_${lib_name}${set_SUFFIX}, so one archive would stand for both. Rename a "
+                    "feature.")
+            endif()
+        endforeach()
+        if(NOT set_text IN_LIST known_sets)
+            set_property(GLOBAL APPEND PROPERTY JFX_RUST_FEATURE_LISTS_${crate_name} "${set_text}")
+        endif()
+    endif()
+    get_target_property(linked_set ${target} JFX_RUST_FEATURE_SET_${crate_name})
+    if(linked_set AND NOT linked_set STREQUAL set_KEY)
+        message(FATAL_ERROR "jfx_add_rust_slice(${target}): the slice ${SLICE_SLICE} names the feature set "
+            "\"${set_KEY}\" of the ${crate_name} crate, and an earlier slice of ${target} \"${linked_set}\": a "
+            "target links one archive of a crate, so all its slices of that crate name the same FEATURES")
+    endif()
+    set_target_properties(${target} PROPERTIES JFX_RUST_FEATURE_SET_${crate_name} "${set_KEY}")
+
     # The same export list with Rust on and off. Anonymous version node: no symbol version is attached.
     if(NOT WIN32 AND NOT APPLE)
         set(script "${JFX_RUST_BINARY_DIR}/${target}.version")
@@ -1221,18 +1649,26 @@ ${export_count} exports of ${library} (target ${target}) */\n{\n    global:\n   
         endif()
         file(REMOVE ${stale})
         message(STATUS "${library} (${target}): slice ${SLICE_SLICE} built from C (JFX_RUST=OFF), "
-            "${export_count} exports")
+            "${export_count} export lines in its headers")
         return()
     endif()
 
-    _jfx_rust_require_toolchain("${library}")
-    _jfx_rust_crate_library("${crate_dir}" "${crate_name}" imported)
+    set(deleted_slice "")
+    if(SLICE_C_DELETED)
+        set(deleted_slice "${SLICE_SLICE}")
+    endif()
+    _jfx_rust_require_toolchain("${library}" "${deleted_slice}")
+    _jfx_rust_crate_library("${crate_dir}" "${crate_name}" imported ${SLICE_FEATURES})
     target_link_libraries(${target} PRIVATE ${imported})
     add_dependencies(${target} ${imported}_cargo)
     target_compile_definitions(${target} PRIVATE "JFX_RUST_${SLICE_SLICE}=1")
-    foreach(sym ${SLICE_EXPORTS})
-        if(WIN32)
+    foreach(sym ${SLICE_EXPORTS} ${SLICE_INTERNAL})
+        if(WIN32 AND sym IN_LIST SLICE_EXPORTS)
             target_link_options(${target} PRIVATE "/EXPORT:${sym}")
+        elseif(WIN32)
+            # Pulls the member out of the archive and fails the link when nothing defines it, as /EXPORT: does, and
+            # keeps the function through /OPT:REF, without exporting it
+            target_link_options(${target} PRIVATE "/INCLUDE:${sym}")
         elseif(APPLE)
             # Pulls the member out of the archive, and fails the link when nothing defines it
             target_link_options(${target} PRIVATE "LINKER:-u,_${sym}")
@@ -1241,6 +1677,14 @@ ${export_count} exports of ${library} (target ${target}) */\n{\n    global:\n   
             target_link_options(${target} PRIVATE "LINKER:--require-defined=${sym}")
         endif()
     endforeach()
+    if(NOT WIN32 AND NOT APPLE)
+        # The crate's archive references each IMPORTS symbol. GNU ld links a shared library with a reference that
+        # nothing defines, which fails only at its first call; required, a symbol the C/C++ does not define fails
+        # the link, as it does on Windows and macOS
+        foreach(sym ${SLICE_IMPORTS})
+            target_link_options(${target} PRIVATE "LINKER:--require-defined=${sym}")
+        endforeach()
+    endif()
     if(APPLE)
         _jfx_rust_darwin_link(${target} "${crate_dir}" "${crate_name}" ${imported} ${SLICE_EXPORTS})
     elseif(NOT WIN32)
@@ -1266,26 +1710,53 @@ ${export_count} exports of ${library} (target ${target}) */\n{\n    global:\n   
     endif()
     # A generator may name the archive relative to the top of the build tree or to the target's directory
     get_target_property(target_binary_dir ${target} BINARY_DIR)
+    set(internal_args)
+    set(checked_text "${rust_text}")
+    if(SLICE_INTERNAL)
+        string(REPLACE ";" "$<SEMICOLON>" internal "${SLICE_INTERNAL}")
+        set(internal_args "-DJFX_RUST_INTERNAL=${internal}")
+        list(JOIN SLICE_INTERNAL ", " internal_text)
+        string(APPEND checked_text " and the INTERNAL ${internal_text}")
+    endif()
     add_custom_command(TARGET ${target} POST_BUILD
         COMMAND "${CMAKE_COMMAND}" -DJFX_RUST_ACTION=check-origin "-DJFX_RUST_MAP=${map}"
             "-DJFX_RUST_MAP_FORMAT=${map_format}" "-DJFX_RUST_ARCHIVE=$<TARGET_FILE:${imported}>" ${librarian}
             ${ld64_args} "-DJFX_RUST_LINK_DIRS=${CMAKE_BINARY_DIR};${target_binary_dir}"
             "-DJFX_RUST_TARGET=${target}" "-DJFX_RUST_LOG=${JFX_RUST_BINARY_DIR}/logs/${target}-origin.log"
             "-DJFX_RUST_LIBRARY=${library}" "-DJFX_RUST_CRATE=${crate_name}"
-            "-DJFX_RUST_SLICE=${SLICE_SLICE}" "-DJFX_RUST_EXPORTS=${SLICE_EXPORTS}" -P "${JFX_RUST_HELPER}"
-        COMMENT "Checking that ${library} (${target}) takes ${rust_text} from the ${crate_name} crate"
+            "-DJFX_RUST_SLICE=${SLICE_SLICE}" "-DJFX_RUST_EXPORTS=${SLICE_EXPORTS}" ${internal_args}
+            -P "${JFX_RUST_HELPER}"
+        COMMENT "Checking that ${library} (${target}) takes ${checked_text} from the ${crate_name} crate"
         VERBATIM)
 
+    # Per crate, its feature sets; per feature set, what its ABI check covers
+    set(set_property_suffix "${crate_name}_${set_KEY}")
     set_property(GLOBAL APPEND PROPERTY JFX_RUST_LINKED_CRATES "${crate_dir}")
-    set_property(GLOBAL APPEND PROPERTY JFX_RUST_EXPORTS_${crate_name} ${SLICE_EXPORTS})
+    set_property(GLOBAL APPEND PROPERTY JFX_RUST_FEATURE_SETS_${crate_name} "${set_KEY}")
+    set_property(GLOBAL PROPERTY JFX_RUST_FEATURES_${set_property_suffix} "${set_FEATURES}")
+    set_property(GLOBAL APPEND PROPERTY JFX_RUST_EXPORTS_${set_property_suffix} ${SLICE_EXPORTS})
+    set_property(GLOBAL APPEND PROPERTY JFX_RUST_INTERNAL_${set_property_suffix} ${SLICE_INTERNAL})
+    set_property(GLOBAL APPEND PROPERTY JFX_RUST_IMPORTS_${set_property_suffix} ${SLICE_IMPORTS})
+    set_property(GLOBAL APPEND PROPERTY JFX_RUST_ABI_DEFINITIONS_${set_property_suffix} ${SLICE_ABI_CHECK_DEFINITIONS})
     foreach(header ${SLICE_HEADERS})
         get_filename_component(header_dir "${header}" DIRECTORY)
-        set_property(GLOBAL APPEND PROPERTY JFX_RUST_ABI_INCLUDE_DIRS_${crate_name} "${header_dir}")
+        set_property(GLOBAL APPEND PROPERTY JFX_RUST_ABI_INCLUDE_DIRS_${set_property_suffix} "${header_dir}")
     endforeach()
-    set_property(GLOBAL APPEND PROPERTY JFX_RUST_ABI_INCLUDE_DIRS_${crate_name} ${SLICE_ABI_CHECK_INCLUDE_DIRS})
+    set_property(GLOBAL APPEND PROPERTY JFX_RUST_ABI_INCLUDE_DIRS_${set_property_suffix}
+        ${SLICE_ABI_CHECK_INCLUDE_DIRS})
 
+    set(details "")
+    foreach(keyword FEATURES INTERNAL IMPORTS)
+        if(SLICE_${keyword})
+            string(TOLOWER "${keyword}" word)
+            list(JOIN SLICE_${keyword} ", " text)
+            string(APPEND details "; ${word} ${text}")
+        endif()
+    endforeach()
+    # The headers' export lines are counted as lines, under #if too, so a library can export fewer of them (glass.dll:
+    # 123 lines, 97 exports in the release build), and on Windows and macOS other names as well
     message(STATUS "${library} (${target}): slice ${SLICE_SLICE} from the ${crate_name} crate, "
-        "${rust_text} of ${export_count} exports in Rust")
+        "${rust_text} in Rust; ${export_count} export lines in its headers${details}")
 endfunction()
 
 # jfx_rust_test and jfx_rust_lint, once every slice of the tree is registered
@@ -1302,31 +1773,69 @@ function(_jfx_rust_define_check_targets)
     endif()
     list(REMOVE_DUPLICATES crates)
 
-    set(packages)
-    foreach(crate_dir ${crates} "${JFX_RUST_SUPPORT_CRATE}")
-        get_filename_component(crate_name "${crate_dir}" NAME)
-        list(APPEND packages -p ${crate_name})
-    endforeach()
-    list(JOIN packages " " packages_text)
+    # The crates linked without FEATURES, with jfx-rust-support, in one cargo test and one clippy run in the cargo
+    # directory of the default features, as before FEATURES existed; then one more run per crate and other feature set,
+    # in that set's own cargo directory, so that no run replaces an archive of another set
     _jfx_rust_pins(pins)
+    set(packages)
+    set(all_packages)
+    set(feature_runs)
+    foreach(crate_dir ${crates})
+        get_filename_component(crate_name "${crate_dir}" NAME)
+        list(APPEND all_packages -p ${crate_name})
+        get_property(keys GLOBAL PROPERTY JFX_RUST_FEATURE_SETS_${crate_name})
+        list(REMOVE_DUPLICATES keys)
+        foreach(key ${keys})
+            if(key STREQUAL "base")
+                list(APPEND packages -p ${crate_name})
+            else()
+                list(APPEND feature_runs "${crate_name}" "${key}")
+            endif()
+        endforeach()
+    endforeach()
+    get_filename_component(support_name "${JFX_RUST_SUPPORT_CRATE}" NAME)
+    list(APPEND packages -p ${support_name})
+    list(APPEND all_packages -p ${support_name})
+    list(JOIN packages " " packages_text)
 
     _jfx_rust_cargo_command(cargo_test test test --locked --offline ${pins} ${packages})
-    add_custom_target(jfx_rust_test
-        COMMAND ${cargo_test}
-        WORKING_DIRECTORY "${JFX_RUST_REPO_ROOT}"
-        COMMENT "jfx_rust_test: cargo test ${packages_text}"
-        VERBATIM)
-
-    _jfx_rust_cargo_command(cargo_fmt fmt fmt --check ${packages})
     _jfx_rust_cargo_command(cargo_clippy clippy
         clippy --locked --offline ${pins} --all-targets ${packages} -- -D warnings)
-    add_custom_target(jfx_rust_lint_cargo
-        COMMAND ${cargo_fmt}
-        COMMAND ${cargo_clippy}
+    set(test_commands COMMAND ${cargo_test})
+    set(clippy_commands COMMAND ${cargo_clippy})
+    set(test_text "${packages_text}")
+    list(LENGTH feature_runs remaining)
+    while(remaining GREATER 0)
+        list(POP_FRONT feature_runs crate_name key)
+        math(EXPR remaining "${remaining} - 2")
+        get_property(features GLOBAL PROPERTY JFX_RUST_FEATURES_${crate_name}_${key})
+        _jfx_rust_feature_set(set "${crate_name}" ${features})
+        _jfx_rust_cargo_command_in(cargo_test "${set_DIR}" "test-${crate_name}${set_TAG}"
+            test --locked --offline ${pins} -p ${crate_name} ${set_ARGS})
+        _jfx_rust_cargo_command_in(cargo_clippy "${set_DIR}" "clippy-${crate_name}${set_TAG}"
+            clippy --locked --offline ${pins} --all-targets -p ${crate_name} ${set_ARGS} -- -D warnings)
+        list(APPEND test_commands COMMAND ${cargo_test})
+        list(APPEND clippy_commands COMMAND ${cargo_clippy})
+        list(JOIN set_ARGS " " args_text)
+        string(APPEND test_text "; -p ${crate_name} ${args_text}")
+    endwhile()
+
+    add_custom_target(jfx_rust_test
+        ${test_commands}
         WORKING_DIRECTORY "${JFX_RUST_REPO_ROOT}"
-        COMMENT "jfx_rust_lint: cargo fmt --check and cargo clippy -D warnings ${packages_text}"
+        COMMENT "jfx_rust_test: cargo test ${test_text}"
         VERBATIM)
 
+    _jfx_rust_cargo_command(cargo_fmt fmt fmt --check ${all_packages})
+    add_custom_target(jfx_rust_lint_cargo
+        COMMAND ${cargo_fmt}
+        ${clippy_commands}
+        WORKING_DIRECTORY "${JFX_RUST_REPO_ROOT}"
+        COMMENT "jfx_rust_lint: cargo fmt --check and cargo clippy -D warnings ${test_text}"
+        VERBATIM)
+
+    # The ABI check of each crate and feature set: cbindgen into a directory of its own, the completeness check, and
+    # abi_check.cpp compiled with the ABI_CHECK_DEFINITIONS of the set
     set(abi_checks)
     foreach(crate_dir ${crates})
         get_filename_component(crate_name "${crate_dir}" NAME)
@@ -1334,32 +1843,62 @@ function(_jfx_rust_define_check_targets)
         if(NOT EXISTS "${crate_dir}/abi_check.cpp")
             message(FATAL_ERROR "jfx_rust: the library crate ${crate_name} has no abi_check.cpp in ${crate_dir}")
         endif()
-        get_property(crate_exports GLOBAL PROPERTY JFX_RUST_EXPORTS_${crate_name})
-        list(REMOVE_DUPLICATES crate_exports)
-        set(gen_dir "${JFX_RUST_BINARY_DIR}/${lib_name}/abi-check")
-        add_custom_target(jfx_rust_abi_${lib_name}_headers
-            COMMAND "${CMAKE_COMMAND}" -DJFX_RUST_ACTION=cbindgen
-                "-DJFX_CBINDGEN_VERSION=${JFX_CBINDGEN_VERSION}" "-DJFX_RUST_CRATE=${crate_name}"
-                "-DJFX_RUST_LIB_NAME=${lib_name}" "-DJFX_RUST_CRATE_DIR=${crate_dir}"
-                "-DJFX_RUST_GEN_DIR=${gen_dir}" "-DJFX_RUST_EXPORTS=${crate_exports}" -P "${JFX_RUST_HELPER}"
-            WORKING_DIRECTORY "${JFX_RUST_REPO_ROOT}"
-            COMMENT "jfx_rust_lint: cbindgen of the ${crate_name} crate for its ABI check"
-            VERBATIM)
-        add_dependencies(jfx_rust_abi_${lib_name}_headers jfx_rust_lint_cargo)
+        get_property(keys GLOBAL PROPERTY JFX_RUST_FEATURE_SETS_${crate_name})
+        list(REMOVE_DUPLICATES keys)
+        foreach(key ${keys})
+            get_property(features GLOBAL PROPERTY JFX_RUST_FEATURES_${crate_name}_${key})
+            _jfx_rust_feature_set(set "${crate_name}" ${features})
+            set(abi_target "jfx_rust_abi_${lib_name}${set_SUFFIX}")
+            set(gen_dir "${JFX_RUST_BINARY_DIR}/${lib_name}/abi-check${set_TAG}")
+            foreach(property EXPORTS INTERNAL IMPORTS ABI_DEFINITIONS ABI_INCLUDE_DIRS)
+                get_property(set_${property} GLOBAL PROPERTY JFX_RUST_${property}_${crate_name}_${key})
+                if(set_${property})
+                    list(REMOVE_DUPLICATES set_${property})
+                endif()
+            endforeach()
+            # Passed only when there is something to pass, so that a crate with none of them gets the command it
+            # always had
+            set(set_args)
+            set(comment "jfx_rust_lint: cbindgen of the ${crate_name} crate for its ABI check")
+            foreach(property INTERNAL IMPORTS ABI_DEFINITIONS)
+                if(set_${property})
+                    string(REPLACE ";" "$<SEMICOLON>" value "${set_${property}}")
+                    string(REPLACE "ABI_" "" name "${property}")
+                    list(APPEND set_args "-DJFX_RUST_${name}=${value}")
+                endif()
+            endforeach()
+            if(set_FEATURES)
+                string(REPLACE ";" "$<SEMICOLON>" value "${set_FEATURES}")
+                list(APPEND set_args "-DJFX_RUST_FEATURES=${value}")
+                list(JOIN set_FEATURES ", " features_text)
+                string(APPEND comment " with the features ${features_text}")
+            endif()
+            add_custom_target(${abi_target}_headers
+                COMMAND "${CMAKE_COMMAND}" -DJFX_RUST_ACTION=cbindgen
+                    "-DJFX_CBINDGEN_VERSION=${JFX_CBINDGEN_VERSION}" "-DJFX_RUST_CRATE=${crate_name}"
+                    "-DJFX_RUST_LIB_NAME=${lib_name}" "-DJFX_RUST_CRATE_DIR=${crate_dir}"
+                    "-DJFX_RUST_GEN_DIR=${gen_dir}" "-DJFX_RUST_EXPORTS=${set_EXPORTS}" ${set_args}
+                    -P "${JFX_RUST_HELPER}"
+                WORKING_DIRECTORY "${JFX_RUST_REPO_ROOT}"
+                COMMENT "${comment}"
+                VERBATIM)
+            add_dependencies(${abi_target}_headers jfx_rust_lint_cargo)
 
-        # Compiled, never linked: as C++, where a second extern "C" declaration with other types is an error
-        get_property(include_dirs GLOBAL PROPERTY JFX_RUST_ABI_INCLUDE_DIRS_${crate_name})
-        list(REMOVE_DUPLICATES include_dirs)
-        add_library(jfx_rust_abi_${lib_name} OBJECT EXCLUDE_FROM_ALL "${crate_dir}/abi_check.cpp")
-        set_target_properties(jfx_rust_abi_${lib_name} PROPERTIES CXX_STANDARD 14 CXX_STANDARD_REQUIRED ON)
-        target_include_directories(jfx_rust_abi_${lib_name} PRIVATE ${include_dirs} "${gen_dir}")
-        if(MSVC)
-            target_compile_options(jfx_rust_abi_${lib_name} PRIVATE /nologo /W4 /WX /EHsc)
-        else()
-            target_compile_options(jfx_rust_abi_${lib_name} PRIVATE -Wall -Wextra -Werror)
-        endif()
-        add_dependencies(jfx_rust_abi_${lib_name} jfx_rust_abi_${lib_name}_headers)
-        list(APPEND abi_checks jfx_rust_abi_${lib_name})
+            # Compiled, never linked: as C++, where a second extern "C" declaration with other types is an error
+            add_library(${abi_target} OBJECT EXCLUDE_FROM_ALL "${crate_dir}/abi_check.cpp")
+            set_target_properties(${abi_target} PROPERTIES CXX_STANDARD 14 CXX_STANDARD_REQUIRED ON)
+            target_include_directories(${abi_target} PRIVATE ${set_ABI_INCLUDE_DIRS} "${gen_dir}")
+            if(set_ABI_DEFINITIONS)
+                target_compile_definitions(${abi_target} PRIVATE ${set_ABI_DEFINITIONS})
+            endif()
+            if(MSVC)
+                target_compile_options(${abi_target} PRIVATE /nologo /W4 /WX /EHsc)
+            else()
+                target_compile_options(${abi_target} PRIVATE -Wall -Wextra -Werror)
+            endif()
+            add_dependencies(${abi_target} ${abi_target}_headers)
+            list(APPEND abi_checks ${abi_target})
+        endforeach()
     endforeach()
 
     # A NOTFOUND result is searched again by the next configure, so installing perl later needs no cache edit

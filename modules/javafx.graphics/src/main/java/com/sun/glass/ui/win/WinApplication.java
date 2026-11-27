@@ -154,8 +154,8 @@ final class WinApplication extends Application implements InvokeLaterDispatcher.
         // staticScreen_getScreens, and the method id it cached for CheckAndClearException is cached by
         // WinAccessible (see the class comment).
         Application.loadNativeLibrary();
-        // Hands PlatformSupport::updatePreferences (native-glass/win/PlatformSupport.cpp) the callback
-        // that replaced its java.util.Map building; since that C was deleted, a change
+        // Hands the preferences of glass.dll (update_preferences, native-rust/glass-win/src/prefs.rs) the
+        // callback that replaced the former java.util.Map building; since that C was deleted, a change
         // that finds no callback installed is not delivered at all. It belongs here and nowhere
         // else: this initializer runs on the launcher thread, after the library is loaded and before
         // Application.run() creates the toolkit window, so the table is installed before the first

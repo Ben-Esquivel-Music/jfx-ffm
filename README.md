@@ -84,7 +84,10 @@ javafx.media native libraries, and the legal notices under `legal/`.
 Parts of the native libraries are written in Rust and linked into the same
 library as its C/C++ code; today that is `jfxm_abi_version` of `jfxmedia` on
 Windows, Linux and macOS (crate
-`modules/javafx.media/src/main/native-rust/jfxmedia`).
+`modules/javafx.media/src/main/native-rust/jfxmedia`) and, on Windows, the
+WinRT platform preferences of `glass` (crate
+`modules/javafx.graphics/src/main/native-rust/glass-win`, which links the
+`windows` crate vendored in `buildtools/rust/vendor`).
 The toolchain is pinned in [rust-toolchain.toml](rust-toolchain.toml) (Rust
 1.100.0, with clippy and rustfmt, and the standard library of the two macOS
 targets `aarch64-apple-darwin` and `x86_64-apple-darwin`), and the lint step
@@ -96,7 +99,9 @@ repository root. The native build runs cargo with `--locked --offline`, the
 `test` phase runs `cargo test`, and `verify` runs `cargo fmt --check`, clippy
 with `-D warnings`, an ABI check of each crate against its C header and
 `buildtools/rust/check-crate-licences.pl`. `-DJFX_RUST=false` builds the C
-implementation of every Rust part instead and needs no Rust toolchain;
+implementation of `jfxm_abi_version` instead and needs no Rust toolchain; the
+C++ of glass's preferences is deleted, so on Windows javafx.graphics needs the
+toolchain and fails to configure with `-DJFX_RUST=false`.
 `-DskipNative=true` skips Rust along with the rest of the native build.
 
 Every module jar carries the files of its module's `src/main/legal/` under

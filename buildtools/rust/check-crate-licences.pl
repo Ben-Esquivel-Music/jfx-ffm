@@ -34,6 +34,9 @@
 # above this file) with <cargo>, else the first cargo on PATH, else the one in $CARGO_HOME/bin when CARGO_HOME
 # is set and not empty, else the one in ~/.cargo/bin (the lookup of buildtools/rust/jfx_rust.cmake), and with
 # --config <cargo config> when given, as jfx_rust_lint passes the build's; or reads that JSON from <file>.
+# Run by hand, give --config buildtools/rust/cargo-config.toml: that file replaces crates.io with the vendored crates
+# of buildtools/rust/vendor, and without it the offline cargo metadata finds the third-party crates only in the
+# registry cache of CARGO_HOME and fails when they are not there.
 # The shipped crates are the workspace members with a staticlib target. The build links a crate whatever its
 # Cargo.toml lists, so jfx_rust_lint names each crate it links with --linked, and one that is not a workspace
 # member with a staticlib target is a violation. For each shipped crate, the crates it links are those reached
@@ -353,6 +356,7 @@ sub find_cargo {
     return undef;
 }
 
+# --config stays optional here, but an offline run needs buildtools/rust/cargo-config.toml for the vendored crates
 sub metadata_command {
     my ($cargo, $config) = @_;
     return ($cargo, 'metadata', '--locked', '--offline', (defined $config ? ('--config', $config) : ()),

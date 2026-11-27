@@ -94,12 +94,12 @@ final class WinPreferenceCalls {
     static final int COLOR_WINDOWTEXT = 8;
 
     /*
-     * enum GwinPreferenceType (glass_win_api.h), which is PlatformSupport::PreferenceType
-     * (PlatformSupport.h). A bitmask of the four sources of the preference map, not an index.
+     * enum GwinPreferenceType (glass_win_api.h), the GWIN_PT_* constants of the glass-win crate
+     * (lib.rs). A bitmask of the four sources of the preference map, not an index.
      * GWIN_PT_ALL is what WinApplication.getPlatformPreferences collects; the values the native side
      * sends to the callback are 2, 4, 5, 6, 8 and 12 (4 | 8: the types the two WinRT sinks kept after a
-     * failed post, ORed by PlatformSupport::PostPreferencesChanged and delivered in one call by
-     * PlatformSupport::RunDeferredPreferences).
+     * failed post, ORed by post_preferences_changed and delivered in one call by run_deferred, both in
+     * the glass-win crate's prefs.rs).
      */
     static final int GWIN_PT_SYSTEM_COLORS = 1;
     static final int GWIN_PT_SYSTEM_PARAMS = 2;
@@ -472,19 +472,19 @@ final class WinPreferenceCalls {
      * <b>Thread.</b> Always the Glass toolkit thread: inside {@code GlassApplication::WindowProc}, in the
      * {@code WM_SETTINGCHANGE} / {@code WM_THEMECHANGED} / {@code WM_SYSCOLORCHANGE} /
      * {@code WM_DWMCOLORIZATIONCOLORCHANGED} arms and the arm for what the two WinRT sinks post, or in
-     * {@code PlatformSupport::RunDeferredPreferences}, for the types a sink kept, right after a retrieved
+     * {@code run_deferred} of the glass-win crate, for the types a sink kept, right after a retrieved
      * message was dispatched: after a {@code DispatchMessage} of a toolkit pump, or in three arms of that
      * procedure - {@code WM_DO_ACTION_LATER}, the wake a sink posts after keeping its types, and the
      * {@code WM_TIMER} of the one-shot timer it arms when that wake is refused too - which a pump that is
      * not Glass's (an OS modal loop, the SWT embedder's) dispatches like any other message; never inside
-     * a sink or at a sent-message point. The sinks themselves may run elsewhere: they are WRL
-     * {@code Callback<>} delegates, not agile by default - {@code Callback<>} builds them with
-     * {@code RuntimeClassFlags<Delegate>}, {@code Delegate} is {@code ClassicCom}, and only {@code WinRt}
-     * classes aggregate the free-threaded marshaler ({@code FtmBase}) - so each event source decides whether
-     * to marshal its sink into the apartment {@code RoInitialize(RO_INIT_SINGLETHREADED)} created on the
-     * toolkit thread or to call it on a WinRT thread of its own. Either way a sink only posts its types to
+     * a sink or at a sent-message point. The sinks themselves may run elsewhere: they are delegates the
+     * {@code windows} crate builds for the glass-win crate ({@code prefs.rs}), and those are agile - they
+     * answer {@code IAgileObject} and {@code IMarshal}, where the WRL {@code Callback<>} delegates of
+     * {@code 5a709c189d} were {@code ClassicCom} and not agile - so an event source may call its sink on a
+     * thread of its own rather than marshal it into the apartment {@code RoInitialize(RO_INIT_SINGLETHREADED)}
+     * created on the toolkit thread. Either way a sink only posts its types to
      * the toolkit window through the guarded post of {@code gwin_invoke_later}
-     * ({@code PlatformSupport::PostPreferencesChanged}), or keeps them for the toolkit thread when that
+     * ({@code post_preferences_changed}, {@code prefs.rs}), or keeps them for the toolkit thread when that
      * {@code PostMessage} fails with the window published (its posted-message queue is at its quota) and
      * posts the wake; when the wake is refused too it arms the timer
      * ({@code GlassApplication::ArmPreferencesTimer}): {@code SetTimer} on the toolkit thread, else a
@@ -504,7 +504,7 @@ final class WinPreferenceCalls {
      *
      * @return 1 if the preferences changed, 0 otherwise; {@code GlassApplication::WindowProc} chooses
      *         between {@code return 0} and {@code DefWindowProc} on this, and
-     *         {@code RunDeferredPreferences} does not use it
+     *         {@code run_deferred} of the glass-win crate ({@code prefs.rs}) does not use it
      */
     static int onPreferencesChanged(MemorySegment user, int types) {
         try {

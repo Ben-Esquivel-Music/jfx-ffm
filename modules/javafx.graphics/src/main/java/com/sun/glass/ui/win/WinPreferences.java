@@ -40,7 +40,7 @@ import javafx.scene.paint.Color;
 
 /**
  * {@code PlatformSupport.cpp}'s preference map, built in Java: the eight {@code GetSysColor} colours
- * of {@code PlatformSupport::querySystemColors} ({@code native-glass/win/PlatformSupport.cpp}), the
+ * of {@code PlatformSupport::querySystemColors} ({@code PlatformSupport.cpp} at {@code 8492cb03b0}), the
  * three {@code SystemParametersInfoW} values of {@code querySystemParameters}, the eleven
  * {@code IUISettings} entries of {@code queryUISettings} and the one {@code INetworkInformation}
  * entry of {@code queryNetworkInformation} - and the collect / compare / notify cycle of
@@ -60,7 +60,7 @@ import javafx.scene.paint.Color;
  * <b>Two sources, two directions.</b> The colours and the two {@code SPI} values are plain
  * {@code user32} calls this class makes itself. The twelve WinRT entries are not: {@code IUISettings}
  * and {@code INetworkInformation} need {@code RoActivateInstance}, three generations of a vtable and
- * two event sinks, so those objects stay in {@code PlatformSupport} and hand their results out as POD
+ * two event sinks, so those objects stay native (the glass-win crate) and hand their results out as POD
  * through {@code gwin_prefs_query_ui_settings} / {@code gwin_prefs_query_network}
  * ({@link WinGlassNative#uiSettings}, {@link WinGlassNative#networkInfo}). This class is the only
  * place that turns either source into key/value pairs, so the key names exist once.
@@ -91,14 +91,14 @@ import javafx.scene.paint.Color;
  * {@code notifyPreferencesChanged} (application listener code) would be a deadlock the C never had.
  * {@link #update} runs only on the Glass toolkit thread, which is the JavaFX application thread here:
  * the four {@code WndProc} arms reach it there, and so does the arm for what the two WinRT sinks post.
- * The sinks themselves may run on another thread - they are WRL {@code Callback<>} delegates and are
- * not agile: {@code Callback<>} builds them with {@code RuntimeClassFlags<Delegate>}, {@code Delegate}
- * is {@code ClassicCom}, and by default only {@code WinRt} classes aggregate the free-threaded
- * marshaler ({@code FtmBase}) - but they only post to the toolkit window, so a sink's notification
- * arrives here asynchronously, on the toolkit thread, and the {@code gwin_prefs_query_*} calls of
- * {@link #collect} run there too, in the apartment the WinRT objects were activated in.
- * {@link #collected} stays {@code volatile} because tests read it from their own thread through
- * {@link #collected()}.
+ * The sinks themselves may run on another thread - they are agile delegates the {@code windows} crate
+ * builds for the glass-win crate ({@code IAgileObject}, {@code IMarshal}), where the WRL
+ * {@code Callback<>} delegates of {@code 5a709c189d} were {@code ClassicCom} and not agile, so an
+ * event source may call them on a thread of its own - but they only post to the toolkit window, so a
+ * sink's notification arrives here asynchronously, on the toolkit thread, and the
+ * {@code gwin_prefs_query_*} calls of {@link #collect} run there too, in the apartment the WinRT
+ * objects were activated in. {@link #collected} stays {@code volatile} because tests read it from
+ * their own thread through {@link #collected()}.
  * <p>
  * Line numbers into {@code Utils.cpp} refer to it at commit {@code 8492cb03b0}
  * ({@code git show 8492cb03b0:modules/javafx.graphics/src/main/native-glass/win/Utils.cpp}).
@@ -164,8 +164,8 @@ final class WinPreferences {
     /**
      * The map the last notification carried. It replaces {@code PlatformSupport::preferences}
      * ({@code PlatformSupport.h}), the member the JNI {@code updatePreferences} compared against; that
-     * member has been deleted with the comparison, and the C {@code updatePreferences} now
-     * compares nothing - it calls the table slot.
+     * member has been deleted with the comparison, and {@code update_preferences} of the glass-win crate
+     * ({@code prefs.rs}) compares nothing - it calls the table slot.
      * <p>
      * {@code null}, not {@code Map.of()}: {@code HashMap.equals(null)} is false, so the first
      * collection always counts as a change even when it is empty, which is what the C's null
@@ -181,7 +181,7 @@ final class WinPreferences {
     }
 
     /**
-     * {@code PlatformSupport::updatePreferences}, which is the body of the one surviving upcall.
+     * The former {@code PlatformSupport::updatePreferences}, now the body of the one surviving upcall.
      * Collects the requested groups, compares them with the last collection and notifies the
      * application when they differ.
      * <p>
@@ -278,8 +278,8 @@ final class WinPreferences {
     }
 
     /**
-     * {@code PlatformSupport::queryUISettings}, whose WinRT half
-     * runs in {@code PlatformSupport::collectUISettings} and reaches Java as a POD struct.
+     * The former {@code PlatformSupport::queryUISettings}, whose WinRT half now runs in
+     * {@code Preferences::collect_ui_settings} of the glass-win crate and reaches Java as a POD struct.
      * <p>
      * Each of the three groups appears only when its own flag says the C got that far: no
      * {@code UISettings} at all means no keys, a failed {@code IUISettings3} means no colours
@@ -310,8 +310,8 @@ final class WinPreferences {
     }
 
     /**
-     * {@code PlatformSupport::queryNetworkInformation}, whose
-     * WinRT half runs in {@code PlatformSupport::collectNetworkInfo}.
+     * The former {@code PlatformSupport::queryNetworkInformation}, whose WinRT half now runs in
+     * {@code Preferences::collect_network_info} of the glass-win crate.
      * <p>
      * Either there is no key at all - no activation factory, or an {@code RoException} before the C
      * reached its {@code putString} - or there is exactly one, and {@code "Unknown"} is a value it can
@@ -384,7 +384,7 @@ final class WinPreferences {
     /**
      * {@code PlatformSupport::putColor(jobject, const char*, Color)}: an
      * {@code ABI::Windows::UI::Color} is four bytes A, R, G, B, which
-     * {@code PlatformSupport::collectUISettings} packs as {@code 0xAARRGGBB}, and the alpha reaches
+     * {@code argb} of the glass-win crate packs as {@code 0xAARRGGBB}, and the alpha reaches
      * {@code Color.rgb} as {@code A / 255.0} in double.
      */
     private static Color uiColor(int argb) {
