@@ -1384,8 +1384,8 @@ because they had run nowhere else now run on Windows and Linux, each Javadoc say
   same check over the same composite, skipped on neither macOS 15 runner (`PrismFontFactoryTest` 9 / 0 / 0 / 0).
 
 **Gates.** Counted from the Maven log, run / failures / errors / skipped; every class in the kept tables
-[`US-111-windows-per-class.tsv`](US-111-windows-per-class.tsv) and
-[`US-111-wsl-per-class.tsv`](US-111-wsl-per-class.tsv).
+`US-111-windows-per-class.tsv` and
+`US-111-wsl-per-class.tsv`.
 
 Windows, `mvn -B -ntp -pl modules/javafx.graphics -am test -Djfx.parity.require=true` in the main tree: the committed
 `2c9003b909` before any edit, and the final tree. Master does not run here: a second Windows tree cannot live in the

@@ -1,5 +1,16 @@
 # US-053 — Fix two Glass Windows window-procedure hazards: a late `RemoveProp`, and unvalidated action pointers
 
+## In short
+- **Problem:** Two hazards in the window procedures of Glass on Windows. (1) When a window is closed from inside one
+  of its own messages, Glass removes its marker from the window handle after Windows has freed the handle, so it can
+  hit a different window that got the same handle. (2) The toolkit window treats a number in a private message as a
+  pointer and calls through it, whoever sent the message.
+- **Seen failing?** No. Read from the code and from Microsoft's documentation. Both are in upstream OpenJFX too.
+- **Goal:** The marker is removed while the handle is still ours, and only actions that Glass queued itself are run.
+- **Done when:** A test closes a window from inside its own message and no late removal happens; a private message
+  with a pointer Glass never queued is ignored.
+- **Order:** Can start now. Better before slice 3 of US-031.
+
 **Status:** 📋 Ready (filed 2026-10-01 from an independent review of the US-039 part 1 redesign; read:
 `BaseWnd.cpp:30-190`, `GlassApplication.cpp:44-92` and `:178-194`, `glass_win_api.cpp:596-631`,
 `glass_win_api.h:716-731`, `git blame` of `BaseWnd.cpp:163-170` and `GlassApplication.cpp:69-78`, and three Microsoft

@@ -1,5 +1,15 @@
 # US-049 — Move Glass Windows robot capture to Java and delete the pre-Vista file dialogs
 
+## In short
+- **Problem:** Two leftovers in Glass on Windows. Part 1: the `Robot` screen capture is 115 lines of C++ that Java
+  could do through FFM. Part 2: 384 lines of file-dialog code that can run only on Windows older than Vista.
+- **Seen failing?** No. Clean-up, so the Rust port of US-031 has less to port.
+- **Goal:** Capture done in Java (part 1) and the dead dialog code deleted (part 2).
+- **Done when:** Part 1: the Java capture equals the C++ capture pixel for pixel at 100 % and 150 % scaling, and the
+  export is gone. Part 2: the files are deleted and nothing else changes.
+- **Order:** Part 2 can start now. Part 1 needs the owner's ruling (the header says capture stays native), before
+  US-031.
+
 **Status:** 🔶 Needs a maintainer ruling on part 1 (filed 2026-09-30 from the Rust-port survey of `native-glass/win`;
 nothing built or run). Part 1 contradicts the ABI header, which labels robot capture "OS-CALL, stays native"
 (`glass_win_api.h:262`). Part 2 is ready once the folder-dialog dispatch is traced. · **Epic:** Less native code

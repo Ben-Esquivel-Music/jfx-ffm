@@ -1,5 +1,15 @@
 # US-102 — Play CD+G karaoke with its paired audio
 
+## In short
+- **Problem:** CD+G karaoke (a `.cdg` graphics file beside an audio file) is not a media type JavaFX knows. The
+  owner's jKaraoke player decodes it itself, on its own timer, beside a `MediaView`.
+- **Seen failing?** Not a defect. A missing format.
+- **Goal:** A `Media` made from the graphics file and its audio file, both named explicitly, plays the audio and
+  shows the graphics in a `MediaView`, in step with the sound.
+- **Done when:** The graphics follow the audio clock through play, pause and seek, every CD+G instruction is drawn as
+  the specification says, and the audio alone plays as before.
+- **Order:** After US-096 and US-100.
+
 **Status:** 📋 Ready (filed 2026-11-07 from the media-format survey; pairing revised 2026-11-07 to an explicit URI
 pair) · **Epic:** Media formats ·
 **Blocked by:** US-096 (clear errors for the new failure cases), US-100 (frames decoded in Java reach `MediaView`) ·

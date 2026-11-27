@@ -1,5 +1,15 @@
 # US-081 — Port Godot's 2D character controller and collider tools above the engine contract
 
+## In short
+- **Problem:** A platformer needs more than rigid bodies: a character that walks, slides along walls and stands on
+  slopes and moving platforms, and tile colliders the character does not catch on.
+- **Seen failing?** Not a defect. New work.
+- **Goal:** Godot's 2D character controller and its collider tools in Java, written against the API of US-080 so they
+  work on any engine.
+- **Done when:** On the built-in engine the character's movement matches Godot's recordings bit for bit, and a
+  character runs across a row of tiles without catching on a seam.
+- **Order:** After US-079 and US-080.
+
 **Status:** 📋 Ready (filed 2026-11-07 from the game-toolkit design review) · **Epic:** Game toolkit ·
 **Blocked by:** US-075 (the ported code's notices must ship), US-076 (scene-mode goldens), US-079 (the built-in
 engine the goldens run on), US-080 (the contract the controller is limited to) · **Blocks:** US-082

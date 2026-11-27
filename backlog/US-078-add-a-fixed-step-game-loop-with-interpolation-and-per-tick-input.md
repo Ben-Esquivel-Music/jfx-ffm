@@ -1,5 +1,15 @@
 # US-078 — Add a fixed-step game loop with interpolation and per-tick input
 
+## In short
+- **Problem:** JavaFX has no game loop. An `AnimationTimer` runs once per screen refresh, at whatever rate the
+  platform gives, so a game's speed and results depend on the machine.
+- **Seen failing?** Not a defect. A missing feature.
+- **Goal:** A loop that advances the game in fixed steps (60 a second by default), draws smoothly between steps, and
+  gives the game one snapshot of the input per step.
+- **Done when:** Tests show the same game result at any refresh rate, smooth drawing between steps, a cap on catch-up
+  steps, and one input snapshot per step.
+- **Order:** Can start now. US-082, US-087, US-088 and US-093 wait for it.
+
 **Status:** 📋 Ready (filed 2026-11-07 from the game-toolkit design review) · **Epic:** Game toolkit ·
 **Blocked by:** none · **Blocks:** US-082, US-087, US-088, US-093
 

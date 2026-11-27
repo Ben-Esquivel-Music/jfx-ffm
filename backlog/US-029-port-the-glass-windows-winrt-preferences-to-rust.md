@@ -1,6 +1,18 @@
 # US-029 — Port the Glass Windows WinRT preferences (PlatformSupport) to Rust behind the glass_win_api ABI
 
-**Status:** 🔷 Implemented, not merged (2026-11-26): committed as `7c38bdc73a` on the branch
+## In short
+- **Problem:** The Windows code that reads system settings (colours, network state) through the Windows Runtime was
+  981 lines of C++ with hand-written COM. It is the first real piece of Glass to move to Rust.
+- **Goal:** The same five exports in Rust, the C++ deleted, the same answers.
+- **State:** Merged (PR #76, 2026-11-27).
+- **Left to do (owner):** the `tests/system` preference tests and the manual sink check (commands under "Left for the
+  owner" below); accept the side effects, the main ones being 118 MB of vendored Rust crates in the repository and
+  four more system DLLs that `glass.dll` loads. Follow-up: US-132 (test gaps).
+  US-133 was closed without change.
+
+**Status:** 🔶 Merged, not Done (PR #76, 2026-11-27). What is left is under "In short".
+The status as written before the merge:
+🔷 Implemented, not merged (2026-11-26): committed as `7c38bdc73a` on the branch
 `port-the-glass-windows-winrt-preferences-to-rust`; the fixes of its code review of 2026-11-27 are committed as
 `fcfc41cf48` (PR #76, open). The five preferences exports and the two preference test hooks of `glass_win_api.h` are
 Rust, in the new `glass-win` crate linked into both builds of glass.dll; `PlatformSupport.cpp/.h` and

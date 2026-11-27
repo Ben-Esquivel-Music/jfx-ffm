@@ -1,5 +1,13 @@
 # US-103 — Play FLAC audio
 
+## In short
+- **Problem:** FLAC files do not play. They are not recognised, and no decoder is bundled.
+- **Seen failing?** Read from the code: "Unrecognized file signature!".
+- **Goal:** `.flac` plays through `Media`, `MediaPlayer` and `AudioClip` on every desktop.
+- **Done when:** The decoded audio matches the checksum each FLAC file carries, seeking lands on the exact sample, and
+  damaged files only raise an error.
+- **Order:** After US-100.
+
 **Status:** 📋 Ready (filed 2026-11-07 from the media-format survey) · **Epic:** Media formats ·
 **Blocked by:** US-100 (playback of media decoded in Java) · **Blocks:** none
 

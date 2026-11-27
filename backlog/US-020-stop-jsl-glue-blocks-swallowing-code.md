@@ -1,6 +1,17 @@
 # US-020 — Stop a JSL glue block swallowing the code after it
 
-**Status:** 🔷 Implemented (2026-11-14; filed 2026-09-27); the Windows and WSL gates and filing the upstream issue
+## In short
+- **Problem:** A shader file can hold a block of Java text between `<<` and `>>`. The compiler took everything up to
+  the last `>>` in the file, so a second block, or a `>>` in a later comment, swallowed the shader code in between.
+- **Goal:** Each block ends at its own `>>`, and the Prism generator rejects such blocks, which it never supported.
+- **State:** Merged (PR #63, 2026-11-14).
+- **Left to do (owner):** file the upstream issue (draft outside the repository). The Windows and WSL gates this
+  story asks for have since been run on later trees that contain this change (US-023 and US-024, 0 failures on both
+  systems).
+
+**Status:** 🔶 Merged, not Done (PR #63, 2026-11-14). What is left is under "In short".
+The status as written before the merge:
+🔷 Implemented (2026-11-14; filed 2026-09-27); the Windows and WSL gates and filing the upstream issue
 are [owner-run](#owner-run-and-pending) · **Found:** 2026-09-27, US-008 (filing US-019: two of its parse cases had two
 glue blocks; one lost the function between them with no error, the other failed with `Unknown variable x`)
 
@@ -692,8 +703,8 @@ They are extra evidence: the criterion's gates are Windows and WSL. Counts are r
 
 | Gate | Command | Result |
 | --- | --- | --- |
-| Module gate | `mvn -B -ntp -l <log> -Dmaven.test.failure.ignore=true -pl buildtools/jslc,modules/javafx.graphics -am clean test`, before and after | Both exit 0 with BUILD SUCCESS (72 s and 71 s), and `jsl-codegen`, `cmake-configure` and `cmake-build` ran. jslc 235 / 0 / 0 / 0 in 28 classes before and 276 / 0 / 0 / 0 in 31 after; base 5,510 / 0 / 0 / 22 in 290 classes and graphics 26,696 / 0 / 0 / 858 in 629 in both. Of the 947 per-class lines before and 950 after, `diff` shows only `PrismProgramTest 13 0 0 0`, `ProgramGlueBlockTest 20 0 0 0` and `lexer.GlueBlockTest 8 0 0 0` added ([per class](US-020-macos-per-class.tsv)). No class has a failure or an error. No `hs_err_pid*` file in either clone |
-| Generated files | The module gate's `target/gensrc` | 797 files (`jsl-decora` 158, `jsl-prism` 636, `mtl-headers` 3), identical by name and md5 before and after ([md5 list](US-020-macos-gensrc.md5), the after run's) and to `US-019-macos-gensrc.md5` |
+| Module gate | `mvn -B -ntp -l <log> -Dmaven.test.failure.ignore=true -pl buildtools/jslc,modules/javafx.graphics -am clean test`, before and after | Both exit 0 with BUILD SUCCESS (72 s and 71 s), and `jsl-codegen`, `cmake-configure` and `cmake-build` ran. jslc 235 / 0 / 0 / 0 in 28 classes before and 276 / 0 / 0 / 0 in 31 after; base 5,510 / 0 / 0 / 22 in 290 classes and graphics 26,696 / 0 / 0 / 858 in 629 in both. Of the 947 per-class lines before and 950 after, `diff` shows only `PrismProgramTest 13 0 0 0`, `ProgramGlueBlockTest 20 0 0 0` and `lexer.GlueBlockTest 8 0 0 0` added (per class). No class has a failure or an error. No `hs_err_pid*` file in either clone |
+| Generated files | The module gate's `target/gensrc` | 797 files (`jsl-decora` 158, `jsl-prism` 636, `mtl-headers` 3), identical by name and md5 before and after (md5 list, the after run's) and to `US-019-macos-gensrc.md5` |
 | ANTLR warning | `grep -c 'warning(131)'` on the module gate's logs | 1 before, `[WARNING] warning(131): com/sun/scenario/effect/compiler/JSL.g4:488:19: greedy block ()* contains wildcard; the non-greedy syntax ()*? may be preferred`, and 0 after. The plugin's echo of it (`JSL.g4 [488:19]: greedy block …`) is gone too; the other `[WARNING]` lines that are not test totals are the same in both logs, except for the clone path in one `javac` note |
 
 The check commands of [Windows gate](#windows-gate), run in bash on this host with `windows` replaced by `macos`, on

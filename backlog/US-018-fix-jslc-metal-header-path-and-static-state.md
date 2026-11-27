@@ -1,5 +1,15 @@
 # US-018 — Stop the jslc Metal backend depending on `jsl-` in the output path and on static state
 
+## In short
+- **Problem:** On macOS, a build without `clean` after touching one shader wrote Metal header files that listed only
+  the touched shaders (1 of 50, 28 of 212), so the Metal pipeline broke until a clean build. The compiler also found
+  its output folder by looking for the text `jsl-` in the path.
+- **Goal:** The headers always list every shader, and the caller names the folder.
+- **State:** Merged (PR #50, 2026-11-07). On the Mac a build without `clean` now keeps all 50 and all 212 shaders.
+- **Left to do (owner):** the Windows build without `clean` with `"-Djfx.jsl.backends=-d3d -mtl"`; file the upstream
+  report (draft outside the repository). The Windows and WSL gates this story also asks for have since been run on
+  later trees that contain this change (US-023 and US-024, 0 failures on both systems).
+
 **Status:** 🔶 Merged, not Done (2026-11-07, PR #50): implemented 2026-11-05 in `a8d6688172`, with the fixes for the two PR 50 review rounds in `ba2b68e991` and `84f699400e`; the Windows and WSL gates and the upstream report are [pending](#owner-run-and-pending) · **Found:** 2026-09-27, US-008 (review of the jslc test port: `SymbolTest` would have passed for any program that parses, because the Metal backend threw)
 
 ## Story

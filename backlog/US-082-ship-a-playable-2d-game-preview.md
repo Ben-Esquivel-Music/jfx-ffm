@@ -1,5 +1,14 @@
 # US-082 — Ship a playable 2D game preview
 
+## In short
+- **Problem:** The loop, the physics and the character controller are parts. Nothing yet connects them to JavaFX nodes
+  or shows that a game can be built from them.
+- **Seen failing?** Not a defect. New work.
+- **Goal:** Nodes that follow physics bodies, a debug view, sprites, a large tile layer, a camera, and a sample
+  platformer.
+- **Done when:** The sample platformer plays, and it also runs without a display in CI.
+- **Order:** After US-078, US-080 and US-081. This is the first thing a user can play.
+
 **Status:** 📋 Ready (filed 2026-11-07 from the game-toolkit design review) · **Epic:** Game toolkit ·
 **Blocked by:** US-078 (the loop, interpolation and input), US-080 (the engine contract that bodies and the debug view
 use), US-081 (the character controller and the tile colliders) · **Blocks:** US-084

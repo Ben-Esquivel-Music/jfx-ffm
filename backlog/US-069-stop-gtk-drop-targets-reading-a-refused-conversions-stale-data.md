@@ -126,7 +126,7 @@ comment-only (diffed). The gates ran on the final tree, applied to a fresh clone
 
 Run / failures / errors / skipped. Per class and per method the after runs equal the before runs except for the new
 class's 10 methods and the new `GtkTraceRulesTest` method; per-class sums equal Maven's totals; no `hs_err_pid`.
-Per-class display results: [US-069-linux-display-per-class.tsv](US-069-linux-display-per-class.tsv).
+Per-class display results: US-069-linux-display-per-class.tsv.
 
 `GtkDnDRefusedConversionTest` with the fix: 10 / 0 / 0 / 0 in 3 of 3 runs without a window manager and 3 of 3 under
 openbox; `GtkDnDTargetTest` 8/8, `GtkDnDReentrantDropTest` 5/5, `GtkDnDTraceTest` 6/6 (goldens compared). Mutants,

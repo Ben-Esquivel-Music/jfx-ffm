@@ -1,8 +1,16 @@
 # US-131 — Stop a WebView page teardown deadlocking on macOS when SQLite is not yet initialized
 
+## In short
+- **Problem:** On macOS, closing a WebView page that uses `localStorage` can freeze the application for good. The FX
+  thread waits for the storage thread to end, and the storage thread waits for the FX thread.
+- **Seen failing?** Yes: the `javafx.web` tests hang in 4 of 4 runs on the Mac, with thread dumps.
+- **Goal:** Closing a page never blocks the FX thread for good.
+- **Done when:** On the Mac, `UserDataDirectoryTest` passes (19 tests) with the fix and hangs without it.
+- **Order:** High priority: a real hang that users can hit, and it stops the web tests on macOS. Needs a WebKit build.
+
 **Status:** 📋 Ready (filed 2026-11-25) · **Found:** 2026-11-25, running the `javafx.web` tests on the macOS host
 against a newly downloaded `jfxwebkit`; the hang reproduced in all 4 runs, with the new library and with the one
-before it, and thread dumps and native samples locate it ([evidence](US-131-macos-evidence.md)) · **Related:** US-025
+before it, and thread dumps and native samples locate it (evidence) · **Related:** US-025
 (its Windows gate passes the same test)
 
 ## Story
@@ -26,16 +34,16 @@ Paths are relative to `modules/javafx.web/src/main/native/Source`; line numbers 
 - **Observed.** In `UserDataDirectoryTest.testSimpleModification` a page writes to `localStorage` and is disposed
   within the 1 s sync interval (`WebKitLegacy/Storage/StorageAreaSync.cpp:44`), in a JVM where nothing has opened an
   SQLite database before. The native stacks of both threads are those above, frame for frame, with both libraries
-  ([evidence](US-131-macos-evidence.md#the-native-stacks-sample-runs-3-and-4)).
+  (evidence).
 - **Effect on the test run.** On macOS the `javafx.web` `default-test` cannot finish: the blocked FX thread fails
   the class's remaining 17 tests and every later class that needs it, 31 in `TestBase#setupOnce()` and
   `WebKitRegistryLeakTest`. That is 290 / 18 / 32 / 110, where the run without `UserDataDirectoryTest` is
-  473 / 0 / 0 / 113 ([per class](US-131-macos-per-class.tsv)). Because the `default-test` fails, the
+  473 / 0 / 0 / 113 (per class). Because the `default-test` fails, the
   `ffm-binding-test` execution after it does not run. CI never runs `default-test`, and US-025's gate was on
   Windows, so neither saw it.
 - **Only Darwin.** Every other OS calls `sqlite3_initialize()` directly (`SQLiteDatabase.cpp:83-88`). US-025's
   Windows gate passes `UserDataDirectoryTest` 19 / 0 / 0 / 0 before and after
-  ([per class](US-025-windows-per-class.tsv)).
+  (per class).
 - **Origin.** The Darwin branch came with the WebKit 625.1 update (`1e7e7d03e8`, 8380556). Its comment gives the
   reason for the main thread: in WebKit's Network process `sqlite3_initialize()` can race with other code that
   queries the Darwin user temp directory through `confstr()`. Whether upstream OpenJFX has the same hang was not
@@ -61,7 +69,7 @@ Paths are relative to `modules/javafx.web/src/main/native/Source`; line numbers 
 ## Acceptance criteria
 1. **No deadlock on macOS.** Against a `jfxwebkit` built from the changed tree for macOS, `UserDataDirectoryTest`
    passes 19 / 0 / 0 / 0. Against the same tree's `jfxwebkit` built without the change, it hangs as in the
-   [evidence](US-131-macos-evidence.md).
+   evidence.
 2. **A test that cannot be hidden by test order.** A test destroys a page that has just written to `localStorage`,
    in a JVM in which nothing has initialized SQLite before it, whatever classes run before it. It passes against the
    changed library and fails against the unchanged one on macOS.
@@ -70,9 +78,9 @@ Paths are relative to `modules/javafx.web/src/main/native/Source`; line numbers 
    and against the libraries before and after the change on Windows.
 4. **The whole module runs on macOS.** `mvn -B -ntp -pl modules/javafx.web -am test -Djfx.web.skipTests=false
    -Djfx.web.skipFfmTests=false` passes with 0 failures and 0 errors, and its per-class list is
-   [`US-131-macos-per-class.tsv`](US-131-macos-per-class.tsv) plus `UserDataDirectoryTest` and the new tests.
+   `US-131-macos-per-class.tsv` plus `UserDataDirectoryTest` and the new tests.
 5. **Windows and Linux unchanged.** The same command's per-class list on Windows equals the final list of
-   [`US-025-windows-per-class.tsv`](US-025-windows-per-class.tsv) plus the new tests, and on Linux (WSL) it equals
+   `US-025-windows-per-class.tsv` plus the new tests, and on Linux (WSL) it equals
    that run against the library before the change, plus the new tests.
 
 ## Definition of Done

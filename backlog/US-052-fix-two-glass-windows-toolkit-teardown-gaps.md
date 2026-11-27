@@ -1,5 +1,18 @@
 # US-052 — Fix two Glass Windows toolkit teardown gaps: a toolkit thread that ends undestroyed, and leaked classes
 
+## In short
+- **Problem:** Part 1: if the thread that runs Glass on Windows ends without the normal shutdown (JavaFX embedded in
+  SWT, or foreign code posting a quit message), Glass still believes the toolkit is alive. A later `invokeAndWait`
+  then waits for ever, or a message goes to a window that no longer exists. Part 2: Glass never unregisters its
+  window classes.
+- **Seen failing?** Part 1 partly: a stand-alone probe showed that Windows frees the window without telling Glass.
+  Nobody has seen a JavaFX application hang this way. Part 2 was read from the code.
+- **Goal:** Glass notices that its thread ended and refuses later calls with an error; window classes are
+  unregistered when the toolkit ends.
+- **Done when:** Tests in child JVMs end the toolkit thread both ways, and later calls return "no toolkit" and do not
+  hang; no window class of an ended toolkit stays registered.
+- **Order:** Can start now. Better before slice 3 of US-031.
+
 **Status:** 📋 Ready (filed 2026-10-01; found while redesigning US-039 part 1 after PR review; revised the same day
 after a review of this story, and again after the PR review of that revision, which replaced part 1's
 fiber-local-storage callback, and once more after a review of that change; read: `GlassApplication.cpp:44-135`,
@@ -15,7 +28,8 @@ Features" ("Window Destruction"), `GetCurrentThreadId`, "Terminating a Thread", 
 side of the embedded mode; not checked: every point marked so below; built and run: one standalone probe, on
 Windows 10.0.19045.6466 x64 with glass.dll's compiler and linker flags; nothing built or run against glass.dll
 itself) ·
-**Evidence:** `US-052-thread-end-probe-results.md` (this folder), with the probe's sources beside it. The scenario
+**Evidence:** `US-052-thread-end-probe-results.md` and the probe's sources, removed from this folder on 2026-11-27
+(`git show cee405c84e:backlog/US-052-thread-end-probe-results.md`). The scenario
 numbers S1 to S12 below are its sections · **Found:** 2026-10-01, redesign of US-039 part 1 ·
 **Blocked by:** US-039 part 1, landed in PR #37 (part 1 extends its publication and reuses its test hooks;
 part 2 is independent) ·

@@ -1,5 +1,15 @@
 # US-080 — Let applications bring their own 2D physics engine
 
+## In short
+- **Problem:** A game should not be tied to one physics engine. Godot's own engine interface is a C++ header with
+  unwritten rules, so it cannot be used as the contract.
+- **Seen failing?** Not a defect. New public API.
+- **Goal:** One public 2D physics API that any engine can plug into, and a test kit that shows how each engine
+  behaves and where engines differ.
+- **Done when:** The built-in engine of US-079 runs behind the API, a game picks an engine in code or by a system
+  property, a missing engine fails with a clear error, and the kit prints a difference table per engine.
+- **Order:** After US-079.
+
 **Status:** 📋 Ready (filed 2026-11-07 from the game-toolkit design review) · **Epic:** Game toolkit ·
 **Blocked by:** US-079 (the built-in engine, the first engine the contract must fit; if US-077's gate stops the
 port, not blocked: see criterion 8) ·

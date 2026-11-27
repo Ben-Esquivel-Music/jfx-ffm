@@ -1,5 +1,14 @@
 # US-116 — Keep the build directory out of the RUNPATH of the Linux media libraries
 
+## In short
+- **Problem:** The Linux media libraries we ship remember the folder they were built in (for example
+  `/home/<user>/.../target/native/bin`) as a place to look for other libraries. On a user's machine that folder is
+  not ours; a library planted there would be loaded.
+- **Seen failing?** Yes, measured with `readelf` on the built `libjfxmedia.so`.
+- **Goal:** The shipped media libraries look for their dependencies only next to themselves.
+- **Done when:** `readelf` shows no absolute path in any shipped media library.
+- **Order:** Can start now. Small: a CMake setting.
+
 **Status:** 📋 Ready (filed 2026-11-15 from US-040) · **Found:** 2026-11-15, US-040's native build in WSL Ubuntu
 (`readelf -d`); the CMake files re-read for this story the same day, nothing built or run for it
 

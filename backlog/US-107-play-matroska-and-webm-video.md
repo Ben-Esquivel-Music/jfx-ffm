@@ -1,5 +1,15 @@
 # US-107 — Play Matroska and WebM video
 
+## In short
+- **Problem:** WebM and Matroska video (VP8, VP9, with Opus or Vorbis sound) does not play. No demuxer and no decoder
+  for them is bundled.
+- **Seen failing?** Read from the code: "Unrecognized file signature!".
+- **Goal:** These files play in a `MediaView` on every desktop. This one adds native code, under the native licence
+  rule.
+- **Done when:** Decoded frames are exact, sound and picture stay in step at real-time speed, seeking works, and
+  unplayable files fail with a clear error.
+- **Order:** US-040, its blocker, is done, so it can start.
+
 **Status:** 📋 Ready (filed 2026-11-07 from the media-format survey) · **Epic:** Media formats ·
 **Blocked by:** US-040 (native pipeline changes wait for its fixes) · **Blocks:** none
 

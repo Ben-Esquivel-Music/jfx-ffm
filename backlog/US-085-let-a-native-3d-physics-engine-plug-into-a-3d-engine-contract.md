@@ -1,5 +1,14 @@
 # US-085 — Let a native 3D physics engine plug into a 3D engine contract
 
+## In short
+- **Problem:** The built-in 3D engine (US-086) is far away. 3D games need a 3D physics API sooner, and a native
+  engine to run behind it.
+- **Seen failing?** Not a defect. New public API.
+- **Goal:** A 3D physics API and test kit, like the 2D ones of US-080, with a native 3D engine plugged in through FFM.
+- **Done when:** The native 3D engine passes the 3D kit for everything it declares, and every rule of US-080 holds for
+  3D as well.
+- **Order:** After US-080.
+
 **Status:** 📋 Ready (filed 2026-11-07 from the game-toolkit design review) · **Epic:** Game toolkit ·
 **Blocked by:** US-080 (the 2D contract and conformance kit that this story extends to 3D) ·
 **Blocks:** US-086, US-087, US-091, US-095

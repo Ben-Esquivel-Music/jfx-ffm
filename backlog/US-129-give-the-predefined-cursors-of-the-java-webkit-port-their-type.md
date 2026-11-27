@@ -1,6 +1,18 @@
 # US-129 — Give the predefined cursors of the Java WebKit port their type
 
-**Status:** 📋 Ready (filed 2026-11-21 from US-025) · **Found:** 2026-11-21, resolving US-025: its plan trace and its
+## In short
+- **Closed without change on 2026-11-27 (owner's decision).**
+  No JavaFX application can see it: the right cursor is shown, and only WebKit's own test tools read the unset field.
+  It is not worth a WebKit build.
+- **Problem:** Inside the WebKit port, the standard mouse cursors (pointer, hand, text and so on) have their internal
+  "type" field left unset. Only WebKit's own test tools read that field.
+- **Seen failing?** No. Read from the code. A JavaFX application cannot see it: the right cursor is still shown.
+- **Goal:** Each standard cursor carries its type.
+- **Done when:** A native probe reads the type of all 43 standard cursors and each is right.
+
+**Status:** ⛔ Closed without change (2026-11-27, owner's decision; the reason is under "In short").
+The status as written before:
+📋 Ready (filed 2026-11-21 from US-025) · **Found:** 2026-11-21, resolving US-025: its plan trace and its
 independent review (optional finding on the predefined cursors) read that the class whose custom-cursor constructor
 US-025 fixed builds every predefined cursor the same way; read from the source, nothing built or run for this story
 
@@ -35,11 +47,11 @@ US-025's change.
 - **Nothing on the Java side comes to depend on the type:** no Java class of javafx.web, and no slot of the host ABI,
   is given or reads it.
 - **US-025's custom cursor stays as it is:** `CustomCursorTest` passes, and the observations of what reaches Java in
-  [US-025's reviewer probe](US-025-native-probes.md#the-reviewers-probes) are unchanged.
+  US-025's reviewer probe are unchanged.
 
 ## Acceptance criteria
 1. **Every predefined cursor has its type.** A native probe built as in
-   [`US-025-native-probes.md`](US-025-native-probes.md), with a fake host installed, calls each of the 43 accessors and
+   `US-025-native-probes.md`, with a fake host installed, calls each of the 43 accessors and
    checks that `type()` is the `Cursor::Type` that `Cursor::fromType` (`platform/Cursor.cpp:59`) maps to that accessor.
    Mutant proof: with one accessor's type left unset, the probe fails.
 2. **What reaches Java is unchanged.** The same probe records, for every accessor, the argument of
@@ -47,7 +59,7 @@ US-025's change.
    records are equal.
 3. **No regression.** `CustomCursorTest` passes against the changed `jfxwebkit`, and the `modules/javafx.web`
    `default-test` gives the per-class list of the final gate in
-   [`US-025-windows-per-class.tsv`](US-025-windows-per-class.tsv). `java buildtools/CheckNoJni.java .` passes.
+   `US-025-windows-per-class.tsv`. `java buildtools/CheckNoJni.java .` passes.
 
 ## Definition of Done
 - All acceptance criteria met, with the probe's sources, mutants and results kept with the change and the results

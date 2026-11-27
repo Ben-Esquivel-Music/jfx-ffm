@@ -1,5 +1,15 @@
 # US-105 — Play MIDI files and KAR karaoke
 
+## In short
+- **Problem:** MIDI and KAR (MIDI karaoke) files do not play, and there is no way for KAR lyrics to reach the
+  application at the right moment.
+- **Seen failing?** Read from the code: "Unrecognized file signature!".
+- **Goal:** `.mid`, `.midi` and `.kar` play the same on every desktop, with a stated sound bank, and the lyrics reach
+  the application on time through an API the story names.
+- **Done when:** Note timing is exact, the output is the same on every target, lyrics arrive at their times, and
+  damaged files only raise an error.
+- **Order:** After US-100.
+
 **Status:** 📋 Ready (filed 2026-11-07 from the media-format survey) · **Epic:** Media formats ·
 **Blocked by:** US-100 (playback of media decoded in Java) · **Blocks:** none
 

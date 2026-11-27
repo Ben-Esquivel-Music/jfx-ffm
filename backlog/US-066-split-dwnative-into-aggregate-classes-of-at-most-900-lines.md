@@ -6,8 +6,8 @@
 section). `DWNative` stays the entry point and aggregates eleven package-private classes,
 12 files with the largest at 820 lines; the split is behaviour-neutral, the 84 DirectWrite tests and the full module
 run on Windows give the same counts as `e3b8b21e6d`, and `ffm-reviewer` signed off (AC 8). Evidence:
-[US-066-windows-gate.md](US-066-windows-gate.md) and
-[US-066-windows-full-per-class.tsv](US-066-windows-full-per-class.tsv) ·
+US-066-windows-gate.md and
+US-066-windows-full-per-class.tsv ·
 **Found:** 2026-10-23, owner request · **Amended:** 2026-10-24, owner: the story states the requirement; the
 implementer designs the split
 

@@ -1,5 +1,15 @@
 # US-087 — Ship a playable 3D game preview
 
+## In short
+- **Problem:** The 3D counterpart of US-082. Nothing connects 3D physics to JavaFX 3D nodes, and JavaFX 3D is limited
+  (one material, three lights, no shadows).
+- **Seen failing?** Not a defect. New work.
+- **Goal:** Bodies that drive 3D nodes, a 3D character controller, picking, debug drawing and playable samples, on
+  JavaFX 3D as it is today.
+- **Done when:** A sample 3D game plays on both the native and the built-in 3D engine, and the samples say which
+  JavaFX 3D limits they hit.
+- **Order:** After US-078, US-085 and US-086.
+
 **Status:** 📋 Ready (filed 2026-11-07 from the game-toolkit design review) · **Epic:** Game toolkit ·
 **Blocked by:** US-076 (scene-mode goldens for the character controller), US-078 (the loop and per-tick input),
 US-085 (the 3D contract and a native 3D engine), US-086 (the built-in 3D engine) · **Blocks:** none

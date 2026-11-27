@@ -1,10 +1,20 @@
 # US-028 — Build and link the Rust slices on macOS
 
-**Status:** 🔷 Implemented, not merged (2026-11-21): uncommitted on `6832730e09`. On the arm64 macOS host the
+## In short
+- **Problem:** US-027 built Rust only on Windows and Linux. macOS still built the C version.
+- **Goal:** The Rust code also builds and links on macOS, exporting exactly the names of the C build.
+- **State:** Merged (PR #70, 2026-11-21).
+- **Left to do (owner):** confirm the recorded side effects (the library is about 320 KB larger and has more system
+  imports; CI downloads two more Rust packages). The list is under "Deviations from the story's text" in
+  "Implementation" below.
+
+**Status:** 🔶 Merged, not Done (PR #70, 2026-11-21). What is left is under "In short".
+The status as written before the merge:
+🔷 Implemented, not merged (2026-11-21): uncommitted on `6832730e09`. On the arm64 macOS host the
 Rust-linked `libjfxmedia.dylib` exports exactly the names of its C build (501 in Release, 557 in Debug) and loads the
 same libraries in the same order, and `mvn -pl modules/javafx.media -am verify` passes with Rust on, with
 `-DJFX_RUST=false` and with `-DCONF=Debug`; x86_64 was built and compared there (519 and 575 names, equal), never run
-(see "Implementation" below and the [gate](US-028-macos-gate.md)). Open: the owner's commit and PR, a green
+(see "Implementation" below and the gate). Open: the owner's commit and PR, a green
 `submit.yml` run with both macOS jobs, which have never run with Rust, and the owner's confirmation of the deviations.
 Filed 2026-09-30 · **Epic:** Rust port of the remaining native code (goal 3) · **Blocked by:** US-027 (merged as
 `f5e137e15e`)
@@ -123,7 +133,7 @@ What a macOS slice will meet, from the Windows and Linux work:
 - **Output.** Every cargo step writes one merged log, `<build tree>/jfx-rust/logs/<step>.log`, because a tool's two
   streams come out interleaved in the Maven log (US-125; measured on Windows and Linux).
 
-Not known for macOS on 2026-11-16 (each is answered under "Implementation" and in the [gate](US-028-macos-gate.md)):
+Not known for macOS on 2026-11-16 (each is answered under "Implementation" and in the gate):
 - what `rustc --print native-static-libs` prints for `x86_64-apple-darwin` and `aarch64-apple-darwin`;
 - whether ld64's `-u` fails when nothing defines the symbol, and how ld64 resolves a C definition against an archive
   member;
@@ -137,7 +147,7 @@ Not known for macOS on 2026-11-16 (each is answered under "Implementation" and i
 ## Implementation (2026-11-21, uncommitted on 6832730e09)
 
 The work is uncommitted on `master` at `6832730e09`: six modified files, no new one (below). This write-up adds
-[`US-028-macos-gate.md`](US-028-macos-gate.md), with the dumps, the negative controls and the gates, and changes this
+`US-028-macos-gate.md`, with the dumps, the negative controls and the gates, and changes this
 story, the status line of US-027 and `backlog/README.md`. US-032, US-033, US-035, US-036 and the `.claude` skill and
 agent files are updated in the same working tree by a separate step, not described here. "This Mac" is the project's
 arm64 macOS host, which has no Rosetta: x86_64 code was built and inspected there, never run. "Build tree" means
@@ -214,7 +224,7 @@ slice on an Apple host is gone. On macOS with `JFX_RUST` on:
   `6832730e09` (112 lines, `cmp`). Configured on this Mac with Linux and Windows simulated, the helper of
   `6832730e09` against the one before the fix round (5, 8 and 6 configurations), and that one against the final
   helper (12 pairs), gave identical configure output and generated files
-  ([gate](US-028-macos-gate.md#windows-and-linux)). No real Windows or Linux build was made.
+  (gate). No real Windows or Linux build was made.
 
 **The registration** (`modules/javafx.media/native/mac.cmake`, 8 lines added): `jfx_add_rust_slice(jfxmedia ...)`
 after `add_media_library(jfxmedia ...)`, with the `CRATE`, `SLICE JFXMEDIA_ABI_VERSION`, `EXPORTS jfxm_abi_version`
@@ -332,7 +342,7 @@ dependencies and size):
   `libjfxmedia_avf.dylib` links against it unchanged and imports the same 13 names. The other four dylibs are
   unchanged.
 - **The Mach-O differences** against the C twin, for the owner to accept
-  ([table](US-028-macos-gate.md#mach-o-differences)): 206,032 to 529,392 bytes on arm64 Release (187,536 to 528,088 on
+  (table): 206,032 to 529,392 bytes on arm64 Release (187,536 to 528,088 on
   x86_64); the header flag `MH_HAS_TLV_DESCRIPTORS`; the sections `__DATA,__thread_vars`, `__thread_data` and
   `__thread_bss`, and `__TEXT,__eh_frame` where the C build has none (on arm64 Release it grows from 0x88 to 0x5160
   bytes); 42 more undefined imports (x86_64 43), all bound to libSystem (`_Unwind_*`, `_dyld_*`, `_tlv_*`, the malloc
@@ -359,9 +369,9 @@ dependencies and size):
 - **The matrix:** four pairs of a Rust and a C tree (arm64 and x86_64, Release and Debug), compared in exports,
   `otool -L`, the avf imports, the load commands, sections, imports, symbol tables and stabs; and a smoke program that
   `dlopen`s each arm64 library and calls `jfxm_abi_version` (4 from each). See the
-  [gate](US-028-macos-gate.md#matrix).
+  gate.
 - **Negative controls,** each failing as intended, with the messages in the
-  [gate](US-028-macos-gate.md#negative-controls): the origin check against a C definition that wins (also in a real
+  gate: the origin check against a C definition that wins (also in a real
   build, where make deletes the library), another archive, a Rust name exported, no list, the export hidden, no map,
   a C name hidden by the list, a hostile map; the listing step against a missing, truncated or foreign archive and a
   failing nm; `-u` without the archive; the configure against a universal tree, `arm64e`, a missing std, `C_DELETED`,
@@ -408,7 +418,7 @@ the same result on those paths.
 | --- | --- | --- |
 | 0 | checks before the runs | as listed below |
 | 1 | scratch trees with Rust on: `cmake -S modules/javafx.media/native -B <tree> …`, `cmake --build` | rc 0 each |
-| 2 | the negative controls of the [gate](US-028-macos-gate.md#negative-controls) | each as listed there |
+| 2 | the negative controls of the gate | each as listed there |
 | 3 | the body of both macOS export steps of `submit.yml`, under `/bin/bash -e` | rc 0 each |
 | 4 | `mvn -pl modules/javafx.media -am verify` | BUILD SUCCESS, 79 s |
 | 5 | `mvn -pl modules/javafx.media -am verify -DJFX_RUST=false` | BUILD SUCCESS, 78 s |
@@ -434,7 +444,7 @@ the same result on those paths.
   - Step 7 relinked: 529,392 bytes, 501 names equal to the baseline's, `otool -L` equal in order, minos 11.0, N_OSO
     0, avf imports 13.
 
-The [gate](US-028-macos-gate.md#maven-gates) has the skipped tests, the lint lines and the final library.
+The gate has the skipped tests, the lint lines and the final library.
 
 ### Reviews and analysis
 - **Measurements before the design** (toy links and hand relinks on this Mac): ld64's `-u`, its precedence of a C
@@ -467,7 +477,7 @@ The [gate](US-028-macos-gate.md#maven-gates) has the skipped tests, the lint lin
 - **Review of the CI change** (`submit.yml`, `README.md`, `rust-std.md`): mergeable, one nit. The macOS check compares
   with a fresh C build, so the change that marks a jfxmedia slice `C_DELETED` makes both macOS jobs fail in this step.
   Fixed in the comment of both steps; the fix reproduced the failure with a copy of `mac.cmake` that marks the slice
-  (the [gate](US-028-macos-gate.md#the-ci-step)). The committed baseline that will replace the C build belongs to that
+  (the gate). The committed baseline that will replace the C build belongs to that
   change.
 
 ### Not verified, not done
@@ -512,7 +522,7 @@ The [gate](US-028-macos-gate.md#maven-gates) has the skipped tests, the lint lin
 ### Follow-up
 - **US-035 and US-036,** whose deletion slices delete jfxmedia's C++: C++ that defines a name that
   `libjfxmedia_avf.dylib` imports (13 today, listed in the
-  [gate](US-028-macos-gate.md#the-names-libjfxmedia_avf-imports)), or that jfxmedia's own macOS sources reference
+  gate), or that jfxmedia's own macOS sources reference
   (`platform/osx/OSXPlatform.mm`, `OSXMediaPlayer.mm`, `CVVideoFrame.mm`), cannot leave the macOS build while they
   reference it, and no story ports the AVF layer or those three files. The change that marks a jfxmedia slice
   `C_DELETED` must also give the macOS CI check a baseline other than the C build, which that change can no longer

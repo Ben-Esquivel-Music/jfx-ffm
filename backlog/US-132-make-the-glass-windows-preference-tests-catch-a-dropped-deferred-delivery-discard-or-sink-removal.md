@@ -1,5 +1,14 @@
 # US-132 — Make the Glass Windows preference tests catch a dropped deferred delivery, discard or sink removal
 
+## In short
+- **Problem:** Seven deliberate breakages of the Windows preference code (system colours and similar settings
+  reaching JavaFX) go unnoticed: with any of them in place, every test still passes.
+- **Seen failing?** Not a defect in the product. Measured gaps in the tests, from US-029's mutant run.
+- **Goal:** Each of the seven breakages fails at least one test.
+- **Done when:** Each breakage, applied alone, fails a test with a message that names what is missing, and the
+  unbroken code passes.
+- **Order:** Before slice 3 of US-031, which moves six of the seven places. Test only.
+
 **Status:** 📋 Ready (filed 2026-11-26 from US-029) · **Found:** the end-to-end mutant run of US-029's port and its
 triage, 2026-11-26; from their reports; nothing built or run for this story · **Before:** US-031 slice 3, which moves
 six of the seven sites below

@@ -1,5 +1,14 @@
 # US-127 — Make a build to the compile phase pass from a fresh clone
 
+## In short
+- **Problem:** `mvn ... clean compile` fails in a fresh clone. Maven wants the test jar of `javafx-base`, which a
+  build that stops at `compile` never makes. Stopping at `test-compile` or later works.
+- **Seen failing?** Yes, measured on Windows.
+- **Goal:** A build to the `compile` phase passes from a fresh clone, without anything installed in `~/.m2`.
+- **Done when:** The command passes on Windows and WSL in a fresh clone with no `org.openjfx` artifacts in the local
+  repository.
+- **Order:** Can start now. Developer convenience; the workaround is to build to `test-compile`.
+
 **Status:** 📋 Ready (filed 2026-11-17 from US-023) · **Found:** 2026-11-17, while implementing US-023: the command of
 its "One JVM" criterion; quoted from that story's logs and reports, one pom read for this story, nothing built for it
 

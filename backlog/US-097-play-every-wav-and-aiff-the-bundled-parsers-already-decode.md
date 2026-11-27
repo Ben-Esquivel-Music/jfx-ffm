@@ -1,5 +1,14 @@
 # US-097 — Play every WAV and AIFF the bundled parsers already decode
 
+## In short
+- **Problem:** Many ordinary WAV and AIFF files are refused: 24-bit and multichannel WAV in the "extensible" form,
+  RF64, AIFC. The decoder can read them; a check of the first 22 bytes of the file turns them away before it tries.
+- **Seen failing?** Read from the code, nothing run. The story first measures which forms play on each platform.
+- **Goal:** Every PCM and float WAV and AIFF plays, whatever header form the tool that wrote it chose.
+- **Done when:** Each form plays with the same samples on every platform, files that played before play as before,
+  and encodings that nothing can decode still fail early with a clear error.
+- **Order:** Can start now. US-098 waits for it.
+
 **Status:** 📋 Ready (filed 2026-11-07 from the media-format survey) · **Epic:** Media formats ·
 **Blocked by:** none · **Blocks:** US-098 (it adds encodings to the forms this story makes playable)
 

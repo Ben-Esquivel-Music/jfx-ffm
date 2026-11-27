@@ -1,5 +1,15 @@
 # US-050 — Retire dshowwrapper by decoding through Media Foundation
 
+## In short
+- **Problem:** On Windows, H.264, AAC and MP3 are decoded through DirectShow by a plugin (5,134 lines) that also needs
+  37,810 lines of bundled Microsoft sample code. It is too large to port to Rust.
+- **Seen failing?** No. No defect. This would be the largest native deletion in `javafx.media`.
+- **Goal:** Decode through Media Foundation, as H.265 already does, and delete the plugin and the sample code.
+- **Done when:** H.264 frames are identical to today's. AAC and MP3 come from a different decoder, so their sound can
+  only be close, not identical.
+- **Order:** Needs the owner's ruling first, because it changes behaviour: is "close" good enough for AAC and MP3? If
+  not, the story is closed and the plugin stays.
+
 **Status:** 🔶 Needs a maintainer ruling (filed 2026-09-30 from the Rust-port survey of the media plugins; nothing
 built or run; 2026-10-01: dshowwrapper's `CoInitialize(NULL)` calls were re-read with their `CoUninitialize`
 calls). This is a behaviour change. H.264 can be exact, but AAC and MP3 would be decoded by a different

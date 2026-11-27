@@ -1,5 +1,15 @@
 # US-100 — Let media decoded in Java play through javafx.media
 
+## In short
+- **Problem:** Every format JavaFX plays needs a native decoder on every platform. The Java media platform exists in
+  the code but plays nothing.
+- **Seen failing?** Not a defect. It is the groundwork for the new formats.
+- **Goal:** Media that is decoded in Java plays through `Media`, `MediaPlayer`, `MediaView` and `AudioClip` exactly
+  like native media: seek, volume, equalizer, spectrum, events.
+- **Done when:** One real format plays through the Java path with the whole player contract tested on all five
+  targets, and the formats that play today are unchanged.
+- **Order:** After US-096. US-101 to US-105 wait for it.
+
 **Status:** 📋 Ready (filed 2026-11-07 from the media-format survey) · **Epic:** Media formats ·
 **Blocked by:** US-096 (a failed playback must report one clear error before more formats can fail) ·
 **Blocks:** US-101, US-102, US-103, US-104, US-105

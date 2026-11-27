@@ -1,5 +1,16 @@
 # US-030 — Port the Glass Windows COM servers (clipboard, DnD, UI Automation) to Rust behind the glass_win_api ABI
 
+## In short
+- **Problem:** Clipboard, drag and drop and screen-reader support on Windows are six COM objects written by hand in
+  C++ (4,507 lines). Other programs (a screen reader, a drop source) hold references to them, so one wrong reference
+  count is a crash or a freed object still in use.
+- **Seen failing?** No. No defect is known. This is a port for safety (Rust epic), not a bug fix.
+- **Goal:** The same 32 exports, written in Rust, where the reference counting is generated. The C++ is deleted and
+  nothing changes for Java or for applications.
+- **Done when:** Recordings taken from the C++ (clipboard, drag and drop, UI Automation) match the Rust build exactly,
+  the Windows tests pass unchanged, and the eight C++ files are gone.
+- **Order:** Next Windows Glass port after US-029 (merged, PR #76).
+
 **Status:** 📋 Ready (drafted 2026-09-30 from a read-only survey; read `glass_win_api.h:97-113,1697-1733,2293-2400,
 2893-2930`, class declarations and refcount sites by `grep`; the COM method bodies of `GlassClipboard.cpp`,
 `GlassDnD.cpp`, `GlassAccessible.cpp` and `GlassTextRangeProvider.cpp` were NOT read; nothing built; on 2026-10-01,

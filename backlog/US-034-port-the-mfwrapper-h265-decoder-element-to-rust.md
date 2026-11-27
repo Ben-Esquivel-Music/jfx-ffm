@@ -1,5 +1,14 @@
 # US-034 — Port the mfwrapper H.265 decoder element to Rust inside fxplugins
 
+## In short
+- **Problem:** H.265 video on Windows is decoded by an element that drives Media Foundation (2,550 lines of C++). It
+  counts COM references by hand and parses bytes from the video file that nobody has validated.
+- **Seen failing?** No. No defect is known apart from US-051.
+- **Goal:** The element in Rust, with the same decoded frames.
+- **Done when:** Frame recordings from the C++ match the Rust build on a Windows machine that has an H.265 decoder
+  installed, and the four C++ files are deleted. Whether this machine has that decoder was not checked.
+- **Order:** After US-032 and US-051.
+
 **Status:** 📋 Ready (drafted 2026-09-30 from a read-only survey; read: `mfwrapper.cpp` and `mfgstbuffer.cpp`
 excerpts (COM object, decoder enumeration, the HVCC parser, COM/MF start-up), the H.265 pipeline selection; not
 checked: whether this host has an HEVC decoder MFT, the exact `windows` crate coverage, the colour-converter

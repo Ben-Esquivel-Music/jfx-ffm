@@ -1,5 +1,13 @@
 # US-130 — Make the DirectWrite golden independent of the test classes that run before it
 
+## In short
+- **Problem:** The test that compares DirectWrite font measurements with a stored reference gives different results
+  depending on which other test classes ran before it in the same JVM, because it reuses fonts they cached.
+- **Seen failing?** Shown by a reviewer's experiment on the capture machine (this Windows box). No gate has failed.
+- **Goal:** The test records and compares the same rows whatever ran before it.
+- **Done when:** The reviewer's two experiments no longer change the result, and the stored reference still passes.
+- **Order:** Can start now. Small; test only, and only on the capture machine.
+
 **Status:** 📋 Ready (filed 2026-11-24 from US-111) · **Found:** finding R6 of the independent review of US-111's
 Windows and Linux round, 2026-11-24; quoted from its report and logs; nothing built or run for this story
 

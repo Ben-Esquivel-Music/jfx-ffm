@@ -1,5 +1,14 @@
 # US-038 — Run the GTK screencast code paths in WSL against a mock portal and a stub PipeWire library
 
+## In short
+- **Problem:** The Wayland screen-capture code of GTK Glass cannot be run on this machine or in CI. WSL has no
+  PipeWire, no desktop portal and no D-Bus, so the tests reach only the "PipeWire is missing" branch.
+- **Seen failing?** Not a defect. It is missing test equipment.
+- **Goal:** A fake portal and a fake PipeWire library, so the real capture, mouse and key paths run in WSL.
+- **Done when:** Tests drive those paths end to end against the fakes, a test can hand the code a bad frame, and the
+  existing "no PipeWire" tests behave as before when the fakes are absent.
+- **Order:** Can start now. US-042 and US-037 wait for it.
+
 **Status:** 📋 Ready (drafted 2026-09-30 from a read-only survey and one WSL probe. NOT checked: whether the WSL user
 can install packages, and whether GitHub's Ubuntu runners ship `dbus-daemon`. Nothing built) · **Epic:** none; it is a
 prerequisite of US-037 and US-042 · **Blocked by:** — (the CI half

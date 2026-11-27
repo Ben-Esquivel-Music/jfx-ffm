@@ -86,8 +86,8 @@ done
   root `LICENSE`, `ADDITIONAL_LICENSE_INFO` and `ASSEMBLY_EXCEPTION` under `legal/` and each module's notices under
   `legal/<module>/`.
 - `buildtools/CheckLegalNotices.java` checks every such jar and the SDK at verify and fails the build otherwise.
-- [The evidence](US-075-evidence.md) has the runs, the plants, the [jar diff](US-075-jar-diff.tsv) and the
-  [per-class test results](US-075-windows-per-class.tsv).
+- The evidence has the runs, the plants, the jar diff and the
+  per-class test results.
 - `game-toolkit-reviewer` (agent definition `.claude/agents/game-toolkit-reviewer.agent.md`, created for this story)
   reviewed the change after three general-purpose stand-in reviews, first as a general-purpose agent following the
   definition and then as the registered agent type on the final tree after the final builds, and signed off both

@@ -204,7 +204,7 @@ pushes and merges; the PR and CI are pending.
      errors. After: 1,235 classes, 42,355 run, 1,049 skipped, 0 failures, 0 errors, no `hs_err_pid`. The per-class
      difference is exactly −`JniStringOracleTest` 4, +`JniStringCodecGoldenTest` 4, +`WinConstantsHeaderTest` 11 and
      +`NativeLibLoaderTest` 11 with 1 skipped (macOS-only). Per class:
-     [US-074-windows-per-class.tsv](US-074-windows-per-class.tsv). The run took the tree as of the first review's
+     US-074-windows-per-class.tsv. The run took the tree as of the first review's
      fixes; the sign-off review's later fixes changed only `NativeLibLoaderTest`'s child-JVM handling, comments, an
      unused import and `CheckNoJni`, and the targeted rerun of the affected classes was green with the same counts.
    - CI before run: 43114478515 (PR #56 head `abfb42b5f1`, whose tree is `0fd9cb0ef5`'s).

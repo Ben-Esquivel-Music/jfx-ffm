@@ -1,5 +1,14 @@
 # US-114 — Release everything a failed GStreamer media creation has built
 
+## In short
+- **Problem:** When opening a media file fails part-way on the GStreamer platform (Windows, Linux), the pieces of the
+  pipeline that were already built are not released. Each failed open leaks them.
+- **Seen failing?** No. Read from the code; nothing built or run. The leak is per failed open, so it adds up only in a
+  program that fails to open media again and again.
+- **Goal:** A failed open releases everything it built.
+- **Done when:** A test forces a failure at each return point and shows every object freed exactly once.
+- **Order:** Can start now. Uses the test hooks US-040 added.
+
 **Status:** 📋 Ready (filed 2026-11-15 from US-040) · **Found:** 2026-11-15, US-040's independent review; every
 site below re-read for this story in the US-040 working tree, nothing built or run
 

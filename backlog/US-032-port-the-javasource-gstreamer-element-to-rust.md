@@ -1,5 +1,16 @@
 # US-032 — Port the javasource GStreamer element to Rust inside fxplugins
 
+## In short
+- **Problem:** `javasource` is the GStreamer element that feeds media bytes from Java into the pipeline (1,398 lines
+  of C). It is the smallest media element, so it is the one to prove that Rust elements build against this fork's
+  cut-down GStreamer.
+- **Seen failing?** No. Its one known defect is item 1 of US-041.
+- **Goal:** `javasource` in Rust inside the same `fxplugins` library, plus a test driver that records what an element
+  does, which the later media ports reuse.
+- **Done when:** The recordings from the C match the Rust build on Windows and Linux, the media tests pass unchanged,
+  and the C is deleted on all three platforms.
+- **Order:** First media port. After US-041.
+
 **Status:** 📋 Ready (drafted 2026-09-30 from a read-only survey; read: `javasource.c` excerpts (pads, signals,
 properties, locking, both buffer paths), `fxplugins.c`, the `fxplugins` CMake targets, `gstreamer-lite.def`, the
 jfxmedia signal wiring; lines counted with `git ls-files | xargs wc -l`; not checked: how gstreamer-rs's `-sys`

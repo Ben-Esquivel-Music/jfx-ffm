@@ -1,5 +1,13 @@
 # US-104 — Play Ogg Opus and Ogg Vorbis audio
 
+## In short
+- **Problem:** Ogg Opus and Ogg Vorbis files do not play. They are not recognised, and no decoder is bundled.
+- **Seen failing?** Read from the code: "Unrecognized file signature!".
+- **Goal:** Both play through `Media`, `MediaPlayer` and `AudioClip` on every desktop.
+- **Done when:** The output is within bounds of the reference decoders, agreed before the comparison, and the same on
+  every target; seeking is sample-accurate; damaged files only raise an error.
+- **Order:** After US-100.
+
 **Status:** 📋 Ready (filed 2026-11-07 from the media-format survey) · **Epic:** Media formats ·
 **Blocked by:** US-100 (playback of media decoded in Java) · **Blocks:** none
 

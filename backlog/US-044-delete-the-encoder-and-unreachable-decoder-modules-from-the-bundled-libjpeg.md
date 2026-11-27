@@ -1,5 +1,14 @@
 # US-044 — Delete the encoder and the unreachable decoder modules from the bundled libjpeg
 
+## In short
+- **Problem:** The bundled JPEG library carries 22 source files (15,433 lines, 44 % of it) that the image loader can
+  never run: the whole encoder and five decoder modules. They are still compiled, shipped and reviewed.
+- **Seen failing?** Not a defect. It is dead code. The build after the deletion has not been tried yet.
+- **Goal:** Delete the 22 files with no change in behaviour.
+- **Done when:** The library builds and exports the same 9 functions, the JPEG reference results are byte-identical,
+  and every JPEG test passes on Windows and WSL.
+- **Order:** Can start now. US-045 waits for it.
+
 **Status:** 📋 Ready (drafted 2026-09-30 from a read-only survey; entry points, settings and references counted with
 grep/`wc -l`; the build was not run, so link success is not yet proven; nothing built). Corrected on 2026-10-01 after
 PR review: `jdmerge.c` is reachable and stays, so 22 files go, not 23. Re-read `jdmaster.c:20-532`,

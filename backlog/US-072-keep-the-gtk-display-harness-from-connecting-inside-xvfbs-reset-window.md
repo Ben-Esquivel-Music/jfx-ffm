@@ -127,7 +127,7 @@ fixed script.
 
 Run / failures / errors / skipped. Equal per class and per method (name and status). Under openbox the same 5
 classes, the script's expected list, run no test. No `hs_err_pid`; natives unchanged. Per class:
-[US-072-linux-display-per-class.tsv](US-072-linux-display-per-class.tsv). Maven started on server generation 1 in the
+US-072-linux-display-per-class.tsv. Maven started on server generation 1 in the
 after openbox pass and on 2 in the other three.
 
 The baseline that criterion 4 names (no-WM 38 classes / 255 tests, openbox 38 / 228, the US-065 branch) predates
@@ -147,7 +147,7 @@ and natives built from source on that tree.
 Equal per class and per method, and per class (all four counts) equal to that tree's 2026-11-01 gate, whose counts
 US-065's Review section records; its glass library is byte-identical to that gate's. No `hs_err_pid`. Maven started
 on server generation 1 in the after openbox pass and on 2 in the other three. Per class:
-[US-072-baseline-692cd3a432-per-class.tsv](US-072-baseline-692cd3a432-per-class.tsv).
+US-072-baseline-692cd3a432-per-class.tsv.
 
 ### Acceptance criteria
 1. ✅ Reproduced: 18 of 1000 under load, 0 of 500 idle; every attributed hit was item 2. Not closed as a note.

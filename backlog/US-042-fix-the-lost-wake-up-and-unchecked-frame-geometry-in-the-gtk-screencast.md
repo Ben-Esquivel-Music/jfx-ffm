@@ -1,5 +1,15 @@
 # US-042 — Fix the lost wake-up and the unchecked frame geometry in the GTK screencast frame path
 
+## In short
+- **Problem:** In the Wayland screen capture of GTK Glass: (1) the wait for a frame can miss its wake-up signal and
+  then hang for ever; (2) the size and row length that the compositor reports for a frame are used without a check,
+  so a bad frame reads past the buffer; (3) a frame is read after its buffer was handed back.
+- **Seen failing?** No. Read from the code; impact not measured. It cannot be run here until US-038 exists.
+- **Goal:** A capture never hangs and never reads memory the compositor did not hand over.
+- **Done when:** On the test bed of US-038, a test that hangs before the fix passes after it, and each bad frame is
+  refused and the next good frame still completes the capture.
+- **Order:** After US-038. US-037 waits for it.
+
 **Status:** 📋 Ready (filed 2026-09-30 from the read-only survey evidence below; the buffer re-queue and the read
 after hand-back were added in the PR #21 review, also by reading the code; impact not measured; nothing built)
 · **Epic:** none (correctness of Linux GTK Glass; a prerequisite of US-037) · **Blocked by:** US-038 (the test bed

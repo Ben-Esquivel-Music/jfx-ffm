@@ -1,5 +1,16 @@
 # US-041 — Fix GstBuffer map misuse, a leaked sample buffer and a float-to-int UB in fxplugins
 
+## In short
+- **Problem:** Four defects in the media plugins, all found by reading the code: (1) `javasource` writes into a buffer
+  it opened read-only, which works only by accident; (2) the DirectShow wrapper changes codec data that it shares
+  with others; (3) the DirectShow sink leaks a buffer on two error paths; (4) the download buffer converts a number
+  to an integer without a range check.
+- **Seen failing?** No. Nothing was built or run, and it is not known whether any test reaches these lines.
+- **Goal:** Fix the four in the C, so the Rust ports (US-032, US-033) do not have to copy them.
+- **Done when:** The media tests pass unchanged on Windows and WSL, the write in (2) no longer compiles, and each leak
+  path of (3) is shown freed in a one-off run that forces the error.
+- **Order:** Can start now. US-032 and US-033 wait for it.
+
 **Status:** 📋 Ready (drafted 2026-09-30 from a read-only survey; the four sites below were read, and
 `GetGstBuffer`'s ownership was checked at its one implementation; not checked: whether any site is reached by
 today's tests, or the `bandwidth`/`prebuffer-time` property ranges; nothing built) · **Found:** 2026-09-30, Rust-port

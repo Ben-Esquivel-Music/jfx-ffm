@@ -1,5 +1,15 @@
 # US-095 — Grow the built-in 3D engine past its Godot origin
 
+## In short
+- **Problem:** Godot itself now puts its 3D effort into another engine (Jolt), so its own 3D engine, the one US-086
+  ports, will stay behind: for example, fast bodies lose momentum when they bounce.
+- **Seen failing?** Not a defect. Later improvement work.
+- **Goal:** Once the port equals Godot, improve it where measurements show it is worse than the native 3D engine of
+  US-085. Each improvement is a recorded, deliberate change of behaviour.
+- **Done when:** The point where the port stops following Godot is recorded, and a first improvement closes a measured
+  gap with every gate still passing.
+- **Order:** Last. After US-085 and US-086.
+
 **Status:** 📋 Ready (filed 2026-11-07 from the game-toolkit design review) · **Epic:** Game toolkit ·
 **Blocked by:** US-085 (the native 3D engine to measure against), US-086 (the built-in 3D engine at Godot parity) ·
 **Blocks:** none

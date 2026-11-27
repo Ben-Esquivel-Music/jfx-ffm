@@ -1,6 +1,20 @@
 # US-133 — Balance each toolkit thread's RoInitialize in the handle that made it
 
-**Status:** 📋 Ready (filed 2026-11-27 from US-029) · **Found:** the code review of `7c38bdc73a` (US-029's port),
+## In short
+- **Closed without change on 2026-11-27 (owner's decision).**
+  Nobody has seen it fail and no known path reaches it. It needs two toolkits alive at once, which nothing is known to
+  create, or a bug in our own code first. The C++ before the Rust port had the same flaw.
+- **Problem:** Glass on Windows starts the Windows Runtime on its thread and stops it at shutdown, but tracks that
+  with one flag for the whole process. If two toolkits ever existed at once, one could stop the runtime on the
+  other's thread, or leave its own running.
+- **Seen failing?** No. Read from the code. Nobody has shown that two toolkits can exist at once, and the other
+  path needs a bug in our own code first. The C++ before the Rust port had the same flaw.
+- **Goal:** Each start of the Windows Runtime is undone exactly once, on the same thread, by the toolkit that made it.
+- **Done when:** A test fails on today's code with a message that names the imbalance, and passes after the change.
+
+**Status:** ⛔ Closed without change (2026-11-27, owner's decision; the reason is under "In short").
+The status as written before:
+📋 Ready (filed 2026-11-27 from US-029) · **Found:** the code review of `7c38bdc73a` (US-029's port),
 2026-11-27, its finding F2; from the code; nothing built or run for this story
 
 ## Story

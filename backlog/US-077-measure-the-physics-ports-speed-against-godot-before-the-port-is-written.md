@@ -1,5 +1,15 @@
 # US-077 — Measure the physics port's speed against Godot before the port is written
 
+## In short
+- **Problem:** Nobody knows whether a faithful Java port of Godot's physics can be fast enough. Java 27 has no value
+  types, so the port may allocate or copy much more than the C++.
+- **Seen failing?** Not a defect. A measurement to take before months of porting.
+- **Goal:** Port two small, hot pieces of the 2D engine, time them against Godot's C++, and decide: go on, adjust, or
+  stop the port.
+- **Done when:** The two pieces match Godot bit for bit and the time ratio is recorded. At or below 2x the port goes
+  ahead; above 3x it stops and the 3D route is chosen again.
+- **Order:** After US-076. US-079 and US-086 wait for its result.
+
 **Status:** 📋 Ready (filed 2026-11-07 from the game-toolkit design review) · **Epic:** Game toolkit ·
 **Blocked by:** US-076 (captured inputs and the C++ step time) · **Blocks:** US-079, US-086
 

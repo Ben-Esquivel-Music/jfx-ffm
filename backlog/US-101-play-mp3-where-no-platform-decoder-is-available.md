@@ -1,5 +1,15 @@
 # US-101 — Play MP3 where no platform decoder is available
 
+## In short
+- **Problem:** MP3 depends on the platform: on Linux it needs ffmpeg, and where no platform decoder is available it
+  does not play.
+- **Seen failing?** Read from the code, nothing run.
+- **Goal:** A Java MP3 decoder that is used only where the platform cannot play MP3. Where the platform can, nothing
+  changes.
+- **Done when:** MP3 plays on a machine without a platform decoder, no error is reported when the fallback works, and
+  machines with a platform decoder give the same output as before.
+- **Order:** After US-096 and US-100.
+
 **Status:** 📋 Ready (filed 2026-11-07 from the media-format survey) · **Epic:** Media formats ·
 **Blocked by:** US-096 (a fallback that plays must raise no error), US-100 (the Java playback path) ·
 **Blocks:** none

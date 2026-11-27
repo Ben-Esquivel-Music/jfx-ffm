@@ -1,5 +1,14 @@
 # US-035 — Port jfxmedia's frame, conversion, spectrum, equalizer and logger code to Rust behind the jfxm_* ABI
 
+## In short
+- **Problem:** `libjfxmedia` hands video frames to Java, converts colours, and computes the audio spectrum and
+  equalizer in C and C++ (5,224 lines) with manual reference counting and pixel loops that trust the decoder's sizes.
+- **Seen failing?** No. No defect is known. Port for safety (Rust epic).
+- **Goal:** That code in Rust behind the same 25 exports, with no Java change.
+- **Done when:** Recordings from the C match the Rust build on Windows and Linux, the media tests pass unchanged, and
+  the C is deleted (parts that the macOS build still needs stay there).
+- **Order:** First half of the `libjfxmedia` port. US-027 (its only blocker) is merged.
+
 **Status:** 📋 Ready (drafted 2026-09-30 from a read-only survey; read `jfxmedia_api.h`, `FFM-ABI-CONTRACT.md`
 §0–1, the frame/spectrum/equalizer/logger sources and `native/{win,linux,mac}.cmake`; counted lines with `wc -l` and
 refcount sites with `git grep -c`; NOT checked: current gstreamer-rs/glib releases, their minimum GStreamer/GLib

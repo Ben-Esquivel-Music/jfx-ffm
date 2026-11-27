@@ -1,5 +1,16 @@
 # US-045 — Replace javafx_iio with a faithful pure-Java port of the IJG libjpeg 10 decoder (Rust fallback)
 
+## In short
+- **Problem:** JPEGs, also ones from web pages and remote URLs, are decoded by a C library. A malformed image is a
+  memory-safety risk, and the library is one more native binary to build on every platform.
+- **Seen failing?** No. No defect is known. This removes native code (goal 1).
+- **Goal:** A Java decoder that gives exactly the same pixels, warnings, progress events and exceptions as the C, so
+  `javafx_iio` is deleted everywhere. If Java turns out too slow, the fallback is the same port in Rust.
+- **Done when:** A larger set of test images, also damaged ones, decodes identically in C and Java on Windows and
+  WSL, the speed check passes, and the native library is gone. Changing the bundled library needs the owner's
+  sign-off.
+- **Order:** After US-044 and part 1 of US-054.
+
 **Status:** 📋 Ready (drafted 2026-09-30 from a read-only survey; read `iio_api.h`, the `iio_api.c` entry points
 and error path, libjpeg config/defaults, the test harness; NOT read: the source-manager and ICC bodies of
 `iio_api.c`, most libjpeg bodies; no benchmark exists; nothing built. 2026-10-01, after PR review: FFM memory is

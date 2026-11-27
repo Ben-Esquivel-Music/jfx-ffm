@@ -1,5 +1,15 @@
 # US-084 — Ship a game as a jlink image and a jpackage installer
 
+## In short
+- **Problem:** A player should not have to install Java or JavaFX. Today the SDK cannot be turned into a
+  self-contained application image, because it has no jmods and no legal notices in the form jlink needs.
+- **Seen failing?** Not a defect. A missing packaging path.
+- **Goal:** A game builds into a self-contained image (jlink) and a native installer (jpackage) on each desktop
+  platform.
+- **Done when:** On Windows, macOS and Linux the sample game runs from the image with nothing outside it, the owner
+  installs it from the installer and it starts, and every legal notice is in the image.
+- **Order:** After US-082.
+
 **Status:** 📋 Ready (filed 2026-11-07 from the game-toolkit design review) · **Epic:** Game toolkit ·
 **Blocked by:** US-075 (the notices to ship), US-082 (the sample game) · **Blocks:** none
 

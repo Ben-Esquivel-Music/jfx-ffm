@@ -1,5 +1,15 @@
 # US-076 — Capture per-step physics goldens from a pinned Godot build
 
+## In short
+- **Problem:** The plan is to port Godot's physics engine to Java and prove the port equal to Godot. Godot has no
+  recording of what its physics does at each step, so there is nothing to compare the port against.
+- **Seen failing?** Not a defect. New work; it is the measuring stick for the physics ports.
+- **Goal:** A tool that runs a physics scenario in one fixed Godot build and writes down every body's state after
+  every step.
+- **Done when:** Scenarios of each kind (2D, 3D, character movement) are recorded, a deliberately wrong run is caught,
+  and a second machine records the same bits.
+- **Order:** First story of the game toolkit. The owner must install SCons and Python on the capture machine first.
+
 **Status:** 📋 Ready (filed 2026-11-07 from the game-toolkit design review) · **Epic:** Game toolkit ·
 **Blocked by:** none · **Blocks:** US-077, US-079, US-081, US-086, US-087
 

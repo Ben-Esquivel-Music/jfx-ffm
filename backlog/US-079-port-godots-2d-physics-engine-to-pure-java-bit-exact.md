@@ -1,5 +1,14 @@
 # US-079 — Port Godot's 2D physics engine to pure Java, bit-exact
 
+## In short
+- **Problem:** JavaFX has no physics engine. The plan is to take Godot's 2D engine (about 11,000 lines of C++ plus the
+  core code it needs) and port it faithfully to Java.
+- **Seen failing?** Not a defect. New work, and the largest story of the 2D half.
+- **Goal:** A pure-Java 2D physics engine that gives exactly Godot's results, the same on every platform.
+- **Done when:** Every recorded scenario of US-076 matches bit for bit on all five CI targets, a step allocates
+  nothing, and the speed is within the limit set by US-077.
+- **Order:** After US-076 and US-077 (US-075, its third blocker, is done).
+
 **Status:** 📋 Ready (filed 2026-11-07 from the game-toolkit design review) · **Epic:** Game toolkit ·
 **Blocked by:** US-075 (the ported code's notices must ship), US-076 (the goldens), US-077 (the speed gate) ·
 **Blocks:** US-080, US-081, US-086, US-093, US-094

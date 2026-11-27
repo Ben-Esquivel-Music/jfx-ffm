@@ -1,5 +1,13 @@
 # US-091 — Load glTF 2.0 models into JavaFX nodes and collision shapes
 
+## In short
+- **Problem:** JavaFX cannot load glTF, the common exchange format of 3D tools. A game would need its own loader.
+- **Seen failing?** Not a defect. A missing feature.
+- **Goal:** Load static and animated glTF 2.0 models into JavaFX nodes and into collision shapes.
+- **Done when:** Sample models load and draw, anything the loader does not support is reported and not dropped in
+  silence, and malformed or hostile files only raise an error.
+- **Order:** After US-085. Animated meshes need US-090.
+
 **Status:** 📋 Ready (filed 2026-11-07 from the game-toolkit design review) · **Epic:** Game toolkit ·
 **Blocked by:** US-085 (collision shapes need its 3D engine contract); US-090 (skinned meshes only: JavaFX cannot draw
 them before it) · **Blocks:** none

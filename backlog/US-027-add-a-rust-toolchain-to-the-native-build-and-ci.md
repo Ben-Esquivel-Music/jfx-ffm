@@ -1,5 +1,14 @@
 # US-027 — Add a Rust toolchain to the native build and CI
 
+## In short
+- **Problem:** The Rust port needs the native build and CI to compile Rust and link it into the existing libraries.
+- **Goal:** A pinned Rust toolchain in the build and in CI, with checks on exports, licences and formatting, and one
+  tiny function moved to Rust as proof.
+- **State:** Merged (PR #66, 2026-11-17).
+- **Left to do (owner):** confirm two side effects: on Windows `jfxmedia.dll` now depends on two more system DLLs,
+  and on Linux `libjfxmedia.so` loses a CPU hardening mark (IBT/SHSTK). Record a green CI run that includes the
+  review fixes.
+
 **Status:** 🔶 Merged, not Done: PR #66 was merged as `f5e137e15e` (2026-11-17) with the fixes of its code review
 (2026-11-16), which passed their final gate on Windows 10 and WSL Ubuntu (see "Review fixes" below); before them,
 `924047c8b0` passed all six jobs in CI run 43922168677. Open: a green `submit.yml` run with the review fixes, recorded

@@ -1,5 +1,14 @@
 # US-125 — Keep the output of the native build tools readable in the Maven log
 
+## In short
+- **Problem:** When a native build fails, the messages of cmake, cargo, the compiler and the linker arrive in the
+  Maven log with their two output streams mixed character by character. The error cannot be read.
+- **Seen failing?** Yes, quoted from the build logs of US-027 on Windows and WSL.
+- **Goal:** The tools' messages reach the Maven log as the tools wrote them.
+- **Done when:** A build that is made to fail at configure, and one at compile, show whole, readable error lines on
+  Windows and WSL.
+- **Order:** Can start now. Developer convenience.
+
 **Status:** 📋 Ready (filed 2026-11-16 from US-027) · **Found:** US-027's native builds on Windows 10 and WSL Ubuntu;
 quoted from its final gate of 2026-11-16, whose logs were re-read for this story; nothing built or run for it
 

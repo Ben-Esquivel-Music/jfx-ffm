@@ -1,5 +1,16 @@
 # US-096 — Tell applications why media won't play, and keep AudioClip working after a failed play
 
+## In short
+- **Problem:** When media cannot be played, the application gets different errors for the same cause, at different
+  places, and none says why. Worse: one failed `AudioClip` play (for example, on a machine with no sound device)
+  stops every later `AudioClip` in the program.
+- **Seen failing?** Not yet. Traced in the code, nothing run. The story reproduces it first.
+- **Goal:** One error per cause, with a message that says what is missing, arriving where the API documents it. A
+  failed `AudioClip` play affects only that clip.
+- **Done when:** Tests show the same error type and a clear message for each cause, and `AudioClip` keeps playing
+  after a failed play.
+- **Order:** Can start now. First of the media-format stories; US-100, US-101 and US-102 wait for it.
+
 **Status:** 📋 Ready (filed 2026-11-07 from the media-format survey) · **Epic:** Media formats ·
 **Blocked by:** none · **Blocks:** US-100, US-101, US-102
 

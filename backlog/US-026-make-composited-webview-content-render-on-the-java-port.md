@@ -1,6 +1,19 @@
 # US-026 — Make composited WebView content render on the Java port
 
-**Status:** 🔷 Implemented (2026-11-26, committed as `e5ec21f25b`; the fixes for the code review of that commit are in
+## In short
+- **Problem:** Page content that WebKit draws on its own layers (CSS 3D transforms, view transitions, some animated
+  or filtered content) never reached the screen. The layer code was written for OpenGL, which the Java port does not
+  have.
+- **Goal:** That content draws through Prism.
+- **State:** Merged (PR #75, 2026-11-27). Tested on the Mac without a window: software, Metal and es2.
+- **Left to do (owner, as last recorded):** nobody has run it in a real window on a GPU, on Direct3D, on a HiDPI
+  screen, on Linux or on Windows. Still to run: the `tests/system` web tests on a real pipeline; the graphics robot
+  tests on es2 and d3d (two files of `javafx.graphics` changed, and the d3d one was never run); `build-webkit.yml`
+  for Linux and Windows; file the upstream issue.
+
+**Status:** 🔶 Merged, not Done (PR #75, 2026-11-27). What is left is under "In short".
+The status as written before the merge:
+🔷 Implemented (2026-11-26, committed as `e5ec21f25b`; the fixes for the code review of that commit are in
 the working tree, uncommitted: 13 findings, 9 fixed, 4 refuted, 628 / 0 / 0 / 113 against the rebuilt library, and
 the page tests also pass offscreen on Metal and es2, see
 [Code review of the commit](#code-review-of-the-commit-2026-11-26); filed 2026-09-30): direction (A), by defining
@@ -115,7 +128,7 @@ findings confirmed) and its rework; a confirming review (7 confirmed) and its re
 15:21); a third review of what had changed since (6 confirmed, none above minor) and its rework; a review of the last
 native hunk (nits only); the final gate (15:46 to 15:50).
 
-Kept with the change: [`US-026-macos-per-class.tsv`](US-026-macos-per-class.tsv), the per-class lists of the three
+Kept with the change: `US-026-macos-per-class.tsv`, the per-class lists of the three
 gates. Not kept: libraries, logs, reports, review records and the design. They are in `<scratch>` until it is cleaned
 (`us026-design/design-v2.md`, `us026-review/`, `us026-review2/`, `us026-review3/`, `us026-cpp/`, `us026-tests/`).
 
@@ -228,7 +241,7 @@ directory>:<media bin>:<graphics bin>'`. `UserDataDirectoryTest` is excluded on 
 | After: final tree, final library (15:46 to 15:50) | **550 / 0 / 0 / 113** | 60 |
 
 No class present at head changes its counts; the 42 failures before are all in 7 classes the story adds
-([per class](US-026-macos-per-class.tsv)). The final Java code cannot load the baseline library (the new export), so
+(per class). The final Java code cannot load the baseline library (the new export), so
 "before" is not the final test set. The other modules in the final run: jslc 437 / 0 / 0 / 0, base 5,510 / 0 / 0 / 22,
 graphics 26,889 / 0 / 0 / 859, controls 9,445 / 0 / 0 / 183, media 41 / 0 / 0 / 6. The 77 new tests passed in two more
 runs on the final library. The FFM binding tests (194 / 0 / 0) were last run at 13:47, before the later Javadoc-only
@@ -334,7 +347,7 @@ Also fixed, found only by running on a GPU pipeline:
   d3d render texture of any application, the swap chain's back buffer among them; a draw at 1:1 samples texel
   centres and is unchanged. It compiles here and has **not been run on d3d by anyone**.
 The missing flush in Prism's `MTLRTTexture.readPixels(Buffer)` itself is not changed; it is recorded with L21 in
-[`US-001b-prism-mtl-audit.md`](US-001b-prism-mtl-audit.md).
+`US-001b-prism-mtl-audit.md`.
 
 **The page tests on a GPU pipeline.** A Maven user property overrides the module's `prism.order=sw`, and glass stays
 Headless:

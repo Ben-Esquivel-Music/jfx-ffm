@@ -1,5 +1,14 @@
 # US-089 — Capture the pointer and report layout-independent physical keys
 
+## In short
+- **Problem:** Two things a game's controls need are missing in JavaFX: capturing the mouse (so a camera can keep
+  turning past the screen edge), and knowing which physical key was pressed whatever the keyboard layout.
+- **Seen failing?** Not a defect. Missing features; this one changes Glass and adds public API.
+- **Goal:** An application can capture the pointer and get relative motion, and key events name the physical key.
+- **Done when:** Both work on the three desktops, nothing else about mouse and key events changes, and the new API is
+  documented.
+- **Order:** Can start now.
+
 **Status:** 📋 Ready (filed 2026-11-07 from the game-toolkit design review) · **Epic:** Game toolkit ·
 **Blocked by:** none · **Blocks:** none
 
