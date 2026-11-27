@@ -148,10 +148,10 @@ public class WebKitNativeSymbolTest {
 
     /**
      * The size of the bound surface: the 1796 compiled DOM functions, {@code wkj_abi_version},
-     * {@code wkj_exception_slot}, {@code wkj_init} and the 164 functions of the hand written
-     * headers that the facades bind - which now includes {@code wkj_live_connect_init} and the
-     * three {@code wkj_bridge_sizeof_*} self-checks. A change to that number is a change to the ABI
-     * surface and has to be made here deliberately.
+     * {@code wkj_exception_slot}, {@code wkj_init} and the 165 functions of the hand written
+     * headers that the facades bind - which now includes {@code wkj_live_connect_init}, the three
+     * {@code wkj_bridge_sizeof_*} self-checks and {@code wkj_page_print_composited}. A change to that
+     * number is a change to the ABI surface and has to be made here deliberately.
      * <p>
      * A page function the header declares and no facade binds is <em>reported rather than failed</em>,
      * for the reason {@link #everyDomFunctionTheLibraryExportsIsBound} gives in the other direction:
@@ -168,9 +168,9 @@ public class WebKitNativeSymbolTest {
                     + " webkit_java_api*.h headers are declared but no facade binds them: "
                     + unbound);
         }
-        assertEquals(1963, WebKitNativeShim.boundSymbols().size(),
+        assertEquals(1964, WebKitNativeShim.boundSymbols().size(),
                 "the facades bind the 1796 compiled DOM functions, wkj_abi_version,"
-                        + " wkj_exception_slot, wkj_init and 164 functions of the hand written"
+                        + " wkj_exception_slot, wkj_init and 165 functions of the hand written"
                         + " webkit_java_api*.h headers; a change here is a change to the ABI"
                         + " surface");
     }

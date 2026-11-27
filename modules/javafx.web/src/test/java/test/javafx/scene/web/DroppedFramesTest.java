@@ -1,0 +1,302 @@
+/*
+ * Copyright (c) 2026, Oracle and/or its affiliates. All rights reserved.
+ * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
+ *
+ * This code is free software; you can redistribute it and/or modify it
+ * under the terms of the GNU General Public License version 2 only, as
+ * published by the Free Software Foundation.  Oracle designates this
+ * particular file as subject to the "Classpath" exception as provided
+ * by Oracle in the LICENSE file that accompanied this code.
+ *
+ * This code is distributed in the hope that it will be useful, but WITHOUT
+ * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
+ * FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License
+ * version 2 for more details (a copy is included in the LICENSE file that
+ * accompanied this code).
+ *
+ * You should have received a copy of the GNU General Public License version
+ * 2 along with this work; if not, write to the Free Software Foundation,
+ * Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301 USA.
+ *
+ * Please contact Oracle, 500 Oracle Parkway, Redwood Shores, CA 94065 USA
+ * or visit www.oracle.com if you need additional information or have any
+ * questions.
+ */
+
+package test.javafx.scene.web;
+
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+import static test.javafx.scene.web.PixelAssertions.BLUE;
+import static test.javafx.scene.web.PixelAssertions.CONTROL;
+import static test.javafx.scene.web.PixelAssertions.CYAN;
+import static test.javafx.scene.web.PixelAssertions.GREEN;
+import static test.javafx.scene.web.PixelAssertions.MAGENTA;
+import static test.javafx.scene.web.PixelAssertions.RED;
+import static test.javafx.scene.web.PixelAssertions.WHITE;
+import static test.javafx.scene.web.PixelAssertions.YELLOW;
+import static test.javafx.scene.web.PixelAssertions.assertSamples;
+import static test.javafx.scene.web.PixelAssertions.pageWithControlPatch;
+
+import com.sun.webkit.WebKitNativeShim;
+import java.util.List;
+import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.logging.Handler;
+import java.util.logging.Level;
+import java.util.logging.LogRecord;
+import java.util.logging.Logger;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.ExtendWith;
+import test.javafx.scene.web.PixelAssertions.Sample;
+
+/**
+ * A page drops the frames it recorded and nobody painted in two ways: a page with more than ten
+ * unpainted frames drops them all and repaints the whole page, and a WebView that is not visible drops
+ * them on every pulse. What a dropped frame carried, the decode commands of the images it drew
+ * included, never reaches the screen.
+ */
+@ExtendWith(CaseAnnouncer.class)
+public class DroppedFramesTest extends TestBase {
+
+    /*
+     * A frame is also dropped when a later opaque queue covers it, so each update changes a cell of
+     * its own and the frames add up.
+     */
+    private static final int MAX_UPDATES_BEFORE_A_DROP = 20;
+    /* About one id leaks per dropped change, far past the tolerance WebKitRegistryLeakTest uses. */
+    private static final int GRADIENT_CHANGES = 20;
+    private static final int REGISTRY_TOLERANCE = 2;
+
+    private static final String CHANGE = "layer.style.background = '#0f0'; patch.style.background = '#ff0';";
+
+    private static final String PAGE = pageWithControlPatch("""
+            <div id=layer style='position:absolute;left:0;top:0;width:200px;height:200px;background:#f00;
+                transform:translateZ(0)'></div>
+            <div id=patch style='position:absolute;left:220px;top:0;width:150px;height:100px;background:#00f'></div>
+            <div id=nudge style='position:absolute;left:220px;top:150px;width:20px;height:20px;background:#000'></div>
+            <script>
+            for (let i = 0; i < 20; i++) {
+                const cell = document.createElement('div');
+                cell.id = 'cell' + i;
+                cell.style.cssText = 'position:absolute;top:210px;width:8px;height:10px;background:#000;left:'
+                    + (10 * i) + 'px';
+                document.body.appendChild(cell);
+            }
+            </script>
+            """);
+
+    /*
+     * A canvas of 100 x 100 at (15,15) inside its border, filled red; a change of the border colour repaints it
+     * with nothing new drawn into it.
+     */
+    private static final String CANVAS_PAGE = pageWithControlPatch("""
+            <canvas id=canvas width=100 height=100 style='position:absolute;left:10px;top:10px;
+                border:5px solid #000'></canvas>
+            <script>
+            const context = canvas.getContext('2d');
+            context.fillStyle = '#f00';
+            context.fillRect(0, 0, 100, 100);
+            </script>
+            """);
+
+    @Test
+    public void afterTooManyUnpaintedFramesThePageShowsItsCurrentContent() {
+        try (PumpedPage page = PumpedPage.withDefaultSettings(PAGE)) {
+            assertCurrentAfterTooManyUnpaintedFrames(page, false);
+        }
+    }
+
+    @Test
+    public void afterTooManyUnpaintedFramesACompositedPageShowsItsCurrentContent() {
+        try (PumpedPage page = PumpedPage.withAcceleratedCompositing(PAGE)) {
+            assertCurrentAfterTooManyUnpaintedFrames(page, true);
+        }
+    }
+
+    private void assertCurrentAfterTooManyUnpaintedFrames(PumpedPage page, boolean composited) {
+        page.settle();
+        assertEquals(composited, page.isInCompositingMode(), "compositing mode before the change");
+
+        int updates = page.updatesUntilFramesOverflow(update -> (update == 1 ? CHANGE : "")
+                + "cell" + (update - 1) + ".style.background = '#888'", MAX_UPDATES_BEFORE_A_DROP);
+        assertTrue(updates > 0, MAX_UPDATES_BEFORE_A_DROP + " updates without a paint did not make the page drop"
+                + " its frames");
+
+        page.settle();
+        assertEquals(composited, page.isInCompositingMode(), "compositing mode after the drop");
+        assertSamples("after " + updates + " updates without a paint", page.pump(),
+                CONTROL, new Sample(100, 100, GREEN), new Sample(295, 50, YELLOW), new Sample(300, 200, WHITE));
+    }
+
+    /**
+     * The page draws a canvas through the image that holds its drawing, which decodes the commands that
+     * image's queue holds before it is drawn. The dropped frame carried the decode of the green fill; the
+     * next paint has nothing new to send, and must still ask for the decode.
+     */
+    @Test
+    public void aCanvasDrawnInADroppedFrameShowsItsNewContentWhenRepaintedWithoutNewDrawing() {
+        try (PumpedPage page = PumpedPage.withDefaultSettings(CANVAS_PAGE)) {
+            assertSamples("before the change", page.settle(), CONTROL, new Sample(65, 65, RED));
+            assertFalse(page.isInCompositingMode(), "the page is in compositing mode");
+
+            assertTrue(page.recordAndDropFrames("context.fillStyle = '#0f0'; context.fillRect(0, 0, 100, 100);"),
+                    "the drawing recorded no frame, or its frames were not dropped");
+
+            page.script("canvas.style.borderColor = '#888'");
+            assertSamples("after the dropped frame", page.pumpUntilDrawn(12, 12, 0x888888),
+                    CONTROL, new Sample(65, 65, GREEN));
+        }
+    }
+
+    /**
+     * The canvas the page shows draws another canvas, which is never on the page: the decode of the shown
+     * canvas's queue carries the decode of the other's, and both were in the dropped frame.
+     */
+    @Test
+    public void aCanvasDrawnIntoACanvasInADroppedFrameIsCurrent() {
+        try (PumpedPage page = PumpedPage.withDefaultSettings(CANVAS_PAGE)) {
+            assertSamples("before the change", page.settle(), CONTROL, new Sample(65, 65, RED));
+            assertFalse(page.isInCompositingMode(), "the page is in compositing mode");
+
+            assertTrue(page.recordAndDropFrames("""
+                    const source = document.createElement('canvas');
+                    source.width = 100;
+                    source.height = 100;
+                    const sourceContext = source.getContext('2d');
+                    sourceContext.fillStyle = '#0f0';
+                    sourceContext.fillRect(0, 0, 100, 100);
+                    context.drawImage(source, 0, 0);
+                    """), "the drawing recorded no frame, or its frames were not dropped");
+
+            page.script("canvas.style.borderColor = '#888'");
+            assertSamples("after the dropped frame", page.pumpUntilDrawn(12, 12, 0x888888),
+                    CONTROL, new Sample(65, 65, GREEN));
+        }
+    }
+
+    /*
+     * Canvas A at (0,0) filled red and canvas B at (150,0) filled blue, both 100 x 100; each draws the other in
+     * one script, so each image's queue holds a decode of the other's.
+     */
+    private static final String CANVASES_THAT_DRAW_EACH_OTHER_PAGE = pageWithControlPatch("""
+            <canvas id=a width=100 height=100 style='position:absolute;left:0;top:0'></canvas>
+            <canvas id=b width=100 height=100 style='position:absolute;left:150px;top:0'></canvas>
+            <script>
+            const contextA = a.getContext('2d');
+            contextA.fillStyle = '#f00';
+            contextA.fillRect(0, 0, 100, 100);
+            const contextB = b.getContext('2d');
+            contextB.fillStyle = '#00f';
+            contextB.fillRect(0, 0, 100, 100);
+            </script>
+            """);
+
+    /**
+     * A takes B's top-left quarter (blue) into its own; B then takes A's top half as it is by then, blue and
+     * red, into its bottom half.
+     */
+    @Test
+    public void twoCanvasesThatDrawEachOtherInOneFrameShowTheirContent() {
+        Logger root = Logger.getLogger("");
+        List<String> severe = new CopyOnWriteArrayList<>();
+        Handler handler = new Handler() {
+            @Override
+            public void publish(LogRecord record) {
+                if (record.getLevel() == Level.SEVERE) {
+                    severe.add(record.getLoggerName() + ": " + record.getMessage() + ": " + record.getThrown());
+                }
+            }
+
+            @Override
+            public void flush() {
+            }
+
+            @Override
+            public void close() {
+            }
+        };
+        root.addHandler(handler);
+        try (PumpedPage page = PumpedPage.withDefaultSettings(CANVASES_THAT_DRAW_EACH_OTHER_PAGE)) {
+            assertSamples("before the draws", page.settle(),
+                    CONTROL, new Sample(50, 50, RED), new Sample(200, 50, BLUE));
+            assertFalse(page.isInCompositingMode(), "the page is in compositing mode");
+
+            page.script("""
+                    contextA.drawImage(b, 0, 0, 50, 50, 0, 0, 50, 50);
+                    contextB.drawImage(a, 0, 0, 100, 50, 0, 50, 100, 50);
+                    """);
+            assertSamples("after the draws", page.pumpUntilDrawn(225, 75, RED),
+                    CONTROL, new Sample(25, 25, BLUE), new Sample(75, 25, RED), new Sample(25, 75, RED),
+                    new Sample(175, 25, BLUE), new Sample(225, 25, BLUE), new Sample(175, 75, BLUE),
+                    new Sample(225, 75, RED));
+        } finally {
+            root.removeHandler(handler);
+        }
+        assertEquals(List.of(), severe, "errors logged while the canvases were drawn");
+    }
+
+    /**
+     * The frame that uploaded the changed layer and root tiles is dropped. Without a repaint of their
+     * own, the tiles are drawn again by the next composited frame, here caused by a change elsewhere,
+     * which repaints only part of the root tile at (0,0): the rest of that tile, the part of the patch in
+     * it and the page around, must keep what the dropped upload put there.
+     */
+    @Test
+    public void tilesUploadedInADroppedFrameAreCurrentInTheNextCompositedFrame() {
+        try (PumpedPage page = PumpedPage.withAcceleratedCompositing(PAGE)) {
+            page.settle();
+            assertTrue(page.isInCompositingMode(), "the page is not in compositing mode");
+
+            assertTrue(page.recordAndDropFrames("layer.style.background = '#f0f'; patch.style.background = '#0ff'"),
+                    "the change recorded no frame, or its frames were not dropped");
+
+            page.script("nudge.style.background = '#888'");
+            page.settle();
+            assertTrue(page.isInCompositingMode(), "the page left compositing mode");
+            assertSamples("after the dropped frame", page.pump(),
+                    CONTROL, new Sample(100, 100, MAGENTA), new Sample(295, 50, CYAN), new Sample(230, 160, 0x888888),
+                    new Sample(240, 50, CYAN), new Sample(210, 140, WHITE));
+        }
+    }
+
+    /**
+     * Each update paints the layer's gradient into its tile, whose commands reference the gradient, and
+     * draws the tile through a command that decodes them; dropping the frame leaves them undecoded in
+     * the tile's queue. When the page is destroyed with the tile, nothing can decode them any more, and
+     * only disposing them gives back the ids of what they reference. The same page lifecycle without
+     * dropped frames shows that the registry otherwise returns to where it started.
+     */
+    @Test
+    public void undecodedTileBuffersOfADestroyedPageReleaseWhatTheyReference() throws Exception {
+        String page = pageWithControlPatch("""
+                <div id=layer style='position:absolute;left:0;top:0;width:200px;height:200px;
+                    background:linear-gradient(#f00,#00f);transform:translateZ(0)'></div>
+                """);
+        for (boolean dropFrames : new boolean[] {false, true}) {
+            int start = SettledRegistry.size();
+            try (PumpedPage pumped = PumpedPage.withAcceleratedCompositing(page)) {
+                pumped.settle();
+                assertTrue(pumped.isInCompositingMode(), "the page is not in compositing mode");
+                for (int change = 0; change < GRADIENT_CHANGES; change++) {
+                    String recolour = "layer.style.background = 'linear-gradient(#f00,#"
+                            + String.format("%02x", change) + "00ff)'";
+                    if (dropFrames) {
+                        assertTrue(pumped.recordAndDropFrames(recolour),
+                                "change " + change + " recorded no frame, or its frames were not dropped");
+                    } else {
+                        pumped.script(recolour);
+                        pumped.settle();
+                    }
+                }
+                int held = WebKitNativeShim.registrySize();
+                pumped.close();
+                int end = SettledRegistry.size();
+                String series = (dropFrames ? "with" : "without") + " dropped frames: " + start + " -> held "
+                        + held + " -> after the page " + end;
+                assertTrue(Math.abs(end - start) <= REGISTRY_TOLERANCE,
+                        "the registry did not return to its baseline after the page was destroyed, " + series);
+            }
+        }
+    }
+}

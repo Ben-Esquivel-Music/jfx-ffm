@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2013, 2015, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2013, 2026, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -46,6 +46,22 @@ final class WCRenderQueueImpl extends WCRenderQueue {
                 decode();
             });
         }
+    }
+
+    /*
+     * A page printed off the render thread decodes there the queues of the images it draws, whose render
+     * textures belong to the render thread. The caller holds no monitor of this queue while it waits, so
+     * a render job decoding this queue cannot wait for it.
+     */
+    @Override
+    protected void runDecode(Runnable decode) {
+        PrismInvoker.runOnRenderThread(decode);
+    }
+
+    // After the decodes already queued on the render thread
+    @Override
+    protected void releaseUndecodableBuffers() {
+        PrismInvoker.invokeOnRenderThread(this::dispose);
     }
 
     @Override

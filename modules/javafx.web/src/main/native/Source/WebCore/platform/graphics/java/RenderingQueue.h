@@ -171,7 +171,7 @@ public:
     }
 
     //this method need for enclosed Queue serialization
-    //used in [BufferImage::draw]
+    //used in [flushImageRQ] of GraphicsContextJava.cpp
     RefPtr<RQRef> getRQRenderingQueue() {
         return m_rqoRenderingQueue;
     }

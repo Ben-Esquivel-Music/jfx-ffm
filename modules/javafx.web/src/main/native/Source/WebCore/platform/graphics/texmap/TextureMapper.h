@@ -31,7 +31,9 @@
 #include "TextureMapperGPUBuffer.h"
 #include "TransformationMatrix.h"
 #include <array>
+#include <wtf/Noncopyable.h>
 #include <wtf/OptionSet.h>
+#include <wtf/RefPtr.h>
 #include <wtf/TZoneMalloc.h>
 #include <wtf/Vector.h>
 
@@ -52,9 +54,18 @@ class TextureMapperGPUBuffer;
 class TextureMapperShaderProgram;
 class FilterOperations;
 class FloatRoundedRect;
+#if PLATFORM(JAVA)
+class GraphicsContext;
+class ImageBuffer;
+#endif
 enum class TextureMapperFlags : uint16_t;
 
+#if PLATFORM(JAVA)
+class TextureMapper final {
+    WTF_MAKE_NONCOPYABLE(TextureMapper);
+#else
 class TextureMapper {
+#endif
     WTF_MAKE_TZONE_ALLOCATED(TextureMapper);
 public:
     enum class WrapMode : uint8_t {
@@ -98,6 +109,9 @@ public:
     void beginClip(const TransformationMatrix&, const FloatRoundedRect&);
     void beginClip(const TransformationMatrix&, const ClipPath&);
     void beginClipWithoutApplying(const TransformationMatrix&, const FloatRect&);
+#if PLATFORM(JAVA)
+    WEBCORE_EXPORT void setGraphicsContext(GraphicsContext&, const IntRect& targetRect);
+#endif
     WEBCORE_EXPORT void beginPainting(FlipY = FlipY::No, BitmapTexture* = nullptr);
     WEBCORE_EXPORT void endPainting();
     void endClip();
@@ -106,7 +120,11 @@ public:
     IntSize maxTextureSize() const;
     void setDepthRange(double zNear, double zFar);
     std::pair<double, double> depthRange() const;
+#if PLATFORM(JAVA)
+    void setMaskMode(bool);
+#else
     void setMaskMode(bool m) { m_isMaskMode = m; }
+#endif
     void setWrapMode(WrapMode m) { m_wrapMode = m; }
     void setPatternTransform(const TransformationMatrix& p) { m_patternTransform = p; }
 
@@ -146,7 +164,16 @@ private:
     bool beginRoundedRectClip(const TransformationMatrix&, const FloatRoundedRect&);
     void bindDefaultSurface();
     ClipStack& clipStack();
+#if PLATFORM(JAVA)
+    struct PaintTarget {
+        RefPtr<ImageBuffer> buffer;
+        GraphicsContext* context { nullptr };
+    };
+    PaintTarget currentPaintTarget();
+    GraphicsContext* pushClipTarget();
+#else
     TextureMapperGLData& data() const { return *m_data; }
+#endif
 
     void updateProjectionMatrix();
 
@@ -155,7 +182,17 @@ private:
     WrapMode m_wrapMode { WrapMode::Stretch };
     std::optional<FloatSize> m_uvClampMax;
     std::optional<FloatSize> m_uvClampTexelSize;
+#if PLATFORM(JAVA)
+    GraphicsContext* m_graphicsContext { nullptr };
+    IntRect m_targetRect;
+    RefPtr<BitmapTexture> m_currentSurface;
+    RefPtr<ImageBuffer> m_maskBuffer;
+    Vector<PaintTarget> m_clipTargets;
+    double m_zNear { 0 };
+    double m_zFar { 0 };
+#else
     TextureMapperGLData* m_data;
+#endif
     ClipStack m_clipStack;
 #if ENABLE(DAMAGE_TRACKING)
     std::optional<Damage> m_damage;

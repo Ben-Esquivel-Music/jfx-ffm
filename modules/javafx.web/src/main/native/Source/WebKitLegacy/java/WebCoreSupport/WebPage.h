@@ -29,11 +29,11 @@
 #include <WebCore/GraphicsLayerClient.h>
 #include <WebCore/IntRect.h>
 #include <WebCore/PrintContext.h>
+#include <WebCore/Region.h>
 #include <WebCore/ScrollTypes.h>
 #include <WebCore/HandleUserInputEventResult.h>
 
 #include "MediaPlayerPrivateJava.h"
-#include "TextureMapperJavaAdapter.h"
 
 #include <webkit_java_api_page.h>
 #include <wtf/java/WKJHandle.h>
@@ -98,6 +98,7 @@ public:
     /* `renderQueue` is a com.sun.webkit.graphics.WCRenderQueue registry id. */
     void paint(wkj_ref renderQueue, int32_t, int32_t, int32_t, int32_t);
     void postPaint(wkj_ref renderQueue, int32_t, int32_t, int32_t, int32_t);
+    void printCompositedLayers(wkj_ref renderQueue, int32_t, int32_t, int32_t, int32_t);
     bool processKeyEvent(const PlatformKeyboardEvent& event);
 
     void scroll(const IntSize& scrollDelta, const IntRect& rectToScroll,
@@ -121,6 +122,7 @@ private:
     void markForSync();
     void syncLayers();
     IntRect pageRect();
+    bool syncAndRenderCompositedLayers(GraphicsContext&, const IntRect&);
     void renderCompositedLayers(GraphicsContext&, const IntRect&);
 
     // GraphicsLayerClient
@@ -145,13 +147,14 @@ private:
     const WKJPageCallbacks* m_callbacks { nullptr };
     WKJHandle m_javaPage;
     RefPtr<PrintContext> m_printContext;
-    RefPtr<RQRef> m_jRenderTheme;
 
     RefPtr<GraphicsLayer> m_rootLayer;
-    // Not unique_ptr<TextureMapper>: ~TextureMapper() is not virtual, so deleting the adapter through it
-    // would skip ~TextureMapperJavaAdapter() and leak its TextureMapperJava.
-    std::unique_ptr<TextureMapperJavaAdapter> m_textureMapper;
+    std::unique_ptr<TextureMapper> m_textureMapper;
     bool m_syncLayers { false };
+
+    // What this update's dirty-rect paints repainted, in the clips Java decodes their queues under.
+    Region m_paintedThisUpdate;
+    bool m_collectingPaintedRegion { false };
 
     // Webkit expects keyPress events to be suppressed if the associated keyDown
     // event was handled. Safari implements this behavior by peeking out the

@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2011, 2018, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2011, 2026, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -74,7 +74,7 @@ public abstract class WCImage extends Ref {
     public static WCImage getImage(Object imgFrame) {
         WCImage img = null;
         if (imgFrame instanceof WCImage) {
-            //from BufferImage.drawPattern (canvas/fill layer):
+            //from an ImageBuffer (canvas, layer tile):
             //NativeImagePtr is a wrapper over the WCImage
             img = (WCImage)imgFrame;
         } else if (imgFrame instanceof WCImageFrame) {

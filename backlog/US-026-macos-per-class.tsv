@@ -1,0 +1,61 @@
+# US-026: per-class results of the javafx.web gate (execution default-test), mvn -B -ntp -o -pl modules/javafx.web -am test -DskipNative=true -Djfx.web.skipTests=false '-Dtest=!UserDataDirectoryTest' -Dsurefire.failIfNoSpecifiedTests=false '-Djfx.native.librarypath=<directory of the libjfxwebkit.dylib under test>:<media bin>:<graphics bin>', macOS 27.2.1 arm64, Oracle JDK 27.0.1.0.2, Maven 3.10.0, Headless glass and software Prism at scale 1, in the main tree on 2026-11-26, America/New_York (columns: class, head, before, after; head = 5a709c189d with the baseline libjfxwebkit.dylib built from it, sha256 40b5c6db8f965215462b3f12452e78cacc6f89eb5a645a9f5680dce5de0f581b, 10:43 to 10:46; before = the same baseline library with the story's Java change and its tests as they stood at 13:35 to 13:39 (9 tests fewer than the final set, and before the print export was bound: the final Java code cannot load the baseline library); after = the final tree with the final library, sha256 37f184fa42328b1ff6cd5f62c68eaf76bb4151a9eb323efa2dca5e626fc5c618, 15:46 to 15:50; '-' = no such class); 473 / 0 / 0 / 113 in 50 classes at head, 541 / 42 / 0 / 113 in 60 before, 550 / 0 / 0 / 113 in 60 after; every class present at head has equal counts in all three columns; the 10 other classes are added by the story, and all 42 failures before are in 7 of them
+test.com.sun.javafx.webkit.prism.WCGraphicsPrismContextPerspectiveTest	-	13, Failures: 0, Errors: 0, Skipped: 0	13, Failures: 0, Errors: 0, Skipped: 0
+test.com.sun.webkit.SharedBufferTest	46, Failures: 0, Errors: 0, Skipped: 46	46, Failures: 0, Errors: 0, Skipped: 46	46, Failures: 0, Errors: 0, Skipped: 46
+test.com.sun.webkit.SimpleSharedBufferInputStreamTest	61, Failures: 0, Errors: 0, Skipped: 61	61, Failures: 0, Errors: 0, Skipped: 61	61, Failures: 0, Errors: 0, Skipped: 61
+test.com.sun.webkit.WebKitLibraryAbiTest	1, Failures: 0, Errors: 0, Skipped: 0	1, Failures: 0, Errors: 0, Skipped: 0	1, Failures: 0, Errors: 0, Skipped: 0
+test.com.sun.webkit.graphics.WCRenderQueueReleaseTest	-	4, Failures: 0, Errors: 0, Skipped: 0	4, Failures: 0, Errors: 0, Skipped: 0
+test.com.sun.webkit.network.CookieManagerTest	35, Failures: 0, Errors: 0, Skipped: 0	35, Failures: 0, Errors: 0, Skipped: 0	35, Failures: 0, Errors: 0, Skipped: 0
+test.com.sun.webkit.network.CookieTest	24, Failures: 0, Errors: 0, Skipped: 0	24, Failures: 0, Errors: 0, Skipped: 0	24, Failures: 0, Errors: 0, Skipped: 0
+test.com.sun.webkit.network.DateParserTest	8, Failures: 0, Errors: 0, Skipped: 0	8, Failures: 0, Errors: 0, Skipped: 0	8, Failures: 0, Errors: 0, Skipped: 0
+test.com.sun.webkit.network.PublicSuffixesTest	5, Failures: 0, Errors: 0, Skipped: 0	5, Failures: 0, Errors: 0, Skipped: 0	5, Failures: 0, Errors: 0, Skipped: 0
+test.com.sun.webkit.network.UtilTest	8, Failures: 0, Errors: 0, Skipped: 0	8, Failures: 0, Errors: 0, Skipped: 0	8, Failures: 0, Errors: 0, Skipped: 0
+test.com.sun.webkit.network.data.DataURLConnectionTest	14, Failures: 0, Errors: 0, Skipped: 0	14, Failures: 0, Errors: 0, Skipped: 0	14, Failures: 0, Errors: 0, Skipped: 0
+test.com.sun.webkit.text.TextBreakIteratorTest	1, Failures: 0, Errors: 0, Skipped: 0	1, Failures: 0, Errors: 0, Skipped: 0	1, Failures: 0, Errors: 0, Skipped: 0
+test.javafx.scene.web.BindingTest	3, Failures: 0, Errors: 0, Skipped: 0	3, Failures: 0, Errors: 0, Skipped: 0	3, Failures: 0, Errors: 0, Skipped: 0
+test.javafx.scene.web.CSSTest	37, Failures: 0, Errors: 0, Skipped: 0	37, Failures: 0, Errors: 0, Skipped: 0	37, Failures: 0, Errors: 0, Skipped: 0
+test.javafx.scene.web.CallbackTest	7, Failures: 0, Errors: 0, Skipped: 1	7, Failures: 0, Errors: 0, Skipped: 1	7, Failures: 0, Errors: 0, Skipped: 1
+test.javafx.scene.web.CanvasTest	6, Failures: 0, Errors: 0, Skipped: 0	6, Failures: 0, Errors: 0, Skipped: 0	6, Failures: 0, Errors: 0, Skipped: 0
+test.javafx.scene.web.CheckFxThreadTest	3, Failures: 0, Errors: 0, Skipped: 0	3, Failures: 0, Errors: 0, Skipped: 0	3, Failures: 0, Errors: 0, Skipped: 0
+test.javafx.scene.web.ClientCallbackFailureTest	3, Failures: 0, Errors: 0, Skipped: 0	3, Failures: 0, Errors: 0, Skipped: 0	3, Failures: 0, Errors: 0, Skipped: 0
+test.javafx.scene.web.CompositedContentChangesTest	-	7, Failures: 6, Errors: 0, Skipped: 0	11, Failures: 0, Errors: 0, Skipped: 0
+test.javafx.scene.web.CompositedContentTest	-	23, Failures: 23, Errors: 0, Skipped: 0	24, Failures: 0, Errors: 0, Skipped: 0
+test.javafx.scene.web.CompositedPixelsTest	-	4, Failures: 4, Errors: 0, Skipped: 0	5, Failures: 0, Errors: 0, Skipped: 0
+test.javafx.scene.web.CompositedPrintTest	-	5, Failures: 3, Errors: 0, Skipped: 0	8, Failures: 0, Errors: 0, Skipped: 0
+test.javafx.scene.web.CustomCursorTest	3, Failures: 0, Errors: 0, Skipped: 0	3, Failures: 0, Errors: 0, Skipped: 0	3, Failures: 0, Errors: 0, Skipped: 0
+test.javafx.scene.web.DOMTest	15, Failures: 0, Errors: 0, Skipped: 0	15, Failures: 0, Errors: 0, Skipped: 0	15, Failures: 0, Errors: 0, Skipped: 0
+test.javafx.scene.web.DebuggerTest	6, Failures: 0, Errors: 0, Skipped: 0	6, Failures: 0, Errors: 0, Skipped: 0	6, Failures: 0, Errors: 0, Skipped: 0
+test.javafx.scene.web.DirectoryLockTest	9, Failures: 0, Errors: 0, Skipped: 0	9, Failures: 0, Errors: 0, Skipped: 0	9, Failures: 0, Errors: 0, Skipped: 0
+test.javafx.scene.web.DroppedFramesTest	-	4, Failures: 3, Errors: 0, Skipped: 0	4, Failures: 0, Errors: 0, Skipped: 0
+test.javafx.scene.web.EventListenerLeakTest	10, Failures: 0, Errors: 0, Skipped: 0	10, Failures: 0, Errors: 0, Skipped: 0	10, Failures: 0, Errors: 0, Skipped: 0
+test.javafx.scene.web.FileReaderTest	16, Failures: 0, Errors: 0, Skipped: 0	16, Failures: 0, Errors: 0, Skipped: 0	16, Failures: 0, Errors: 0, Skipped: 0
+test.javafx.scene.web.FileTest	1, Failures: 0, Errors: 0, Skipped: 0	1, Failures: 0, Errors: 0, Skipped: 0	1, Failures: 0, Errors: 0, Skipped: 0
+test.javafx.scene.web.FormControlsTest	18, Failures: 0, Errors: 0, Skipped: 0	18, Failures: 0, Errors: 0, Skipped: 0	18, Failures: 0, Errors: 0, Skipped: 0
+test.javafx.scene.web.HTMLEditingTest	1, Failures: 0, Errors: 0, Skipped: 1	1, Failures: 0, Errors: 0, Skipped: 1	1, Failures: 0, Errors: 0, Skipped: 1
+test.javafx.scene.web.HistoryStateTest	3, Failures: 0, Errors: 0, Skipped: 0	3, Failures: 0, Errors: 0, Skipped: 0	3, Failures: 0, Errors: 0, Skipped: 0
+test.javafx.scene.web.HistoryTest	1, Failures: 0, Errors: 0, Skipped: 0	1, Failures: 0, Errors: 0, Skipped: 0	1, Failures: 0, Errors: 0, Skipped: 0
+test.javafx.scene.web.IrresponsiveScriptTest	3, Failures: 0, Errors: 0, Skipped: 3	3, Failures: 0, Errors: 0, Skipped: 3	3, Failures: 0, Errors: 0, Skipped: 3
+test.javafx.scene.web.JavaScriptBridgeTest	22, Failures: 0, Errors: 0, Skipped: 0	22, Failures: 0, Errors: 0, Skipped: 0	22, Failures: 0, Errors: 0, Skipped: 0
+test.javafx.scene.web.LeakTest	5, Failures: 0, Errors: 0, Skipped: 0	5, Failures: 0, Errors: 0, Skipped: 0	5, Failures: 0, Errors: 0, Skipped: 0
+test.javafx.scene.web.LiveConnectParityTest	8, Failures: 0, Errors: 0, Skipped: 0	8, Failures: 0, Errors: 0, Skipped: 0	8, Failures: 0, Errors: 0, Skipped: 0
+test.javafx.scene.web.LoadNotificationsTest	3, Failures: 0, Errors: 0, Skipped: 0	3, Failures: 0, Errors: 0, Skipped: 0	3, Failures: 0, Errors: 0, Skipped: 0
+test.javafx.scene.web.LoadTest	18, Failures: 0, Errors: 0, Skipped: 1	18, Failures: 0, Errors: 0, Skipped: 1	18, Failures: 0, Errors: 0, Skipped: 1
+test.javafx.scene.web.LocalStorageTest	4, Failures: 0, Errors: 0, Skipped: 0	4, Failures: 0, Errors: 0, Skipped: 0	4, Failures: 0, Errors: 0, Skipped: 0
+test.javafx.scene.web.MathMLRenderTest	1, Failures: 0, Errors: 0, Skipped: 0	1, Failures: 0, Errors: 0, Skipped: 0	1, Failures: 0, Errors: 0, Skipped: 0
+test.javafx.scene.web.MiscellaneousTest	17, Failures: 0, Errors: 0, Skipped: 0	17, Failures: 0, Errors: 0, Skipped: 0	17, Failures: 0, Errors: 0, Skipped: 0
+test.javafx.scene.web.OpacityTest	1, Failures: 0, Errors: 0, Skipped: 0	1, Failures: 0, Errors: 0, Skipped: 0	1, Failures: 0, Errors: 0, Skipped: 0
+test.javafx.scene.web.PathContructorTest	1, Failures: 0, Errors: 0, Skipped: 0	1, Failures: 0, Errors: 0, Skipped: 0	1, Failures: 0, Errors: 0, Skipped: 0
+test.javafx.scene.web.SVGPointerEventsTest	2, Failures: 0, Errors: 0, Skipped: 0	2, Failures: 0, Errors: 0, Skipped: 0	2, Failures: 0, Errors: 0, Skipped: 0
+test.javafx.scene.web.SVGTest	3, Failures: 0, Errors: 0, Skipped: 0	3, Failures: 0, Errors: 0, Skipped: 0	3, Failures: 0, Errors: 0, Skipped: 0
+test.javafx.scene.web.ScreenAndWindowTest	1, Failures: 0, Errors: 0, Skipped: 0	1, Failures: 0, Errors: 0, Skipped: 0	1, Failures: 0, Errors: 0, Skipped: 0
+test.javafx.scene.web.ShadowTest	1, Failures: 0, Errors: 0, Skipped: 0	1, Failures: 0, Errors: 0, Skipped: 0	1, Failures: 0, Errors: 0, Skipped: 0
+test.javafx.scene.web.SubresourceIntegrityTest	12, Failures: 0, Errors: 0, Skipped: 0	12, Failures: 0, Errors: 0, Skipped: 0	12, Failures: 0, Errors: 0, Skipped: 0
+test.javafx.scene.web.SurfacePoolTest	-	1, Failures: 0, Errors: 0, Skipped: 0	1, Failures: 0, Errors: 0, Skipped: 0
+test.javafx.scene.web.SwingDependencyTest	1, Failures: 0, Errors: 0, Skipped: 0	1, Failures: 0, Errors: 0, Skipped: 0	1, Failures: 0, Errors: 0, Skipped: 0
+test.javafx.scene.web.ThemedControlsInImageBuffersTest	-	3, Failures: 2, Errors: 0, Skipped: 0	3, Failures: 0, Errors: 0, Skipped: 0
+test.javafx.scene.web.ViewTransitionContentTest	-	4, Failures: 1, Errors: 0, Skipped: 0	4, Failures: 0, Errors: 0, Skipped: 0
+test.javafx.scene.web.WebKitRegistryLeakTest	2, Failures: 0, Errors: 0, Skipped: 0	2, Failures: 0, Errors: 0, Skipped: 0	2, Failures: 0, Errors: 0, Skipped: 0
+test.javafx.scene.web.WebPageTest	6, Failures: 0, Errors: 0, Skipped: 0	6, Failures: 0, Errors: 0, Skipped: 0	6, Failures: 0, Errors: 0, Skipped: 0
+test.javafx.scene.web.WebViewResizabilityTest	10, Failures: 0, Errors: 0, Skipped: 0	10, Failures: 0, Errors: 0, Skipped: 0	10, Failures: 0, Errors: 0, Skipped: 0
+test.javafx.scene.web.WebViewTest	4, Failures: 0, Errors: 0, Skipped: 0	4, Failures: 0, Errors: 0, Skipped: 0	4, Failures: 0, Errors: 0, Skipped: 0
+test.javafx.scene.web.WebWorkerTest	1, Failures: 0, Errors: 0, Skipped: 0	1, Failures: 0, Errors: 0, Skipped: 0	1, Failures: 0, Errors: 0, Skipped: 0
+test.javafx.scene.web.WebWorkerUpcallTest	2, Failures: 0, Errors: 0, Skipped: 0	2, Failures: 0, Errors: 0, Skipped: 0	2, Failures: 0, Errors: 0, Skipped: 0

@@ -106,7 +106,7 @@
 #include <WebCore/Settings.h>
 #include <WebCore/StorageNamespaceProvider.h>
 #include <WebCore/TextIterator.h>
-#include <WebCore/TextureMapperJava.h>
+#include <WebCore/TextureMapper.h>
 #include <WebCore/TextureMapperLayer.h>
 #include <WebCore/WorkerThread.h>
 #include <WebCore/platform/graphics/java/GraphicsContextJava.h>
@@ -264,6 +264,9 @@ static void drawDebugBorder(GraphicsContext& context,
 }
 
 void WebPage::prePaint() {
+    m_paintedThisUpdate = Region();
+    m_collectingPaintedRegion = true;
+
     if (m_rootLayer) {
         if (m_syncLayers) {
             m_syncLayers = false;
@@ -283,11 +286,8 @@ void WebPage::prePaint() {
 
 RefPtr<RQRef> WebPage::jRenderTheme()
 {
-    if (!m_jRenderTheme) {
-        WKJHandle theme = wkjRenderThemeForPage(handleFromPage(m_page.get()).get());
-        m_jRenderTheme = RQRef::create(theme.get());
-    }
-    return m_jRenderTheme;
+    auto* supplement = m_page ? PageSupplementJava::from(m_page.get()) : nullptr;
+    return supplement ? supplement->jRenderTheme() : nullptr;
 }
 
 void WebPage::paint(wkj_ref rq, int32_t x, int32_t y, int32_t w, int32_t h)
@@ -317,6 +317,10 @@ void WebPage::paint(wkj_ref rq, int32_t x, int32_t y, int32_t w, int32_t h)
     frameView->paint(gc, IntRect(x, y, w, h));
     if (m_page->settings().showDebugBorders()) {
         drawDebugLed(gc, IntRect(x, y, w, h), SRGBA<uint8_t> { 0, 0, 255, 128 });
+    } else if (m_collectingPaintedRegion && w > 2 && h > 2) {
+        // Java asks for its dirty rect grown by one pixel on each side and decodes the queue under the rect.
+        // A paint that draws a debug LED does not count: the full repaint under a highlight paints over the LED.
+        m_paintedThisUpdate.unite(IntRect(x + 1, y + 1, w - 2, h - 2));
     }
 
     gc.platformContext()->rq().flushBuffer();
@@ -324,6 +328,10 @@ void WebPage::paint(wkj_ref rq, int32_t x, int32_t y, int32_t w, int32_t h)
 
 void WebPage::postPaint(wkj_ref rq, int32_t x, int32_t y, int32_t w, int32_t h)
 {
+    bool covered = m_collectingPaintedRegion && m_paintedThisUpdate.contains(IntRect(x, y, w, h));
+    m_paintedThisUpdate = Region();
+    m_collectingPaintedRegion = false;
+
     if (!m_page->inspectorController().highlightedNode()
             && !m_rootLayer
     ) {
@@ -334,25 +342,64 @@ void WebPage::postPaint(wkj_ref rq, int32_t x, int32_t y, int32_t w, int32_t h)
     PlatformContextJava* ppgc = new PlatformContextJava(rq, jRenderTheme());
     GraphicsContextJava gc(ppgc);
 
-    if (m_rootLayer) {
-        if (m_syncLayers) {
-            m_syncLayers = false;
-            syncLayers();
-        }
-        renderCompositedLayers(gc, IntRect(x, y, w, h));
+    if (syncAndRenderCompositedLayers(gc, IntRect(x, y, w, h))) {
         if (m_page->settings().showDebugBorders()) {
             drawDebugLed(gc, IntRect(x, y, w, h), SRGBA<uint8_t> { 0, 192, 0, 128 });
         }
-        if (downcast<GraphicsLayerTextureMapper>(m_rootLayer.get())->layer().descendantsOrSelfHaveRunningAnimations()) {
+        auto& rootTextureMapperLayer = downcast<GraphicsLayerTextureMapper>(*m_rootLayer).layer();
+        if (rootTextureMapperLayer.descendantsOrSelfHaveRunningAnimations()) {
             requestJavaRepaint(pageRect());
         }
     }
 
+    // The overlay clears the whole viewport before it draws, as it would on a layer of its own; the transparency
+    // layer gives it one, so the page drawn before it stays.
     if (m_page->inspectorController().highlightedNode()) {
+        // Outside compositing mode only the dirty rects were repainted, and the retained back buffer holds the
+        // last frame's highlight everywhere else, so the page under the overlay is painted again in full - unless
+        // this update's dirty rects covered the clip over an opaque background, which a second paint would only
+        // repeat. Java clears the clip first under a transparent background, so there the page must be painted.
+        auto* localFrame = m_rootLayer ? nullptr : dynamicDowncast<LocalFrame>(&m_page->mainFrame());
+        auto* frameView = localFrame ? localFrame->view() : nullptr;
+        if (frameView && (!covered || !frameView->hasOpaqueBackground())) {
+            auto* globalObject = localFrame->script().globalObject(mainThreadNormalWorldSingleton());
+            JSC::JSLockHolder lock(toJS(toGlobalRef(globalObject)));
+            frameView->paint(gc, IntRect(x, y, w, h));
+        }
+        gc.beginTransparencyLayer(1);
         m_page->inspectorController().drawHighlight(gc);
+        gc.endTransparencyLayer();
     }
 
     gc.platformContext()->rq().flushBuffer();
+}
+
+// Printing needs the composited content only: no inspector highlight, debug LED or animation repaint.
+void WebPage::printCompositedLayers(wkj_ref rq, int32_t x, int32_t y, int32_t w, int32_t h)
+{
+    if (!m_rootLayer)
+        return;
+
+    // Will be deleted by GraphicsContext destructor
+    PlatformContextJava* ppgc = new PlatformContextJava(rq, jRenderTheme());
+    GraphicsContextJava gc(ppgc);
+    syncAndRenderCompositedLayers(gc, IntRect(x, y, w, h));
+    gc.platformContext()->rq().flushBuffer();
+}
+
+bool WebPage::syncAndRenderCompositedLayers(GraphicsContext& context, const IntRect& clip)
+{
+    if (!m_rootLayer)
+        return false;
+    if (m_syncLayers) {
+        m_syncLayers = false;
+        syncLayers();
+    }
+    // The layout in syncLayers() can leave compositing mode and detach the root.
+    if (!m_rootLayer || !m_textureMapper)
+        return false;
+    renderCompositedLayers(context, clip);
+    return true;
 }
 
 void WebPage::scroll(const IntSize& scrollDelta,
@@ -408,7 +455,7 @@ void WebPage::setRootChildLayer(GraphicsLayer* layer)
         m_rootLayer->setNeedsDisplay();
         m_rootLayer->addChild(*layer);
 
-        m_textureMapper = std::make_unique<TextureMapperJavaAdapter>();
+        m_textureMapper = TextureMapper::create();
     } else {
         m_rootLayer = nullptr;
         m_textureMapper.reset();
@@ -446,7 +493,8 @@ void WebPage::syncLayers()
     if (!localFrame->contentRenderer() || !frameView)
         return;
 
-    frameView->updateLayoutAndStyleIfNeededRecursive();
+    // Layout leaves the compositing update to the rendering update unless asked; the flush below needs it done.
+    frameView->updateLayoutAndStyleIfNeededRecursive(LayoutOptions::UpdateCompositingLayers);
     // Updating layout might have taken us out of compositing mode
     if (m_rootLayer) {
         m_rootLayer->flushCompositingStateForThisLayerOnly();
@@ -469,19 +517,14 @@ void WebPage::renderCompositedLayers(GraphicsContext& context, const IntRect& cl
 
     TextureMapperLayer& rootTextureMapperLayer = downcast<GraphicsLayerTextureMapper>(*m_rootLayer).layer();
 
-    if (m_textureMapper)
-        m_textureMapper->setGraphicsContext(&context);
-
-    TransformationMatrix matrix;
+    m_textureMapper->setGraphicsContext(context, pageRect());
     m_textureMapper->beginPainting();
-    m_textureMapper->beginClip(matrix, FloatRoundedRect(clip));
+    m_textureMapper->beginClip(TransformationMatrix(), FloatRoundedRect(clip));
     rootTextureMapperLayer.applyAnimationsRecursively(MonotonicTime::now());
     downcast<GraphicsLayerTextureMapper>(*m_rootLayer).updateBackingStoreIncludingSubLayers(*m_textureMapper);
     rootTextureMapperLayer.paint(*m_textureMapper);
     m_textureMapper->endClip();
     m_textureMapper->endPainting();
-    // The context belongs to the caller and does not outlive this paint.
-    m_textureMapper->setGraphicsContext(nullptr);
 }
 
 void WebPage::notifyAnimationStarted(const GraphicsLayer*, const String& /*animationKey*/, MonotonicTime /*time*/)
@@ -1788,6 +1831,13 @@ WKJ_EXPORT void wkj_page_post_paint(int64_t pPage, wkj_ref rq, int32_t x, int32_
 {
     WKJCallScope wkjScope;
     WebPage::webPageFromPeer(pPage)->postPaint(rq, x, y, w, h);
+}
+
+WKJ_EXPORT void wkj_page_print_composited(int64_t pPage, wkj_ref rq, int32_t x, int32_t y,
+                                         int32_t w, int32_t h)
+{
+    WKJCallScope wkjScope;
+    WebPage::webPageFromPeer(pPage)->printCompositedLayers(rq, x, y, w, h);
 }
 
 WKJ_EXPORT int32_t wkj_page_get_encoding(int64_t pPage, uint16_t* result_buf, int32_t result_cap,

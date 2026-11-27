@@ -350,6 +350,7 @@ public final class WebPage {
                     }
                 }
 
+                currentFrame.backgroundTransparent = isBackgroundColorTransparent();
                 frameQueue.add(currentFrame);
                 currentFrame = new RenderFrame();
 
@@ -428,61 +429,6 @@ public final class WebPage {
                                      w, Math.abs(dy)));
         addDirtyRect(new WCRectangle(dx >= 0 ? x : x + w + dx, y,
                                      Math.abs(dx), h - Math.abs(dy)));
-    }
-
-    // Instances of this class may not be accessed and modified concurrently
-    // by multiple threads
-    private static final class RenderFrame {
-        private final List<WCRenderQueue> rqList =
-                new LinkedList<>();
-        private int scrollDx, scrollDy;
-        private final WCRectangle enclosingRect = new WCRectangle();
-
-        // Called on: Event thread only
-        private void addRenderQueue(WCRenderQueue rq) {
-            if (rq.isEmpty()) {
-                return;
-            }
-            rqList.add(rq);
-            WCRectangle rqRect = rq.getClip();
-            if (enclosingRect.isEmpty()) {
-                enclosingRect.setFrame(rqRect.getX(), rqRect.getY(),
-                                       rqRect.getWidth(), rqRect.getHeight());
-            } else if (rqRect.isEmpty()) {
-                // do nothing
-            } else {
-                WCRectangle.union(enclosingRect, rqRect, enclosingRect);
-            }
-        }
-
-        // Called on: Event thread and Main thread
-        private List<WCRenderQueue> getRQList() {
-            return rqList;
-        }
-
-        // Called on: Event thread only
-        private WCRectangle getEnclosingRect() {
-            return enclosingRect;
-        }
-
-        // Called on: Event thread only
-        private void drop() {
-            for (WCRenderQueue rq : rqList) {
-                rq.dispose();
-            }
-            rqList.clear();
-            enclosingRect.setFrame(0, 0, 0, 0);
-            scrollDx = 0;
-            scrollDy = 0;
-        }
-
-        @Override
-        public String toString() {
-            return "RenderFrame{"
-                    + "rqList=" + rqList + ", "
-                    + "enclosingRect=" + enclosingRect
-                    + "}";
-        }
     }
 
     // *************************************************************************
@@ -688,7 +634,12 @@ public final class WebPage {
             final WCRenderQueue rq = WCGraphicsManager.getGraphicsManager().
                     createRenderQueue(new WCRectangle(x, y, w, h), true);
             FutureTask<Void> f = new FutureTask<>(() -> {
-                twkUpdateContent(getPage(), rq, x, y, w, h);
+                if (!isDisposed) {
+                    // In compositing mode the page is drawn only by its composited layers, and their sync can
+                    // leave compositing mode, after which only the page paint draws the page.
+                    WebPageNative.printComposited(getPage(), rq, x, y, w, h);
+                    twkUpdateContent(getPage(), rq, x, y, w, h);
+                }
             }, null);
             Invoker.getInvoker().invokeOnEventThread(f);
 
@@ -755,7 +706,7 @@ public final class WebPage {
                 gc.saveState();
                 WCRectangle clip = rq.getClip();
                 if (clip != null) {
-                    if (isBackgroundColorTransparent()) {
+                    if (frame.backgroundTransparent) {
                         // As backbuffer is enabled, new clips are drawn over the old rendered frames
                         // regardless the alpha channel. While that works fine for alpha > 0,
                         // for alpha == 0 we need to clear the old frame or it will still be visible.

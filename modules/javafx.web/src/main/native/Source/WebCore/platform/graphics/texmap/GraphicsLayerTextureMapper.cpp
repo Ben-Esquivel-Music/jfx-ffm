@@ -599,10 +599,16 @@ bool GraphicsLayerTextureMapper::shouldHaveBackingStore() const
 
 bool GraphicsLayerTextureMapper::filtersCanBeComposited(const FilterOperations& filters) const
 {
+#if PLATFORM(JAVA)
+    // The Java TextureMapper has no filter passes; RenderLayerBacking paints the filters in software.
+    UNUSED_PARAM(filters);
+    return false;
+#else
     if (!filters.size())
         return false;
 
     return !filters.hasReferenceFilter();
+#endif
 }
 
 bool GraphicsLayerTextureMapper::addAnimation(const GraphicsLayerKeyframeValueList& valueList, const GraphicsLayerAnimation* anim, const String& keyframesName, double timeOffset)

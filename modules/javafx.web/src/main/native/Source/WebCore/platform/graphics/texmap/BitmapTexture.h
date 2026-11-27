@@ -46,6 +46,9 @@ typedef void *EGLImage;
 namespace WebCore {
 
 class GraphicsLayer;
+#if PLATFORM(JAVA)
+class ImageBuffer;
+#endif
 class NativeImage;
 class TextureMapper;
 enum class TextureMapperFlags : uint16_t;
@@ -98,6 +101,12 @@ public:
 
     ClipStack& clipStack() { return m_clipStack; }
 
+#if PLATFORM(JAVA)
+    ImageBuffer* imageBuffer() const { return m_imageBuffer.get(); }
+    ImageBuffer* ensureImageBuffer();
+    RefPtr<ImageBuffer> takeImageBuffer();
+#endif
+
     void copyFromExternalTexture(GLuint sourceTextureID, const IntRect& targetRect, const IntSize& sourceOffset);
 
     OptionSet<TextureMapperFlags> colorConvertFlags() const;
@@ -135,6 +144,9 @@ private:
     ClipStack m_clipStack;
     RefPtr<const FilterOperation> m_filterOperation;
     PixelFormat m_pixelFormat { PixelFormat::RGBA8 };
+#if PLATFORM(JAVA)
+    RefPtr<ImageBuffer> m_imageBuffer;
+#endif
 
 #if USE(GBM)
     std::unique_ptr<MemoryMappedGPUBuffer> m_memoryMappedGPUBuffer;

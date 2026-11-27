@@ -44,6 +44,7 @@ public:
     unsigned bufferID() const { return m_bufferID; }
     const void* bufferDataOffsetAsPtr() const;
     unsigned numberOfVertices() const { return m_vertices.size(); }
+    const Vector<FloatPoint>& vertices() const { return m_vertices; }
 
     const FloatRect& bounds() const { return m_bounds; }
 

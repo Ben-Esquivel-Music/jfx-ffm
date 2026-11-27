@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2011, 2024, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2011, 2026, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -85,12 +85,15 @@ class WCGraphicsPrismContext extends WCGraphicsContext {
     Graphics baseGraphics;
     private BaseTransform baseTransform;
 
-    private final List<ContextState> states = new ArrayList<>();
+    private final List<PrismContextState> states = new ArrayList<>();
 
-    private ContextState state = new ContextState();
+    private PrismContextState state = new PrismContextState();
 
     // Cache for getPlatformGraphics
     private Graphics cachedGraphics = null;
+
+    // The last graphics given a perspective transform, whose device context still holds it
+    private Graphics perspectiveTarget = null;
 
     private int fontSmoothingType;
     private boolean isRootLayerValid = false;
@@ -136,6 +139,10 @@ class WCGraphicsPrismContext extends WCGraphicsContext {
     }
 
     Graphics getGraphics(boolean checkClip) {
+        // A DECODERQ decodes another context on this thread, which sets Prism's shared perspective.
+        if (cachedGraphics != null && isPerspectiveFoldedInto(cachedGraphics)) {
+            resetCachedGraphics();
+        }
         if (cachedGraphics == null) {
             Layer l = state.getLayerNoClone();
             cachedGraphics = (l != null)
@@ -149,7 +156,7 @@ class WCGraphicsPrismContext extends WCGraphicsContext {
 
             ResourceFactory rf = cachedGraphics.getResourceFactory();
             if (!rf.isDisposed()) {
-                state.apply(cachedGraphics);
+                applyState(cachedGraphics);
             }
 
             if (log.isLoggable(Level.FINE)) {
@@ -162,6 +169,48 @@ class WCGraphicsPrismContext extends WCGraphicsContext {
         return (checkClip && clip!=null && clip.isEmpty())
             ? null
             : cachedGraphics;
+    }
+
+    private void applyState(Graphics g) {
+        state.apply(g);
+        if (isPerspectiveFoldedInto(g)) {
+            perspectiveTarget = g;
+        }
+    }
+
+    /*
+     * Only Prism's shader graphics apply a perspective transform; the software and Java 2D graphics,
+     * printer graphics among them, ignore it. Exactly the shader graphics implement RectShadowGraphics,
+     * through BaseGraphics, which keeps the perspective and which javafx.graphics does not export here.
+     */
+    static boolean appliesPerspective(Graphics g) {
+        return g instanceof RectShadowGraphics;
+    }
+
+    /*
+     * The mapper puts the whole placement of a projected quad into the perspective, so a graphics that
+     * ignores it would draw the quad unplaced at the origin of its target.
+     */
+    private boolean cannotProject(Graphics g) {
+        return !state.getPerspectiveTransformNoClone().isIdentity() && !appliesPerspective(g);
+    }
+
+    /*
+     * Prism keeps the perspective transform in the device context that every graphics shares, and
+     * nothing outside this class resets it, so a decode must not end with one there.
+     */
+    private void resetPerspective() {
+        if (perspectiveTarget != null) {
+            if (!perspectiveTarget.getResourceFactory().isDisposed()) {
+                perspectiveTarget.setPerspectiveTransform(null);
+            }
+            perspectiveTarget = null;
+            resetCachedGraphics();
+        }
+    }
+
+    private boolean isPerspectiveFoldedInto(Graphics g) {
+        return !state.getPerspectiveTransformNoClone().isIdentity() && appliesPerspective(g);
     }
 
     @Override
@@ -273,7 +322,7 @@ class WCGraphicsPrismContext extends WCGraphicsContext {
             log.fine("FlushAllLayers");
         }
 
-        ContextState currentState = state;
+        PrismContextState currentState = state;
 
         for (int i = states.size() - 1; i >=0; i--) {
             Layer layer = state.getLayerNoClone();
@@ -297,10 +346,11 @@ class WCGraphicsPrismContext extends WCGraphicsContext {
 
     @Override
     public void dispose() {
+        resetPerspective();
         if (!states.isEmpty()) {
             log.fine("Unbalanced saveState/restoreState");
         }
-        for (ContextState state: states) {
+        for (PrismContextState state: states) {
             if (state.getLayerNoClone() != null) {
                 state.getLayerNoClone().dispose();
             }
@@ -486,7 +536,11 @@ class WCGraphicsPrismContext extends WCGraphicsContext {
         }
         state.translate(x, y);
         if (cachedGraphics != null) {
-            cachedGraphics.translate(x, y);
+            if (isPerspectiveFoldedInto(cachedGraphics)) {
+                resetCachedGraphics();
+            } else {
+                cachedGraphics.translate(x, y);
+            }
         }
     }
 
@@ -497,7 +551,11 @@ class WCGraphicsPrismContext extends WCGraphicsContext {
         }
         state.scale(sx, sy);
         if (cachedGraphics != null) {
-            cachedGraphics.scale(sx, sy);
+            if (isPerspectiveFoldedInto(cachedGraphics)) {
+                resetCachedGraphics();
+            } else {
+                cachedGraphics.scale(sx, sy);
+            }
         }
     }
 
@@ -508,7 +566,11 @@ class WCGraphicsPrismContext extends WCGraphicsContext {
         }
         state.rotate(radians);
         if (cachedGraphics != null) {
-            cachedGraphics.setTransform(state.getTransformNoClone());
+            if (isPerspectiveFoldedInto(cachedGraphics)) {
+                resetCachedGraphics();
+            } else {
+                cachedGraphics.setTransform(state.getTransformNoClone());
+            }
         }
     }
 
@@ -542,8 +604,8 @@ class WCGraphicsPrismContext extends WCGraphicsContext {
             @Override void doPaint(Graphics g) {
                 Paint paint = (color != null) ? color : state.getPaintNoClone();
                 DropShadow shadow = state.getShadowNoClone();
-                // TextureMapperJava::drawSolidColor calls fillRect with perspective
-                // projection.
+                // TextureMapper::drawSolidColor (TextureMapperJava.cpp) calls fillRect
+                // with perspective projection.
                 if (shadow != null || !state.getPerspectiveTransformNoClone().isIdentity()) {
                     final NGRectangle node = new NGRectangle();
                     node.updateRectangle(x, y, w, h, 0, 0);
@@ -1187,181 +1249,7 @@ class WCGraphicsPrismContext extends WCGraphicsContext {
         g.setHasPreCullingBits(culling);
     }
 
-    private static final class ContextState {
-        private final WCStrokeImpl stroke = new WCStrokeImpl();
-        private Rectangle clip;
-        private Paint paint;
-        private float alpha;
-
-        private boolean textFill = true;
-        private boolean textStroke = false;
-        private boolean textClip = false;
-        private boolean restorePoint = false;
-
-        private DropShadow shadow;
-        private Affine3D xform;
-        private GeneralTransform3D perspectiveTransform;
-        private Layer layer;
-        private int compositeOperation;
-
-        private ContextState() {
-            clip = null;
-            paint = Color.BLACK;
-            stroke.setPaint(Color.BLACK);
-            alpha = 1.0f;
-            xform = new Affine3D();
-            perspectiveTransform = new GeneralTransform3D();
-            compositeOperation = COMPOSITE_SOURCE_OVER;
-        }
-
-        private ContextState(ContextState state) {
-            stroke.copyFrom(state.getStrokeNoClone());
-            setPaint(state.getPaintNoClone());
-            clip = state.getClipNoClone();
-            if (clip != null) {
-                clip = new Rectangle(clip);
-            }
-            xform = new Affine3D(state.getTransformNoClone());
-            perspectiveTransform = new GeneralTransform3D().set(state.getPerspectiveTransformNoClone());
-            setShadow(state.getShadowNoClone());
-            setLayer(state.getLayerNoClone());
-            setAlpha(state.getAlpha());
-            setTextMode(state.isTextFill(), state.isTextStroke(), state.isTextClip());
-            setCompositeOperation(state.getCompositeOperation());
-        }
-
-        @Override
-        protected ContextState clone() {
-            return new ContextState(this);
-        }
-
-        private void apply(Graphics g) {
-            g.setTransform(getTransformNoClone());
-            g.setPerspectiveTransform(getPerspectiveTransformNoClone());
-            g.setClipRect(getClipNoClone());
-            g.setExtraAlpha(getAlpha());
-        }
-
-        private int getCompositeOperation() {
-            return compositeOperation;
-        }
-
-        private void setCompositeOperation(int compositeOperation) {
-            this.compositeOperation = compositeOperation;
-        }
-
-        private WCStrokeImpl getStrokeNoClone() {
-            return stroke;
-        }
-
-        private Paint getPaintNoClone() {
-            return paint;
-        }
-
-        private void setPaint(Paint paint) {
-            this.paint = paint;
-        }
-
-        private Rectangle getClipNoClone() {
-            return clip;
-        }
-
-        private Layer getLayerNoClone() {
-            return layer;
-        }
-
-        private void setLayer(Layer layer) {
-            this.layer = layer;
-        }
-
-        private void setClip(Rectangle area) {
-            clip = area;
-        }
-
-        private void clip(Rectangle area) {
-            if (null == clip) {
-                clip = area;
-            } else {
-                clip.intersectWith(area);
-            }
-        }
-
-        private void setAlpha(float alpha) {
-            this.alpha = alpha;
-        }
-
-        private float getAlpha() {
-            return alpha;
-        }
-
-        private void setTextMode(boolean fill, boolean stroke, boolean clip) {
-            textFill = fill;
-            textStroke = stroke;
-            textClip = clip;
-        }
-
-        private boolean isTextFill() {
-            return textFill;
-        }
-
-        private boolean isTextStroke() {
-            return textStroke;
-        }
-
-        private boolean isTextClip() {
-            return textClip;
-        }
-
-        private void markAsRestorePoint() {
-            restorePoint = true;
-        }
-
-        private boolean isRestorePoint() {
-            return restorePoint;
-        }
-
-        private void setShadow(DropShadow shadow) {
-            this.shadow = shadow;
-        }
-
-        private DropShadow getShadowNoClone() {
-            return shadow;
-        }
-
-        private Affine3D getTransformNoClone() {
-            return xform;
-        }
-
-        private GeneralTransform3D getPerspectiveTransformNoClone() {
-            return perspectiveTransform;
-        }
-
-        private void setTransform(final Affine3D at) {
-            this.xform.setTransform(at);
-        }
-
-        private void setPerspectiveTransform(final GeneralTransform3D gt) {
-            this.perspectiveTransform.set(gt);
-        }
-
-        private void concatTransform(Affine3D at) {
-            xform.concatenate(at);
-        }
-
-        private void translate(double dx, double dy) {
-            xform.translate(dx, dy);
-        }
-
-        private void scale(double sx, double sy) {
-            xform.scale(sx,sy);
-        }
-
-        private void rotate(double radians) {
-            xform.rotate(radians);
-        }
-    }
-
-    private abstract static class Layer {
+    abstract static class Layer {
         FilterContext fctx;
         PrDrawable buffer;
         Graphics graphics;
@@ -1532,7 +1420,7 @@ class WCGraphicsPrismContext extends WCGraphicsContext {
         }
 
         void paint(Graphics g) {
-            if (g != null) {
+            if (g != null && !cannotProject(g)) {
                 CompositeMode oldCompositeMode = g.getCompositeMode();
                 switch (state.getCompositeOperation()) {
                     // decode operations that don't require Blend first
@@ -1568,7 +1456,7 @@ class WCGraphicsPrismContext extends WCGraphicsContext {
                     // blending on canvas
                     dstImg = (PrDrawable) Effect.getCompatibleImage(fctx, clip.width, clip.height);
                     Graphics dstG = dstImg.createGraphics();
-                    state.apply(dstG);
+                    applyState(dstG);
                     ((PrismImage) image).draw(dstG,
                             0, 0, clip.width, clip.height,
                             clip.x, clip.y, clip.width, clip.height);
@@ -1581,7 +1469,7 @@ class WCGraphicsPrismContext extends WCGraphicsContext {
 
                 srcImg = (PrDrawable) Effect.getCompatibleImage(fctx, clip.width, clip.height);
                 Graphics srcG = srcImg.createGraphics();
-                state.apply(srcG);
+                applyState(srcG);
                 doPaint(srcG);
 
                 g.clear();
@@ -1868,6 +1756,8 @@ class WCGraphicsPrismContext extends WCGraphicsContext {
             return;
         }
         flushAllLayers();
+        resetPerspective();
+        resetCachedGraphics();
     }
 
     @Override

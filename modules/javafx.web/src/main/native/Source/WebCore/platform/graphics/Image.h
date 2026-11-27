@@ -159,7 +159,6 @@ public:
 
 #if PLATFORM(JAVA)
     virtual RefPtr<NativeImage> javaImage() { return currentNativeImage(); }
-    virtual void drawImage(GraphicsContext&, const FloatRect& dstRect, const FloatRect& srcRect, CompositeOperator, BlendMode);
 #endif
 
     virtual void drawPattern(GraphicsContext&, const FloatRect& destRect, const FloatRect& srcRect, const AffineTransform& patternTransform, const FloatPoint& phase, const FloatSize& spacing, ImagePaintingOptions = { });

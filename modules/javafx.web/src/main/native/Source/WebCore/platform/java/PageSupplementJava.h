@@ -25,6 +25,7 @@
 
 #pragma once
 
+#include "RQRef.h"
 #include "Supplementable.h"
 
 #include <webkit_java_api.h>
@@ -52,6 +53,10 @@ class PageSupplementJava final : public Supplement<WebCore::Page> {
      * WebPage::handleFromPage) hold it in a WKJHandle.
      */
     WEBCORE_EXPORT WKJHandle jWebPage() const { return m_webPage; }
+    bool hasJavaWebPage() const { return !m_webPage.isNull(); }
+
+    // The page's Java RenderTheme, which is constant for the life of the page.
+    WEBCORE_EXPORT RefPtr<RQRef> jRenderTheme();
 
     WEBCORE_EXPORT static ASCIILiteral supplementName();
     WEBCORE_EXPORT static PageSupplementJava* from(Frame*);
@@ -59,6 +64,7 @@ class PageSupplementJava final : public Supplement<WebCore::Page> {
 
   private:
     WKJHandle m_webPage;
+    RefPtr<RQRef> m_jRenderTheme;
 };
 
 }

@@ -44,35 +44,6 @@ class ImageBuffer;
 
 namespace WebCore {
 
-void Image::drawImage(GraphicsContext& gc, const FloatRect &dstRect, const FloatRect &srcRect,
-                       CompositeOperator compositeOperator, BlendMode)
-{
-    if (gc.paintingDisabled()) {
-        return;
-    }
-
-    auto nativeImage = currentNativeImage();
-    if (!nativeImage) {
-        return;
-    }
-
-    CompositeOperator oldCompositeOperator = gc.compositeOperation();
-    gc.setCompositeOperation(compositeOperator);
-
-    gc.platformContext()->rq().freeSpace(72)
-    << (int32_t)com_sun_webkit_graphics_GraphicsDecoder_DRAWIMAGE
-    << nativeImage->platformImage()->getImage()
-    << dstRect.x() << dstRect.y()
-    << dstRect.width() << dstRect.height()
-    << srcRect.x() << srcRect.y()
-    << srcRect.width() << srcRect.height();
-
-    gc.setCompositeOperation(oldCompositeOperator);
-
-    if (imageObserver())
-        imageObserver()->didDraw(*this);
-}
-
 Ref<Image> ImageAdapter::loadPlatformResource(const char *name)
 {
     return BitmapImage::createFromName(name);

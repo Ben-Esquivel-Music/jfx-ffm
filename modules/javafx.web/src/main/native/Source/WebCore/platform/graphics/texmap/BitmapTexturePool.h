@@ -60,6 +60,9 @@ public:
 #if USE(GRAPHICS_LAYER_WC)
     void releaseUnusedTexturesNow() { releaseUnusedTexturesTimerFired(); }
 #endif
+#if PLATFORM(JAVA)
+    void releaseUnreferencedTextures();
+#endif
 
 private:
     friend class NeverDestroyed<BitmapTexturePool>;

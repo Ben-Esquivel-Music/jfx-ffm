@@ -219,7 +219,11 @@ Consequently:
 That was the state when this contract was written. `jfxwebkit` is now built from the migrated
 sources out of tree, by `.github/workflows/build-webkit.yml`, and the `jfxwebkit.dll` in
 `../caches/sdk/bin` exports 1963 `wkj_*` symbols, 0 `Java_*` and no `JNI_OnLoad`, exactly the set
-the Java facades bind; the module suite runs against it (`FFM-STATUS.md` section 3). The opening
+the Java facades bound before US-026. The facades now bind 1964 names (1796 `wkj_dom_*`, 168
+others): US-026 added `wkj_page_print_composited`, so that library and any earlier
+`build-webkit.yml` Release zip are stale and must be rebuilt from this revision; they fail with the
+missing-symbol `UnsatisfiedLinkError` from `WebPageNative.<clinit>`, not with the version check,
+because an added entry point does not bump `WKJ_ABI_VERSION` (`FFM-STATUS.md` section 16.2). The opening
 sentence still holds: the Maven build compiles Java and `wkjstub`, never WebKit.
 
 To keep the binding layer genuinely verified rather than merely written, the migration ships a
