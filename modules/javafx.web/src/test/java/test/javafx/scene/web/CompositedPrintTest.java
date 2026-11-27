@@ -54,7 +54,10 @@ import test.javafx.scene.web.PixelAssertions.Tolerance;
 /**
  * Printing a WebView node ({@code PrinterJob.printPage(webView)}) records the page into a queue of its
  * own through {@code WebPage.print}. {@code WebPageShim.mockPrint} takes the same path but keeps the
- * printed image to itself, so the tests print through {@code WebPage.print} directly.
+ * printed image to itself, so the tests print through {@code WebPage.print} directly, into a printer's
+ * graphics ({@code PrismPrintGraphics} over a Java 2D image) as a printer job does: the page's own queue
+ * draws into them on the printing thread, and the queues and render textures of the composited tiles
+ * belong to the render thread.
  */
 @ExtendWith(CaseAnnouncer.class)
 public class CompositedPrintTest extends TestBase {
@@ -62,6 +65,20 @@ public class CompositedPrintTest extends TestBase {
     private static final String PAGE = pageWithControlPatch("""
             <div id=box style='position:absolute;left:0;top:0;width:200px;height:200px;background:#f00;
                 transform:translateZ(0)'></div>
+            """);
+
+    private static final String ROUNDED_CLIP_PAGE = pageWithControlPatch("""
+            <div style='position:absolute;left:20px;top:20px;width:200px;height:200px;overflow:hidden;
+                border-radius:60px'>
+            <div style='width:200px;height:200px;background:#f00;transform:translateZ(0)'></div>
+            </div>
+            """);
+
+    private static final String WHOLE_TURN_PAGE = pageWithControlPatch("""
+            <div style='position:absolute;left:0;top:0;width:300px;height:300px;perspective:500px'>
+            <div style='position:absolute;left:0;top:0;width:200px;height:200px;background:#f00;
+                transform:rotateY(360deg)'></div>
+            </div>
             """);
 
     private static final Sample[] SAMPLES = {CONTROL, new Sample(100, 100, RED), new Sample(300, 100, WHITE)};
@@ -72,6 +89,16 @@ public class CompositedPrintTest extends TestBase {
     @Test
     public void aCompositedPagePrintsItsContent() {
         try (PumpedPage page = PumpedPage.withAcceleratedCompositing(PAGE)) {
+            page.settle();
+            assertTrue(page.isInCompositingMode(), "the page is not in compositing mode");
+            assertSamples("printed", page.print(), SAMPLES);
+        }
+    }
+
+    /** The turned layer rests flat where it started, see {@code CompositedPixelsTest}. */
+    @Test
+    public void aLayerTurnedAWholeTurnUnderAPerspectivePrintsItsContent() {
+        try (PumpedPage page = PumpedPage.withAcceleratedCompositing(WHOLE_TURN_PAGE)) {
             page.settle();
             assertTrue(page.isInCompositingMode(), "the page is not in compositing mode");
             assertSamples("printed", page.print(), SAMPLES);
@@ -157,6 +184,21 @@ public class CompositedPrintTest extends TestBase {
         }
     }
 
+    /**
+     * A printer's graphics are Java 2D graphics, and so are those of the clip layer that the rounded clip
+     * opens on them, into which the clipped layer's tiles are drawn.
+     */
+    @Test
+    public void aRoundedOverflowClipOfACompositedLayerPrintsOnAPrinter() {
+        try (PumpedPage page = PumpedPage.withAcceleratedCompositing(ROUNDED_CLIP_PAGE)) {
+            page.settle();
+            assertTrue(page.isInCompositingMode(), "the page is not in compositing mode");
+            assertSamples("printed on a printer", page.printFromThisThread(), CONTROL,
+                    new Sample(120, 120, RED), new Sample(120, 30, RED), new Sample(26, 26, WHITE),
+                    new Sample(214, 214, WHITE), new Sample(300, 100, WHITE));
+        }
+    }
+
     @Test
     public void aPrintCarriesNoInspectorHighlight() {
         try (PumpedPage page = PumpedPage.withDefaultSettings(PAGE)) {
@@ -194,25 +236,12 @@ public class CompositedPrintTest extends TestBase {
         page.script("const spot = document.createElement('div');"
                 + " spot.style.cssText = 'position:absolute;left:380px;top:10px;width:5px;height:5px;background:#000';"
                 + " document.body.appendChild(spot);");
-        pumpUntilDrawn(page, 382, 12, 0x000000);
+        page.pumpUntilDrawn(382, 12, 0x000000);
         page.script("document.body.lastChild.style.background = '#888'");
         assertSamples("the highlighted box after frames that repainted elsewhere",
-                pumpUntilDrawn(page, 382, 12, 0x888888), new Sample(100, 100, highlighted & 0xffffff));
+                page.pumpUntilDrawn(382, 12, 0x888888), new Sample(100, 100, highlighted & 0xffffff));
 
         assertSamples("printed", page.print(), SAMPLES);
-    }
-
-    /** Pumps until a frame shows the colour at the point; fails at the deadline. */
-    private static BufferedImage pumpUntilDrawn(PumpedPage page, int x, int y, int rgb) {
-        long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(10);
-        BufferedImage frame = page.pump();
-        while ((frame.getRGB(x, y) & 0xffffff) != rgb) {
-            if (System.nanoTime() > deadline) {
-                fail(String.format("(%d,%d) never showed %06x, last %08x", x, y, rgb, frame.getRGB(x, y)));
-            }
-            frame = page.pump();
-        }
-        return frame;
     }
 
     private record FirstHop(StackTraceElement caller, BufferedImage printed) {

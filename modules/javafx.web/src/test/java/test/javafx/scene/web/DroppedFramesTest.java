@@ -26,17 +26,26 @@
 package test.javafx.scene.web;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static test.javafx.scene.web.PixelAssertions.BLUE;
 import static test.javafx.scene.web.PixelAssertions.CONTROL;
 import static test.javafx.scene.web.PixelAssertions.CYAN;
 import static test.javafx.scene.web.PixelAssertions.GREEN;
 import static test.javafx.scene.web.PixelAssertions.MAGENTA;
+import static test.javafx.scene.web.PixelAssertions.RED;
 import static test.javafx.scene.web.PixelAssertions.WHITE;
 import static test.javafx.scene.web.PixelAssertions.YELLOW;
 import static test.javafx.scene.web.PixelAssertions.assertSamples;
 import static test.javafx.scene.web.PixelAssertions.pageWithControlPatch;
 
 import com.sun.webkit.WebKitNativeShim;
+import java.util.List;
+import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.logging.Handler;
+import java.util.logging.Level;
+import java.util.logging.LogRecord;
+import java.util.logging.Logger;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import test.javafx.scene.web.PixelAssertions.Sample;
@@ -77,6 +86,20 @@ public class DroppedFramesTest extends TestBase {
             </script>
             """);
 
+    /*
+     * A canvas of 100 x 100 at (15,15) inside its border, filled red; a change of the border colour repaints it
+     * with nothing new drawn into it.
+     */
+    private static final String CANVAS_PAGE = pageWithControlPatch("""
+            <canvas id=canvas width=100 height=100 style='position:absolute;left:10px;top:10px;
+                border:5px solid #000'></canvas>
+            <script>
+            const context = canvas.getContext('2d');
+            context.fillStyle = '#f00';
+            context.fillRect(0, 0, 100, 100);
+            </script>
+            """);
+
     @Test
     public void afterTooManyUnpaintedFramesThePageShowsItsCurrentContent() {
         try (PumpedPage page = PumpedPage.withDefaultSettings(PAGE)) {
@@ -104,6 +127,113 @@ public class DroppedFramesTest extends TestBase {
         assertEquals(composited, page.isInCompositingMode(), "compositing mode after the drop");
         assertSamples("after " + updates + " updates without a paint", page.pump(),
                 CONTROL, new Sample(100, 100, GREEN), new Sample(295, 50, YELLOW), new Sample(300, 200, WHITE));
+    }
+
+    /**
+     * The page draws a canvas through the image that holds its drawing, which decodes the commands that
+     * image's queue holds before it is drawn. The dropped frame carried the decode of the green fill; the
+     * next paint has nothing new to send, and must still ask for the decode.
+     */
+    @Test
+    public void aCanvasDrawnInADroppedFrameShowsItsNewContentWhenRepaintedWithoutNewDrawing() {
+        try (PumpedPage page = PumpedPage.withDefaultSettings(CANVAS_PAGE)) {
+            assertSamples("before the change", page.settle(), CONTROL, new Sample(65, 65, RED));
+            assertFalse(page.isInCompositingMode(), "the page is in compositing mode");
+
+            assertTrue(page.recordAndDropFrames("context.fillStyle = '#0f0'; context.fillRect(0, 0, 100, 100);"),
+                    "the drawing recorded no frame, or its frames were not dropped");
+
+            page.script("canvas.style.borderColor = '#888'");
+            assertSamples("after the dropped frame", page.pumpUntilDrawn(12, 12, 0x888888),
+                    CONTROL, new Sample(65, 65, GREEN));
+        }
+    }
+
+    /**
+     * The canvas the page shows draws another canvas, which is never on the page: the decode of the shown
+     * canvas's queue carries the decode of the other's, and both were in the dropped frame.
+     */
+    @Test
+    public void aCanvasDrawnIntoACanvasInADroppedFrameIsCurrent() {
+        try (PumpedPage page = PumpedPage.withDefaultSettings(CANVAS_PAGE)) {
+            assertSamples("before the change", page.settle(), CONTROL, new Sample(65, 65, RED));
+            assertFalse(page.isInCompositingMode(), "the page is in compositing mode");
+
+            assertTrue(page.recordAndDropFrames("""
+                    const source = document.createElement('canvas');
+                    source.width = 100;
+                    source.height = 100;
+                    const sourceContext = source.getContext('2d');
+                    sourceContext.fillStyle = '#0f0';
+                    sourceContext.fillRect(0, 0, 100, 100);
+                    context.drawImage(source, 0, 0);
+                    """), "the drawing recorded no frame, or its frames were not dropped");
+
+            page.script("canvas.style.borderColor = '#888'");
+            assertSamples("after the dropped frame", page.pumpUntilDrawn(12, 12, 0x888888),
+                    CONTROL, new Sample(65, 65, GREEN));
+        }
+    }
+
+    /*
+     * Canvas A at (0,0) filled red and canvas B at (150,0) filled blue, both 100 x 100; each draws the other in
+     * one script, so each image's queue holds a decode of the other's.
+     */
+    private static final String CANVASES_THAT_DRAW_EACH_OTHER_PAGE = pageWithControlPatch("""
+            <canvas id=a width=100 height=100 style='position:absolute;left:0;top:0'></canvas>
+            <canvas id=b width=100 height=100 style='position:absolute;left:150px;top:0'></canvas>
+            <script>
+            const contextA = a.getContext('2d');
+            contextA.fillStyle = '#f00';
+            contextA.fillRect(0, 0, 100, 100);
+            const contextB = b.getContext('2d');
+            contextB.fillStyle = '#00f';
+            contextB.fillRect(0, 0, 100, 100);
+            </script>
+            """);
+
+    /**
+     * A takes B's top-left quarter (blue) into its own; B then takes A's top half as it is by then, blue and
+     * red, into its bottom half.
+     */
+    @Test
+    public void twoCanvasesThatDrawEachOtherInOneFrameShowTheirContent() {
+        Logger root = Logger.getLogger("");
+        List<String> severe = new CopyOnWriteArrayList<>();
+        Handler handler = new Handler() {
+            @Override
+            public void publish(LogRecord record) {
+                if (record.getLevel() == Level.SEVERE) {
+                    severe.add(record.getLoggerName() + ": " + record.getMessage() + ": " + record.getThrown());
+                }
+            }
+
+            @Override
+            public void flush() {
+            }
+
+            @Override
+            public void close() {
+            }
+        };
+        root.addHandler(handler);
+        try (PumpedPage page = PumpedPage.withDefaultSettings(CANVASES_THAT_DRAW_EACH_OTHER_PAGE)) {
+            assertSamples("before the draws", page.settle(),
+                    CONTROL, new Sample(50, 50, RED), new Sample(200, 50, BLUE));
+            assertFalse(page.isInCompositingMode(), "the page is in compositing mode");
+
+            page.script("""
+                    contextA.drawImage(b, 0, 0, 50, 50, 0, 0, 50, 50);
+                    contextB.drawImage(a, 0, 0, 100, 50, 0, 50, 100, 50);
+                    """);
+            assertSamples("after the draws", page.pumpUntilDrawn(225, 75, RED),
+                    CONTROL, new Sample(25, 25, BLUE), new Sample(75, 25, RED), new Sample(25, 75, RED),
+                    new Sample(175, 25, BLUE), new Sample(225, 25, BLUE), new Sample(175, 75, BLUE),
+                    new Sample(225, 75, RED));
+        } finally {
+            root.removeHandler(handler);
+        }
+        assertEquals(List.of(), severe, "errors logged while the canvases were drawn");
     }
 
     /**

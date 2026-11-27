@@ -42,6 +42,7 @@
 #include "NativeImage.h"
 #include "PixelFormat.h"
 #include "RenderingMode.h"
+#include <utility>
 #include <wtf/RefPtr.h>
 
 namespace WebCore {
@@ -74,6 +75,11 @@ ImageBuffer* BitmapTexture::ensureImageBuffer()
             DestinationColorSpace::SRGB(), PixelFormat::BGRA8);
     }
     return m_imageBuffer.get();
+}
+
+RefPtr<ImageBuffer> BitmapTexture::takeImageBuffer()
+{
+    return std::exchange(m_imageBuffer, nullptr);
 }
 
 void BitmapTexture::updateContents(GraphicsLayer* sourceLayer, const IntRect& targetRect, const IntPoint& offset,

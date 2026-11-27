@@ -104,6 +104,7 @@ public:
 #if PLATFORM(JAVA)
     ImageBuffer* imageBuffer() const { return m_imageBuffer.get(); }
     ImageBuffer* ensureImageBuffer();
+    RefPtr<ImageBuffer> takeImageBuffer();
 #endif
 
     void copyFromExternalTexture(GLuint sourceTextureID, const IntRect& targetRect, const IntSize& sourceOffset);

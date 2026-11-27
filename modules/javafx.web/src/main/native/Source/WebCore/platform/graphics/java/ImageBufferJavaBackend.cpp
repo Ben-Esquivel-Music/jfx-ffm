@@ -27,7 +27,6 @@
 #include <wtf/text/StringBuilder.h>
 #include "ImageBufferJavaBackend.h"
 
-#include "BufferImageJava.h"
 #include "GraphicsContext.h"
 #include "ImageData.h"
 #include "ImageBuffer.h"

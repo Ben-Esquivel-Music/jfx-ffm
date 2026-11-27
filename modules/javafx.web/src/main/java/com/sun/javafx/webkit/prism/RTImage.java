@@ -25,6 +25,7 @@
 
 package com.sun.javafx.webkit.prism;
 
+import com.sun.javafx.geom.Rectangle;
 import com.sun.javafx.logging.PlatformLogger;
 import com.sun.prism.CompositeMode;
 import com.sun.prism.Graphics;
@@ -33,6 +34,7 @@ import com.sun.prism.Image;
 import com.sun.prism.PixelFormat;
 import com.sun.prism.PrinterGraphics;
 import com.sun.prism.RTTexture;
+import com.sun.prism.RenderTarget;
 import com.sun.prism.ResourceFactory;
 import com.sun.prism.ResourceFactoryListener;
 import com.sun.prism.Texture;
@@ -55,6 +57,8 @@ final class RTImage extends PrismImage implements ResourceFactoryListener {
 
     private final static PlatformLogger log =
             PlatformLogger.getLogger(RTImage.class.getName());
+
+    private enum DrawPath { SKIP, DIRECT, COPY }
 
     RTImage(int w, int h, float pixelScale) {
         if (Float.isNaN(pixelScale) || pixelScale <= 0 ||
@@ -111,10 +115,9 @@ final class RTImage extends PrismImage implements ResourceFactoryListener {
         }
 
         if (txt == null) {
-            txt = f.createRTTexture(
+            txt = RTTextureCache.INSTANCE.obtain(f,
                     (int) Math.ceil(width * pixelScale),
-                    (int) Math.ceil(height * pixelScale),
-                    Texture.WrapMode.CLAMP_NOT_NEEDED);
+                    (int) Math.ceil(height * pixelScale));
             if (txt == null) {
                 log.fine("RTImage::getTexture : return null because rt texture not allocated");
                 return null;
@@ -137,47 +140,47 @@ final class RTImage extends PrismImage implements ResourceFactoryListener {
         // Because this method can be called by the Printer there is a chance
         // these checks will run on a thread other than QuantumRenderer. To prevent
         // any mishaps run the checks on render thread.
-        final boolean canDraw = PrismInvoker.callOnRenderThread(() -> {
+        final DrawPath path = PrismInvoker.callOnRenderThread(() -> {
             if (txt == null && g.getCompositeMode() == CompositeMode.SRC_OVER) {
-                return false;
+                return DrawPath.SKIP;
             }
-            if (g.getResourceFactory().isDisposed()) {
+            ResourceFactory factory = g.getResourceFactory();
+            if (factory.isDisposed()) {
                 log.fine("RTImage::draw : skip because device has been disposed");
-                return false;
+                return DrawPath.SKIP;
             }
-            return true;
+            if (g instanceof PrinterGraphics || (txt != null && !factory.isCompatibleTexture(txt))) {
+                return DrawPath.COPY;
+            }
+            return DrawPath.DIRECT;
         });
-        if (!canDraw) {
-            return;
-        }
 
-        if (g instanceof PrinterGraphics) {
-            // We're printing. Copy [txt] into a J2DTexture and draw it.
-            int w = srcx2 - srcx1;
-            int h = srcy2 - srcy1;
-            final IntBuffer pixels = IntBuffer.allocate(w * h);
-
+        if (path == DrawPath.COPY) {
+            final Image[] copy = new Image[1];
+            final boolean[] hasTexture = new boolean[1];
             PrismInvoker.runOnRenderThread(() -> {
-                // getTexture() can return null, prevent NPE if that happens
                 RTTexture tex = getTexture();
-                if (tex != null) {
-                    tex.readPixels(pixels);
+                hasTexture[0] = tex != null;
+                IntBuffer pixels = hasTexture[0] ? readContent(tex) : null;
+                if (pixels != null) {
+                    pixels.rewind();
+                    copy[0] = Image.fromIntArgbPreData(pixels, tex.getContentWidth(), tex.getContentHeight());
                 }
             });
-            Image img = Image.fromIntArgbPreData(pixels, w, h);
-            Texture t = g.getResourceFactory().createTexture(
-                    img, Texture.Usage.STATIC, Texture.WrapMode.CLAMP_NOT_NEEDED);
-            g.drawTexture(t,
-                    dstx1, dsty1, dstx2, dsty2,
-                    0, 0, w, h);
-            t.dispose();
-        } else {
+            if (!hasTexture[0]) {
+                drawTransparent(g, dstx1, dsty1, dstx2, dsty2);
+            } else if (copy[0] != null) {
+                Texture t = g.getResourceFactory().createTexture(
+                        copy[0], Texture.Usage.STATIC, Texture.WrapMode.CLAMP_NOT_NEEDED);
+                g.drawTexture(t,
+                        dstx1, dsty1, dstx2, dsty2,
+                        srcx1 * pixelScale, srcy1 * pixelScale,
+                        srcx2 * pixelScale, srcy2 * pixelScale);
+                t.dispose();
+            }
+        } else if (path == DrawPath.DIRECT) {
             if (txt == null) {
-                Paint p = g.getPaint();
-                g.setPaint(Color.TRANSPARENT);
-                g.fillQuad(dstx1, dsty1, dstx2, dsty2);
-                g.setPaint(p);
-
+                drawTransparent(g, dstx1, dsty1, dstx2, dsty2);
             } else {
                 g.drawTexture(txt,
                     dstx1, dsty1, dstx2, dsty2,
@@ -187,11 +190,47 @@ final class RTImage extends PrismImage implements ResourceFactoryListener {
         }
     }
 
+    private static void drawTransparent(Graphics g, int dstx1, int dsty1, int dstx2, int dsty2) {
+        Paint p = g.getPaint();
+        g.setPaint(Color.TRANSPARENT);
+        g.fillQuad(dstx1, dsty1, dstx2, dsty2);
+        g.setPaint(p);
+    }
+
+    /*
+     * Every pipeline reads the whole content of the texture, and Metal reads only into a direct buffer;
+     * native-order ints are what the others read into an int array.
+     */
+    static IntBuffer readContent(RTTexture tex) {
+        int tw = tex.getContentWidth();
+        int th = tex.getContentHeight();
+        if (4L * tw * th > Integer.MAX_VALUE) {
+            return null;
+        }
+        IntBuffer pixels = ByteBuffer.allocateDirect(tw * th * 4).order(ByteOrder.nativeOrder()).asIntBuffer();
+        Graphics g = tex.createGraphics();
+        if (g != null) {
+            // Metal's read does not flush the draws Prism still holds in its vertex buffer.
+            g.sync();
+        }
+        tex.readPixels(pixels);
+        return pixels;
+    }
+
+    static void clearWholeContent(Graphics g) {
+        RenderTarget target = g.getRenderTarget();
+        // Prism flushes the target's pending draws before a clear only when the clip changed; a clip set here is new.
+        g.setClipRect(new Rectangle(0, 0, target.getContentWidth(), target.getContentHeight()));
+        g.clear();
+    }
+
     @Override
     void dispose() {
         PrismInvoker.invokeOnRenderThread(() -> {
             if (txt != null) {
-                txt.dispose();
+                // getTexture makes every texture it gets useful once, a reused one too
+                txt.contentsNotUseful();
+                RTTextureCache.INSTANCE.offer(registeredWithFactory == null ? null : registeredWithFactory.get(), txt);
                 txt = null;
             }
         });
@@ -276,7 +315,7 @@ final class RTImage extends PrismImage implements ResourceFactoryListener {
                             width,
                             height);
                     Texture txt = g.getResourceFactory().createTexture(img, Texture.Usage.DEFAULT, Texture.WrapMode.CLAMP_NOT_NEEDED);
-                    g.clear();
+                    clearWholeContent(g);
                     g.drawTexture(txt, 0, 0, width, height);
                     txt.dispose();
                 }

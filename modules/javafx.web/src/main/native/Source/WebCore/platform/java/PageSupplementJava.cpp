@@ -29,6 +29,7 @@
 #include "Page.h"
 #include "Frame.h"
 #include "DocumentPage.h"
+#include "PlatformJavaClasses.h"
 
 #include <wtf/java/WKJHandle.h>
 
@@ -37,6 +38,15 @@ namespace WebCore {
 PageSupplementJava::PageSupplementJava(wkj_ref webPage)
     : m_webPage(WKJHandle::retained(webPage))
 {
+}
+
+RefPtr<RQRef> PageSupplementJava::jRenderTheme()
+{
+    if (!m_jRenderTheme) {
+        WKJHandle theme = wkjRenderThemeForPage(m_webPage.get());
+        m_jRenderTheme = RQRef::create(theme.get());
+    }
+    return m_jRenderTheme;
 }
 
 // static

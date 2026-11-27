@@ -31,9 +31,12 @@ import static org.junit.jupiter.api.Assertions.fail;
 import com.sun.javafx.scene.web.Debugger;
 import com.sun.javafx.webkit.prism.PrismInvokerShim;
 import com.sun.javafx.webkit.prism.WCBufferedContextShim;
+import com.sun.prism.j2d.PrismPrintGraphics;
 import com.sun.webkit.WebPage;
 import com.sun.webkit.graphics.WCGraphicsContext;
+import com.sun.webkit.graphics.WCGraphicsManager;
 import com.sun.webkit.graphics.WCRectangle;
+import java.awt.Graphics2D;
 import java.awt.image.BufferedImage;
 import java.io.FileDescriptor;
 import java.io.FileOutputStream;
@@ -55,6 +58,7 @@ import javafx.application.Platform;
 import javafx.concurrent.Worker;
 import javafx.scene.Group;
 import javafx.scene.Scene;
+import javafx.scene.paint.Color;
 import javafx.scene.web.WebEngine;
 import javafx.scene.web.WebEngineShim;
 import javafx.scene.web.WebView;
@@ -209,6 +213,19 @@ final class PumpedPage implements AutoCloseable {
         }
     }
 
+    /** Pumps until a frame shows the colour at the point, and returns that frame; fails at the deadline. */
+    BufferedImage pumpUntilDrawn(int x, int y, int rgb) {
+        long deadline = System.nanoTime() + DEADLINE_NANOS;
+        BufferedImage frame = pump();
+        while ((frame.getRGB(x, y) & 0xffffff) != rgb) {
+            if (System.nanoTime() > deadline) {
+                fail(String.format("(%d,%d) never showed %06x, last %08x", x, y, rgb, frame.getRGB(x, y)));
+            }
+            frame = pump();
+        }
+        return frame;
+    }
+
     /** Pumps until the script answers true, and returns what the pump after that painted. */
     BufferedImage pumpUntil(String condition) {
         long deadline = System.nanoTime() + DEADLINE_NANOS;
@@ -289,6 +306,45 @@ final class PumpedPage implements AutoCloseable {
         });
     }
 
+    /** Hides the inspector's highlight over the same protocol, and answers the protocol's replies. */
+    List<String> hideHighlightInInspector() {
+        return onFxThread(() -> {
+            List<String> replies = new ArrayList<>();
+            Debugger debugger = WebEngineShim.getDebugger(view.getEngine());
+            debugger.setMessageCallback(message -> {
+                replies.add(message);
+                return null;
+            });
+            debugger.sendMessage("{\"method\":\"DOM.hideHighlight\",\"id\":4}");
+            return List.copyOf(replies);
+        });
+    }
+
+    /** Sets the WebView's page fill, which WebKit draws as the base background of the page, and pumps. */
+    BufferedImage setPageFill(Color fill) {
+        return onFxThread(() -> {
+            view.setPageFill(fill);
+            return pumpOnFxThread();
+        });
+    }
+
+    /**
+     * Runs the change, gives the page its size again, which invalidates the whole page, and records that
+     * update without painting it; then sets the page fill and paints only the recorded update. One FX task,
+     * so that no pulse drops the update.
+     */
+    BufferedImage recordAnUpdateThenSetPageFillAndPaint(String change, Color fill) {
+        return onFxThread(() -> {
+            view.getEngine().executeScript(change);
+            page.setBounds(0, 0, width, height);
+            page.updateContent(new WCRectangle(0, 0, width, height));
+            view.setPageFill(fill);
+            WCGraphicsContext gc = WCBufferedContextShim.createBufferedContext(width, height);
+            PrismInvokerShim.runOnRenderThread(() -> page.paint(gc, 0, 0, width, height));
+            return gc.getImage().toBufferedImage();
+        });
+    }
+
     private static int replyNodeId(List<String> replies, String request) {
         Matcher nodeId = Pattern.compile("\"nodeId\":(\\d+)").matcher(replies.isEmpty() ? "" : replies.getLast());
         if (!nodeId.find()) {
@@ -301,20 +357,27 @@ final class PumpedPage implements AutoCloseable {
     BufferedImage print() {
         return onFxThread(() -> {
             page.updateContent(new WCRectangle(0, 0, width, height));
-            WCGraphicsContext gc = WCBufferedContextShim.createBufferedContext(width, height);
-            page.print(gc, 0, 0, width, height);
-            return gc.getImage().toBufferedImage();
+            return printFromThisThread();
         });
     }
 
     /**
-     * Prints from the calling thread, which a printer job does from a thread of its own; the page is
-     * not updated first.
+     * Prints from the calling thread into a printer's graphics, as a printer job prints a WebView node
+     * from a thread of its own; the page is not updated first.
      */
     BufferedImage printFromThisThread() {
-        WCGraphicsContext gc = WCBufferedContextShim.createBufferedContext(width, height);
-        page.print(gc, 0, 0, width, height);
-        return gc.getImage().toBufferedImage();
+        BufferedImage printed = new BufferedImage(width, height, BufferedImage.TYPE_INT_ARGB);
+        Graphics2D g2d = printed.createGraphics();
+        WCGraphicsContext gc = WCGraphicsManager.getGraphicsManager()
+                .createGraphicsContext(new PrismPrintGraphics(g2d, width, height));
+        try {
+            page.print(gc, 0, 0, width, height);
+            gc.flush();
+        } finally {
+            gc.dispose();
+            g2d.dispose();
+        }
+        return printed;
     }
 
     /** Navigates away and disposes the engine, which destroys the page; once only. */

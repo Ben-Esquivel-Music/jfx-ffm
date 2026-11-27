@@ -31,6 +31,8 @@
 #if !PLATFORM(JAVA)
 #include "GLContext.h"
 #include "GLContextWrapper.h"
+#else
+#include "ImageBuffer.h"
 #endif
 #include "PlatformDisplay.h"
 #include <wtf/TZoneMallocInlines.h>
@@ -74,6 +76,8 @@ Ref<BitmapTexture> BitmapTexturePool::acquireTexture(const IntSize& size, Option
 {
 #if !PLATFORM(JAVA)
     ASSERT(GLContextWrapper::currentContext());
+#else
+    RefPtr<ImageBuffer> releasedBuffer;
 #endif
     Locker locker { m_lock };
     Entry* selectedEntry = std::find_if(m_textures.begin(), m_textures.end(), [&](Entry& entry) {
@@ -95,21 +99,26 @@ Ref<BitmapTexture> BitmapTexturePool::acquireTexture(const IntSize& size, Option
 #endif
     } else {
         RELEASE_ASSERT(size == selectedEntry->texture->size());
+#if PLATFORM(JAVA)
+        releasedBuffer = selectedEntry->texture->takeImageBuffer();
+#endif
         selectedEntry->texture->reset(size, flags);
     }
 
     enterLimitExceededModeIfNeeded();
 
+#if !PLATFORM(JAVA)
     scheduleReleaseUnusedTextures();
+#endif
 
     selectedEntry->markIsInUse();
     return selectedEntry->texture;
 }
 
 #if PLATFORM(JAVA)
-// The release timer never fires where nothing runs the WTF main RunLoop (Linux, Headless), and a reset
-// BitmapTexture keeps no content, so an unreferenced entry is worth nothing. Textures are dropped after
-// the lock is released, because destroying their buffers calls into Java.
+// On Java the pool is emptied only here, at TextureMapper::endPainting: the release timer is never armed, as it
+// never fires where nothing runs the WTF main RunLoop, and a reset BitmapTexture keeps no content. Destroying a
+// texture or its buffer calls into Java, so no path destroys one while m_lock is held.
 void BitmapTexturePool::releaseUnreferencedTextures()
 {
     Vector<Ref<BitmapTexture>> released;

@@ -264,6 +264,9 @@ static void drawDebugBorder(GraphicsContext& context,
 }
 
 void WebPage::prePaint() {
+    m_paintedThisUpdate = Region();
+    m_collectingPaintedRegion = true;
+
     if (m_rootLayer) {
         if (m_syncLayers) {
             m_syncLayers = false;
@@ -283,11 +286,8 @@ void WebPage::prePaint() {
 
 RefPtr<RQRef> WebPage::jRenderTheme()
 {
-    if (!m_jRenderTheme) {
-        WKJHandle theme = wkjRenderThemeForPage(handleFromPage(m_page.get()).get());
-        m_jRenderTheme = RQRef::create(theme.get());
-    }
-    return m_jRenderTheme;
+    auto* supplement = m_page ? PageSupplementJava::from(m_page.get()) : nullptr;
+    return supplement ? supplement->jRenderTheme() : nullptr;
 }
 
 void WebPage::paint(wkj_ref rq, int32_t x, int32_t y, int32_t w, int32_t h)
@@ -317,6 +317,10 @@ void WebPage::paint(wkj_ref rq, int32_t x, int32_t y, int32_t w, int32_t h)
     frameView->paint(gc, IntRect(x, y, w, h));
     if (m_page->settings().showDebugBorders()) {
         drawDebugLed(gc, IntRect(x, y, w, h), SRGBA<uint8_t> { 0, 0, 255, 128 });
+    } else if (m_collectingPaintedRegion && w > 2 && h > 2) {
+        // Java asks for its dirty rect grown by one pixel on each side and decodes the queue under the rect.
+        // A paint that draws a debug LED does not count: the full repaint under a highlight paints over the LED.
+        m_paintedThisUpdate.unite(IntRect(x + 1, y + 1, w - 2, h - 2));
     }
 
     gc.platformContext()->rq().flushBuffer();
@@ -324,6 +328,10 @@ void WebPage::paint(wkj_ref rq, int32_t x, int32_t y, int32_t w, int32_t h)
 
 void WebPage::postPaint(wkj_ref rq, int32_t x, int32_t y, int32_t w, int32_t h)
 {
+    bool covered = m_collectingPaintedRegion && m_paintedThisUpdate.contains(IntRect(x, y, w, h));
+    m_paintedThisUpdate = Region();
+    m_collectingPaintedRegion = false;
+
     if (!m_page->inspectorController().highlightedNode()
             && !m_rootLayer
     ) {
@@ -348,9 +356,12 @@ void WebPage::postPaint(wkj_ref rq, int32_t x, int32_t y, int32_t w, int32_t h)
     // layer gives it one, so the page drawn before it stays.
     if (m_page->inspectorController().highlightedNode()) {
         // Outside compositing mode only the dirty rects were repainted, and the retained back buffer holds the
-        // last frame's highlight everywhere else, so the page under the overlay is painted again in full.
+        // last frame's highlight everywhere else, so the page under the overlay is painted again in full - unless
+        // this update's dirty rects covered the clip over an opaque background, which a second paint would only
+        // repeat. Java clears the clip first under a transparent background, so there the page must be painted.
         auto* localFrame = m_rootLayer ? nullptr : dynamicDowncast<LocalFrame>(&m_page->mainFrame());
-        if (auto* frameView = localFrame ? localFrame->view() : nullptr) {
+        auto* frameView = localFrame ? localFrame->view() : nullptr;
+        if (frameView && (!covered || !frameView->hasOpaqueBackground())) {
             auto* globalObject = localFrame->script().globalObject(mainThreadNormalWorldSingleton());
             JSC::JSLockHolder lock(toJS(toGlobalRef(globalObject)));
             frameView->paint(gc, IntRect(x, y, w, h));

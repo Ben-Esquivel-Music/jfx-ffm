@@ -94,6 +94,38 @@ public class CompositedPixelsTest extends TestBase {
     }
 
     /**
+     * A whole turn leaves sin(2 pi), about -2.4e-16, in the layer's matrix, which a perspective turns into a
+     * projective part of about 1e-19: the layer still rests flat where it started.
+     */
+    @Test
+    public void aLayerTurnedAWholeTurnAboutYUnderAPerspectiveIsDrawnFlat() {
+        assertComposited(pageWithControlPatch(perspectiveContainer(turnedBox("rotateY(360deg)"))),
+                rectangleSamples(20, 20, 120, 120));
+    }
+
+    @Test
+    public void aLayerTurnedAWholeTurnAboutXUnderAPerspectiveIsDrawnFlat() {
+        assertComposited(pageWithControlPatch(perspectiveContainer(turnedBox("rotateX(360deg)"))),
+                rectangleSamples(20, 20, 120, 120));
+    }
+
+    @Test
+    public void aLayerTurnedTwoWholeTurnsUnderItsOwnPerspectiveIsDrawnFlat() {
+        assertComposited(pageWithControlPatch(turnedBox("perspective(" + PERSPECTIVE + "px) rotateY(720deg)")),
+                rectangleSamples(20, 20, 120, 120));
+    }
+
+    /**
+     * WebKit snaps the sine and cosine of multiples of 90 degrees to exact values, so a half turn carries no
+     * projective part at all. The flip mirrors the box about its own centre, which a box of one colour hides.
+     */
+    @Test
+    public void aLayerTurnedAHalfTurnUnderAPerspectiveShowsItsMirroredBackFace() {
+        assertComposited(pageWithControlPatch(perspectiveContainer(turnedBox("rotateY(180deg)"))),
+                rectangleSamples(20, 20, 120, 120));
+    }
+
+    /**
      * Two planes of 200 px in one preserve-3d context, turned 45 degrees either way about their common
      * centre (200,150) and drawn without perspective, so each spans 200 ± 100 cos45. They cut each
      * other along the centre line: {@code rotateY(45deg)} comes toward the viewer on the left
@@ -152,6 +184,11 @@ public class CompositedPixelsTest extends TestBase {
     private static String perspectiveContainer(String child) {
         return "<div style='position:absolute;left:0;top:0;width:300px;height:300px;perspective:" + PERSPECTIVE
                 + "px'>" + child + "</div>";
+    }
+
+    private static String turnedBox(String transform) {
+        return "<div style='position:absolute;left:20px;top:20px;width:100px;height:100px;background:#f00;"
+                + "transform:" + transform + "'></div>";
     }
 
     private static double projected(int coordinate, double scale) {

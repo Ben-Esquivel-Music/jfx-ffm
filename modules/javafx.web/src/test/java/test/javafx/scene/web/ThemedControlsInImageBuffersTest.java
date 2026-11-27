@@ -27,6 +27,7 @@ package test.javafx.scene.web;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static test.javafx.scene.web.PixelAssertions.CONTROL;
 import static test.javafx.scene.web.PixelAssertions.CONTROL_PATCH;
 import static test.javafx.scene.web.PixelAssertions.GREEN;
@@ -36,6 +37,7 @@ import static test.javafx.scene.web.PixelAssertions.assertMatchesReference;
 import static test.javafx.scene.web.PixelAssertions.assertPixel;
 import static test.javafx.scene.web.PixelAssertions.assertSamples;
 
+import com.sun.webkit.WebKitNativeShim;
 import java.awt.image.BufferedImage;
 import java.util.List;
 import java.util.concurrent.CopyOnWriteArrayList;
@@ -128,6 +130,55 @@ public class ThemedControlsInImageBuffersTest extends TestBase {
             assertSamples("filtered", drawn, CONTROL);
             assertMatchesReference(reference, drawn, CONTROL_EDGES);
         }
+    }
+
+    /*
+     * Each control painted into an image buffer creates the widget it draws, one registry id, and asking the
+     * page for its theme again would mint another. The ids one repaint creates are counted for two numbers of
+     * controls, so that what the repaint costs besides the controls cancels out.
+     */
+    private static final int FEW_CONTROLS = 10;
+    private static final int MANY_CONTROLS = 40;
+    private static final double MAX_IDS_PER_CONTROL = 1.5;
+
+    @Test
+    public void aControlInAnImageBufferUsesThePageThemeWithoutAskingAgain() {
+        int few = idsCreatedByARepaintOfTheFilteredControls(FEW_CONTROLS);
+        int many = idsCreatedByARepaintOfTheFilteredControls(MANY_CONTROLS);
+        double perControl = (double) (many - few) / (MANY_CONTROLS - FEW_CONTROLS);
+        assertTrue(perControl < MAX_IDS_PER_CONTROL, String.format("a repaint created %d registry ids for %d"
+                + " controls and %d for %d, %.2f per control", few, FEW_CONTROLS, many, MANY_CONTROLS, perControl));
+    }
+
+    /** The page's theme, which its controls in image buffers share, is released with the page. */
+    @Test
+    public void aPageThatPaintedControlsInAnImageBufferLeavesNothingInTheRegistry() throws Exception {
+        int start = SettledRegistry.size();
+        idsCreatedByARepaintOfTheFilteredControls(FEW_CONTROLS);
+        assertEquals(start, SettledRegistry.size(), "registry size after the page was destroyed");
+    }
+
+    private static int idsCreatedByARepaintOfTheFilteredControls(int controls) {
+        String html = "<html><body style='margin:0;background:#fff'><div id=filtered style='position:absolute;"
+                + "left:0;top:0;width:400px;height:200px;background:#fff;filter:drop-shadow(1px 1px 0 transparent)'>"
+                + "<input type=checkbox checked style='margin:2px;width:16px;height:16px'>".repeat(controls)
+                + "</div>" + CONTROL_PATCH + "</body></html>";
+        try (PumpedPage page = PumpedPage.withDefaultSettingsAndFormControls(html)) {
+            page.settle();
+            long before = nextRegistryId();
+            page.script("filtered.style.background = '#eee'; filtered.offsetWidth");
+            BufferedImage repainted = page.pump();
+            long after = nextRegistryId();
+            assertPixel("the pump measured, which must draw the repaint", repainted, 390, 190, 0xeeeeee);
+            return (int) (after - before - 1);
+        }
+    }
+
+    /** Registry ids are handed out in order, so a probe's id tells how many were handed out before it. */
+    private static long nextRegistryId() {
+        long id = WebKitNativeShim.register(new Object());
+        WebKitNativeShim.unregister(id);
+        return id;
     }
 
     /** Inside the button, clear of its label: the theme's fill, which a missing theme leaves white. */

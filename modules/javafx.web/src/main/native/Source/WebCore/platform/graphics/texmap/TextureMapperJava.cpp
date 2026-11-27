@@ -54,6 +54,7 @@
 #include "TextureMapperGPUBuffer.h"
 #include "TransformationMatrix.h"
 #include "WindRule.h"
+#include <algorithm>
 #include <array>
 #include <cmath>
 #include <optional>
@@ -69,9 +70,20 @@ namespace WebCore {
 
 WTF_MAKE_TZONE_ALLOCATED_IMPL(TextureMapper);
 
-static std::optional<AffineTransform> textureMapperJavaPlaneTransform(const TransformationMatrix& matrix)
+// Whole turns leave sin(2 pi) = -2.4e-16 in a rotation, so under a perspective m14 or m24 is ~1e-19.
+static constexpr double textureMapperJavaFlatTolerance = 1e-9;
+
+static std::optional<AffineTransform> textureMapperJavaPlaneTransform(const TransformationMatrix& matrix,
+    const FloatRect& rect)
 {
-    if (matrix.m14() || matrix.m24() || matrix.m44() <= 0)
+    if (matrix.m44() <= 0)
+        return std::nullopt;
+    double reach = 0;
+    if (matrix.m14())
+        reach += std::abs(matrix.m14()) * std::max(std::abs(rect.x()), std::abs(rect.maxX()));
+    if (matrix.m24())
+        reach += std::abs(matrix.m24()) * std::max(std::abs(rect.y()), std::abs(rect.maxY()));
+    if (reach && !(reach <= textureMapperJavaFlatTolerance * matrix.m44()))
         return std::nullopt;
     double w = matrix.m44();
     return AffineTransform(matrix.m11() / w, matrix.m12() / w, matrix.m21() / w, matrix.m22() / w,
@@ -84,13 +96,14 @@ static std::optional<AffineTransform> textureMapperJavaPlaneTransform(const Tran
 static bool textureMapperJavaIsOutsideClip(const TransformationMatrix& matrix, const FloatRect& rect,
     const IntRect& clipBounds)
 {
-    auto planeTransform = textureMapperJavaPlaneTransform(matrix);
+    auto planeTransform = textureMapperJavaPlaneTransform(matrix, rect);
     return planeTransform && !enclosingIntRect(planeTransform->mapRect(rect)).intersects(clipBounds);
 }
 
-static void textureMapperJavaConcatModelView(GraphicsContext& context, const TransformationMatrix& matrix)
+static void textureMapperJavaConcatModelView(GraphicsContext& context, const TransformationMatrix& matrix,
+    const FloatRect& rect)
 {
-    if (auto planeTransform = textureMapperJavaPlaneTransform(matrix)) {
+    if (auto planeTransform = textureMapperJavaPlaneTransform(matrix, rect)) {
         context.concatCTM(*planeTransform);
         return;
     }
@@ -171,7 +184,7 @@ static Vector<FloatPoint> textureMapperJavaRoundedRectVertices(const FloatRounde
 
 static Path textureMapperJavaRoundedRectPath(const FloatRoundedRect& roundedRect, const TransformationMatrix& matrix)
 {
-    auto planeTransform = textureMapperJavaPlaneTransform(matrix);
+    auto planeTransform = textureMapperJavaPlaneTransform(matrix, roundedRect.rect());
     if (!planeTransform)
         return textureMapperJavaPolygonPath(textureMapperJavaRoundedRectVertices(roundedRect), matrix);
 
@@ -352,7 +365,7 @@ void TextureMapper::drawTexture(const BitmapTexture& texture, const FloatRect& t
 
     GraphicsContext& context = *target.context;
     context.save();
-    textureMapperJavaConcatModelView(context, matrix);
+    textureMapperJavaConcatModelView(context, matrix, textureRect);
     context.setAlpha(opacity);
     context.drawImageBuffer(*image, textureRect, ImagePaintingOptions { CompositeOperator::SourceOver });
     context.restore();
@@ -371,7 +384,7 @@ void TextureMapper::drawSolidColor(const FloatRect& rect, const TransformationMa
 
     GraphicsContext& context = *target.context;
     context.save();
-    textureMapperJavaConcatModelView(context, modelViewMatrix);
+    textureMapperJavaConcatModelView(context, modelViewMatrix, rect);
     context.fillRect(rect, color);
     context.restore();
 }

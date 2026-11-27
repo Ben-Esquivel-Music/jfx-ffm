@@ -124,11 +124,9 @@ bool RenderThemeJava::paintWidget(
     if (!jRenderTheme) {
         Page* page = object.document().page();
         PageSupplementJava* pageSupplement = page ? PageSupplementJava::from(page) : nullptr;
-        WKJHandle jWebPage = pageSupplement ? pageSupplement->jWebPage() : WKJHandle();
-        if (!jWebPage)
+        if (!pageSupplement || !pageSupplement->hasJavaWebPage())
             return false;
-        WKJHandle theme = wkjRenderThemeForPage(jWebPage.get());
-        jRenderTheme = RQRef::create(theme.get());
+        jRenderTheme = pageSupplement->jRenderTheme();
     }
     if (!jRenderTheme) {
         return false;
@@ -233,7 +231,6 @@ bool RenderThemeJava::paintWidget(
         //switch to WebKit default render
         return true;
     }
-    wkjCheckAndClearException();
 
     // jRenderTheme and widgetRef will go into rq's inner refs vector.
     paintInfo.context().platformContext()->rq().freeSpace(20)

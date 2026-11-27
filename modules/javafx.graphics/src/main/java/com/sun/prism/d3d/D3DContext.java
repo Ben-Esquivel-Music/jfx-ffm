@@ -385,7 +385,9 @@ class D3DContext extends BaseShaderContext {
             linear = tex.getLinearFiltering();
             switch (tex.getWrapMode()) {
                 case CLAMP_NOT_NEEDED:
-                    wrapMode = D3DTADDRESS_NOP;
+                    // A render texture may be drawn rotated or scaled; with NOP it would sample with the
+                    // address mode the previous texture on this sampler left.
+                    wrapMode = tex instanceof D3DRTTexture ? D3DTADDRESS_CLAMP : D3DTADDRESS_NOP;
                     break;
                 case CLAMP_TO_EDGE:
                 case CLAMP_TO_EDGE_SIMULATED:

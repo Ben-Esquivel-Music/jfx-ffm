@@ -29,6 +29,7 @@
 #include <WebCore/GraphicsLayerClient.h>
 #include <WebCore/IntRect.h>
 #include <WebCore/PrintContext.h>
+#include <WebCore/Region.h>
 #include <WebCore/ScrollTypes.h>
 #include <WebCore/HandleUserInputEventResult.h>
 
@@ -146,11 +147,14 @@ private:
     const WKJPageCallbacks* m_callbacks { nullptr };
     WKJHandle m_javaPage;
     RefPtr<PrintContext> m_printContext;
-    RefPtr<RQRef> m_jRenderTheme;
 
     RefPtr<GraphicsLayer> m_rootLayer;
     std::unique_ptr<TextureMapper> m_textureMapper;
     bool m_syncLayers { false };
+
+    // What this update's dirty-rect paints repainted, in the clips Java decodes their queues under.
+    Region m_paintedThisUpdate;
+    bool m_collectingPaintedRegion { false };
 
     // Webkit expects keyPress events to be suppressed if the associated keyDown
     // event was handled. Safari implements this behavior by peeking out the

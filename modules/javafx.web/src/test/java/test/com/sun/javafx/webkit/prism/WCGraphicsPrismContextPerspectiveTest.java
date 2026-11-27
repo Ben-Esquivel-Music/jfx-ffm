@@ -31,6 +31,7 @@ import static org.junit.jupiter.api.Assertions.assertNotSame;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assumptions.assumeFalse;
 
 import com.sun.javafx.geom.transform.Affine3D;
 import com.sun.javafx.geom.transform.BaseTransform;
@@ -57,7 +58,9 @@ import java.nio.ByteOrder;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.function.Consumer;
+import java.util.function.ObjIntConsumer;
 import org.junit.jupiter.api.Test;
+import org.opentest4j.TestAbortedException;
 import test.javafx.scene.web.TestBase;
 
 /**
@@ -98,15 +101,27 @@ public class WCGraphicsPrismContextPerspectiveTest extends TestBase {
         return new WCTransform(1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1);
     }
 
+    /** Prism's device context, which holds one perspective transform for every graphics drawing through it. */
+    private static final class DeviceContext {
+        private GeneralTransform3D perspective = new GeneralTransform3D();
+    }
+
     private static final class RecordingGraphics implements InvocationHandler {
         private final Graphics target;
+        private final DeviceContext device;
         private final List<String> calls = new ArrayList<>();
+        private final List<GeneralTransform3D> devicePerspectivesAtFills = new ArrayList<>();
         private BaseTransform transform = BaseTransform.IDENTITY_TRANSFORM;
         private GeneralTransform3D perspective = new GeneralTransform3D();
         private boolean refuseFills = false;
 
         private RecordingGraphics(Graphics target) {
+            this(target, new DeviceContext());
+        }
+
+        private RecordingGraphics(Graphics target, DeviceContext device) {
             this.target = target;
+            this.device = device;
         }
 
         @Override
@@ -114,9 +129,15 @@ public class WCGraphicsPrismContextPerspectiveTest extends TestBase {
             switch (method.getName()) {
                 case "setTransform" -> transform = args[0] == null
                         ? BaseTransform.IDENTITY_TRANSFORM : new Affine3D((BaseTransform) args[0]);
-                case "setPerspectiveTransform" -> perspective = args[0] == null
-                        ? new GeneralTransform3D() : new GeneralTransform3D().set((GeneralTransform3D) args[0]);
+                case "setPerspectiveTransform" -> {
+                    perspective = args[0] == null
+                            ? new GeneralTransform3D() : new GeneralTransform3D().set((GeneralTransform3D) args[0]);
+                    device.perspective = perspective;
+                }
                 default -> { }
+            }
+            if (method.getName().startsWith("fill")) {
+                devicePerspectivesAtFills.add(new GeneralTransform3D().set(device.perspective));
             }
             calls.add(method.getName());
             if (refuseFills && method.getName().startsWith("fill")) {
@@ -274,6 +295,166 @@ public class WCGraphicsPrismContextPerspectiveTest extends TestBase {
         });
     }
 
+    /**
+     * The decoder asks for the context's graphics at the start of every command buffer, which folds the
+     * perspective into Prism's device context. A tile's queue decoded inline by DECODERQ then gives the
+     * same device context its own perspective, so the context must fold its own again before it draws.
+     */
+    @Test
+    public void aNestedDecodeDoesNotLeaveItsPerspectiveForTheNextDraw() {
+        onRenderTarget(APPLIES_PERSPECTIVE, target -> {
+            Fills fills = decodeWithATile(target, FRESH_TILE, List.of(
+                    (buffer, tile) -> putProjection(buffer),
+                    (buffer, tile) -> {
+                        putDecodeTile(buffer, tile);
+                        putFillRect(buffer);
+                    }));
+            assertEquals(1, fills.tile().size(), "fills of the tile's queue");
+            assertEquals(1, fills.outer().size(), "fills of the outer queue");
+            assertPerspective(foldedCommandProjection(), fills.outer().get(0));
+        });
+    }
+
+    /**
+     * Restoring the state drops a folded perspective from the context, but not from Prism's device context,
+     * so a tile's queue decoded next must set its own there before it draws, though the tile's context has
+     * decoded before.
+     */
+    @Test
+    public void aNestedDecodeAfterARestoredPerspectiveDrawsWithItsOwn() {
+        onRenderTarget(APPLIES_PERSPECTIVE, target -> {
+            Fills fills = decodeWithATile(target, WARM_TILE, List.of((buffer, tile) -> {
+                buffer.putInt(GraphicsDecoder.SAVESTATE);
+                putProjection(buffer);
+                putFillRect(buffer);
+                buffer.putInt(GraphicsDecoder.RESTORESTATE);
+                putDecodeTile(buffer, tile);
+            }));
+            assertEquals(1, fills.outer().size(), "fills of the outer queue");
+            assertPerspective(foldedCommandProjection(), fills.outer().get(0));
+            assertEquals(1, fills.tile().size(), "fills of the tile's queue");
+            assertPerspective(new GeneralTransform3D(), fills.tile().get(0));
+        });
+    }
+
+    /** The outer context folds its perspective at the start of the buffer, before the tile is decoded. */
+    @Test
+    public void aNestedDecodeAtTheStartOfABufferDrawsWithItsOwnPerspective() {
+        onRenderTarget(APPLIES_PERSPECTIVE, target -> {
+            Fills fills = decodeWithATile(target, WARM_TILE, List.of(
+                    (buffer, tile) -> putProjection(buffer),
+                    (buffer, tile) -> {
+                        putDecodeTile(buffer, tile);
+                        putFillRect(buffer);
+                    }));
+            assertEquals(1, fills.tile().size(), "fills of the tile's queue");
+            assertPerspective(new GeneralTransform3D(), fills.tile().get(0));
+            assertEquals(1, fills.outer().size(), "fills of the outer queue");
+            assertPerspective(foldedCommandProjection(), fills.outer().get(0));
+        });
+    }
+
+    private static final float[] COMMAND_PROJECTION = {1, 0, 0, 0.0009765625f, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1};
+    private static final boolean WARM_TILE = true;
+    private static final boolean FRESH_TILE = false;
+
+    /** The perspectives in Prism's device context at the fills of the tile's queue and of the outer queue. */
+    private record Fills(List<GeneralTransform3D> tile, List<GeneralTransform3D> outer) {
+    }
+
+    /**
+     * Decodes the buffers into the target translated by (30, 40), with a tile's queue of one fill that they
+     * name by its ID. The tile's context draws through the target's device context; a warm tile's context has
+     * decoded a queue of an earlier frame.
+     */
+    private static Fills decodeWithATile(Context target, boolean warm, List<ObjIntConsumer<ByteBuffer>> buffers) {
+        RTTexture tileTexture = GraphicsPipeline.getDefaultResourceFactory()
+                .createRTTexture(100, 100, Texture.WrapMode.CLAMP_NOT_NEEDED);
+        RecordingGraphics tileRecording = new RecordingGraphics(tileTexture.createGraphics(),
+                target.recording().device);
+        WCGraphicsContext tileContext = WCGraphicsManager.getGraphicsManager()
+                .createGraphicsContext(present(tileRecording, APPLIES_PERSPECTIVE));
+        WCRenderQueue tileQueue = new HeapBufferQueue(tileContext);
+        tileQueue.ref();
+        try {
+            if (warm) {
+                WCRenderQueue earlierFrame = new HeapBufferQueue(tileContext);
+                earlierFrame.addBuffer(commands(WCGraphicsPrismContextPerspectiveTest::putFillRect));
+                earlierFrame.decode();
+                tileRecording.devicePerspectivesAtFills.clear();
+            }
+            tileQueue.addBuffer(commands(WCGraphicsPrismContextPerspectiveTest::putFillRect));
+            WCRenderQueue queue = new HeapBufferQueue(target.context());
+            for (ObjIntConsumer<ByteBuffer> buffer : buffers) {
+                queue.addBuffer(commands(writer -> buffer.accept(writer, tileQueue.getID())));
+            }
+            target.context().translate(30, 40);
+            queue.decode();
+        } finally {
+            tileQueue.deref();
+            tileContext.dispose();
+            tileTexture.dispose();
+        }
+        return new Fills(List.copyOf(tileRecording.devicePerspectivesAtFills),
+                List.copyOf(target.recording().devicePerspectivesAtFills));
+    }
+
+    private static GeneralTransform3D foldedCommandProjection() {
+        return new GeneralTransform3D()
+                .mul(BaseTransform.getTranslateInstance(30, 40))
+                .mul(new GeneralTransform3D().set(perspective(COMMAND_PROJECTION).getMatrix()));
+    }
+
+    private static void putProjection(ByteBuffer buffer) {
+        buffer.putInt(GraphicsDecoder.SET_PERSPECTIVE_TRANSFORM);
+        for (float value : COMMAND_PROJECTION) {
+            buffer.putFloat(value);
+        }
+    }
+
+    private static void putDecodeTile(ByteBuffer buffer, int tileQueueId) {
+        buffer.putInt(GraphicsDecoder.DECODERQ);
+        buffer.putInt(tileQueueId);
+    }
+
+    /** A queue of heap buffers, which the native release must never see. */
+    private static final class HeapBufferQueue extends WCRenderQueue {
+        private HeapBufferQueue(WCGraphicsContext context) {
+            super(context);
+        }
+
+        @Override
+        protected void flush() {
+        }
+
+        @Override
+        protected void disposeGraphics() {
+        }
+
+        @Override
+        public void dispose() {
+        }
+    }
+
+    private static ByteBuffer commands(Consumer<ByteBuffer> writer) {
+        ByteBuffer buffer = ByteBuffer.allocate(256).order(ByteOrder.nativeOrder());
+        writer.accept(buffer);
+        buffer.flip();
+        return buffer;
+    }
+
+    private static void putFillRect(ByteBuffer buffer) {
+        buffer.putInt(GraphicsDecoder.FILLRECT_FFFF);
+        for (float value : new float[] {0, 0, 50, 50}) {
+            buffer.putFloat(value);
+        }
+    }
+
+    private static WCTransform perspective(float[] m) {
+        return new WCTransform(m[0], m[1], m[2], m[3], m[4], m[5], m[6], m[7],
+                m[8], m[9], m[10], m[11], m[12], m[13], m[14], m[15]);
+    }
+
     private static List<String> drawCalls(Context target) {
         return target.recording().calls.stream()
                 .filter(call -> call.startsWith("fill") || call.startsWith("draw")).toList();
@@ -291,6 +472,8 @@ public class WCGraphicsPrismContextPerspectiveTest extends TestBase {
             target.context().setClip(30, 40, 200, 100);
             target.context().beginTransparencyLayer(1f);
             Graphics layer = (Graphics) target.context().getPlatformGraphics();
+            assumeFalse(layer instanceof RectShadowGraphics, "on a GPU pipeline a layer's graphics are shader"
+                    + " graphics, where the context folds; the GPU offscreen suite covers the fold inside layers");
             assertNotSame(target.graphics(), layer, "the layer's own graphics");
             assertTransform(BaseTransform.getTranslateInstance(-30, -40), layer.getTransformNoClone());
 
@@ -400,13 +583,8 @@ public class WCGraphicsPrismContextPerspectiveTest extends TestBase {
                     .createRTTexture(400, 300, Texture.WrapMode.CLAMP_NOT_NEEDED);
             WCGraphicsContext context = null;
             try {
-                Graphics real = texture.createGraphics();
-                RecordingGraphics recording = new RecordingGraphics(real);
-                Class<?>[] kinds = appliesPerspective
-                        ? new Class<?>[] {Graphics.class, ReadbackGraphics.class, RectShadowGraphics.class}
-                        : new Class<?>[] {Graphics.class, ReadbackGraphics.class};
-                Graphics recorded = (Graphics) Proxy.newProxyInstance(Graphics.class.getClassLoader(), kinds,
-                        recording);
+                RecordingGraphics recording = new RecordingGraphics(texture.createGraphics());
+                Graphics recorded = present(recording, appliesPerspective);
                 context = WCGraphicsManager.getGraphicsManager().createGraphicsContext(recorded);
                 check.accept(new Context(context, recording, recorded));
                 ran[0] = true;
@@ -422,9 +600,19 @@ public class WCGraphicsPrismContextPerspectiveTest extends TestBase {
         if (failure[0] instanceof Error error) {
             throw error;
         }
+        if (failure[0] instanceof TestAbortedException aborted) {
+            throw aborted;
+        }
         if (failure[0] != null) {
             throw new AssertionError(failure[0]);
         }
         assertTrue(ran[0], "the check did not run on the render thread");
+    }
+
+    private static Graphics present(RecordingGraphics recording, boolean appliesPerspective) {
+        Class<?>[] kinds = appliesPerspective
+                ? new Class<?>[] {Graphics.class, ReadbackGraphics.class, RectShadowGraphics.class}
+                : new Class<?>[] {Graphics.class, ReadbackGraphics.class};
+        return (Graphics) Proxy.newProxyInstance(Graphics.class.getClassLoader(), kinds, recording);
     }
 }

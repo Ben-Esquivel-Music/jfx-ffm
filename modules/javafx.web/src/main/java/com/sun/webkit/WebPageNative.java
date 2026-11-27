@@ -854,53 +854,26 @@ final class WebPageNative {
      * @param h the height of the region to update
      */
     static void updateContent(long pPage, WCRenderQueue rq, int x, int y, int w, int h) {
-        long ref = WebKitNative.register(rq);
-        try {
-            PAGE_UPDATE_CONTENT.invokeExact(pPage, ref, x, y, w, h);
-        } catch (Throwable t) {
-            throw new AssertionError(t);
-        } finally {
-            WebKitNative.release(ref);
-        }
+        encodeRegion(PAGE_UPDATE_CONTENT, pPage, rq, x, y, w, h);
     }
 
-    /**
-     * Encodes the commands that finish a paint cycle, as {@link #updateContent} does.
-     *
-     * @param pPage the page handle
-     * @param rq the render queue the commands are encoded into
-     * @param x the left edge of the painted region
-     * @param y the top edge of the painted region
-     * @param w the width of the painted region
-     * @param h the height of the painted region
-     */
+    /** Encodes the commands that finish a paint cycle, as {@link #updateContent} does. */
     static void postPaint(long pPage, WCRenderQueue rq, int x, int y, int w, int h) {
-        long ref = WebKitNative.register(rq);
-        try {
-            PAGE_POST_PAINT.invokeExact(pPage, ref, x, y, w, h);
-        } catch (Throwable t) {
-            throw new AssertionError(t);
-        } finally {
-            WebKitNative.release(ref);
-        }
+        encodeRegion(PAGE_POST_PAINT, pPage, rq, x, y, w, h);
     }
 
     /**
-     * Encodes the composited layers of a page being printed, before {@link #updateContent}: the sync
-     * of the layers can leave compositing mode, and the page paint then draws the page. Encodes nothing
-     * outside compositing mode, and never the inspector highlight.
-     *
-     * @param pPage the page handle
-     * @param rq the render queue the commands are encoded into
-     * @param x the left edge of the printed region
-     * @param y the top edge of the printed region
-     * @param w the width of the printed region
-     * @param h the height of the printed region
+     * Encodes a printed page's composited layers and never the inspector highlight.
+     * Outside compositing mode it encodes nothing.
      */
     static void printComposited(long pPage, WCRenderQueue rq, int x, int y, int w, int h) {
+        encodeRegion(PAGE_PRINT_COMPOSITED, pPage, rq, x, y, w, h);
+    }
+
+    private static void encodeRegion(MethodHandle handle, long pPage, WCRenderQueue rq, int x, int y, int w, int h) {
         long ref = WebKitNative.register(rq);
         try {
-            PAGE_PRINT_COMPOSITED.invokeExact(pPage, ref, x, y, w, h);
+            handle.invokeExact(pPage, ref, x, y, w, h);
         } catch (Throwable t) {
             throw new AssertionError(t);
         } finally {

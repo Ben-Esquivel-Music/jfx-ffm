@@ -506,7 +506,11 @@ to Java: the Metal completion block stays internal to the C. No upcall stubs and
   keep `srcx = srcy = 0`.
 - **L21** Printing a `Canvas` rendered on Metal, or a WebView page that draws an `RTImage`, crashes the JVM: the
   read-back of the texture into a heap `IntBuffer` copies into `NULL` (R3 has the path). The FFM build passes the
-  same `NULL`.
+  same `NULL`. The WebView half is fixed by the US-026 review fixes (2026-11-26): `RTImage.draw` reads back into a
+  direct buffer of the texture's content size, shown on Metal offscreen (`WebPrismGpuOffscreenTest`). The `Canvas`
+  half (`NGCanvas`) is unchanged. That run also showed that `MTLRTTexture.readPixels(Buffer)` does not flush Prism's
+  vertex buffer, as `getPixels()` and the es2 and d3d reads do, so a read right after a draw misses that draw:
+  `RTImage` flushes before it reads, and `NGCanvas`'s print will need the same once its `NULL` copy is fixed.
 
 ### Recommendation
 
