@@ -120,7 +120,7 @@ because CI does not run `tests/system`. The C++ is deleted. `backlog/README.md` 
 | 6 | OLE-marshalled calls on the UIA path could reorder once objects move. | The traces record order and thread, and no marshalling is added. |
 
 ## Facts from US-029 (2026-11-26)
-US-029 is implemented and committed as `7c38bdc73a` (the fixes of its code review of 2026-11-27 uncommitted on it); its
+US-029 is implemented and committed as `7c38bdc73a` (the fixes of its code review of 2026-11-27 as `fcfc41cf48`); its
 "Implementation" has the details.
 - **The crate exists:** `modules/javafx.graphics/src/main/native-rust/glass-win/`, linked into `glass` and
   `glass_test` by `native/win.cmake` (slice `GLASS_WIN_PREFERENCES`, `C_DELETED`). Its modules are `ffi` (the C ABI and

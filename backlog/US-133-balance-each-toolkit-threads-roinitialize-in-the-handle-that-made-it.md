@@ -14,7 +14,7 @@ initialised.
 The glass-win crate (`modules/javafx.graphics/src/main/native-rust/glass-win/src/`) ties `RoUninitialize` to one
 process-wide flag, not to the handle whose creation called `RoInitialize`.
 
-### The code (line numbers of the tree US-029 left: `7c38bdc73a` with its uncommitted review fixes)
+### The code (line numbers of the tree US-029 left: `fcfc41cf48`, which is `7c38bdc73a` with its review fixes)
 - `prefs.rs:55-59`: `static RO_INITIALIZED: AtomicBool`, "Whether a successful `RoInitialize` is in force: the
   process-wide flag of `RoActivationSupport.cpp` at `5a709c189d`".
 - `prefs.rs:119-131`, `Preferences::create`: calls `sys::ro_initialize_single_threaded()`

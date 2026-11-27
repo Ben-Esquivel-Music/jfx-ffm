@@ -185,7 +185,7 @@ The C++ is deleted. The WSL Linux build still configures. `backlog/README.md` is
 | 6 | The shared side of the toolkit guard held across a `SendMessageW`, an upcall or a wait deadlocks teardown. | One function owns the shared side and makes one OS call inside it; US-039 part 1's parked-poster and exit-from-a-runnable tests run against the slice. |
 
 ## Facts from US-029 (2026-11-26)
-US-029 is implemented and committed as `7c38bdc73a` (the fixes of its code review of 2026-11-27 uncommitted on it); its
+US-029 is implemented and committed as `7c38bdc73a` (the fixes of its code review of 2026-11-27 as `fcfc41cf48`); its
 "Implementation" has the details.
 - **The crate, the vendored `windows` crate and the switch:** as in US-030's "Facts from US-029": the `glass-win`
   crate links into `glass` and `glass_test`, `windows` 0.62.2 is vendored in `buildtools/rust/vendor/`, and

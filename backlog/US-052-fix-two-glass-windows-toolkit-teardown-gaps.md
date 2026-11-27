@@ -22,7 +22,7 @@ part 2 is independent) ·
 **Blocks:** none. Part 1 should follow US-039 part 1 directly, because it ends a hang that part ships with, and the
 story should precede US-031 slice 3, which otherwise reproduces both gaps in Rust
 
-**Since US-029** (implemented 2026-11-26, committed as `7c38bdc73a`, its review fixes uncommitted):
+**Since US-029** (implemented 2026-11-26, committed as `7c38bdc73a`, its review fixes as `fcfc41cf48`):
 `PlatformSupport.cpp/.h` and `RoActivationSupport.cpp/.h` are deleted, and the references to them below are to the
 tree this story was read on.
 `PlatformSupport::DiscardDeferredPreferences()` and `RunDeferredPreferences()` are now `glass_prefs_discard_deferred()`

@@ -1,13 +1,13 @@
 # US-029 — Port the Glass Windows WinRT preferences (PlatformSupport) to Rust behind the glass_win_api ABI
 
 **Status:** 🔷 Implemented, not merged (2026-11-26): committed as `7c38bdc73a` on the branch
-`port-the-glass-windows-winrt-preferences-to-rust`; the fixes of its code review of 2026-11-27 are
-uncommitted on `7c38bdc73a`. The five preferences exports and the two preference test hooks of `glass_win_api.h` are
+`port-the-glass-windows-winrt-preferences-to-rust`; the fixes of its code review of 2026-11-27 are committed as
+`fcfc41cf48` (PR #76, open). The five preferences exports and the two preference test hooks of `glass_win_api.h` are
 Rust, in the new `glass-win` crate linked into both builds of glass.dll; `PlatformSupport.cpp/.h` and
 `RoActivationSupport.cpp/.h` are deleted. Both builds export exactly the names of `5a709c189d` (97 and 123), and
 `gwin_abi_version()` is still 7. The final Windows gate passes with the baseline's per-class counts plus four new test
-classes (graphics 26,898 tests, 0 failures, 0 errors, 906 skipped), before and after the review fixes. Open: the
-owner's commit of the review fixes and the PR, a green `submit.yml` run (macOS included), the owner-only
+classes (graphics 26,898 tests, 0 failures, 0 errors, 906 skipped), before and after the review fixes. Open: a
+green `submit.yml` run (macOS included), the owner-only
 `tests/system` runs and the owner's acceptance of the deviations (see "Implementation" below). Drafted 2026-09-30
 from a read-only survey (read `glass_win_api.h:1-262,488-523,641-649` and `PlatformSupport.cpp:80-140`, counted
 with `wc -l`/`grep -c`; `RoActivationSupport.cpp` and the two query bodies were NOT read; nothing built. 2026-10-01,
@@ -127,12 +127,13 @@ The WSL Linux build still configures (glass/win is not built there). `backlog/RE
 | 3 | Theme-dependent goldens differ between machines. | Store the settings with the golden and compare the Rust build on the same machine. |
 | 4 | The `windows` crate may cache activation factories for the process (from memory, not checked), so the factory would not be released before `RoUninitialize`. | Read the crate's generated factory accessor in slice 3. If it caches, activate through `RoGetActivationFactory` directly, as the C does. |
 
-## Implementation (2026-11-26, committed as 7c38bdc73a; code review of 2026-11-27 uncommitted)
+## Implementation (2026-11-26, committed as 7c38bdc73a; code review of 2026-11-27 committed as fcfc41cf48)
 
 The port is committed as `7c38bdc73a` ("winrt prefs ported to Rust", 2026-11-27) on the branch
 `port-the-glass-windows-winrt-preferences-to-rust`; its parent is `5a709c189d`. The fixes of the
-code review of 2026-11-27 are uncommitted on `7c38bdc73a`: 12 modified files, nothing new or deleted (see "Code review
-of 7c38bdc73a (2026-11-27)"). Before the commit the work was uncommitted on `master` at `5a709c189d`: 18 modified
+code review of 2026-11-27 are committed on it as `fcfc41cf48` ("Code review feedback addressed.", 2026-11-27; PR #76,
+open): 12 modified code files, 5 modified backlog files and the new US-133 (see "Code review of 7c38bdc73a
+(2026-11-27)"). Before the first commit the work was uncommitted on `master` at `5a709c189d`: 18 modified
 files, 4 deleted files and 12 new entries, one of them `buildtools/rust/vendor/` with 1,068 files
 (`git status --short` before the first write-up: 34 lines). That write-up, part of `7c38bdc73a`, changed this story,
 `backlog/README.md`, US-030, US-031, US-052 and `README.md`, added US-132, and corrected the skills `jfx-native-build`
@@ -706,7 +707,7 @@ session scratch directory `cr029\gate\` (`gate.log`, `golden-verify.log`, `total
 
 ### Code review of 7c38bdc73a (2026-11-27)
 A code review of the commit reported five findings on the crate and its tests. Each was decided as below; the fixes
-are uncommitted on `7c38bdc73a`.
+are committed as `fcfc41cf48`.
 
 - **F1**, after a caught panic the toolkit stops delivering every preference change: fixed (D1, below). The C++
   delivered without its object's state: `PlatformSupport::updatePreferences` and `onSettingChanged` were `const`
@@ -833,9 +834,9 @@ dependents are in the scratch directory of the port's own gates, `us029\baseline
   "PlatformSupport's") and `WinPreferencesParityTest.java:63` (history) in `tests/system`.
 
 ### Left for the owner
-- **The commit** of the code review's fixes (the 12 modified files of `git status --short`) with this write-up's
-  backlog changes (this story, `backlog/README.md`, US-030, US-031, US-052 and the new US-133), and the PR. The port
-  itself is committed as `7c38bdc73a`.
+- **Done 2026-11-27, the commit and the PR:** the port is `7c38bdc73a`; the code review's fixes (12 code files) with
+  this write-up's backlog changes (this story, `backlog/README.md`, US-030, US-031, US-052 and the new US-133) are
+  `fcfc41cf48`; both are in PR #76 (open).
 - **A green `submit.yml` run** in all jobs, macOS included: the helper's Darwin code changed and could not be built
   here. To look at: the Windows job builds glass.dll from the vendored crates offline and runs the graphics Rust test
   and lint; the Linux jobs' media lint and `cargo metadata` pass through the source replacement; the jfxmedia export
