@@ -66,10 +66,8 @@ public class WinPreferenceActivationFailureTest {
 
     private static final long WAIT_MILLIS = 10_000;
 
-    /** {@code COINIT_MULTITHREADED} of {@code objbase.h}. */
     private static final int COINIT_MULTITHREADED = 0x0;
 
-    /** {@code RPC_E_CHANGED_MODE} of {@code winerror.h}. */
     private static final int RPC_E_CHANGED_MODE = 0x8001_0106;
 
     /** {@code CoGetApartmentType} on a thread of the multithreaded apartment it entered itself. */

@@ -1,18 +1,20 @@
 # US-029 — Port the Glass Windows WinRT preferences (PlatformSupport) to Rust behind the glass_win_api ABI
 
-**Status:** 🔷 Implemented, not merged (2026-11-26): uncommitted on `5a709c189d`. The five preferences exports and the
-two preference test hooks of `glass_win_api.h` are Rust, in the new `glass-win` crate linked into both builds of
-glass.dll; `PlatformSupport.cpp/.h` and `RoActivationSupport.cpp/.h` are deleted. Both builds export exactly the names
-of `5a709c189d` (97 and 123), and `gwin_abi_version()` is still 7. The final Windows gate passes with the baseline's
-per-class counts plus four new test classes (graphics 26,898 tests, 0 failures, 0 errors, 906 skipped). Open: the
-owner's commit and PR, a green `submit.yml` run (macOS included), the owner-only `tests/system` runs and the owner's
-acceptance of the deviations (see "Implementation" below). Drafted 2026-09-30 from a read-only survey (read
-`glass_win_api.h:1-262,488-523,641-649` and `PlatformSupport.cpp:80-140`, counted with `wc -l`/`grep -c`;
-`RoActivationSupport.cpp` and the two query bodies were NOT read; nothing built. 2026-10-01, after PR review: the sink
-text follows US-039 part 2's design, in which the sinks only post; re-read `PlatformSupport.cpp:36-47` and `:138-144`,
-and `GlassApplication.h:97-99` and `:128`; the same day the post became US-039 part 1's guarded post, after that
-part's redesign) · **Epic:** Rust port of the remaining native code (goal 3) · **Blocked by:** US-027, US-039 part 2
-(a C++ fix; landed in PR #37)
+**Status:** 🔷 Implemented, not merged (2026-11-26): committed as `7c38bdc73a` on the branch
+`port-the-glass-windows-winrt-preferences-to-rust`; the fixes of its code review of 2026-11-27 are
+uncommitted on `7c38bdc73a`. The five preferences exports and the two preference test hooks of `glass_win_api.h` are
+Rust, in the new `glass-win` crate linked into both builds of glass.dll; `PlatformSupport.cpp/.h` and
+`RoActivationSupport.cpp/.h` are deleted. Both builds export exactly the names of `5a709c189d` (97 and 123), and
+`gwin_abi_version()` is still 7. The final Windows gate passes with the baseline's per-class counts plus four new test
+classes (graphics 26,898 tests, 0 failures, 0 errors, 906 skipped), before and after the review fixes. Open: the
+owner's commit of the review fixes and the PR, a green `submit.yml` run (macOS included), the owner-only
+`tests/system` runs and the owner's acceptance of the deviations (see "Implementation" below). Drafted 2026-09-30
+from a read-only survey (read `glass_win_api.h:1-262,488-523,641-649` and `PlatformSupport.cpp:80-140`, counted
+with `wc -l`/`grep -c`; `RoActivationSupport.cpp` and the two query bodies were NOT read; nothing built. 2026-10-01,
+after PR review: the sink text follows US-039 part 2's design, in which the sinks only post; re-read
+`PlatformSupport.cpp:36-47` and `:138-144`, and `GlassApplication.h:97-99` and `:128`; the same day the post became
+US-039 part 1's guarded post, after that part's redesign) · **Epic:** Rust port of the remaining native code
+(goal 3) · **Blocked by:** US-027, US-039 part 2 (a C++ fix; landed in PR #37)
 
 ## Story
 As a platform maintainer,
@@ -125,16 +127,20 @@ The WSL Linux build still configures (glass/win is not built there). `backlog/RE
 | 3 | Theme-dependent goldens differ between machines. | Store the settings with the golden and compare the Rust build on the same machine. |
 | 4 | The `windows` crate may cache activation factories for the process (from memory, not checked), so the factory would not be released before `RoUninitialize`. | Read the crate's generated factory accessor in slice 3. If it caches, activate through `RoGetActivationFactory` directly, as the C does. |
 
-## Implementation (2026-11-26, uncommitted on 5a709c189d)
+## Implementation (2026-11-26, committed as 7c38bdc73a; code review of 2026-11-27 uncommitted)
 
-The work is uncommitted on `master` at `5a709c189d`: 18 modified files, 4 deleted files and 12 new entries, one of them
-`buildtools/rust/vendor/` with 1,068 files (`git status --short` before this write-up: 34 lines). This write-up
-changes this story, `backlog/README.md`, US-030, US-031, US-052 and `README.md`, adds US-132, and corrects the skills
-`jfx-native-build` and `jfx-rust-port`, which are git-ignored (`.gitignore:80`), so the commit does not carry them.
-The story's four slices were built and gated as one change. "The C++" is the code of `5a709c189d`; "the baseline" is
-the gate run on it before any change. The four deleted files had 981 lines there (`PlatformSupport.cpp` 522,
-`PlatformSupport.h` 123, `RoActivationSupport.cpp` 256, `RoActivationSupport.h` 80), not the 755 of "Current state",
-which was counted before US-039 and US-068 changed them.
+The port is committed as `7c38bdc73a` ("winrt prefs ported to Rust", 2026-11-27) on the branch
+`port-the-glass-windows-winrt-preferences-to-rust`; its parent is `5a709c189d`. The fixes of the
+code review of 2026-11-27 are uncommitted on `7c38bdc73a`: 12 modified files, nothing new or deleted (see "Code review
+of 7c38bdc73a (2026-11-27)"). Before the commit the work was uncommitted on `master` at `5a709c189d`: 18 modified
+files, 4 deleted files and 12 new entries, one of them `buildtools/rust/vendor/` with 1,068 files
+(`git status --short` before the first write-up: 34 lines). That write-up, part of `7c38bdc73a`, changed this story,
+`backlog/README.md`, US-030, US-031, US-052 and `README.md`, added US-132, and corrected the skills `jfx-native-build`
+and `jfx-rust-port`, which are git-ignored (`.gitignore:80`), so no commit carries them. The story's four slices were
+built and gated as one change. "The C++" is the code of `5a709c189d`; "the baseline" is the gate run on it before any
+change. The four deleted files had 981 lines there (`PlatformSupport.cpp` 522, `PlatformSupport.h` 123,
+`RoActivationSupport.cpp` 256, `RoActivationSupport.h` 80), not the 755 of "Current state", which was counted before
+US-039 and US-068 changed them.
 
 ### What changed
 
@@ -150,33 +156,38 @@ files kept unchanged are listed under "Follow-up".
   "Networking_Connectivity", "Win32_System_WinRT"] }`.
 - `src/lib.rs` (105): the 21 `int32_t` constants of `glass_win_api.h` the crate uses, `GWIN_UI_COLOR_COUNT`, and the
   `#[repr(C)]` structs `GwinUiSettings`, `GwinNetworkInfo` and `GwinPrefsCallbacks`.
-- `src/ffi.rs` (732): the exports, the seam functions the crate defines, the declarations of the C++ ones it calls,
-  the two test hooks (feature `test-hooks`), and doubles of the C++ seam for the unit tests.
-- `src/prefs.rs` (855): the ported logic, safe Rust: `Preferences` (activation in `create`, the teardown in `Drop`,
-  `collect_ui_settings`, `collect_network_info`), the kept word `KeptTypes`, `post_preferences_changed`,
-  `run_deferred`, `update_preferences`, `setting_changed_types` and the `RoInitialize failed: ` line.
-- `src/sys.rs` (281): the raw OS and vtable calls: `RoInitialize`, `RoUninitialize`, `RoActivateInstance`,
-  `RoGetActivationFactory`, the `add_*`, `remove_*` and getter calls on the WinRT interfaces, and `FormatMessageW`,
-  `WideCharToMultiByte` and `LocalFree`, declared with `windows::core::link!` (no further crate feature).
+- `src/ffi.rs` (765; 732 in `7c38bdc73a`): the exports, the seam functions the crate defines, the declarations of
+  the C++ ones it calls, the two test hooks (feature `test-hooks`), and doubles of the C++ seam for the unit tests.
+- `src/prefs.rs` (871; 855 in `7c38bdc73a`): the ported logic, safe Rust: `Preferences` (activation in `create`, the
+  teardown in `Drop`, `collect_ui_settings`, `collect_network_info`), the kept word `KeptTypes`,
+  `post_preferences_changed`, `run_deferred`, `update_preferences`, `setting_changed_types` and the
+  `RoInitialize failed: ` line.
+- `src/sys.rs` (280; 281 in `7c38bdc73a`): the raw OS and vtable calls: `RoInitialize`, `RoUninitialize`,
+  `RoActivateInstance`, `RoGetActivationFactory`, the `add_*`, `remove_*` and getter calls on the WinRT interfaces, and
+  `FormatMessageW`, `WideCharToMultiByte` and `LocalFree`, declared with `windows::core::link!` (no further crate
+  feature).
 - `abi_check.cpp` (146), `cbindgen-functions.toml` (40) and `cbindgen-types.toml` (39). The check includes
   `glass_win_api.h`, the seam header and both cbindgen outputs: a prototype that differs between the C++ and the crate
   is a compile error in both directions; `static_assert`s pin the 21 constants by value and type, `GWIN_UI_COLOR_COUNT`,
   and `sizeof`, `alignof`, every `offsetof` and every field's type of the three structs. cbindgen's `[defines]` maps
   `feature = test-hooks` to `GLASS_WIN_TEST_HOOKS`.
-- 32 unit tests (23 in `prefs.rs`, 9 in `ffi.rs`), the same in both feature sets.
+- 35 unit tests (24 in `prefs.rs`, 11 in `ffi.rs`), the same in both feature sets; 32 (23 and 9) in `7c38bdc73a`.
 
-**The seam** `native-glass/win/glass_win_prefs.h` (new, 137 lines): internal to glass.dll, C types only, no export
-macro.
+**The seam** `native-glass/win/glass_win_prefs.h` (new, 136 lines; 137 in `7c38bdc73a`): internal to glass.dll, C
+types only, no export macro.
 - The crate defines, the C++ calls: `void* glass_prefs_create(void)`, `void glass_prefs_destroy(void* handle)`,
-  `int32_t glass_prefs_update(void* handle, int32_t types)`, `int32_t glass_prefs_setting_changed(void* handle,
-  uintptr_t wparam, intptr_t lparam)`, `void glass_prefs_run_deferred(void)`, `void glass_prefs_discard_deferred(void)`.
+  `int32_t glass_prefs_update(int32_t types);`,
+  `int32_t glass_prefs_setting_changed(uintptr_t wparam, intptr_t lparam);` (`glass_win_prefs.h:87` and `:95`; in
+  `7c38bdc73a` both took a leading `void* handle`, which they only checked for NULL and poison),
+  `void glass_prefs_run_deferred(void)`, `void glass_prefs_discard_deferred(void)`.
 - The C++ defines, `noexcept` and calling nothing that throws; the crate calls: `int32_t glass_prefs_post(int32_t
   types, int32_t* published)`, `void glass_prefs_arm_timer(void)`, `void* glass_prefs_live_handle(void)`,
   `void glass_prefs_stderr(const char* text)`, and under `GLASS_WIN_TEST_HOOKS` the probes
   `glass_prefs_test_record_delegate_call`, `glass_prefs_test_log_event` and `glass_prefs_test_count` (each
   `(int32_t)`).
 - A NULL handle is legal everywhere and means "no WinRT objects". The header says what each function answers for a
-  poisoned handle.
+  poisoned handle: the queries answer for it what they answer without WinRT objects, `glass_prefs_destroy` leaves it
+  alone, and the delivery of preference types reads no handle, so neither NULL nor a poisoned handle stops it.
 
 **The C++ that stays** (`native-glass/win/`).
 - `GlassApplication.h` (195 to 214 lines): includes `glass_win_api.h` and `glass_win_prefs.h` instead of
@@ -195,8 +206,12 @@ macro.
   `GwinTestLogEvent` and `GwinTestCount`.
 - `glass_win_api.h` (3,264 to 3,275) and `GlassMenu.cpp`: comments only. Without its comments `glass_win_api.h` is
   identical to `5a709c189d`: no declaration, type, constant or enumerator changed, `GLASS_WIN_ABI_VERSION` is 7. The
-  new comments say that `gwin_prefs_set_callbacks`, `gwin_test_prefs_capture` and the two queries answer
-  `GWIN_ERR_INVALID_ARG` only after a panic the crate caught (a bug), and that a query then writes nothing.
+  new comments say that `gwin_prefs_set_callbacks` and `gwin_test_prefs_capture` answer `GWIN_ERR_INVALID_ARG` only
+  after a panic the crate caught (a bug). For the two queries (`glass_win_api.h:623-626`, since the code review of
+  2026-11-27): a panic caught while a query reads the live toolkit's preferences handle poisons that handle, and that
+  query and every later one on the handle answer as a toolkit without WinRT objects does, a zeroed struct and
+  `GWIN_OK`, until the toolkit window is destroyed; a panic caught anywhere else in the call answers
+  `GWIN_ERR_INVALID_ARG` with nothing written.
 
 **The build.**
 - `modules/javafx.graphics/native/win.cmake` (+40): the slice `GLASS_WIN_PREFERENCES` of the crate, registered for
@@ -241,10 +256,10 @@ macro.
 - `WinApplication.java`, `WinPreferenceCalls.java`, `WinPreferences.java`: comments only (2, 13 and 18 lines
   replaced; 731, 517 and 421 lines as before), where a comment named a deleted file or C++ symbol as the place where
   something lives today. The 68 compiled classes of `com/sun/glass/ui/win` are md5-identical to the baseline's.
-- `WinGlassNativeShim.java` (+325/-4, 5,811 lines): what the new tests bind (`SendMessageW`, the raw queries over a
-  fill byte, `CoGetApartmentType`, `CoInitializeEx` and `CoUninitialize`, the system message of an `HRESULT`, a
-  callback table that answers 0 or 1, a table with a NULL slot) with one import, and comment fixes in three places
-  of the existing code (4 lines).
+- `WinGlassNativeShim.java` (+323/-4 against `5a709c189d`, 5,809 lines; +325/-4 and 5,811 in `7c38bdc73a`): what
+  the new tests bind (`SendMessageW`, the raw queries over a fill byte, `CoGetApartmentType`, `CoInitializeEx` and
+  `CoUninitialize`, the system message of an `HRESULT`, a callback table that answers 0 or 1, a table with a NULL
+  slot) with one import, and comment fixes in three places of the existing code (4 lines).
 - The new tests and their helpers are under "Tests". No existing test file and nothing under `tests/system` changed.
 
 ### Decisions and their reasons
@@ -287,10 +302,14 @@ macro.
   object, the statics and the factory, then calls `RoUninitialize` only if `RoInitialize` succeeded, with the same six
   test events in the same order.
 - **Failure values under the guard**, where the C++ had no `catch` on these paths: `gwin_sizeof_*` 0 (no struct has
-  size 0, so Java reports a layout mismatch); `gwin_prefs_set_callbacks`, the queries and the two test hooks
-  `GWIN_ERR_INVALID_ARG`, the only failure value they document; `glass_prefs_create` NULL; `glass_prefs_update` and
-  `glass_prefs_setting_changed` 0, so the message goes to `DefWindowProc` as when no table is installed; both delegate
-  bodies `S_OK`. The handle embeds a `Poison`; functions without a handle use `guard`.
+  size 0, so Java reports a layout mismatch); `gwin_prefs_set_callbacks` and the two test hooks
+  `GWIN_ERR_INVALID_ARG`, the only failure value they document; the queries, for a panic while they read the live
+  handle, every byte zero and `GWIN_OK` (the answer of the C++'s failure path without WinRT objects, `available == 0`;
+  the failure value of `guard_handle` in `query_live`), and `GWIN_ERR_INVALID_ARG` for a panic anywhere else in the
+  call; `glass_prefs_create` NULL; `glass_prefs_update` and `glass_prefs_setting_changed` 0, so the message goes to
+  `DefWindowProc` as when no table is installed; both delegate bodies `S_OK`. The handle embeds a `Poison`; functions
+  without a handle use `guard`. The query answer for a poisoned handle is that of the code review of 2026-11-27; in
+  `7c38bdc73a` it was `GWIN_ERR_INVALID_ARG`.
 - **State.** The kept word `s_deferredTypes` is one atomic with the C's three operations (OR, acquire load,
   exchange). The callback slot and its user pointer, which the C read and wrote without a lock by design, are atomics,
   each loaded once per call as the C loaded the slot once. Orderings: the `RoInitialize` flag Relaxed, the slot and
@@ -310,8 +329,8 @@ macro.
 - **Ownership and order in `GlassApplication`.** `m_platformSupport` stays a member at the same position, so creation
   still happens in the constructor's member initialisation and destruction after `~GlassApplication`'s body and before
   `~BaseWnd`. Which handle is live stays a C++ rule. Create answers a handle whenever no panic occurred, also when
-  `RoInitialize` or an activation failed, since `glass_prefs_update` and `glass_prefs_setting_changed` need no WinRT
-  object.
+  `RoInitialize` or an activation failed. `glass_prefs_update` and `glass_prefs_setting_changed` need no WinRT object
+  and, since the code review of 2026-11-27, take no handle.
 - **Tests.** The dispatch trace is permanent, always on and machine-independent, its expected values in the test
   source. The query golden is opt-in, a test resource with the capture commit in its name and `machine.*` keys,
   compared only on the same machine (story risk 3). The tests written first were proven against the C++ by temporary
@@ -360,7 +379,16 @@ Each was argued; none is silent.
    its four stderr texts (`GetProcAddress: %s not loaded`, `WinRT: Failed to fetch system directory`, `WinRT: Failed
    to form path to combase.dll` and the module-not-found message) are gone, so glass.dll no longer loads where these
    DLLs are missing. JDK 27 runs on Windows 10 and later, where both exist. Nothing was removed from the dependents,
-   and the delay-load list is unchanged.
+   and the delay-load list is unchanged. The code review of `7c38bdc73a` (F3) raised the two WinRT entries and changed
+   nothing: `dumpbin /DEPENDENTS` of the baseline gate's release glass.dll (the C++ of `5a709c189d`) lists
+   `ole32.dll` among its load-time dependencies, and on this Windows 10 `dumpbin /DEPENDENTS` of
+   `C:\Windows\System32\ole32.dll` lists `combase.dll` among ole32.dll's dependencies and
+   `api-ms-win-core-winrt-l1-1-0.dll` among its delay-load dependencies.
+   On this Windows 10 (10.0.19045), loading `api-ms-win-core-winrt-l1-1-0.dll` and loading `combase.dll` return the
+   same module handle (`NativeLibrary.Load` in PowerShell 7, 2026-11-27), and the four functions glass.dll imports
+   from the API set, `RoInitialize`, `RoUninitialize`, `RoActivateInstance` and `RoGetActivationFactory`, are found
+   through that handle. Here the API set is therefore `combase.dll`, which the C++ glass.dll already had in its
+   process through `ole32.dll`.
 3. **Existing C++ imports bind elsewhere:** `CoTaskMemAlloc` and `CoTaskMemFree` now bind to `combase.dll` instead of
    `ole32.dll`; the five `OLEAUT32.dll` ordinal imports (#2, #4, #6, #7, #150) are named imports from `oleaut32.dll`;
    14 `KERNEL32.dll` functions moved to the lower-case `kernel32.dll` descriptor. `GetSystemDirectoryW`,
@@ -384,14 +412,17 @@ Each was argued; none is silent.
    the C++ `gwin_app_create`'s `catch (...)` (`glass_win_api.cpp:554`; `:557` in the tree) turned a `bad_alloc`
    into a NULL toolkit.
 10. **Differences on paths that only a Rust bug or a COM contract violation reaches:** a query on a poisoned handle
-    answers `GWIN_ERR_INVALID_ARG` and writes nothing, and every later notification of that toolkit is dropped;
-    `glass_prefs_update` and `glass_prefs_setting_changed` check the poison, then run the upcall under `guard`
-    holding no reference to the handle (a listener that calls `Platform.exit()` can destroy it inside the upcall), so
-    a panic there poisons nothing; `glass_prefs_destroy` leaves a poisoned handle alone (no remove, release or
-    `RoUninitialize`: it leaks); a panic inside create runs `Drop` on the partly built object before create answers
-    NULL; a failed `QueryInterface` or `GetConnectionCost` that still writes a pointer leaks it, where the C++'s
-    `ComPtr` released it; `gwin_test_prefs_invoke` calls the crate's `Invoke`, which would call `GetErrorInfo` on a
-    failure `HRESULT` (unreachable).
+    writes a zeroed struct and answers `GWIN_OK`, as a toolkit without WinRT objects does (in `7c38bdc73a` it answered
+    `GWIN_ERR_INVALID_ARG` and wrote nothing, on which Java's `requireOk` throws, `WinPreferenceCalls.java:385` and
+    `:394`, and every later notification of that toolkit was dropped); `glass_prefs_update` and
+    `glass_prefs_setting_changed` read no handle and deliver whatever the state of the handle, under `guard`, so a
+    panic there poisons nothing (a listener that calls `Platform.exit()` can destroy the handle inside the upcall);
+    `glass_prefs_run_deferred` delivers when the live handle is not NULL, poisoned or not, and drops the taken types
+    when it is NULL; `glass_prefs_destroy` leaves a poisoned handle alone (no remove, release or `RoUninitialize`: it
+    leaks, and `RO_INITIALIZED` stays set: US-133); a panic inside create runs `Drop` on the partly built object
+    before create answers NULL; a failed `QueryInterface` or `GetConnectionCost` that still writes a pointer leaks it,
+    where the C++'s `ComPtr` released it; `gwin_test_prefs_invoke` calls the crate's `Invoke`, which would call
+    `GetErrorInfo` on a failure `HRESULT` (unreachable).
 
 ### Defects of the deleted C++ and what the port does
 | # | Site at `5a709c189d` | Defect | The port | Where behaviour now differs |
@@ -417,7 +448,7 @@ For someone who builds the fork:
   "rustup toolchain install" in <repo>. glass has no C implementation of its slice GLASS_WIN_PREFERENCES to fall back
   to (C_DELETED), so the toolchain is required.` (the helper's text). `-DJFX_RUST=false` fails configure for it
   (deviation 8). Linux and macOS builds of javafx.graphics register no slice and need no Rust tool.
-- On Windows the graphics `test` phase runs `cargo test` (glass-win 32 tests without features and 32 with
+- On Windows the graphics `test` phase runs `cargo test` (glass-win 35 tests without features and 35 with
   `test-hooks`, jfx-rust-support 9, 2, 1, 1), and `verify` runs fmt, clippy `-D warnings` and the ABI check for both
   feature sets and the licence check (`check-crate-licences: OK, 13 linked crate(s), 6 build-time crate(s)`).
 - Every cargo call of the build takes the third-party crates from `buildtools/rust/vendor/`. A cargo run by hand
@@ -427,8 +458,8 @@ For someone who builds the fork:
 
 For someone who ships the libraries:
 - Both builds of glass.dll export the same names (97 release, 123 test). Release glass.dll grows from 241,664 to
-  350,208 bytes, the test build from 262,144 to 371,200. The dependents are deviation 2. The javafx.graphics jar and
-  the SDK carry `rust-std.md` and `rust-crates.md`.
+  345,600 bytes, the test build from 262,144 to 366,592 (350,208 and 371,200 in `7c38bdc73a`). The dependents are
+  deviation 2. The javafx.graphics jar and the SDK carry `rust-std.md` and `rust-crates.md`.
 
 For someone who runs JavaFX on Windows:
 - The preference values and their delivery are unchanged on the captured scenarios: the query structs equal the
@@ -452,7 +483,19 @@ For someone who runs JavaFX on Windows:
 | `WinPreferenceToolkitLifecycleTest` | 6 | The toolkit thread already in an STA (`RoInitialize` answers `S_FALSE`, the SWT-embedded path): nothing on stderr, both sinks registered and delivering 4 and 8 on the toolkit thread, events 1 to 6, live queries carry values, the thread stays in its STA after the toolkit's `RoUninitialize` and `OleUninitialize`. A second toolkit in one process, on a new thread and on the same thread after its loop returned: WinRT is initialised again, its own registrations deliver (the first toolkit's kept delegates are dropped first), its queries carry values, events 1 to 6 each |
 | `WinPreferenceQueryGoldenTest` | 1, skipped by default | With `-Dwin.glass.prefsGolden=verify` (or `capture`): both query structs and their statuses byte for byte against `win-prefs-query-golden-5a709c189d.txt` (39 lines, sha256 `bf29c9f0...`), captured from the C++ on Windows 10.0.19045.6466 (light theme, accent `0xff0078d7`, network unrestricted) and compared only where its `machine.*` keys match |
 
-Helpers: `WinSteppedToolkit` (136 lines; one toolkit at a time) and `WinAppCreateStandardError` (205 lines).
+Helpers: `WinSteppedToolkit` (134 lines; one toolkit at a time) and `WinAppCreateStandardError` (204 lines); 136 and
+205 in `7c38bdc73a`.
+
+**Crate unit tests** (`glass-win`, run by `jfx_rust_test` in the graphics `test` phase): 35 in each feature set (24 in
+`prefs.rs`, 11 in `ffi.rs`); 32 in `7c38bdc73a`. The code review of 2026-11-27 added
+`ffi::tests::a_collect_that_panics_answers_none_and_poisons_the_live_handle`,
+`ffi::tests::a_query_on_a_poisoned_live_handle_writes_zeros_and_answers_ok` and
+`prefs::tests::run_deferred_delivers_also_when_a_panic_poisoned_the_live_handle`, and rewrote
+`the_seam_answers_0_for_a_null_handle_and_destroy_ignores_it` as
+`the_seam_delivers_without_any_handle_and_destroy_ignores_null`; `set_callbacks_...` and `setting_changed_...` call the
+new signatures. A test that installs the process-wide callback table holds `doubles::lock_table()`, a `TableLock`
+whose `Drop` clears the table with the lock still held (`gwin_prefs_set_callbacks(NULL, NULL)`, status ignored, no
+assertion), so a failing test leaves no table installed for the next one.
 
 **Proven against the C++ of `5a709c189d`** (Windows 10.0.19045.6466). The dispatch trace (then 8 tests), the
 activation-failure test and the golden were written and passed on the unchanged tree before any native change: 13
@@ -484,12 +527,13 @@ byte-identical.
   closure leaves the JVM running, gives the failure value and writes one `jfx-rust: panic at` line each; sink bits, the
   C++ `& GWIN_PT_ALL`, the teardown order and an added newline each fail a test. The Rust `& 15` in `KeptTypes::take`
   is caught only by the crate's unit tests.
-- A temporary panic in `Preferences::create` after both activations: `gwin_app_create` still answers a toolkit
-  window, the unwind runs the full teardown (events 1 to 6), the handle is NULL, so the queries answer 0 and zeros and
-  no message or sink reaches `preferences_changed`; the child exits 0 with one panic line and no `hs_err`. At the top
-  of `collect_ui_settings`: that query and every later one on the handle, network too, answer -1 and write nothing;
-  after teardown 0 and zeros; nothing is delivered through `glass_prefs_update`; teardown logs no event and the
-  thread stays in its STA; both children exit 0 with one panic line each.
+- In `7c38bdc73a`, superseded by P1 and P2 of the code review below: a temporary panic in `Preferences::create`
+  after both activations: `gwin_app_create` still answers a toolkit window, the unwind runs the full teardown (events
+  1 to 6), the handle is NULL, so the queries answer 0 and zeros and no message or sink reaches
+  `preferences_changed`; the child exits 0 with one panic line and no `hs_err`. At the top of `collect_ui_settings`:
+  that query and every later one on the handle, network too, answer -1 and write nothing; after teardown 0 and zeros;
+  nothing is delivered through `glass_prefs_update`; teardown logs no event and the thread stays in its STA; both
+  children exit 0 with one panic line each.
 - The fallback texts: a C++ harness printing `_com_error(hr).ErrorMessage()` (MSVC 14.44, `/DUNICODE /D_UNICODE`) and
   the Rust pipeline agree code unit for code unit for 0x80040201, 0x8004FFFF, 0x80040200, 0x80050000, 0x00040201,
   0x80010106, 0x80042000, 0x8004F000, 0x8004FE00 and 0x80040203.
@@ -591,7 +635,25 @@ The first test run there failed `roInitializeFailingWritesItsSystemMessageToStan
 (5 / 1 / 0 / 0): a Debug glass.dll writes `GlassApplication: created.` after the `RoInitialize` line (`STRACE` at
 `GlassApplication.cpp:233`, which `OleUtils.h:47-48` sends to stderr only with `DEBUG` or `_DEBUG`; the same line at
 `5a709c189d`). The test now expects it by build kind; a clean Debug build then gave 5 / 0 / 0 / 0, 9 / 0 / 0 / 0 and
-6 / 0 / 0 / 0, and Release was restored (350,208 / 371,200 bytes, 97 / 123 exports).
+6 / 0 / 0 / 0, and Release was restored (350,208 / 371,200 bytes, 97 / 123 exports). The Debug build was made in the
+rework round, before the fix round, and the WSL runs above on the tree committed as `7c38bdc73a`; neither was
+repeated after the code review of 2026-11-27.
+
+**Gate after the code review of 2026-11-27**, Windows 10 only, alone on the machine after the last code change and
+after the confirming review, the same command as the final gate: exit 0, 594 s wall. Totals identical to the final
+gate's (jslc 437 / 0 / 0 / 3, base 5510 / 0 / 0 / 22, graphics 26898 / 0 / 0 / 906, media 41 / 0 / 0 / 2), and the
+four per-class tables (36, 290, 644 and 9 classes) `cmp`-identical to its. The preference classes:
+`WinPreferencesNativeTest` 28 / 0 / 0 / 0, `WinPreferenceSinksNativeTest` 10 / 0 / 0 / 1,
+`WinGlassNativeTest` 27 / 0 / 0 / 0, `WinPreferenceDispatchTraceTest` 9 / 0 / 0 / 0,
+`WinPreferenceActivationFailureTest` 5 / 0 / 0 / 0, `WinPreferenceToolkitLifecycleTest` 6 / 0 / 0 / 0,
+`WinPreferenceQueryGoldenTest` 1 / 0 / 0 / 1. glass-win `cargo test` 35 passed in each feature set, jfx-rust-support
+9, 2, 1, 1; the lint's 15 and 20 symbols as above;
+`check-crate-licences: OK, 13 linked crate(s), 6 build-time crate(s)`; no `[ERROR]` line. Release glass.dll 97 and
+test build 123 exports, both sorted lists `cmp`-identical to the final gate's; 345,600 and 366,592 bytes. The md5
+lists of the 68 classes of `com/sun/glass/ui/win` and of the 532 generated sources `cmp`-identical. The golden in
+verify mode afterwards: 1 / 0 / 0 / 0. No `hs_err_pid*` in the four module directories. The checked-out commit
+(`7c38bdc73a`) and the sha256 of the 12 modified files the same before and after. Logs, outside the repository: the
+session scratch directory `cr029\gate\` (`gate.log`, `golden-verify.log`, `totals.txt`, `per-class-*.tsv`).
 
 ### Reviews and analysis
 - **Three independent reviews** of the port as first gated:
@@ -642,6 +704,98 @@ The first test run there failed `roInitializeFailingWritesItsSystemMessageToStan
   slice decides the remedy (no tree mixes a slice with its C and a `C_DELETED` one today); the optional comment on
   poisoning.
 
+### Code review of 7c38bdc73a (2026-11-27)
+A code review of the commit reported five findings on the crate and its tests. Each was decided as below; the fixes
+are uncommitted on `7c38bdc73a`.
+
+- **F1**, after a caught panic the toolkit stops delivering every preference change: fixed (D1, below). The C++
+  delivered without its object's state: `PlatformSupport::updatePreferences` and `onSettingChanged` were `const`
+  members that read only the static callback table, and `RunDeferredPreferences` counted, then delivered whenever a
+  `PlatformSupport` existed (`PlatformSupport.cpp:277-326` at `5a709c189d`). In `7c38bdc73a` a NULL or poisoned
+  handle made `glass_prefs_update`, `glass_prefs_setting_changed` and `run_deferred` deliver nothing.
+- **F2**, `RoUninitialize` follows the process-wide `RO_INITIALIZED` flag, not the handle that initialised: no change
+  here, filed as US-133. The flag is the C++'s (`RoActivationSupport.cpp:42` at `5a709c189d`) and the port reproduces
+  it (`jfx-rust-port` §2.9, §6 "port and fix").
+- **F3**, glass.dll needs `combase.dll` and `api-ms-win-core-winrt-l1-1-0.dll` at load time: no change. It is
+  deviation 2, with the `ole32.dll` evidence and the API-set probe added there.
+- **F4**, a failing Rust unit test leaves the process-wide callback table installed for the next test that makes an
+  update: fixed (D4, below).
+- **F5**, new comments only restate the code: 14 deleted (4 Rust, 10 Java), 5 kept.
+  `WinGlassNativeShim.comApartment()`'s comment names the OS call, whose name differs from the method's; the
+  `void CoUninitialize(void)` comment on its binding stays because every binding of the shim carries its C prototype
+  (already at `5a709c189d`); the section dividers `ffi.rs:99` and `:146` are like the file's other three;
+  `glass_win_api.h:3140` is one cell of an enumerator column to which lines 3141 and 3142 refer back.
+
+**D1.** The delivery of preference types no longer depends on the handle, and a query on a poisoned handle answers
+what a toolkit without WinRT objects answers. Making delivery independent of the handle alone would not have been
+enough: Java's upcall `WinPreferenceCalls.onPreferencesChanged` runs `WinPreferences.update(types)`, whose
+`collect(types)` calls `gwin_prefs_query_ui_settings` and `gwin_prefs_query_network` for the `GWIN_PT_UI_SETTINGS`
+and `GWIN_PT_NETWORK_INFORMATION` bits through `requireOk`, which throws on the `GWIN_ERR_INVALID_ARG` a poisoned
+handle answered; every `types` value the window procedure sends except 2 carries one of those bits
+(`GlassApplication.cpp:276, 298, 322`). **D4.** `doubles::lock_table()` answers a `TableLock` (under "Tests").
+
+**What changed, by file** (12 modified, nothing new or deleted; `git diff --stat`: 133 insertions, 96 deletions):
+- `glass_win_prefs.h`: `glass_prefs_update` and `glass_prefs_setting_changed` without their `void* handle`; the file
+  comment and the comments of those two and of `glass_prefs_run_deferred` follow the code.
+- `GlassApplication.cpp:276, 298, 322`: the three calls drop `m_platformSupport.Get(), `.
+- `glass_win_api.h:623-626`: the query contract, comment lines only; `GLASS_WIN_ABI_VERSION` 7.
+- `ffi.rs`: `query_live` answers `T` with `none` as the failure value of `guard_handle`, so both queries write zeros
+  and answer `GWIN_OK` for a poisoned live handle; `out == NULL` and the outer guard still answer
+  `GWIN_ERR_INVALID_ARG`. `glass_prefs_update` and `glass_prefs_setting_changed` call `prefs::update_preferences` in
+  `guard(0, ...)`; `update_on` is deleted, `usable` stays for `glass_prefs_destroy`. The test doubles gain `TableLock`
+  and `poisoned()`; two tests added, three rewritten; two comments deleted.
+- `prefs.rs`: `run_deferred` counts `GWIN_TEST_COUNTER_PREFS_DEFERRED_RUN` and calls `update_preferences(types)` when
+  the live handle is not NULL, poisoned or not, as `RunDeferredPreferences` did; one test added; one comment deleted.
+- `sys.rs`: one comment deleted.
+- `WinGlassNativeShim.java` (2), `WinAppCreateStandardError.java` (1), `WinPreferenceActivationFailureTest.java` (2),
+  `WinPreferenceDispatchTraceTest.java` (2), `WinPreferenceToolkitLifecycleTest.java` (1), `WinSteppedToolkit.java`
+  (2): one-line Javadoc comments deleted, nothing added.
+- Unchanged: every export's name and prototype, the slice lists of `win.cmake` (the lint still names 15 and 20
+  symbols), `RO_INITIALIZED`, the sinks, the kept word, `glass_prefs_create`, `glass_prefs_destroy`; 40 `unsafe`
+  blocks (21 in `ffi.rs`, 19 in `sys.rs`), each with its `// SAFETY:` comment.
+
+**Proofs.** Every mutant and temporary panic was reverted, with the sha256 lists of the changed files the same before
+and after.
+- The implementer's: **M1** (`query_live` back to `Option<T>` with `let Some(..) else` in the exports): 33 passed, 2
+  failed, `a_query_on_a_poisoned_live_handle_writes_zeros_and_answers_ok` with "left: -1 right: 0"; after the collect
+  test was changed to compare the answer directly, the mutant no longer builds the test crate
+  (`error[E0308]: mismatched types` at `ffi.rs:672:79` and `ffi.rs:679:17`). **M2** (`run_deferred` skips a
+  poisoned live handle): `run_deferred_delivers_also_when_a_panic_poisoned_the_live_handle` fails,
+  "left: [LiveHandle, Count(11)] right: [LiveHandle, Count(11), Changed(4)]". **M3** (`--test-threads=1`, a temporary
+  failing assertion in `set_callbacks_...`): with `TableLock` only that test fails; with its clearing `Drop` removed
+  `update_calls_the_installed_slot_once_and_answers_whether_it_reported_a_change` fails too, at `prefs.rs:858`,
+  "left: [Changed(4)] right: []". **M4** (`void* handle` back in the header's `glass_prefs_update` only): the lint
+  fails in both feature sets,
+  `error C2733: 'glass_prefs_update': you cannot overload a function with 'extern "C"' linkage`.
+- End to end, a temporary `panic!` in the test build of glass.dll, `WinPreferenceDispatchTraceTest`: **P1**, at the
+  top of `Preferences::collect_ui_settings`: 9 tests, 3 failures, each the poisoning's expected effect (the live query
+  carries zeros, "GwinUiSettings.available is 0, not 1, ..."; no teardown event, as the poisoned handle is left alone;
+  the apartment after the loop, as `RoUninitialize` never ran). In the child both live queries answer status 0 with
+  every byte zero, the four sink deliveries, which the implementer places after the poisoning query, reach
+  `preferences_changed` on the toolkit thread (`sink.*.delivered=true`, `thread=toolkit`), stderr holds exactly one
+  `jfx-rust: panic at ...prefs.rs:180:9: P1: ...` line, and the child exits 0 without `hs_err`. **P2**, in
+  `Preferences::create` after both activations: 9 tests, 2 failures (the live query carries zeros;
+  `apartment.afterCreate` is `CO_E_NOTINITIALIZED`, as the unwind ran the teardown); every preference message reaches
+  `preferences_changed` with a NULL handle, the sink and teardown tests pass (events 1 to 6), the queries answer
+  status 0 with zeros, one panic line per child, exit 0, no `hs_err`.
+- The confirming review's, each killed: **R1** and **R2** (a query answers `GWIN_ERR_INVALID_ARG` on a poisoned live
+  handle) at `ffi.rs:686` and `:689`, "left: -1 right: 0"; **R3** (`glass_prefs_update` answers 0 for a poisoned
+  live handle) at `ffi.rs:703` and `:723`; **R4** (the same in `glass_prefs_setting_changed`) at `:703` and `:737`;
+  **R5** (`query_live` with `guard` instead of `guard_handle`, so nothing is poisoned) at `ffi.rs:670`; **R6**
+  (`run_deferred` neither counts nor delivers for a poisoned handle) at `prefs.rs:815`; **R7** (`TableLock::drop`
+  clears only when the thread is not panicking, `--test-threads=1`) survived with its injected failure in
+  `ffi::tests::the_seam_...`, because later tests overwrite and clear the table first, and **R7b**, the same mutant
+  with the injection at `prefs.rs:795`, was killed at `prefs.rs:858`, "left: [Changed(4)] right: []"; with `TableLock`
+  intact the same injection fails only the injected test. Negative control: the panicking `collect` of
+  `a_collect_that_panics_answers_none_and_poisons_the_live_handle` replaced by a plain one fails it at `ffi.rs:668`.
+- **Review verdict:** pass, no must-fix and no optional finding; 35 / 35 in both feature sets after the last restore,
+  fmt and clippy `-D warnings` clean in both, exports 97 / 123 `cmp`-identical to the final gate's.
+- **Gate:** "Gate after the code review of 2026-11-27" under "Gates".
+
+Logs, outside the repository, in the session scratch directory `cr029\`: `porter\` (M1 to M4, P1, P2), `review\`
+(R1 to R7b, the negative control, `ole32-dependents.txt`, `glass-dependents.txt`), `gate\`; the baseline glass.dll's
+dependents are in the scratch directory of the port's own gates, `us029\baseline\glass-release-dependents.txt`.
+
 ### Not verified, not done
 - **macOS:** nothing built or run. The helper's Darwin code changed for the new keywords (the ld64 origin check loops
   over `EXPORTS` and `INTERNAL`, `jfx_rust.cmake:592`; the `macos-<version>` directory below a feature set's cargo
@@ -658,9 +812,15 @@ The first test run there failed `roInitializeFailingWritesItsSystemMessageToStan
   answers 0 for these messages); `WM_THEMECHANGED` after a poisoning query was not sent.
 - **A Debug build of the C++** was not run; the Debug stderr rule is proven on the port's Debug build only.
 - **`mvn install`:** not run; every gate ran `verify`.
+- **The code review of 2026-11-27 ran on Windows only:** no WSL run (the changed production code is Windows-only: the
+  `glass-win` crate is `#![cfg(windows)]` and the C++ is glass win; the Java changes are ten deleted comment lines),
+  and no Debug build. Nobody ran a robot or `tests/system` test in that round; the owner's commands below name no
+  symbol the round changed.
 
 ### Follow-up
 - **US-132** (filed): the seven mutants above that no test caught, at sites the port touched but US-039 designed.
+- **US-133** (filed 2026-11-27, finding F2 of the code review): every successful `RoInitialize` of a toolkit thread
+  balanced by exactly one `RoUninitialize` on that thread, by the handle that made it; inherited from the C++.
 - **Upstream, not filed:** defects 1 to 5 are in upstream's code too: at openjdk/jfx `ca9b07aeae` (8390652, the newest
   upstream commit in this history) `RoActivationSupport.cpp` is as `76d5e1ae1c` (8343398) left it and
   `PlatformSupport.cpp` as `436f3ffe3d` (8365763) left it, with the same lines; defects 1 to 4 date from 8301302
@@ -673,8 +833,9 @@ The first test run there failed `roInitializeFailingWritesItsSystemMessageToStan
   "PlatformSupport's") and `WinPreferencesParityTest.java:63` (history) in `tests/system`.
 
 ### Left for the owner
-- **One commit** of the change with this write-up (the 34 entries of `git status --short` plus the backlog files and
-  `README.md`), and the PR.
+- **The commit** of the code review's fixes (the 12 modified files of `git status --short`) with this write-up's
+  backlog changes (this story, `backlog/README.md`, US-030, US-031, US-052 and the new US-133), and the PR. The port
+  itself is committed as `7c38bdc73a`.
 - **A green `submit.yml` run** in all jobs, macOS included: the helper's Darwin code changed and could not be built
   here. To look at: the Windows job builds glass.dll from the vendored crates offline and runs the graphics Rust test
   and lint; the Linux jobs' media lint and `cargo metadata` pass through the source replacement; the jfxmedia export
@@ -693,7 +854,7 @@ The first test run there failed `roInitializeFailingWritesItsSystemMessageToStan
   ```
   mvn -B -ntp -pl buildtools/jslc,modules/javafx.base,modules/javafx.graphics test -Dtest=WinPreferenceQueryGoldenTest -Dsurefire.failIfNoSpecifiedTests=false -Dwin.glass.prefsGolden=verify
   ```
-- **The deviations** 1 to 10 above, accepted or rejected.
+- **The deviations** 1 to 10 above, accepted or rejected; deviation 10 changed with the code review of 2026-11-27.
 - **The stale test comments** above, in a later change; and filing the upstream issue for defects 1 to 5 from the
   draft handed to the owner.
 - **Clean-up outside the repository:** the WSL clones `~/us029-a2` and `~/us029-final` (1.3 GB each); the std
@@ -705,9 +866,10 @@ The first test run there failed `roInitializeFailingWritesItsSystemMessageToStan
 
 ### Definition of Done
 - Merged PR: open, for the owner.
-- Verified on Windows, the module suite: yes (final gate); the `tests/system` Windows preference tests: open, for the
-  owner.
+- Verified on Windows, the module suite: yes (final gate, and the gate after the code review of 2026-11-27); the
+  `tests/system` Windows preference tests: open, for the owner.
 - The C is deleted: yes.
-- The WSL Linux build still configures: yes, on the final tree, and javafx.media builds and passes there.
+- The WSL Linux build still configures: yes, on the tree of `7c38bdc73a`, and javafx.media builds and passes there;
+  not repeated after the code review, whose changes are Windows-only.
 - `backlog/README.md` is updated: yes (this row, the "Rust port" table, "Order", the rows of US-030 and US-031, and
-  US-132's row).
+  US-132's row; after the code review the rows of US-029, US-030 and US-133, the "Rust port" table and "Order").

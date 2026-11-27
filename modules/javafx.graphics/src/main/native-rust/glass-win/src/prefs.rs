@@ -27,9 +27,9 @@
 //! in the same order, with the same tolerated failures and partial states.
 //!
 //! The toolkit core owns one [`Preferences`] per `GlassApplication` (`glass_prefs_create` in its member
-//! initialisation, `glass_prefs_destroy` in its destructor) and passes it to [`update_preferences`] and
-//! [`setting_changed_types`] from its window procedure. The two sinks only post their `GWIN_PT_*` bits to the
-//! toolkit window; `preferences_changed` runs on the toolkit thread only.
+//! initialisation, `glass_prefs_destroy` in its destructor); its window procedure hands preference types to
+//! [`update_preferences`] and [`setting_changed_types`], which read no handle. The two sinks only post their
+//! `GWIN_PT_*` bits to the toolkit window; `preferences_changed` runs on the toolkit thread only.
 
 use core::sync::atomic::{AtomicBool, AtomicI32, Ordering};
 
@@ -283,7 +283,6 @@ fn on_sink_invoked(which: i32, types: i32) {
 /// until a toolkit pump takes them: `s_deferredTypes` of `5a709c189d`.
 pub(crate) struct KeptTypes(AtomicI32);
 
-/// The one kept word of the process.
 pub(crate) static KEPT_TYPES: KeptTypes = KeptTypes::new();
 
 // The orderings are those of the C's Interlocked functions (full barriers, SeqCst here) and ReadAcquire (Acquire):
@@ -330,7 +329,7 @@ pub(crate) fn post_preferences_changed(kept: &KeptTypes, types: i32) {
 }
 
 /// `RunDeferredPreferences`: when anything is kept, take it, and when the masked types are not 0 and a live handle
-/// exists, deliver them to the toolkit's handle as the `WM_PREFERENCES_CHANGED` arm does. The answer is not used.
+/// exists, poisoned or not, deliver them as the `WM_PREFERENCES_CHANGED` arm does. The answer is not used.
 pub(crate) fn run_deferred(kept: &KeptTypes) {
     let Some(types) = kept.take() else {
         return;
@@ -338,7 +337,7 @@ pub(crate) fn run_deferred(kept: &KeptTypes) {
     let live = ffi::live_handle();
     if types != 0 && !live.is_null() {
         ffi::test_count(GWIN_TEST_COUNTER_PREFS_DEFERRED_RUN);
-        ffi::update_on(live, types);
+        update_preferences(types);
     }
 }
 
@@ -795,13 +794,30 @@ mod tests {
         let kept = KeptTypes::new();
         kept.keep(GWIN_PT_UI_SETTINGS | GWIN_PT_NETWORK_INFORMATION | 0x40);
         doubles::with_live_handle(Preferences::without_winrt(), || run_deferred(&kept));
-        doubles::clear_table();
         assert_eq!(
             doubles::take_calls(),
             expect(vec![
                 Call::LiveHandle,
                 Call::Count(GWIN_TEST_COUNTER_PREFS_DEFERRED_RUN),
                 Call::Changed(12)
+            ])
+        );
+        assert_eq!(kept.take(), None);
+    }
+
+    #[test]
+    fn run_deferred_delivers_also_when_a_panic_poisoned_the_live_handle() {
+        let _table = doubles::lock_table();
+        doubles::install_recording_table();
+        let kept = KeptTypes::new();
+        kept.keep(GWIN_PT_UI_SETTINGS);
+        doubles::with_live_handle(doubles::poisoned(Preferences::without_winrt()), || run_deferred(&kept));
+        assert_eq!(
+            doubles::take_calls(),
+            expect(vec![
+                Call::LiveHandle,
+                Call::Count(GWIN_TEST_COUNTER_PREFS_DEFERRED_RUN),
+                Call::Changed(GWIN_PT_UI_SETTINGS)
             ])
         );
         assert_eq!(kept.take(), None);

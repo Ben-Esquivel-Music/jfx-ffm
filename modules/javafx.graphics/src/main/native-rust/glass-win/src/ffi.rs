@@ -146,18 +146,16 @@ pub(crate) fn preferences_changed(types: i32) -> bool {
 // ---- the queries ----
 
 /// `int32_t gwin_prefs_query_ui_settings(GwinUiSettings* out)`: `GWIN_ERR_INVALID_ARG` for a NULL `out`; without a
-/// live toolkit every byte zero and `GWIN_OK`; otherwise every byte the live handle's answer and `GWIN_OK`.
-/// `GWIN_ERR_INVALID_ARG` with nothing written after a caught panic, in this call or in an earlier query that poisoned
-/// the live handle.
+/// live toolkit, and for a live handle a panic poisoned, every byte zero and `GWIN_OK`, the C's answer without WinRT
+/// objects; otherwise every byte the live handle's answer and `GWIN_OK`. `GWIN_ERR_INVALID_ARG` with nothing written
+/// after a panic caught outside the read of the live handle.
 #[unsafe(no_mangle)]
 pub extern "C" fn gwin_prefs_query_ui_settings(out: *mut GwinUiSettings) -> i32 {
     guard(GWIN_ERR_INVALID_ARG, || {
         if out.is_null() {
             return GWIN_ERR_INVALID_ARG;
         }
-        let Some(settings) = query_live(GwinUiSettings::default(), Preferences::collect_ui_settings) else {
-            return GWIN_ERR_INVALID_ARG;
-        };
+        let settings = query_live(GwinUiSettings::default(), Preferences::collect_ui_settings);
         // SAFETY: out is not NULL, and glass_win_api.h makes it a GwinUiSettings the caller owns for this call; the
         // write covers all 60 bytes (no padding) at any alignment, and the pointer is not kept.
         unsafe { out.write_unaligned(settings) };
@@ -172,25 +170,23 @@ pub extern "C" fn gwin_prefs_query_network(out: *mut GwinNetworkInfo) -> i32 {
         if out.is_null() {
             return GWIN_ERR_INVALID_ARG;
         }
-        let Some(info) = query_live(GwinNetworkInfo::default(), Preferences::collect_network_info) else {
-            return GWIN_ERR_INVALID_ARG;
-        };
+        let info = query_live(GwinNetworkInfo::default(), Preferences::collect_network_info);
         // SAFETY: as in gwin_prefs_query_ui_settings, for the 8 bytes of a GwinNetworkInfo.
         unsafe { out.write_unaligned(info) };
         GWIN_OK
     })
 }
 
-/// `collect` on the live handle; `none` without one; `None` when the handle is poisoned or `collect` panicked, which
+/// `collect` on the live handle; `none` without one, and when the handle is poisoned or `collect` panicked, which
 /// poisons it. The queries call no Java and run on the toolkit thread, so the handle outlives the call.
-fn query_live<T: Copy>(none: T, collect: impl FnOnce(&Preferences) -> T) -> Option<T> {
+fn query_live<T: Copy>(none: T, collect: impl FnOnce(&Preferences) -> T) -> T {
     let handle = live_handle();
     // SAFETY: a non-NULL live handle is the one glass_prefs_create answered for the GlassApplication that is the
     // toolkit's instance; only that instance's destructor destroys it, on the toolkit thread, which these exports run
     // on and which is inside this call.
     match unsafe { handle.cast::<Preferences>().as_ref() } {
-        None => Some(none),
-        Some(preferences) => guard_handle(&preferences.poison, None, || Some(collect(preferences))),
+        None => none,
+        Some(preferences) => guard_handle(&preferences.poison, none, || collect(preferences)),
     }
 }
 
@@ -217,21 +213,18 @@ pub extern "C" fn glass_prefs_destroy(handle: *mut c_void) {
     })
 }
 
-/// `int32_t glass_prefs_update(void* handle, int32_t types)`: `updatePreferences`, 0 for a NULL or poisoned handle and
-/// after a caught panic, which poisons nothing ([`update_on`]).
+/// `int32_t glass_prefs_update(int32_t types)`: `updatePreferences`, which read only the callback table and so
+/// delivers whatever the state of the preferences handle; 0 after a caught panic, which poisons nothing.
 #[unsafe(no_mangle)]
-pub extern "C" fn glass_prefs_update(handle: *mut c_void, types: i32) -> i32 {
-    guard(0, || update_on(handle, types))
+pub extern "C" fn glass_prefs_update(types: i32) -> i32 {
+    guard(0, || prefs::update_preferences(types))
 }
 
-/// `int32_t glass_prefs_setting_changed(void* handle, uintptr_t wparam, intptr_t lparam)`: `onSettingChanged`, 0 for
-/// a NULL or poisoned handle and after a caught panic, which poisons nothing, as in [`glass_prefs_update`].
+/// `int32_t glass_prefs_setting_changed(uintptr_t wparam, intptr_t lparam)`: `onSettingChanged`, which, as
+/// [`glass_prefs_update`], reads no handle; 0 after a caught panic, which poisons nothing.
 #[unsafe(no_mangle)]
-pub extern "C" fn glass_prefs_setting_changed(handle: *mut c_void, wparam: usize, lparam: isize) -> i32 {
+pub extern "C" fn glass_prefs_setting_changed(wparam: usize, lparam: isize) -> i32 {
     guard(0, || {
-        if !usable(handle) {
-            return 0;
-        }
         let text = core::ptr::with_exposed_provenance::<u16>(lparam as usize);
         let types = prefs::setting_changed_types(wparam, lparam, |index| {
             // SAFETY: setting_changed_types calls this only for a non-zero lParam, which for WM_SETTINGCHANGE is a
@@ -257,16 +250,6 @@ pub extern "C" fn glass_prefs_run_deferred() {
 #[unsafe(no_mangle)]
 pub extern "C" fn glass_prefs_discard_deferred() {
     guard((), || KEPT_TYPES.discard())
-}
-
-/// `updatePreferences` on `handle`, 0 when it is NULL or poisoned. No reference to the handle is held across the
-/// upcall, which may end the toolkit and so destroy the handle (a listener calling Platform.exit()); a panic in the
-/// upcall therefore poisons nothing, and the update reads no state of the handle that a panic could leave behind.
-pub(crate) fn update_on(handle: *mut c_void, types: i32) -> i32 {
-    if !usable(handle) {
-        return 0;
-    }
-    prefs::update_preferences(types)
 }
 
 /// Whether `handle` is a handle of [`glass_prefs_create`] that no panic poisoned.
@@ -455,7 +438,6 @@ mod hooks {
         })
     }
 
-    /// The `HRESULT` behind the crate's `Result` of a delegate's `Invoke`.
     fn hresult(result: windows::core::Result<()>) -> i32 {
         match result {
             Ok(()) => 0,
@@ -474,6 +456,8 @@ pub(crate) mod doubles {
     use std::collections::VecDeque;
     use std::sync::{Mutex, MutexGuard};
 
+    use jfx_rust_support::guard_handle;
+
     use crate::GwinPrefsCallbacks;
     use crate::prefs::Preferences;
 
@@ -490,7 +474,6 @@ pub(crate) mod doubles {
     }
 
     impl Call {
-        /// A call of a probe of the test build.
         pub(crate) fn is_probe(&self) -> bool {
             matches!(self, Call::RecordDelegate(_) | Call::LogEvent(_) | Call::Count(_))
         }
@@ -527,8 +510,29 @@ pub(crate) mod doubles {
         CHANGED.with(|changed| changed.borrow_mut().extend(answers.iter().copied()));
     }
 
-    pub(crate) fn lock_table() -> MutexGuard<'static, ()> {
-        TABLE.lock().unwrap_or_else(|poisoned| poisoned.into_inner())
+    /// Clears the table when dropped, while it still holds the lock: a test that fails with a table installed would
+    /// otherwise leave it to the next test that makes an update.
+    pub(crate) struct TableLock {
+        _lock: MutexGuard<'static, ()>,
+    }
+
+    impl Drop for TableLock {
+        fn drop(&mut self) {
+            // No assertion: this may run while a failed assertion unwinds
+            super::gwin_prefs_set_callbacks(core::ptr::null(), null_mut());
+        }
+    }
+
+    pub(crate) fn lock_table() -> TableLock {
+        TableLock {
+            _lock: TABLE.lock().unwrap_or_else(|poisoned| poisoned.into_inner()),
+        }
+    }
+
+    /// `preferences` after a panic on it, which the guard caught: what a panic in a query leaves behind.
+    pub(crate) fn poisoned(preferences: Preferences) -> Preferences {
+        guard_handle(&preferences.poison, (), || panic!("a panic on the preferences handle"));
+        preferences
     }
 
     extern "C" fn recording_changed(user: *mut c_void, types: i32) -> i32 {
@@ -655,52 +659,81 @@ mod tests {
     }
 
     #[test]
-    fn the_seam_answers_0_for_a_null_handle_and_destroy_ignores_it() {
+    fn a_collect_that_panics_answers_none_and_poisons_the_live_handle() {
+        let none = GwinNetworkInfo {
+            available: 7,
+            cost_type: -7,
+        };
+        doubles::with_live_handle(Preferences::without_winrt(), || {
+            assert_eq!(query_live(none, |_| panic!("a collect that panics")), none);
+            let mut collected = false;
+            assert_eq!(
+                query_live(none, |_| {
+                    collected = true;
+                    GwinNetworkInfo::default()
+                }),
+                none
+            );
+            assert!(!collected, "a poisoned handle runs no collect");
+        });
+        assert_eq!(doubles::take_calls(), vec![Call::LiveHandle, Call::LiveHandle]);
+    }
+
+    #[test]
+    fn a_query_on_a_poisoned_live_handle_writes_zeros_and_answers_ok() {
+        doubles::with_live_handle(doubles::poisoned(Preferences::without_winrt()), || {
+            let mut ui = [0xA5u8; 60];
+            assert_eq!(gwin_prefs_query_ui_settings(ui.as_mut_ptr().cast()), GWIN_OK);
+            assert_eq!(ui, [0; 60]);
+            let mut network = [0xA5u8; 8];
+            assert_eq!(gwin_prefs_query_network(network.as_mut_ptr().cast()), GWIN_OK);
+            assert_eq!(network, [0; 8]);
+        });
+        assert_eq!(doubles::take_calls(), vec![Call::LiveHandle, Call::LiveHandle]);
+    }
+
+    #[test]
+    fn the_seam_delivers_without_any_handle_and_destroy_ignores_null() {
         let _table = doubles::lock_table();
         doubles::install_recording_table();
-        assert_eq!(glass_prefs_update(null_mut(), GWIN_PT_UI_SETTINGS), 0);
-        assert_eq!(glass_prefs_setting_changed(null_mut(), 0x0043, 0), 0);
+        doubles::script_changed(&[0, 1]);
+        assert_eq!(glass_prefs_update(GWIN_PT_UI_SETTINGS), 0);
+        assert_eq!(glass_prefs_setting_changed(0x0043, 0), 1);
         glass_prefs_destroy(null_mut());
-        doubles::clear_table();
-        assert_eq!(doubles::take_calls(), vec![]);
+        assert_eq!(
+            doubles::take_calls(),
+            vec![Call::Changed(GWIN_PT_UI_SETTINGS), Call::Changed(6)]
+        );
     }
 
     #[test]
     fn set_callbacks_copies_the_slot_by_value_and_a_null_table_or_slot_clears_it() {
         let _table = doubles::lock_table();
-        let handle = Box::into_raw(Box::new(Preferences::without_winrt())).cast::<c_void>();
         doubles::install_recording_table();
         doubles::script_changed(&[1]);
-        assert_eq!(glass_prefs_update(handle, GWIN_PT_ALL), 1);
+        assert_eq!(glass_prefs_update(GWIN_PT_ALL), 1);
         let empty = GwinPrefsCallbacks {
             preferences_changed: None,
         };
         assert_eq!(gwin_prefs_set_callbacks(&empty, 0x10 as *mut c_void), GWIN_OK);
-        assert_eq!(glass_prefs_update(handle, GWIN_PT_UI_SETTINGS), 0);
+        assert_eq!(glass_prefs_update(GWIN_PT_UI_SETTINGS), 0);
         doubles::install_recording_table();
         doubles::clear_table();
-        assert_eq!(glass_prefs_update(handle, GWIN_PT_UI_SETTINGS), 0);
-        glass_prefs_destroy(handle);
+        assert_eq!(glass_prefs_update(GWIN_PT_UI_SETTINGS), 0);
         assert_eq!(doubles::take_calls(), vec![Call::Changed(GWIN_PT_ALL)]);
     }
 
     #[test]
     fn setting_changed_reads_the_text_and_updates_with_its_types() {
         let _table = doubles::lock_table();
-        let handle = Box::into_raw(Box::new(Preferences::without_winrt())).cast::<c_void>();
         doubles::install_recording_table();
         doubles::script_changed(&[1, 0, 1]);
         let text: Vec<u16> = "ImmersiveColorSet\0".encode_utf16().collect();
         let other: Vec<u16> = "Policy\0".encode_utf16().collect();
-        assert_eq!(glass_prefs_setting_changed(handle, 0, text.as_ptr() as isize), 1);
-        assert_eq!(glass_prefs_setting_changed(handle, 0x1043, 0), 0);
-        assert_eq!(glass_prefs_setting_changed(handle, 0, other.as_ptr() as isize), 0);
-        assert_eq!(
-            glass_prefs_setting_changed(handle, 0x1_0000_0043, other.as_ptr() as isize),
-            1
-        );
-        doubles::clear_table();
-        glass_prefs_destroy(handle);
+        assert_eq!(glass_prefs_setting_changed(0, text.as_ptr() as isize), 1);
+        assert_eq!(glass_prefs_setting_changed(0x1043, 0), 0);
+        assert_eq!(glass_prefs_setting_changed(0, other.as_ptr() as isize), 0);
+        assert_eq!(glass_prefs_setting_changed(0x1_0000_0043, other.as_ptr() as isize), 1);
         assert_eq!(
             doubles::take_calls(),
             vec![Call::Changed(4), Call::Changed(2), Call::Changed(6)]

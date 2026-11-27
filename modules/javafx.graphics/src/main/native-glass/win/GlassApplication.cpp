@@ -273,7 +273,7 @@ LRESULT GlassApplication::WindowProc(UINT msg, WPARAM wParam, LPARAM lParam)
             }
             break;
         case WM_SETTINGCHANGE:
-            if (glass_prefs_setting_changed(m_platformSupport.Get(), (uintptr_t)wParam, (intptr_t)lParam) != 0) {
+            if (glass_prefs_setting_changed((uintptr_t)wParam, (intptr_t)lParam) != 0) {
                 return 0;
             }
 
@@ -295,7 +295,7 @@ LRESULT GlassApplication::WindowProc(UINT msg, WPARAM wParam, LPARAM lParam)
                     glass_prefs_run_deferred();
                     return 0;
                 }
-                if (glass_prefs_update(m_platformSupport.Get(), types) != 0) {
+                if (glass_prefs_update(types) != 0) {
                     return 0;
                 }
             }
@@ -319,7 +319,7 @@ LRESULT GlassApplication::WindowProc(UINT msg, WPARAM wParam, LPARAM lParam)
         case WM_THEMECHANGED:
         case WM_SYSCOLORCHANGE:
         case WM_DWMCOLORIZATIONCOLORCHANGED:
-            if (glass_prefs_update(m_platformSupport.Get(), GWIN_PT_SYSTEM_COLORS | GWIN_PT_UI_SETTINGS) != 0) {
+            if (glass_prefs_update(GWIN_PT_SYSTEM_COLORS | GWIN_PT_UI_SETTINGS) != 0) {
                 return 0;
             }
             break;

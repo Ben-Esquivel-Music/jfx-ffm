@@ -90,7 +90,6 @@ final class WinAppCreateStandardError {
                 + (debug ? "Debug" : "Release") + " build of glass.dll: " + run.describe());
     }
 
-    /** {@code first} followed by {@code second}. */
     static byte[] concat(byte[] first, byte[] second) {
         byte[] both = Arrays.copyOf(first, first.length + second.length);
         System.arraycopy(second, 0, both, first.length, second.length);

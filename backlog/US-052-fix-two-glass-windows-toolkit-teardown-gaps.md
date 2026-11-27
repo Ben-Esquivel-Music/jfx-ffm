@@ -22,8 +22,9 @@ part 2 is independent) ·
 **Blocks:** none. Part 1 should follow US-039 part 1 directly, because it ends a hang that part ships with, and the
 story should precede US-031 slice 3, which otherwise reproduces both gaps in Rust
 
-**Since US-029** (implemented 2026-11-26, uncommitted on `5a709c189d`): `PlatformSupport.cpp/.h` and
-`RoActivationSupport.cpp/.h` are deleted, and the references to them below are to the tree this story was read on.
+**Since US-029** (implemented 2026-11-26, committed as `7c38bdc73a`, its review fixes uncommitted):
+`PlatformSupport.cpp/.h` and `RoActivationSupport.cpp/.h` are deleted, and the references to them below are to the
+tree this story was read on.
 `PlatformSupport::DiscardDeferredPreferences()` and `RunDeferredPreferences()` are now `glass_prefs_discard_deferred()`
 and `glass_prefs_run_deferred()` of the glass-win crate, called from the same `GlassApplication.cpp` arms;
 `RoInitialize` and the WinRT activation run in `glass_prefs_create`, which `GlassApplication`'s constructor calls

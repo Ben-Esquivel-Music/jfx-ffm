@@ -620,10 +620,10 @@ GLASS_WIN_EXPORT int32_t gwin_prefs_set_callbacks(const GwinPrefsCallbacks* cb, 
  * out == NULL -> GWIN_ERR_INVALID_ARG, nothing written. Otherwise GWIN_OK; every failure the C
  * tolerated is reported through the struct's flags, not the return value, because the C tolerated it
  * by emitting fewer map keys and this ABI has to be able to say the same thing.
- * The one other answer is GWIN_ERR_INVALID_ARG with nothing written after a panic the crate caught (a
- * bug, never passed on to the caller): in this call, or in an earlier query on the live toolkit's
- * preferences handle, which that panic poisoned; every later query on that handle answers the same,
- * until the toolkit window is destroyed. Without a toolkit the answer stays a zeroed struct and GWIN_OK.
+ * A panic the crate caught (a bug, never passed on to the caller) while it read the live toolkit's
+ * preferences handle poisons that handle: that query and every later one on the handle answer as a
+ * toolkit without WinRT objects does, a zeroed struct and GWIN_OK, until the toolkit window is
+ * destroyed. A panic caught anywhere else in the call answers GWIN_ERR_INVALID_ARG with nothing written.
  *
  * available == 0 also covers "the Glass toolkit is not running": these read the WinRT objects the
  * live GlassApplication's preferences handle activated, and before Application.run() (or after the

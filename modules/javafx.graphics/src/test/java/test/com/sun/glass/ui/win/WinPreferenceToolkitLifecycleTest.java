@@ -74,7 +74,6 @@ public class WinPreferenceToolkitLifecycleTest {
 
     private static final long WAIT_MILLIS = 10_000;
 
-    /** {@code COINIT_APARTMENTTHREADED} of {@code objbase.h}. */
     private static final int COINIT_APARTMENTTHREADED = 0x2;
 
     /** The first single-threaded apartment of the process, as {@code CoGetApartmentType} reports it. */

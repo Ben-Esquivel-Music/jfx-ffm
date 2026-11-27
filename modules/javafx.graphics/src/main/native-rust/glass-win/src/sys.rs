@@ -47,7 +47,6 @@ use windows::Win32::System::WinRT::{
 };
 use windows::core::{HRESULT, IInspectable, Interface, h};
 
-/// The delegate type of `IUISettings5::AutoHideScrollBarsChanged`.
 pub(crate) type AutoHideHandler = TypedEventHandler<UISettings, UISettingsAutoHideScrollBarsChangedEventArgs>;
 
 // Neither function has a projection without a feature that brings a whole Win32 namespace; this is the declaration

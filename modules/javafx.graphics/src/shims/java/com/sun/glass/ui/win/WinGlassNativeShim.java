@@ -5643,7 +5643,6 @@ public final class WinGlassNativeShim {
         }
     }
 
-    /** {@code ole32!CoInitializeEx(NULL, coInit)} on the calling thread: its {@code HRESULT}. */
     public static int coInitializeEx(int coInit) {
         try {
             return (int) PreferenceProbes.CO_INITIALIZE_EX.invokeExact(MemorySegment.NULL, coInit);
@@ -5652,7 +5651,6 @@ public final class WinGlassNativeShim {
         }
     }
 
-    /** {@code ole32!CoUninitialize} on the calling thread. */
     public static void coUninitialize() {
         try {
             PreferenceProbes.CO_UNINITIALIZE.invokeExact();

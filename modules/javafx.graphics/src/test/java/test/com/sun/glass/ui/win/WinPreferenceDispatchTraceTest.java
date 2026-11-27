@@ -84,7 +84,6 @@ public class WinPreferenceDispatchTraceTest {
     /** What the recording table answers in each sweep: no change, then a change. */
     static final List<Integer> ANSWERS = List.of(0, 1);
 
-    /** {@code WM_*} of {@code winuser.h} and {@code dwmapi.h}. */
     static final int WM_SYSCOLORCHANGE = 0x0015;
     static final int WM_SETTINGCHANGE = 0x001A;
     static final int WM_THEMECHANGED = 0x031A;
@@ -93,7 +92,6 @@ public class WinPreferenceDispatchTraceTest {
     /** {@code WM_PREFERENCES_CHANGED} of {@code GlassApplication.h}: what the sinks post, {@code WM_USER + 4}. */
     static final int WM_PREFERENCES_CHANGED = WinGlassNativeShim.WM_USER + 4;
 
-    /** {@code SPI_*} of {@code winuser.h}. */
     static final long SPI_GETHIGHCONTRAST = 0x0042;
     static final long SPI_SETHIGHCONTRAST = 0x0043;
     static final long SPI_SETCLIENTAREAANIMATION = 0x1043;

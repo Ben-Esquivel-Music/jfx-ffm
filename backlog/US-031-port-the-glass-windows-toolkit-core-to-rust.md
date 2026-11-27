@@ -185,7 +185,8 @@ The C++ is deleted. The WSL Linux build still configures. `backlog/README.md` is
 | 6 | The shared side of the toolkit guard held across a `SendMessageW`, an upcall or a wait deadlocks teardown. | One function owns the shared side and makes one OS call inside it; US-039 part 1's parked-poster and exit-from-a-runnable tests run against the slice. |
 
 ## Facts from US-029 (2026-11-26)
-US-029 is implemented and uncommitted on `5a709c189d`; its "Implementation" has the details.
+US-029 is implemented and committed as `7c38bdc73a` (the fixes of its code review of 2026-11-27 uncommitted on it); its
+"Implementation" has the details.
 - **The crate, the vendored `windows` crate and the switch:** as in US-030's "Facts from US-029": the `glass-win`
   crate links into `glass` and `glass_test`, `windows` 0.62.2 is vendored in `buildtools/rust/vendor/`, and
   `-DJFX_RUST=false` is a configure error for javafx.graphics on Windows, so a slice's C path cannot be built in the
@@ -195,7 +196,9 @@ US-029 is implemented and uncommitted on `5a709c189d`; its "Implementation" has 
   `GetPreferencesHandle()`); the `GlassApplication` window procedure (`WM_DO_ACTION_LATER`, `WM_CREATE`,
   `WM_NCDESTROY`, `WM_SETTINGCHANGE`, `WM_PREFERENCES_CHANGED`, `WM_TIMER`, `WM_THEMECHANGED`, `WM_SYSCOLORCHANGE`,
   `WM_DWMCOLORIZATIONCOLORCHANGED`), `EnterNestedEventLoop` and `gwin_run_loop`'s pump call `glass_prefs_update`,
-  `glass_prefs_setting_changed`, `glass_prefs_run_deferred` and `glass_prefs_discard_deferred`;
+  `glass_prefs_setting_changed`, `glass_prefs_run_deferred` and `glass_prefs_discard_deferred` (since US-029's code
+  review the first two take no handle: `int32_t glass_prefs_update(int32_t types)`,
+  `int32_t glass_prefs_setting_changed(uintptr_t wparam, intptr_t lparam)`);
   `GlassApplication.cpp:517-551` defines the four functions the crate calls (`glass_prefs_post` over `PostToToolkit`,
   `glass_prefs_arm_timer`, `glass_prefs_live_handle`, `glass_prefs_stderr`), and `glass_win_test.cpp:187-204` the
   three probes.

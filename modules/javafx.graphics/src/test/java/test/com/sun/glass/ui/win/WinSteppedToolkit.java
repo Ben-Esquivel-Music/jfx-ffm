@@ -98,12 +98,10 @@ final class WinSteppedToolkit {
         WinNativeToolkit.await(released, WinNativeToolkit.KEEP_ALIVE_MILLIS);
     }
 
-    /** The HWND {@code gwin_app_create} answered. */
     long hwnd() {
         return hwnd;
     }
 
-    /** The toolkit thread. */
     Thread thread() {
         return thread;
     }

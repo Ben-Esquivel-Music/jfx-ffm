@@ -36,8 +36,9 @@
  *
  * The handle stands for the WinRT objects of one GlassApplication; NULL is legal everywhere and means "none", as
  * after a panic the crate caught in glass_prefs_create. A panic the crate catches in gwin_prefs_query_ui_settings or
- * gwin_prefs_query_network while it reads the live handle poisons that handle (a bug, never passed on to the caller);
- * the functions below say what each answers for a poisoned handle.
+ * gwin_prefs_query_network while it reads the live handle poisons that handle (a bug, never passed on to the caller):
+ * the queries then answer for it what they answer without WinRT objects, and glass_prefs_destroy leaves it alone. The
+ * delivery of preference types reads no handle, so neither NULL nor a poisoned handle stops it.
  */
 
 #include <stdint.h>
@@ -80,26 +81,24 @@ void glass_prefs_destroy(void* handle);
 
 /*
  * Hands `types` (GWIN_PT_* bits) to GwinPrefsCallbacks.preferences_changed: 1 when it answered nonzero, else 0; 0
- * when no table is installed. 0 for a NULL or a poisoned handle, which calls nothing. A panic in this call answers 0
- * and poisons nothing: a listener may end the toolkit inside the upcall and so destroy the handle, which is
- * therefore not held across the upcall. Toolkit thread only.
+ * when no table is installed. Reads no handle, as PlatformSupport::updatePreferences at 5a709c189d read only the
+ * callback table. A panic in this call answers 0 and poisons nothing. Toolkit thread only.
  */
-int32_t glass_prefs_update(void* handle, int32_t types);
+int32_t glass_prefs_update(int32_t types);
 
 /*
  * The WM_SETTINGCHANGE arm: (UINT)wparam SPI_SETHIGHCONTRAST updates with 6, SPI_SETCLIENTAREAANIMATION with 2, both
  * before lparam is looked at; otherwise a non-zero lparam naming L"ImmersiveColorSet" (as wcscmp compares) updates
- * with 4. Answers what the update answered, 0 when there was none. 0 for a NULL or a poisoned handle, which reads
- * nothing and calls nothing. A panic in this call answers 0 and poisons nothing, for the reason glass_prefs_update
- * gives. Toolkit thread only.
+ * with 4. Answers what the update answered, 0 when there was none. Reads no handle, as glass_prefs_update. A panic in
+ * this call answers 0 and poisons nothing. Toolkit thread only.
  */
-int32_t glass_prefs_setting_changed(void* handle, uintptr_t wparam, intptr_t lparam);
+int32_t glass_prefs_setting_changed(uintptr_t wparam, intptr_t lparam);
 
 /*
- * Delivers the types the sinks kept because their post failed with the toolkit window published, to the handle
- * glass_prefs_live_handle answers, when there are any and it is not NULL, as glass_prefs_update does (so not to a
- * poisoned handle; the taken types are dropped then). Toolkit thread only, with no lock held, where a retrieved
- * message has just been dispatched.
+ * Delivers the types the sinks kept because their post failed with the toolkit window published, as glass_prefs_update
+ * does, when there are any and glass_prefs_live_handle answers a handle, poisoned or not; when it answers NULL (no
+ * toolkit) the taken types are dropped. Toolkit thread only, with no lock held, where a retrieved message has just
+ * been dispatched.
  */
 void glass_prefs_run_deferred(void);
 
